@@ -8,6 +8,7 @@ import cn.novel.yonren.domain.novel.model.entity.StageBlueprintEntity;
 import cn.novel.yonren.domain.novel.model.entity.VolumeBlueprintEntity;
 import cn.novel.yonren.domain.novel.model.valobj.LedgerEntry;
 import cn.novel.yonren.domain.novel.model.valobj.ScoredVectorPoint;
+import cn.novel.yonren.domain.novel.model.valobj.StoredPoint;
 import cn.novel.yonren.domain.novel.model.valobj.StoryVO;
 import cn.novel.yonren.domain.novel.model.valobj.VectorPoint;
 import cn.novel.yonren.domain.novel.model.valobj.properties.StoryMemoryProperties;
@@ -45,6 +46,9 @@ public class StoryMemoryService {
     public static final String KIND_LEDGER = "ledger";
     public static final String KIND_BIBLE = "bible";
     public static final String KIND_VOLUME = "volume";
+
+    /** 回滚对账只动本链路管理的三类点：同集合里还有卷方向点（kind=volume），那是卷生成路径维护的 */
+    private static final Set<String> MANAGED_KINDS = Set.of(KIND_CHAPTER, KIND_LEDGER, KIND_BIBLE);
 
     private static final int EMBED_BATCH = 16;
     private static final Pattern WORLD_ID_PATTERN = Pattern.compile("^[a-zA-Z0-9][a-zA-Z0-9_-]{0,62}$");
@@ -260,28 +264,104 @@ public class StoryMemoryService {
     }
 
     /**
-     * 回滚后重建该故事向量集合：先清空本故事集合（novel-memory-{storyDir}），再对每个剩余章节
-     * 逐一幂等重嵌（摘要+账本+bible）。world 集合（novel-world-{worldId}）多故事共享且 bible 在回滚中
-     * 不变，刻意不动。该集合由下次 ensureCollection 自动按原维度重建。索引失败仅告警，不阻塞回滚。
+     * 回滚后的向量索引对账：**不整集合重嵌**，只改回滚窗口真正涉及的点。
+     *
+     * <p>回滚真正改变的只有回滚窗口内涉及的点（生产实测：105→100 章只有 26 个点——
+     * 5 个章节点消失、11 条只在后 5 章出现的账本条目要删、10 条状态被回退的账本条目要改），
+     * 其余数百个点（未受影响的章节、账本、设定）与回滚前一模一样。做法：
+     * 用 {@link VectorStore#listPoints} 把集合现状读回来（只取 id+文本，不重嵌），
+     * 与"当前应有的点集"逐 id 比对——文本不同或缺失的才 upsert，多余的才删。
+     *
+     * <p>退化路径两条，都保留旧语义：签名不符（换模型/换切分）走 {@link #rebuild} 整集合重建（含 world）；
+     * 读不回现状（向量库抖动/集合结构异常）走整集合重写。world 集合多故事共享且 bible 不受回滚影响，刻意不动。
+     *
+     * <p>结果点集与"整集合重写"完全一致（同一批稳定 id + 同一批文本），差别只在省掉了没变的那些重嵌。
+     * 写入后按集合实际点数做一次机械核对并留痕，避免"少写/漏删"静默通过。
      */
     public void rebuildIndex(StoryVO.Module module, Path storyDir,
                              List<ChapterSummaryEntity> summaries, String worldId) {
         if (!enabled(module, storyDir) || summaries == null || summaries.isEmpty()) {
             return;
         }
+        if (needsRebuild(module, storyDir, summaries)) {
+            rebuild(module, storyDir, summaries, worldId);
+            return;
+        }
         String storyCollection = collectionOf(storyDir);
+        List<MemText> desired = storyTexts(storyDir, summaries);
+        List<StoredPoint> stored;
         try {
-            vectorStore.clear(storyCollection);
+            stored = vectorStore.listPoints(storyCollection);
+        } catch (Exception e) {
+            log.warn("回滚索引对账失败（读不回集合现状），退化为整集合重写：{}", e.getMessage());
+            fullRewrite(module, storyDir, storyCollection, desired);
+            return;
+        }
+        Map<String, String> storedText = new HashMap<>();
+        for (StoredPoint point : stored) {
+            storedText.put(point.getId(), point.getText());
+        }
+        Set<String> desiredIds = new HashSet<>();
+        List<MemText> toWrite = new ArrayList<>();
+        for (MemText text : desired) {
+            String id = stableId(text.stableKey());
+            desiredIds.add(id);
+            if (!text.text().equals(storedText.get(id))) {
+                toWrite.add(text);
+            }
+        }
+        // 只删"本链路管理的点"：同集合里还有卷方向点（kind=volume），那是卷生成路径维护的，回滚不该抹掉它
+        List<String> toDelete = stored.stream()
+                .filter(p -> MANAGED_KINDS.contains(p.getKind()) && !desiredIds.contains(p.getId()))
+                .map(StoredPoint::getId)
+                .toList();
+        try {
+            if (!toDelete.isEmpty()) {
+                vectorStore.delete(storyCollection, toDelete);
+            }
+            embedAndUpsert(module, toWrite, storyCollection);
+            writeIndexMeta(module, storyDir);
+            long actual = vectorStore.count(storyCollection);
+            log.info("回滚索引对账完成：{}（{} 章，应有点 {}，实际 {}，改写 {}，删除 {}）",
+                    storyCollection, summaries.size(), desiredIds.size(), actual, toWrite.size(), toDelete.size());
+            if (actual != desiredIds.size()) {
+                log.warn("回滚索引对账后点数不符（应 {} 实际 {}）：集合里可能残留多余点，建议核对 {}",
+                        desiredIds.size(), actual, storyCollection);
+            }
+        } catch (Exception e) {
+            // 对账是"部分写入"语义：失败时集合内容可能滞后于回滚边界，必须说清，别留下"索引可用"的错觉
+            log.warn("回滚索引对账失败（集合可能仍含回滚掉的点，记忆召回暂不可信）：{}", e.getMessage());
+        }
+    }
+
+    /** 整集合重写：清空 + 全量写入 + 落元数据（对账不可用时的退化路径，语义与旧实现一致） */
+    private void fullRewrite(StoryVO.Module module, Path storyDir, String collection, List<MemText> texts) {
+        try {
+            vectorStore.clear(collection);
         } catch (Exception e) {
             log.warn("回滚向量清空失败，跳过重建（vestigial 索引可能召回已回滚内容）：{}", e.getMessage());
             return;
         }
+        try {
+            embedAndUpsert(module, texts, collection);
+            writeIndexMeta(module, storyDir);
+            log.info("回滚向量整集合重写完成：{}（{} 点）", collection, texts.size());
+        } catch (Exception e) {
+            log.warn("回滚向量整集合重写失败（集合已清空，记忆召回暂空，随下次章节写入逐步恢复）：{}", e.getMessage());
+        }
+    }
+
+    /** 当前故事状态对应的完整点集：全部章节点 + 全量账本 + 设定（对账的"应有"侧） */
+    private List<MemText> storyTexts(Path storyDir, List<ChapterSummaryEntity> summaries) {
+        List<MemText> texts = new ArrayList<>();
         for (ChapterSummaryEntity s : summaries) {
             if (s != null && s.getChapterNo() != null) {
-                indexChapter(module, storyDir, summaries, s.getChapterNo(), worldId);
+                texts.addAll(chapterTexts(storyDir, s));
             }
         }
-        log.info("回滚向量重建完成：{}（{} 章）", storyCollection, summaries.size());
+        appendLedgerTexts(storyDir, texts, summaries);
+        texts.addAll(bibleTexts(storyDir));
+        return texts;
     }
 
     /**

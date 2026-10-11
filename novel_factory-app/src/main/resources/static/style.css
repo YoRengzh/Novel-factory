@@ -574,6 +574,36 @@ textarea { resize: vertical; line-height: 1.7; }
     letter-spacing: 0.5px;
 }
 
+/* ---- 故事卡片上的整本导出按钮 ---- */
+.story-actions {
+    display: flex;
+    gap: 8px;
+    margin-top: 10px;
+}
+
+.btn-export {
+    font-family: var(--mono);
+    font-size: 11px;
+    letter-spacing: 1px;
+    padding: 4px 10px;
+    background: transparent;
+    border: 1px solid var(--line-strong);
+    border-radius: 4px;
+    color: var(--text-secondary);
+    cursor: pointer;
+    transition: all 0.18s;
+}
+
+.btn-export:hover:not(:disabled) {
+    border-color: var(--accent);
+    color: var(--accent);
+}
+
+.btn-export:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
 .active-badge {
     font-family: var(--mono);
     font-size: 10px;

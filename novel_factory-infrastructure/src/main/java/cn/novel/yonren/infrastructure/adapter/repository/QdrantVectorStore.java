@@ -2,6 +2,7 @@ package cn.novel.yonren.infrastructure.adapter.repository;
 
 import cn.novel.yonren.domain.novel.adapter.repository.VectorStore;
 import cn.novel.yonren.domain.novel.model.valobj.ScoredVectorPoint;
+import cn.novel.yonren.domain.novel.model.valobj.StoredPoint;
 import cn.novel.yonren.domain.novel.model.valobj.VectorPoint;
 import io.qdrant.client.QdrantClient;
 import io.qdrant.client.QdrantGrpcClient;
@@ -11,7 +12,13 @@ import io.qdrant.client.grpc.Collections.Distance;
 import io.qdrant.client.grpc.Collections.VectorParams;
 import io.qdrant.client.grpc.Collections.VectorsConfig;
 import io.qdrant.client.grpc.JsonWithInt;
+import io.qdrant.client.grpc.Points.DeletePoints;
 import io.qdrant.client.grpc.Points.PointId;
+import io.qdrant.client.grpc.Points.PointsIdsList;
+import io.qdrant.client.grpc.Points.PointsSelector;
+import io.qdrant.client.grpc.Points.RetrievedPoint;
+import io.qdrant.client.grpc.Points.ScrollPoints;
+import io.qdrant.client.grpc.Points.ScrollResponse;
 import io.qdrant.client.grpc.Points.PointStruct;
 import io.qdrant.client.grpc.Points.ScoredPoint;
 import io.qdrant.client.grpc.Points.SearchPoints;
@@ -19,6 +26,7 @@ import io.qdrant.client.grpc.Points.UpsertPoints;
 import io.qdrant.client.grpc.Points.Vector;
 import io.qdrant.client.grpc.Points.Vectors;
 import io.qdrant.client.grpc.Points.WithPayloadSelector;
+import io.qdrant.client.grpc.Points.WithVectorsSelector;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
@@ -39,6 +47,8 @@ public class QdrantVectorStore implements VectorStore {
 
     private static final Logger log = LoggerFactory.getLogger(QdrantVectorStore.class);
     private static final long TIMEOUT_SECONDS = 30;
+    /** 滚动分页页大小：对账要把整集合读回来（不含向量，单点很轻），256 足够少批次 */
+    private static final int SCROLL_PAGE_SIZE = 256;
 
     private final QdrantClient client;
 
@@ -196,6 +206,92 @@ public class QdrantVectorStore implements VectorStore {
         } catch (Exception e) {
             throw new IllegalStateException("向量检索失败: " + e.getMessage(), e);
         }
+    }
+
+    @Override
+    public List<StoredPoint> listPoints(String collection) {
+        QdrantClient qdrant = requireClient();
+        List<StoredPoint> points = new ArrayList<>();
+        try {
+            if (!qdrant.collectionExistsAsync(collection).get(TIMEOUT_SECONDS, TimeUnit.SECONDS)) {
+                // 集合不存在 = 里面什么都没有：调用方据此走"全量写入"，无需特判异常
+                return points;
+            }
+            PointId offset = null;
+            while (true) {
+                ScrollPoints.Builder request = ScrollPoints.newBuilder()
+                        .setCollectionName(collection)
+                        .setLimit(SCROLL_PAGE_SIZE)
+                        .setWithPayload(WithPayloadSelector.newBuilder().setEnable(true).build())
+                        .setWithVectors(WithVectorsSelector.newBuilder().setEnable(false).build());
+                if (offset != null) {
+                    request.setOffset(offset);
+                }
+                ScrollResponse page = qdrant.scrollAsync(request.build()).get(TIMEOUT_SECONDS, TimeUnit.SECONDS);
+                for (RetrievedPoint point : page.getResultList()) {
+                    Map<String, String> payload = toStringPayload(point.getPayloadMap());
+                    points.add(StoredPoint.builder()
+                            .id(pointIdOf(point.getId()))
+                            .kind(payload.get("kind"))
+                            .text(payload.get("text"))
+                            .build());
+                }
+                if (!page.hasNextPageOffset()) {
+                    return points;
+                }
+                offset = page.getNextPageOffset();
+            }
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new IllegalStateException("向量列举被中断", e);
+        } catch (Exception e) {
+            throw new IllegalStateException("向量列举失败: " + e.getMessage(), e);
+        }
+    }
+
+    @Override
+    public void delete(String collection, List<String> ids) {
+        if (ids == null || ids.isEmpty()) {
+            return;
+        }
+        QdrantClient qdrant = requireClient();
+        PointsIdsList idList = PointsIdsList.newBuilder()
+                .addAllIds(ids.stream().map(id -> PointId.newBuilder().setUuid(id).build()).toList())
+                .build();
+        try {
+            qdrant.deleteAsync(DeletePoints.newBuilder()
+                    .setCollectionName(collection)
+                    .setPoints(PointsSelector.newBuilder().setPoints(idList).build())
+                    .setWait(true)
+                    .build()).get(TIMEOUT_SECONDS, TimeUnit.SECONDS);
+            log.info("向量按 id 删除完成：{} 个点 ← {}", ids.size(), collection);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new IllegalStateException("向量删除被中断", e);
+        } catch (Exception e) {
+            throw new IllegalStateException("向量删除失败: " + e.getMessage(), e);
+        }
+    }
+
+    @Override
+    public long count(String collection) {
+        QdrantClient qdrant = requireClient();
+        try {
+            if (!qdrant.collectionExistsAsync(collection).get(TIMEOUT_SECONDS, TimeUnit.SECONDS)) {
+                return 0;
+            }
+            return qdrant.countAsync(collection).get(TIMEOUT_SECONDS, TimeUnit.SECONDS);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new IllegalStateException("向量计数被中断", e);
+        } catch (Exception e) {
+            throw new IllegalStateException("向量计数失败: " + e.getMessage(), e);
+        }
+    }
+
+    /** 点 id 取字面量：本链路写入的点都是 UUID，非法形态按数值型兜底，避免对账时静默丢键 */
+    private String pointIdOf(PointId id) {
+        return id.hasUuid() ? id.getUuid() : String.valueOf(id.getNum());
     }
 
     private List<Float> toFloatList(float[] vector) {

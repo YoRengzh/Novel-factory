@@ -12,7 +12,10 @@ import cn.novel.yonren.api.dto.StorySummaryDTO;
 import cn.novel.yonren.domain.novel.adapter.repository.IStoryRepository;
 import cn.novel.yonren.domain.novel.model.entity.ChapterContentEntity;
 import cn.novel.yonren.domain.novel.model.entity.ChapterSummaryEntity;
+import cn.novel.yonren.domain.novel.model.valobj.BookExport;
 import cn.novel.yonren.domain.novel.service.armory.edit.ChapterEditService;
+import cn.novel.yonren.domain.novel.service.export.BookExportService;
+import cn.novel.yonren.domain.novel.service.export.BookFormat;
 import cn.novel.yonren.domain.novel.service.job.JobRegistry;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -20,13 +23,17 @@ import org.mockito.ArgumentCaptor;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.MockitoAnnotations;
+import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
+import org.springframework.http.ResponseEntity;
 import org.springframework.web.server.ResponseStatusException;
 
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.List;
 
+import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -49,6 +56,8 @@ class StoryManageControllerTest {
     private JobRegistry jobRegistry;
     @Mock
     private ChapterEditService chapterEditService;
+    @Mock
+    private BookExportService bookExportService;
 
     @InjectMocks
     private StoryManageController controller;
@@ -131,6 +140,81 @@ class StoryManageControllerTest {
         ResponseStatusException e = assertThrows(ResponseStatusException.class,
                 () -> controller.readChapter("20260902-story-0001", 99));
         assertEquals(HttpStatus.NOT_FOUND, e.getStatusCode());
+    }
+
+    // ==================== 导出成书（分章 ZIP） ====================
+
+    /** 三种格式响应都恒为 application/zip 附件：txt 版 */
+    @Test
+    void exportBook_txtReturnsPerChapterZip() throws Exception {
+        Path storyDir = Paths.get("/workspace/20260902-story-0001");
+        when(storyRepository.resolveStoryDirectory("20260902-story-0001")).thenReturn(storyDir);
+        when(bookExportService.exportChapters(eq(storyDir), eq(BookFormat.TXT))).thenReturn(
+                BookExport.builder()
+                        .fileName("雾港拾骨-分章TXT-2章-20261011.zip")
+                        .fileBytes(new byte[]{1, 2, 3})
+                        .format(BookFormat.TXT)
+                        .chapterCount(2)
+                        .effectiveChars(100L)
+                        .novelTitle("雾港拾骨")
+                        .build());
+
+        ResponseEntity<byte[]> response = controller.exportBook("20260902-story-0001", "txt");
+
+        assertEquals(HttpStatus.OK, response.getStatusCode());
+        String disposition = response.getHeaders().getFirst(HttpHeaders.CONTENT_DISPOSITION);
+        assertTrue(disposition.startsWith("attachment"));
+        // 中文文件名必须走 RFC 5987 的 filename*，否则浏览器下载名会乱码
+        assertTrue(disposition.contains("filename*=UTF-8''"));
+        assertEquals("application/zip", String.valueOf(response.getHeaders().getContentType()));
+        assertArrayEquals(new byte[]{1, 2, 3}, response.getBody());
+    }
+
+    /** docx 版：包内每章是独立 Word 文档，响应形态与 txt/md 相同 */
+    @Test
+    void exportBook_docxReturnsPerChapterZip() throws Exception {
+        Path storyDir = Paths.get("/workspace/20260902-story-0001");
+        when(storyRepository.resolveStoryDirectory("20260902-story-0001")).thenReturn(storyDir);
+        when(bookExportService.exportChapters(eq(storyDir), eq(BookFormat.DOCX))).thenReturn(
+                BookExport.builder()
+                        .fileName("雾港拾骨-分章DOCX-2章-20261011.zip")
+                        .fileBytes(new byte[]{9, 8})
+                        .format(BookFormat.DOCX)
+                        .chapterCount(2)
+                        .novelTitle("雾港拾骨")
+                        .build());
+
+        ResponseEntity<byte[]> response = controller.exportBook("20260902-story-0001", "docx");
+
+        assertEquals(HttpStatus.OK, response.getStatusCode());
+        assertEquals("application/zip", String.valueOf(response.getHeaders().getContentType()));
+        assertArrayEquals(new byte[]{9, 8}, response.getBody());
+        assertTrue(response.getHeaders().getFirst(HttpHeaders.CONTENT_DISPOSITION).contains(".zip"));
+    }
+
+    @Test
+    void exportBook_withoutChapters_returns404() throws Exception {
+        Path storyDir = Paths.get("/workspace/20260902-story-0001");
+        when(storyRepository.resolveStoryDirectory("20260902-story-0001")).thenReturn(storyDir);
+        when(bookExportService.exportChapters(eq(storyDir), any())).thenReturn(null);
+
+        ResponseStatusException e = assertThrows(ResponseStatusException.class,
+                () -> controller.exportBook("20260902-story-0001", "txt"));
+
+        assertEquals(HttpStatus.NOT_FOUND, e.getStatusCode());
+        assertTrue(e.getReason().contains("还没有可导出的章节"));
+    }
+
+    @Test
+    void exportBook_unsupportedFormat_returns400WithoutCallingService() throws Exception {
+        // pdf 是非法格式；zip 是旧参数，随单文件导出一起退役（三种合法格式的响应本就是 zip）
+        for (String illegal : new String[]{"pdf", "zip"}) {
+            ResponseStatusException e = assertThrows(ResponseStatusException.class,
+                    () -> controller.exportBook("20260902-story-0001", illegal));
+
+            assertEquals(HttpStatus.BAD_REQUEST, e.getStatusCode(), illegal);
+        }
+        verify(bookExportService, never()).exportChapters(any(), any());
     }
 
     @Test

@@ -16,8 +16,9 @@ import java.util.List;
 
 /**
  * 检查点 + 回滚编排服务：手动命名快照、列表、回滚。
- * 回滚 = 磁盘原子还原（IStoryRepository.restore，锁内完成，恢复后可续写）→ 向量索引重建
- * （StoryMemoryService.rebuild，fail-soft，不阻塞）。module/worldId 取法对齐 ChapterEditService.reflow。
+ * 回滚 = 磁盘原子还原（IStoryRepository.restore，锁内完成，恢复后可续写）→ 向量索引对账
+ * （StoryMemoryService.rebuildIndex，只改回滚窗口内涉及的点，fail-soft，不阻塞）。
+ * module/worldId 取法对齐 ChapterEditService.reflow。
  */
 @Slf4j
 @Service
@@ -40,7 +41,8 @@ public class CheckpointService {
 
     /**
      * 回滚到指定检查点：先磁盘原子还原（使章节/摘要/蓝图/账本回到该点，续写锁步校验天然通过），
-     * 再按剩余章节重建该故事向量索引。向量重建失败仅告警（增强通道），不阻塞回滚。
+     * 再把该故事向量索引对账回该点（只改回滚窗口内涉及的点，不整集合重嵌）。
+     * 索引对账失败仅告警（增强通道），不阻塞回滚。
      */
     public void restore(Path storyDir, String checkpointId) throws Exception {
         CheckpointEntity target = storyRepository.readCheckpoint(storyDir, checkpointId);
@@ -53,7 +55,7 @@ public class CheckpointService {
             storyMemoryService.rebuildIndex(storyProperties.toStoryVO().getModule(), storyDir,
                     storyRepository.readChapterSummaries(storyDir), null);
         } catch (Exception e) {
-            log.warn("回滚后向量索引重建失败，已跳过（不阻塞）：{}", e.getMessage());
+            log.warn("回滚后向量索引对账失败，已跳过（不阻塞）：{}", e.getMessage());
         }
     }
 }

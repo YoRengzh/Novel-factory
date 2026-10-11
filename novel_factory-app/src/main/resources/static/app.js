@@ -1373,9 +1373,16 @@
             storiesDiv.innerHTML = stories.map(function (s) {
                 const date = new Date(s.lastModifiedMs).toLocaleString('zh-CN');
                 const badge = s.activeJob ? '<span class="active-badge">生成中</span>' : '';
+                // 还没有章节时禁用导出：后端会 404，前端提前拦掉更直观
+                const exportDisabled = s.chapterCount > 0 ? '' : ' disabled title="还没有章节可导出"';
                 return '<div class="story-card" data-dir="' + esc(s.storyDirName) + '">'
                     + '<div><div class="story-title">' + esc(s.novelTitle) + '</div>'
-                    + '<div class="story-meta">' + s.chapterCount + ' 章 · ' + date + '</div></div>'
+                    + '<div class="story-meta">' + s.chapterCount + ' 章 · ' + date + '</div>'
+                    + '<div class="story-actions">'
+                    + '<button type="button" class="btn-export" data-format="txt"' + exportDisabled + ' title="每章一个文件打包下载，解压即文件夹">导出TXT</button>'
+                    + '<button type="button" class="btn-export" data-format="md"' + exportDisabled + ' title="每章一个 Markdown 文件打包下载，解压即文件夹">导出MD</button>'
+                    + '<button type="button" class="btn-export" data-format="docx"' + exportDisabled + ' title="每章一个 Word 文件打包下载，解压即文件夹">导出Word</button>'
+                    + '</div></div>'
                     + badge + '</div>';
             }).join('');
             storiesDiv.querySelectorAll('.story-card').forEach(function (card) {
@@ -1384,9 +1391,50 @@
                     loadChapters(currentStoryDir);
                 });
             });
+            // 导出按钮在整卡可点的卡片内部：stopPropagation 防止误触发进章节列表
+            storiesDiv.querySelectorAll('.btn-export').forEach(function (btn) {
+                btn.addEventListener('click', function (e) {
+                    e.stopPropagation();
+                    downloadBookExport(btn.closest('.story-card').dataset.dir, btn.dataset.format, btn);
+                });
+            });
         })
         .catch(function (err) {
             storiesDiv.innerHTML = '<p class="empty-hint">加载失败：' + esc(err.message) + '</p>';
+        });
+    }
+
+    // ===== 整本导出：不能走 fetchJson（它强制要求 JSON 响应），用原生 fetch + blob 触发下载 =====
+    function downloadBookExport(storyDir, format, btn) {
+        const url = API_BASE + '/api/stories/' + encodeURIComponent(storyDir) + '/export?format=' + encodeURIComponent(format);
+        const original = btn.textContent;
+        btn.disabled = true;
+        btn.textContent = '导出中…';
+        fetch(url).then(function (r) {
+            if (!r.ok) {
+                return r.json().catch(function () { return {}; }).then(function (body) {
+                    throw new Error(body.message || body.error || ('导出失败（' + r.status + '）'));
+                });
+            }
+            // 文件名取 RFC 5987 的 filename*（后端 ContentDisposition 以 UTF-8 输出，中文不乱码）
+            const cd = r.headers.get('content-disposition') || '';
+            const m = /filename\*\s*=\s*UTF-8''([^;]+)/i.exec(cd);
+            const name = m ? decodeURIComponent(m[1]) : ('novel-export.' + format);
+            return r.blob().then(function (blob) { return { blob: blob, name: name }; });
+        }).then(function (pack) {
+            const a = document.createElement('a');
+            const objUrl = URL.createObjectURL(pack.blob);
+            a.href = objUrl;
+            a.download = pack.name;
+            document.body.appendChild(a);
+            a.click();
+            a.remove();
+            setTimeout(function () { URL.revokeObjectURL(objUrl); }, 1000);
+        }).catch(function (err) {
+            alert('导出失败：' + err.message);
+        }).finally(function () {
+            btn.disabled = false;
+            btn.textContent = original;
         });
     }
 

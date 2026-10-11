@@ -22,3 +22,6 @@ application-local.yml
 # 系统
 .DS_Store
 Thumbs.db
+
+# AI 会话本地产物
+.zcode/

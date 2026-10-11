@@ -18,25 +18,34 @@ import cn.novel.yonren.domain.novel.model.entity.CheckpointEntity;
 import cn.novel.yonren.domain.novel.model.entity.ChapterSummaryEntity;
 import cn.novel.yonren.domain.novel.model.entity.QualityDebtEntity;
 import cn.novel.yonren.domain.novel.model.entity.StageBlueprintEntity;
+import cn.novel.yonren.domain.novel.model.valobj.BookExport;
 import cn.novel.yonren.domain.novel.model.valobj.LedgerEntry;
 import cn.novel.yonren.domain.novel.service.armory.CheckpointService;
 import cn.novel.yonren.domain.novel.service.armory.memory.ChapterMemoryService;
 import cn.novel.yonren.domain.novel.service.armory.edit.ChapterEditService;
 import cn.novel.yonren.domain.novel.service.armory.quality.ChapterLengthPolicy;
+import cn.novel.yonren.domain.novel.service.export.BookExportService;
+import cn.novel.yonren.domain.novel.service.export.BookFormat;
 import cn.novel.yonren.domain.novel.service.job.JobRegistry;
 import cn.novel.yonren.types.utils.StoryBibleParser;
 import jakarta.annotation.Resource;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.http.ContentDisposition;
+import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
+import org.springframework.http.MediaType;
+import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.server.ResponseStatusException;
 
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
@@ -44,6 +53,10 @@ import java.util.List;
 /**
  * 故事库端点：列表 / 章节浏览 / 章节编辑（编辑触发摘要回流）。
  * 无鉴权（localhost 个人使用）
+ *
+ * <p>⚠️ 所有映射注解必须显式写参数名（如 {@code @PathVariable("storyDirName")}）：
+ * 根 pom 钉的 maven-compiler-plugin 3.0 未开 {@code -parameters}，Spring 拿不到反射参数名，
+ * 省略名字会在运行期抛 IllegalArgumentException（编译期无任何征兆）。
  */
 @Slf4j
 @RestController
@@ -70,6 +83,9 @@ public class StoryManageController {
 
     @Resource
     private CheckpointService checkpointService;
+
+    @Resource
+    private BookExportService bookExportService;
 
     @GetMapping
     public List<StorySummaryDTO> listStories() {
@@ -457,6 +473,41 @@ public class StoryManageController {
             log.error("批末体检失败：{}", storyDirName, e);
             throw new ResponseStatusException(HttpStatus.INTERNAL_SERVER_ERROR,
                     "批末体检失败：" + e.getMessage());
+        }
+    }
+
+    /**
+     * 导出成书：分章 ZIP 下载——每章一个独立文件（TXT / Markdown / Word），解压即「书名文件夹 +
+     * 分章文件」。只读，不加「作业运行中」守卫——章节文件是原子写（tmp+move），
+     * 导出的是发起时刻的快照；响应头用 ContentDisposition 的 UTF-8 filename*（RFC 5987），中文书名不乱码。
+     */
+    @GetMapping("/{storyDirName}/export")
+    public ResponseEntity<byte[]> exportBook(@PathVariable("storyDirName") String storyDirName,
+                                             @RequestParam(name = "format", defaultValue = "txt") String format) {
+        BookFormat bookFormat = BookFormat.fromParam(format);
+        if (bookFormat == null) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
+                    "不支持的导出格式：" + format + "（可选 txt / md / docx）");
+        }
+        Path storyDir = resolveStoryDir(storyDirName);
+        try {
+            BookExport book = bookExportService.exportChapters(storyDir, bookFormat);
+            if (book == null) {
+                throw new ResponseStatusException(HttpStatus.NOT_FOUND, "该故事还没有可导出的章节");
+            }
+            ContentDisposition disposition = ContentDisposition.attachment()
+                    .filename(book.getFileName(), StandardCharsets.UTF_8)
+                    .build();
+            return ResponseEntity.ok()
+                    .header(HttpHeaders.CONTENT_DISPOSITION, disposition.toString())
+                    .contentType(MediaType.parseMediaType("application/zip"))
+                    .body(book.getFileBytes());
+        } catch (ResponseStatusException e) {
+            throw e;
+        } catch (Exception e) {
+            log.error("导出成书失败：{}", storyDirName, e);
+            throw new ResponseStatusException(HttpStatus.INTERNAL_SERVER_ERROR,
+                    "导出成书失败：" + e.getMessage());
         }
     }
 

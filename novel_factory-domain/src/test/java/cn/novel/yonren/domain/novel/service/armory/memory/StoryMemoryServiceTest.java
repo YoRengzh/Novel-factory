@@ -8,6 +8,7 @@ import cn.novel.yonren.domain.novel.model.entity.StageBlueprintEntity;
 import cn.novel.yonren.domain.novel.model.entity.VolumeBlueprintEntity;
 import cn.novel.yonren.domain.novel.model.valobj.LedgerEntry;
 import cn.novel.yonren.domain.novel.model.valobj.ScoredVectorPoint;
+import cn.novel.yonren.domain.novel.model.valobj.StoredPoint;
 import cn.novel.yonren.domain.novel.model.valobj.StoryVO;
 import cn.novel.yonren.domain.novel.model.valobj.VectorPoint;
 import cn.novel.yonren.domain.novel.model.valobj.properties.StoryMemoryProperties;
@@ -22,6 +23,8 @@ import org.springframework.web.client.ResourceAccessException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
+import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ExecutionException;
@@ -37,6 +40,8 @@ import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doNothing;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.clearInvocations;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.spy;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
@@ -47,7 +52,7 @@ import static org.mockito.Mockito.when;
  * 检索失败语义（瞬时失败有界重试；重试耗尽或确定性失败则终止作业，不静默降级）
  */
 @SuppressWarnings("unchecked")
-class StoryMemoryServiceTest {
+class StoryMemoryServiceTest { /*MARKER-CHECK-1*/
 
     private EmbeddingGateway embeddingGateway;
     private VectorStore vectorStore;
@@ -68,6 +73,125 @@ class StoryMemoryServiceTest {
             List<String> texts = inv.getArgument(1);
             return texts.stream().map(t -> new float[8]).toList();
         });
+    }
+
+    // ==================== 回滚索引对账（2026-10-11，自旧系统对齐） ====================
+
+    private List<ChapterSummaryEntity> threeChapters() {
+        return List.of(
+                ChapterSummaryEntity.builder().chapterNo(1).title("一").summary("甲").build(),
+                ChapterSummaryEntity.builder().chapterNo(2).title("二").summary("乙").build(),
+                ChapterSummaryEntity.builder().chapterNo(3).title("三").summary("丙").build());
+    }
+
+    @Test
+    void rebuildIndex_writesWholeStoryOnce_whenCollectionEmpty(@TempDir Path storyDir) throws Exception {
+        Files.writeString(storyDir.resolve("story-bible.txt"), "小说名称：测试\n世界观：架空");
+        when(chapterMemoryService.buildCharacterLedger(anyList()))
+                .thenReturn(List.of(new LedgerEntry("陆瑾瑜", "报名三班", 1, 3, null, null, false)));
+        when(chapterMemoryService.buildLedger(anyList(), any())).thenReturn(List.of());
+        List<ChapterSummaryEntity> summaries = threeChapters();
+        // 先经末章写入建立索引签名；缺签名时回滚对账会走"整集合重建"分支（那是签名变更的专用路径）
+        service.indexAfterChapter(module(), storyDir, summaries, null);
+        clearInvocations(vectorStore);
+
+        service.rebuildIndex(module(), storyDir, summaries, null);
+
+        String collection = "novel-memory-" + storyDir.getFileName();
+        // 对账路径不删集合：读不到现状（空集合）等价于"全都得写"，无需先清空
+        verify(vectorStore, never()).clear(anyString());
+        ArgumentCaptor<List<VectorPoint>> captor = ArgumentCaptor.forClass(List.class);
+        verify(vectorStore, times(1)).upsert(eq(collection), captor.capture());
+        List<VectorPoint> points = captor.getValue();
+        assertEquals(3, points.stream().filter(p -> "chapter".equals(p.getPayload().get("kind")))
+                .map(VectorPoint::getId).distinct().count(), "3 章各写一个章节点，且各只写一次");
+        // 账本与设定在百章规模下占单次写入的绝大多数：逐章重嵌会让同一份账本被重写 N 次
+        assertEquals(1, points.stream().filter(p -> "ledger".equals(p.getPayload().get("kind"))).count(),
+                "账本点只能写一次");
+        assertEquals(1, points.stream().filter(p -> "bible".equals(p.getPayload().get("kind"))).count(),
+                "设定点只能写一次");
+    }
+
+    @Test
+    void rebuildIndex_rewritesOnlyChangedPoints_andDeletesVanished(@TempDir Path storyDir) throws Exception {
+        Files.writeString(storyDir.resolve("story-bible.txt"), "小说名称：测试");
+        when(chapterMemoryService.buildCharacterLedger(anyList()))
+                .thenReturn(List.of(new LedgerEntry("陆瑾瑜", "报名三班", 1, 3, null, null, false)));
+        when(chapterMemoryService.buildLedger(anyList(), any())).thenReturn(List.of());
+        List<ChapterSummaryEntity> summaries = threeChapters();
+        service.indexAfterChapter(module(), storyDir, summaries, null);
+        clearInvocations(vectorStore);
+
+        // 第一遍：集合为空 → 捕获"应有"的完整点集，拿它当集合现状
+        service.rebuildIndex(module(), storyDir, summaries, null);
+        ArgumentCaptor<List<VectorPoint>> first = ArgumentCaptor.forClass(List.class);
+        verify(vectorStore).upsert(anyString(), first.capture());
+        List<VectorPoint> desired = first.getValue();
+        // 集合现状：第 1、2 章的点原样、第 3 章的点文本过时（模拟状态被回退）、外加一个不该存在的点
+        List<StoredPoint> stored = new ArrayList<>();
+        for (VectorPoint p : desired) {
+            String chapterNo = p.getPayload().get("chapterNo");
+            stored.add(StoredPoint.builder()
+                    .id((String) p.getId())
+                    .kind(p.getPayload().get("kind"))
+                    .text("3".equals(chapterNo) ? "过时文本" : p.getPayload().get("text"))
+                    .build());
+        }
+        stored.add(StoredPoint.builder()
+                .id("11111111-2222-3333-4444-555555555555").kind("chapter").text("回滚掉的内容").build());
+        when(vectorStore.listPoints(anyString())).thenReturn(stored);
+        when(vectorStore.count(anyString())).thenReturn((long) desired.size());
+        clearInvocations(vectorStore);
+
+        service.rebuildIndex(module(), storyDir, summaries, null);
+
+        ArgumentCaptor<List<VectorPoint>> second = ArgumentCaptor.forClass(List.class);
+        verify(vectorStore).upsert(anyString(), second.capture());
+        List<VectorPoint> written = second.getValue();
+        assertEquals(1, written.size(), "只有文本变了的那个点需要重嵌");
+        assertEquals("3", written.get(0).getPayload().get("chapterNo"));
+        ArgumentCaptor<List<String>> deleted = ArgumentCaptor.forClass(List.class);
+        verify(vectorStore).delete(anyString(), deleted.capture());
+        assertEquals(List.of("11111111-2222-3333-4444-555555555555"), deleted.getValue(),
+                "集合里多出来的点要删掉，否则会召回已回滚内容");
+    }
+
+    @Test
+    void rebuildIndex_keepsVolumePoints_whichItDoesNotManage(@TempDir Path storyDir) throws Exception {
+        Files.writeString(storyDir.resolve("story-bible.txt"), "小说名称：测试");
+        when(chapterMemoryService.buildCharacterLedger(anyList())).thenReturn(List.of());
+        when(chapterMemoryService.buildLedger(anyList(), any())).thenReturn(List.of());
+        List<ChapterSummaryEntity> summaries = threeChapters();
+        service.indexAfterChapter(module(), storyDir, summaries, null);
+        clearInvocations(vectorStore);
+
+        // 同一集合里还有卷方向点：它是卷生成路径写的，回滚对账不该把它当"多余的点"删掉
+        List<StoredPoint> stored = new ArrayList<>();
+        stored.add(StoredPoint.builder().id("99999999-8888-7777-6666-555544443333")
+                .kind("volume").text("第1卷《外门篇》：站稳外门").build());
+        when(vectorStore.listPoints(anyString())).thenReturn(stored);
+        when(vectorStore.count(anyString())).thenReturn((long) stored.size());
+
+        service.rebuildIndex(module(), storyDir, summaries, null);
+
+        verify(vectorStore, never()).delete(anyString(), anyList());
+    }
+
+    @Test
+    void rebuildIndex_fallsBackToFullRewrite_whenStoredUnreadable(@TempDir Path storyDir) throws Exception {
+        Files.writeString(storyDir.resolve("story-bible.txt"), "小说名称：测试");
+        when(chapterMemoryService.buildCharacterLedger(anyList())).thenReturn(List.of());
+        when(chapterMemoryService.buildLedger(anyList(), any())).thenReturn(List.of());
+        List<ChapterSummaryEntity> summaries = threeChapters();
+        service.indexAfterChapter(module(), storyDir, summaries, null);
+        clearInvocations(vectorStore);
+        when(vectorStore.listPoints(anyString())).thenThrow(new IllegalStateException("Qdrant 抖动"));
+
+        service.rebuildIndex(module(), storyDir, summaries, null);
+
+        String collection = "novel-memory-" + storyDir.getFileName();
+        verify(vectorStore).clear(collection);
+        verify(vectorStore, times(1)).upsert(eq(collection), anyList());
     }
 
     private StoryVO.Module module() {
