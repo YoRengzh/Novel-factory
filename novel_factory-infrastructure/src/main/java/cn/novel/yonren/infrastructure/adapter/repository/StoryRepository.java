@@ -147,6 +147,9 @@ public class StoryRepository implements IStoryRepository {
             appendBibleLine(sb, StoryBibleParser.LABEL_TARGET_AUDIENCE, ctx.getTargetAudience());
             appendBibleLine(sb, StoryBibleParser.LABEL_TONE, ctx.getTone());
             appendBibleLine(sb, StoryBibleParser.LABEL_PROTAGONIST, ctx.getProtagonist());
+            // 人物档案紧跟主人公：两者同属"跨章不变的设定"。值为空时 appendBibleLine 跳过，
+            // 老故事（无该字段）的 bible 格式不变
+            appendBibleLine(sb, StoryBibleParser.LABEL_CHARACTERS, ctx.getCharacterProfiles());
             appendBibleLine(sb, StoryBibleParser.LABEL_OUTLINE, ctx.getOutline());
             appendBibleLine(sb, StoryBibleParser.LABEL_CHAPTER_COUNT, ctx.getChapterCount());
             appendBibleLine(sb, StoryBibleParser.LABEL_CHAPTER_GOAL, ctx.getChapterGoal());
@@ -242,6 +245,8 @@ public class StoryRepository implements IStoryRepository {
             sb.append("    goal: ").append(quote(item.getGoal())).append(System.lineSeparator());
             writeStringList(sb, "characters", item.getCharacters());
             writeStringList(sb, "keyEvents", item.getKeyEvents());
+            // 对话承载声明（逐字取自 keyEvents 的子集）：人工裁决时核对"本章有没有戏"就看这几条
+            writeStringList(sb, "dialogueScenes", item.getDialogueScenes());
             sb.append("    endingHook: ").append(quote(item.getEndingHook())).append(System.lineSeparator());
             sb.append("    chapterType: ").append(item.getChapterType() == null ? "normal" : item.getChapterType().getCode()).append(System.lineSeparator());
             // 悬念档位（主线推进标尺）：人工裁决时最该看的一项——它直接反映主线有没有在往前走

@@ -28,6 +28,15 @@ public final class StoryBibleParser {
     public static final String LABEL_TARGET_AUDIENCE = "目标读者";
     public static final String LABEL_TONE = "语气基调";
     public static final String LABEL_PROTAGONIST = "主人公";
+    /**
+     * 主要人物档案（代词与既定事实）：如「陆瑾瑜（男，用「他」）；沈清欢（女，用「她」）；宋知渔（女，用「她」）」
+     * ＋既定事实（班级/年级/亲属/住址）。
+     *
+     * <p><b>为什么需要单独一条</b>：正文把女主**宋知渔**写成了「他」，连写了 88/103/105 三章；
+     * 而账本里既没有"宋知渔是女"的事实、也没有可判定的锚，审计想判"事实矛盾"都无从对照。
+     * 性别与志愿这类**跨章不变的设定**必须由作者在 bible 里声明一次，靠模型从正文推断只会复制已有的错。
+     */
+    public static final String LABEL_CHARACTERS = "主要人物";
     public static final String LABEL_OUTLINE = "故事概述";
     public static final String LABEL_CHAPTER_COUNT = "章节数量";
     public static final String LABEL_CHAPTER_GOAL = "章节目标";
@@ -52,7 +61,9 @@ public final class StoryBibleParser {
                            String perspective, String targetAudience, String tone, String protagonist,
                            String outline, String chapterGoal, String worldId,
                            Boolean hasCheatMechanism, String cheatMechanismName,
-                           Integer cheatUsageInterval) {
+                           Integer cheatUsageInterval,
+                           /** 主要人物档案（代词与既定事实）；老 bible 无此行为 null */
+                           String characters) {
     }
 
     /**
@@ -74,7 +85,8 @@ public final class StoryBibleParser {
                 values.get(LABEL_WORLD_ID),
                 parseBooleanOrNull(values.get(LABEL_HAS_CHEAT)),
                 values.get(LABEL_CHEAT_NAME),
-                parseLeadingIntOrNull(values.get(LABEL_CHEAT_INTERVAL)));
+                parseLeadingIntOrNull(values.get(LABEL_CHEAT_INTERVAL)),
+                values.get(LABEL_CHARACTERS));
     }
 
     /**

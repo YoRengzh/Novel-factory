@@ -426,4 +426,154 @@ class ChapterPlanChecksTest {
         assertTrue(feedback.contains("时间跳跃"), feedback);
         assertTrue(feedback.contains("一句带过"), feedback);
     }
+
+    // ==================== 对话承载校验（2026-10-10） ====================
+
+    private static final List<String> ROSTER = List.of("陆瑾瑜", "宋知渔");
+
+    /** 造一章：默认 characters 即名册二人，给出关键事件与对话承载声明 */
+    private ChapterPlanItemEntity planWithScenes(int chapterNo, ChapterTypeVO type,
+                                                 List<String> keyEvents, List<String> scenes) {
+        return ChapterPlanItemEntity.builder()
+                .chapterNo(chapterNo)
+                .title("标题")
+                .goal("目标")
+                .characters(List.of("陆瑾瑜", "宋知渔"))
+                .keyEvents(keyEvents)
+                .dialogueScenes(scenes)
+                .chapterType(type)
+                .build();
+    }
+
+    /** 达标形态：≥2 条声明逐字命中 keyEvents、事件写到双人名、单人事件不过半 */
+    @Test
+    void validateDialogueCarriage_passesWhenScenesDeclaredVerbatimAndNamed() {
+        String scene1 = "宋知渔带着篮球走近，直接要求单挑一局，陆瑾瑜应下";
+        String scene2 = "陆瑾瑜承认控分意图，宋知渔承诺对外保密此事";
+        ChapterPlanItemEntity chapter = planWithScenes(101, ChapterTypeVO.NORMAL,
+                List.of(scene1, scene2, "马老师在远处观察，记录了两人的互动"),
+                List.of(scene1, scene2));
+
+        assertNull(ChapterPlanChecks.validateDialogueCarriage(List.of(chapter), ROSTER));
+    }
+
+    /** 第 105 章病灶回归：0 条声明（缺字段/空列表）必须点名章号驳回 */
+    @Test
+    void validateDialogueCarriage_flagsMissingDeclaration() {
+        ChapterPlanItemEntity missing = planWithScenes(105, ChapterTypeVO.NORMAL,
+                List.of("陆瑾瑜在整理论坛私信时发现英文账号使用了术语", "他将发件人的语言特征对照推断"),
+                null);
+        ChapterPlanItemEntity empty = planWithScenes(106, ChapterTypeVO.NORMAL,
+                List.of("陆瑾瑜在整理论坛私信时发现英文账号使用了术语", "他将发件人的语言特征对照推断"),
+                List.of());
+
+        String issue = ChapterPlanChecks.validateDialogueCarriage(List.of(missing, empty), ROSTER);
+
+        assertNotNull(issue);
+        assertTrue(issue.contains("第 105 章"), issue);
+        assertTrue(issue.contains("第 106 章"), issue);
+        assertTrue(issue.contains("未声明 dialogueScenes"), issue);
+    }
+
+    /** 声明诚实性：与 keyEvents 对不上的"声明"是占位虚报，连同有效数量一起驳回 */
+    @Test
+    void validateDialogueCarriage_flagsDeclarationNotInKeyEvents() {
+        ChapterPlanItemEntity chapter = planWithScenes(105, ChapterTypeVO.NORMAL,
+                List.of("陆瑾瑜在整理论坛私信时发现英文账号使用了术语"),
+                List.of("陆瑾瑜与宋知渔当面对质术语来源"));
+
+        String issue = ChapterPlanChecks.validateDialogueCarriage(List.of(chapter), ROSTER);
+
+        assertNotNull(issue);
+        assertTrue(issue.contains("逐字"), issue);
+        assertTrue(issue.contains("有效对话承载事件仅 0 条"), issue);
+    }
+
+    /** "谁对谁"的全名落点：声明命中了事件、但事件只写一个人名 → 驳回 */
+    @Test
+    void validateDialogueCarriage_flagsSceneWithoutTwoNamedPersons() {
+        String solo = "陆瑾瑜在蓝皮本新页写下推断过程，未向任何人透露";
+        String scene = "宋知渔指出陆瑾瑜的说法前后矛盾，陆瑾瑜被迫解释";
+        ChapterPlanItemEntity chapter = planWithScenes(105, ChapterTypeVO.NORMAL,
+                List.of(solo, scene), List.of(solo, scene));
+
+        String issue = ChapterPlanChecks.validateDialogueCarriage(List.of(chapter), ROSTER);
+
+        assertNotNull(issue, "把单人事件声明成对话承载也要报");
+        assertTrue(issue.contains("只写到 1 个人物全名"), issue);
+    }
+
+    /** transition 章 ≥1 条即达标，且豁免单人事件占比（过渡章允许留白，与密度反馈同口径） */
+    @Test
+    void validateDialogueCarriage_transitionNeedsOnlyOneScene() {
+        String scene = "马老师向传达室老杨核实三次寄信记录，两人就登记格式对了一遍";
+        ChapterPlanItemEntity chapter = ChapterPlanItemEntity.builder()
+                .chapterNo(102).title("标题").goal("目标")
+                .characters(List.of("马老师"))
+                .keyEvents(List.of(scene, "马老师在办公室查阅寄信登记本", "马老师在教师例会上提出定性"))
+                .dialogueScenes(List.of(scene))
+                .chapterType(ChapterTypeVO.TRANSITION)
+                .build();
+
+        assertNull(ChapterPlanChecks.validateDialogueCarriage(List.of(chapter),
+                List.of("马老师", "老杨")));
+    }
+
+    /** 第 96 章逃逸形态回归："2 条合规"但其余全是独白——单人事件过半必须驳回 */
+    @Test
+    void validateDialogueCarriage_flagsSoloEventMajority() {
+        String scene1 = "陆瑾瑜与宋知渔就控分意图当面对质";
+        String scene2 = "陆瑾瑜向宋知渔说明留在虹镇的原因";
+        ChapterPlanItemEntity chapter = planWithScenes(105, ChapterTypeVO.NORMAL,
+                List.of(scene1, scene2,
+                        "陆瑾瑜在蓝皮本新页写下推断过程",
+                        "陆瑾瑜将发件人的语言特征逐项对照",
+                        "陆瑾瑜合上蓝皮本"),
+                List.of(scene1, scene2));
+
+        String issue = ChapterPlanChecks.validateDialogueCarriage(List.of(chapter), ROSTER);
+
+        assertNotNull(issue);
+        assertTrue(issue.contains("单人事件 3/5"), issue);
+    }
+
+    /** 同一条事件重复声明只计一次，不得凑数 */
+    @Test
+    void validateDialogueCarriage_countsDistinctEventsOnly() {
+        String scene = "宋知渔逼问陆瑾瑜控分的真实意图";
+        ChapterPlanItemEntity chapter = planWithScenes(101, ChapterTypeVO.NORMAL,
+                List.of(scene, "陆瑾瑜承认控分意图，宋知渔承诺保密"),
+                List.of(scene, scene));
+
+        String issue = ChapterPlanChecks.validateDialogueCarriage(List.of(chapter), ROSTER);
+
+        assertNotNull(issue, "重复声明同一事件不得凑足条数");
+        assertTrue(issue.contains("有效对话承载事件仅 1 条"), issue);
+    }
+
+    /** 新书首段降级：无账本名册且 characters 不足 2 人 → 人名/占比跳过，只查存在与数量 */
+    @Test
+    void validateDialogueCarriage_degradesToCountOnlyWhenPoolTooSmall() {
+        ChapterPlanItemEntity chapter = ChapterPlanItemEntity.builder()
+                .chapterNo(1).title("标题").goal("目标")
+                .characters(List.of("陆瑾瑜"))
+                .keyEvents(List.of("陆瑾瑜在课堂上首次展露心算天赋", "陆瑾瑜独自翻看母亲的旧账本"))
+                .dialogueScenes(List.of("陆瑾瑜在课堂上首次展露心算天赋", "陆瑾瑜独自翻看母亲的旧账本"))
+                .chapterType(ChapterTypeVO.NORMAL)
+                .build();
+
+        assertNull(ChapterPlanChecks.validateDialogueCarriage(List.of(chapter), List.of()),
+                "人名池不足 2 时不得拿人名强查全章误报");
+    }
+
+    /** 反馈必须解开"蓝图逐字锁"死结：里程碑照抄、事件本体改为双人戏 */
+    @Test
+    void dialogueCarriageFeedback_namesFixInstructions() {
+        String feedback = ChapterPlanChecks.dialogueCarriageFeedback("第 105 章未声明 dialogueScenes");
+
+        assertTrue(feedback.contains("不是**事件本体**"), feedback);
+        assertTrue(feedback.contains("逐字复制"), feedback);
+        assertTrue(feedback.contains("全名"), feedback);
+        assertTrue(feedback.contains("落点"), feedback);
+    }
 }

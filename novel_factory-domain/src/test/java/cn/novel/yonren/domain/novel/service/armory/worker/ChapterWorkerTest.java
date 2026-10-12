@@ -397,12 +397,12 @@ class ChapterWorkerTest {
                 .build();
 
         // 段规划经规划执行器（与链式路径同一实现）：打桩并验证调用契约
-        when(planSegmentPlanner.planSegment(any(), any(), anyString(), eq(3), eq(4), any(), any()))
+        when(planSegmentPlanner.planSegment(any(), any(), anyString(), eq(3), eq(4), any(), any(), any()))
                 .thenReturn(new ChapterPlanSegmentPlanner.PlannedSegment("segment-2-raw", segment2Plan));
 
         chapterWorker.generateAll(command, ctx);
 
-        verify(planSegmentPlanner, times(1)).planSegment(any(), any(), anyString(), eq(3), eq(4), any(), any());
+        verify(planSegmentPlanner, times(1)).planSegment(any(), any(), anyString(), eq(3), eq(4), any(), any(), any());
 
         // 4 章全部生成（首段 2 章 + 惰性规划段 2 章），段计划已合并进整批计划
         assertEquals(4, ctx.getChapterContents().size());

@@ -13,6 +13,7 @@ import org.springframework.ai.converter.BeanOutputConverter;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -292,5 +293,181 @@ public final class ChapterPlanChecks {
                 + "单章落地时无权改写它；确需调整请在该章 keyEvents 里补充说明，而不是改 mainLineAdvance；"
                 + "\n3. 相邻两章不得使用同一句推进描述；"
                 + "\n4. 重新输出**完整**计划（章数不变）。";
+    }
+
+    // ==================== 对话承载校验（2026-10-10） ====================
+
+    /**
+     * 对话承载事件下限：normal/climax/finale 章 ≥{@value DIALOGUE_SCENES_MIN}，transition 章 ≥
+     * {@link #DIALOGUE_SCENES_MIN_TRANSITION}。**口径只有这一处**——
+     * prompt 侧（ChapterPlanPromptService）引用同一常量拼装要求文本，
+     * 与 {@link #hasUsableLadder} 同套路，防"两边对不上让闸门看似存在实则空转"。
+     */
+    static final int DIALOGUE_SCENES_MIN = 2;
+
+    /** transition 章的对话承载事件下限（过渡章允许留白，但仍须一场当面戏） */
+    static final int DIALOGUE_SCENES_MIN_TRANSITION = 1;
+
+    /** 声明被认作"逐字复制"的最短归一化长度：低于此长的"声明"无法定位到具体事件，视为未声明 */
+    private static final int DIALOGUE_DECLARATION_MIN_CHARS = 8;
+
+    /**
+     * **对话承载校验**：把「有没有戏可演」从散文规则变成可机械核验的结构契约。
+     *
+     * <p><b>为什么必须新增</b>：keyEvents 是自由文本，事件的性质（双人当面戏 / 单人独处）
+     * 不在结构里——【对话承载·硬约束】写了"至少 2 个"却无人执法，第 105 章 5 条关键事件
+     * 全是"整理私信/写笔记/看屏幕"的单人特写照样放行（characters 里甚至写着"电脑屏幕"）。
+     * 声明（dialogueScenes）+ 逐字比对 + 人名计数，就是这条规则的执法通道。
+     *
+     * <p>逐章核验五条：
+     * <ol>
+     *   <li><b>存在</b>：dialogueScenes 缺失/空 = 没契约（字段不进输出等于不存在）；</li>
+     *   <li><b>数量</b>：有效声明（逐字命中 keyEvents 的**不同**事件数）达标；</li>
+     *   <li><b>诚实</b>：声明必须逐字取自本章 keyEvents（归一化后互为包含），防占位虚报；</li>
+     *   <li><b>双人</b>：匹配到的 keyEvent 须写到 ≥2 个人名——"谁对谁"的全名落点，代词不算；</li>
+     *   <li><b>占比</b>：非 transition 章"单人事件"（人名 &lt;2）不得超过一半——治第 96 章的
+     *       "2 条合规但其余全是独白"逃逸形态。</li>
+     * </ol>
+     *
+     * <p><b>人名来源</b>：角色账本名册（rosterNames，调用方传入）∪ 本章 characters——
+     * 并集容忍"本章首次登场、账本还没有的新角色"；防"电脑屏幕"这类伪角色靠的是
+     * 它必须先被列进 characters 这道显式动作，同时被占比检查与体检观测兜住——
+     * 软闸门不为跟模型军备竞赛。
+     *
+     * <p><b>降级</b>：人名池不足 2 个（新书首段、characters 只列一人）时，人名与占比两条
+     * 跳过（无人可数，强查只会全章误报），存在/数量/诚实三条仍执法。
+     *
+     * <p>软闸门：与其它推进校验同款——带反馈重规划一次，二次仍不过则告警放行。
+     */
+    public static String validateDialogueCarriage(List<ChapterPlanItemEntity> chapters,
+                                                  List<String> rosterNames) {
+        if (chapters == null || chapters.isEmpty()) {
+            return null;
+        }
+        List<String> issues = new ArrayList<>();
+        for (int i = 0; i < chapters.size(); i++) {
+            ChapterPlanItemEntity item = chapters.get(i);
+            if (item == null) {
+                continue;
+            }
+            // 章号可能缺失（上游未规范化）：退回"列表内序号"定位（与 validateSuspenseAdvance 同口径）
+            int no = item.getChapterNo() == null ? i + 1 : item.getChapterNo();
+            boolean transition = item.getChapterType() != null && item.getChapterType().isTransition();
+            int required = transition ? DIALOGUE_SCENES_MIN_TRANSITION : DIALOGUE_SCENES_MIN;
+            List<String> events = item.getKeyEvents();
+            if (events == null || events.isEmpty()) {
+                // 结构性缺失由 validateSegmentStructure 负责（缺 keyEvents 在那里已判死），不重复报
+                continue;
+            }
+            List<String> scenes = item.getDialogueScenes();
+            if (scenes == null || scenes.isEmpty()) {
+                issues.add("第 " + no + " 章未声明 dialogueScenes：本章需 ≥" + required
+                        + " 条对话承载事件（逐字取自 keyEvents 复制进该字段）");
+                continue;
+            }
+            // 声明诚实性 + 有效数量：逐字命中 keyEvents 的不同事件才算数（同一条重复声明只计一次）
+            Set<Integer> matched = new LinkedHashSet<>();
+            for (String scene : scenes) {
+                if (StringUtils.isBlank(scene)) {
+                    continue;
+                }
+                int idx = matchEventIndex(events, scene);
+                if (idx < 0) {
+                    issues.add("第 " + no + " 章的 dialogueScenes「" + brief(scene)
+                            + "」与本章关键事件对不上——必须逐字复制，不得改写或另写");
+                } else {
+                    matched.add(idx);
+                }
+            }
+            if (matched.size() < required) {
+                issues.add("第 " + no + " 章有效对话承载事件仅 " + matched.size() + " 条（要求 ≥" + required
+                        + "）——把更多关键事件写成双人当面戏");
+            }
+            // 人名与占比：池不足 2 人时降级（无人可数，强查只会全章误报）
+            List<String> pool = namePool(rosterNames, item.getCharacters());
+            if (pool.size() < 2) {
+                continue;
+            }
+            for (int idx : matched) {
+                String event = events.get(idx);
+                int names = countNames(event, pool);
+                if (names < 2) {
+                    issues.add("第 " + no + " 章对话承载事件「" + brief(event) + "」只写到 " + names
+                            + " 个人物全名——必须写明谁对谁（代词不算）");
+                }
+            }
+            if (!transition) {
+                long solo = events.stream().filter(e -> countNames(e, pool) < 2).count();
+                if (solo * 2 > events.size()) {
+                    issues.add("第 " + no + " 章单人事件 " + solo + "/" + events.size()
+                            + " 过半——独处/内心梳理推进需改为双人当面戏");
+                }
+            }
+        }
+        return issues.isEmpty() ? null : String.join("；", issues);
+    }
+
+    /** 违规信息回注规划层的差异化修正指令：核心是解开"蓝图逐字锁"与"要有戏"的死结 */
+    public static String dialogueCarriageFeedback(String issue) {
+        return "\n\n【上一版计划的对话承载被机械驳回】以下问题必须修正（其余部分可保留）：\n- " + issue
+                + "\n\n修正要求（逐条执行，**不得只换措辞**）："
+                + "\n1. mainLineAdvance **照旧逐字取自蓝图**——蓝图定的主线里程碑是本章的**落点**，"
+                + "不是**事件本体**：里程碑不许改，但必须由 ≥2 场双人对峙/盘问/合作/拒绝承载"
+                + "（如「把发现记录在蓝皮本」应演成「被同伴撞见锁抽屉，两人就『你还在查什么』对峙，"
+                + "他在拒答中完成记录」——同一信息落点，戏是补出来的，不是改蓝图）；"
+                + "\n2. 每条对话承载事件写明**谁对谁、围绕什么分歧**，人物一律用**全名**（代词不计入校验）；"
+                + "\n3. 把这 ≥2 条事件（transition 章 ≥1 条）**逐字复制**进对应章的 dialogueScenes 字段；"
+                + "\n4. 非 transition 章单人事件不得过半——主角需要「想明白一件事」时，让它在对话中发生；"
+                + "\n5. 严禁用寒暄与注水凑对话事件——单场景内反复确认已知状态的对话会被【注水反馈】驳回；"
+                + "\n6. 重新输出**完整**计划（章数不变）。";
+    }
+
+    /** 声明 → 事件定位：归一化后互为包含（容忍前后缀差），返回首个命中的事件下标，无命中 -1 */
+    private static int matchEventIndex(List<String> events, String declared) {
+        String d = normalizeAdvance(declared);
+        if (d.length() < DIALOGUE_DECLARATION_MIN_CHARS) {
+            return -1;
+        }
+        for (int i = 0; i < events.size(); i++) {
+            String e = normalizeAdvance(events.get(i));
+            if (e.length() < 4) {
+                continue;
+            }
+            if (e.contains(d) || d.contains(e)) {
+                return i;
+            }
+        }
+        return -1;
+    }
+
+    /** 人名池：账本名册 ∪ 本章 characters，按归一化去重（两处来源任一为 null 安全） */
+    private static List<String> namePool(List<String> rosterNames, List<String> characters) {
+        Set<String> seen = new LinkedHashSet<>();
+        appendNames(seen, rosterNames);
+        appendNames(seen, characters);
+        return new ArrayList<>(seen);
+    }
+
+    private static void appendNames(Set<String> seen, List<String> names) {
+        if (names == null) {
+            return;
+        }
+        for (String name : names) {
+            if (StringUtils.isNotBlank(name)) {
+                seen.add(normalizeAdvance(name));
+            }
+        }
+    }
+
+    /** 事件文本中出现的不同人名个数（归一化包含判定；空名已在上游过滤） */
+    private static int countNames(String text, List<String> pool) {
+        String t = normalizeAdvance(text);
+        int count = 0;
+        for (String name : pool) {
+            if (!name.isEmpty() && t.contains(name)) {
+                count++;
+            }
+        }
+        return count;
     }
 }

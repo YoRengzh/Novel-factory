@@ -280,6 +280,57 @@ class ChapterSummaryServiceTest {
         assertTrue(prompt.contains("严禁改写、拼接或概括"));
     }
 
+    /**
+     * 回收登记是一项**义务**，不是可选项（2026-10-10 强化）。
+     *
+     * <p>原prompt只写了约束（"只能从账中选取""逐字沿用"），没有正面义务、没有例子，
+     * 也没有解析后的机械校验。结果是漏记——而漏记的后果不是"少记一笔"：该线永远关不掉账，
+     * 会在后续每一段被反复要求回收。体检实测「清账静默兑现 80 条（占弃置 66%）」即为此。
+     */
+    @Test
+    void summarize_promptStatesResolutionDutyWithExamples() {
+        stubModel("{\"summary\":\"剧情。\",\"characterStates\":[],\"timePoint\":\"当夜\"}");
+
+        service.summarize(storyVO(), planItem(2), "正文", 2, null,
+                List.of("洛恩腕侧旧伤疤与旧库残页上的半枚印记相似"));
+
+        ArgumentCaptor<LlmCall> captor = ArgumentCaptor.forClass(LlmCall.class);
+        verify(llmGateway).complete(any(), captor.capture());
+        String prompt = captor.getValue().getUserPrompt();
+        assertTrue(prompt.contains("这是一项义务，不是可选项"), prompt);
+        assertTrue(prompt.contains("必须逐条登记"), prompt);
+        assertTrue(prompt.contains("该线永远关不掉账"), "要写清漏记的后果：" + prompt);
+        // 判断口径必须写出来，否则模型仍会按"物件是否出现"误判
+        assertTrue(prompt.contains("看**状态是否变化**，不是看物件是否出现"), prompt);
+        // 正反例子齐备（✅/❌），否则等于只给了约束没给做法
+        assertTrue(prompt.contains("✅ 正确："), prompt);
+        assertTrue(prompt.contains("❌ 错误一："), prompt);
+        assertTrue(prompt.contains("❌ 错误二："), prompt);
+        assertTrue(prompt.contains("老账恰恰最需要登记"), "要点名「老线可以留空」这个误判：" + prompt);
+    }
+
+    /**
+     * 回收清单的机械兜底：去空、去重，但**刻意不丢弃**未匹配账本的条目。
+     *
+     * <p>真实兑现的措辞可能与账本不完全一致，误删等于永久丢掉一次回收——而回收一旦丢失，
+     * 该线就再也不会关账。未命中只作观测信号（WARN），与体检的「清账静默兑现」同源。
+     */
+    @Test
+    void summarize_sanitizesResolvedWithoutDroppingUnmatched() {
+        stubModel("{\"summary\":\"剧情。\",\"characterStates\":[],\"timePoint\":\"当夜\","
+                + "\"foreshadowingResolved\":[\" 旧笔记本里的借书卡 \",\"旧笔记本里的借书卡\",\"  \","
+                + "\"用自己话写的另一条\"]}");
+
+        ChapterSummaryEntity result = service.summarize(storyVO(), planItem(3), "正文", 3, null,
+                List.of("旧笔记本里的借书卡"));
+
+        List<String> resolved = result.getForeshadowingResolved();
+        assertEquals(2, resolved.size(), "去空白、去重后应剩两条：" + resolved);
+        assertTrue(resolved.contains("旧笔记本里的借书卡"), "应保留匹配账本的那条：" + resolved);
+        assertTrue(resolved.contains("用自己话写的另一条"),
+                "未匹配账本的条目不丢弃——误删会永久丢掉一次回收：" + resolved);
+    }
+
     private void stubModel(String content) {
         when(llmGateway.complete(any(), any(LlmCall.class))).thenReturn(content);
     }

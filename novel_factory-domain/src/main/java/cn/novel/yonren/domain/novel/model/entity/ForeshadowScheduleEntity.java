@@ -58,10 +58,26 @@ public class ForeshadowScheduleEntity {
         private Integer actualPlantChapter;
         /** 实际回收章号（命中 foreshadowingResolved 时回填） */
         private Integer actualPayoffChapter;
+        /**
+         * 长线在养标记：在哪一阶段末被裁决判为 PARKED（有意慢慢养的线）。null = 未在养。
+         *
+         * <p><b>为什么用标记而不是新 status</b>：{@link #active()} 只认 PLANNED/PLANTED，
+         * 新状态会被 {@code carriableItems} 静默丢掉——那等于把"在养"变成"停止追踪"，
+         * 而它恰恰要继续被追踪（观察者仍可能提到它、真兑现时要能自动关账）。
+         *
+         * <p>在养的条目：不再进逾期补收/挂起、不再被送回阶段出口裁决，但仍随排期表结转，
+         * 且 {@code matchPayoff} 命中时仍会自动置 PAID——在养是可以自动解除的。
+         */
+        private Integer parkedAtChapter;
 
         /** 是否为"仍在计划中"的活线（结转只带这些） */
         public boolean active() {
             return STATUS_PLANNED.equals(status) || STATUS_PLANTED.equals(status);
+        }
+
+        /** 是否处于"长线在养"（有意慢慢养、当前不该被要求回收） */
+        public boolean parked() {
+            return parkedAtChapter != null;
         }
     }
 

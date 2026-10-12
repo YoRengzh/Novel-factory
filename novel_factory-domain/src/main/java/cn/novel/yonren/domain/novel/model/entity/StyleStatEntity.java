@@ -28,4 +28,16 @@ public class StyleStatEntity {
     /** 疲劳词全篇计数（词 → 出现次数） */
     private Map<String, Integer> fatigueWords;
 
+    /**
+     * 已出现过的**对白句**全集（含引号，去重，滚动窗口远大于 usedSentences）。
+     *
+     * <p>为什么要与 {@link #usedSentences} 分开：那本句集上限只有 80 句、约等于一章的量，
+     * 于是"隔两章的对白重复"根本进不了视野——实测第 100 章与第 102 章一字不差地问了同一句
+     * 「三班还等得到吗？」，两处都查不到。而对白是全篇最刺眼的重复形态（读者会以为人物在复读），
+     * 且每章只有二三十句、句子又短，用一个大得多的窗口单独留存成本极低。
+     *
+     * <p>老数据该字段为 null（读取侧一律按空表处理）。
+     */
+    private List<String> usedDialogueLines;
+
 }

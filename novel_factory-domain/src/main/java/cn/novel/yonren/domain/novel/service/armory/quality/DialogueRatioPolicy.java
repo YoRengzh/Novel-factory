@@ -26,6 +26,24 @@ public final class DialogueRatioPolicy {
     /** 对白轮次：一对中文/直角/ASCII 引号包裹的发言算 1 次（跨行用 DOTALL 非贪婪） */
     private static final Pattern UTTERANCE = Pattern.compile("(?:[“「].*?[”」]|\"[^\"\\r\\n]*\")", Pattern.DOTALL);
 
+    /**
+     * 提取全部对白片段（**含引号本身**）——仓库内"什么算一句对白"的唯一定义。
+     *
+     * <p>跨章对白查重（{@code StyleStatService}）必须与轮次统计用同一份口径，
+     * 否则会出现"同一句对白在一处算重复、在另一处不计入"的分裂——本项目已在两份 LCS 口径上吃过同类亏。
+     */
+    public static List<String> utterances(String content) {
+        if (content == null || content.isBlank()) {
+            return List.of();
+        }
+        Matcher matcher = UTTERANCE.matcher(content);
+        List<String> result = new ArrayList<>();
+        while (matcher.find()) {
+            result.add(matcher.group());
+        }
+        return result;
+    }
+
     private DialogueRatioPolicy() {
     }
 
@@ -78,15 +96,7 @@ public final class DialogueRatioPolicy {
 
     /** 对白轮次：引号成对包裹的发言次数 */
     public static int utteranceCount(String content) {
-        if (content == null || content.isBlank()) {
-            return 0;
-        }
-        Matcher matcher = UTTERANCE.matcher(content);
-        int count = 0;
-        while (matcher.find()) {
-            count++;
-        }
-        return count;
+        return utterances(content).size();
     }
 
     /** 轮次密度 = 轮次 / (有效字/1000)；有效字缺失或为 0 时返回 0（观测层跳过该章） */
@@ -97,8 +107,10 @@ public final class DialogueRatioPolicy {
         return utterances / (effectiveChars / 1000.0);
     }
 
-    /** 判坍缩的最小篇幅：更短的正文样本太小，宁可漏报不误伤 */
-    private static final int FORMAT_COLLAPSE_MIN_CHARS = 800;
+    /** 判坍缩的最小篇幅：更短的正文样本太小，宁可漏报不误伤。
+     *  自 2026-10-09 起同时对轮次密度检测（{@code QualityGate#dialogueDensityCollapse}）开放：
+     * 同一份"样本太小就不断言"的口径必须只有一处，否则两条检测会对同一章给出相反结论。 */
+    public static final int FORMAT_COLLAPSE_MIN_CHARS = 800;
 
     public static List<ChapterIssueEntity> checkFormatCollapse(String content, String chapterTypeCode) {
         if (StringUtils.isBlank(content) || content.length() < FORMAT_COLLAPSE_MIN_CHARS) {

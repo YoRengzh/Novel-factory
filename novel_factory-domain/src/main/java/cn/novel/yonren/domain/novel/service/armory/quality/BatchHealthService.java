@@ -8,6 +8,7 @@ import cn.novel.yonren.domain.novel.model.entity.StageBlueprintEntity;
 import cn.novel.yonren.types.enums.ChapterTypeVO;
 import lombok.extern.slf4j.Slf4j;
 import cn.novel.yonren.domain.novel.service.armory.memory.OutlineSegmentParser;
+import cn.novel.yonren.domain.novel.service.armory.plan.StoryPacing;
 import org.apache.commons.lang3.StringUtils;
 import org.springframework.stereotype.Service;
 
@@ -203,7 +204,13 @@ public class BatchHealthService {
         List<String> voided = ForeshadowSettlementEntity.voidedContents(settlements);
         addForeshadowSpan(metrics, recommendations, chapters, voided);
         addForeshadowPending(metrics, recommendations, chapters, voided);
-        addForeshadowMissed(metrics, recommendations, chapters, voided);
+        // 漏收伏笔数另需排除"长线在养"：那条指标的定位是「有意养的长线」与「被写忘了的线」的分界线，
+        // 在养项已被阶段出口明确裁定为前者，再算它漏收就与该指标自己的定义打架。
+        // 注意「在途伏笔滞留中位数」不排除在养项——它的说明里写明"本项偏高说明长线在养"，
+        // 在养本就该算在途。
+        List<String> notMissed = new java.util.ArrayList<>(voided);
+        notMissed.addAll(ForeshadowSettlementEntity.parkedContents(settlements));
+        addForeshadowMissed(metrics, recommendations, chapters, notMissed);
         addSettlementAudit(metrics, recommendations, settlements);
 
         BatchHealthReport.Level overall = overall(metrics);
@@ -485,22 +492,30 @@ public class BatchHealthService {
         }
         long silent = ForeshadowSettlementPolicy.silentPayoffCount(settlements);
         long voidCount = ForeshadowSettlementPolicy.voidCount(settlements);
-        if (voidCount == 0) {
+        long doneCount = ForeshadowSettlementPolicy.doneCount(settlements);
+        if (voidCount == 0 && doneCount == 0) {
             return;
         }
+        // 指标值取"静默兑现 + 裁决补认已完成"：两者是同一现象（剧情已收、账本没记）的两个出口。
+        // 只数 VOID 那一支的话，这条指标会随着 DONE 的启用凭空变好——而问题一点没变。
+        long omitted = silent + doneCount;
         metrics.add(new BatchHealthReport.Metric("foreshadowSilentPayoff", "清账静默兑现数",
-                silent, "条",
+                omitted, "条",
                 "观测项（无绝对阈值：它度量的是**摘要层漏记回收**的规模，而非清账本身的对错）。"
                         + "数值高说明大量伏笔「剧情已消化、账本却没记回收」",
                 BatchHealthReport.Direction.LOWER_IS_BETTER,
-                silent > 0 ? BatchHealthReport.Level.WATCH : BatchHealthReport.Level.OK,
-                "静默兑现 " + silent + " / 弃置 " + voidCount));
-        if (silent > 0) {
-            recommendations.add("清账静默兑现 " + silent + " 条（占弃置 " + voidCount + " 条的 "
-                    + Math.round(silent * 100.0 / Math.max(1, voidCount)) + "%）："
+                omitted > 0 ? BatchHealthReport.Level.WATCH : BatchHealthReport.Level.OK,
+                "静默兑现 " + silent + " / 弃置 " + voidCount
+                        + "；另由裁决直接补认「已完成」 " + doneCount + " 条"));
+        if (omitted > 0) {
+            recommendations.add("摘要层漏记回收的证据共 " + omitted + " 条"
+                    + "（清账静默兑现 " + silent + " 条，占弃置 " + voidCount + " 条的 "
+                    + Math.round(silent * 100.0 / Math.max(1, voidCount)) + "%；"
+                    + "另 " + doneCount + " 条被裁决直接判为「已完成」）："
                     + "这些伏笔**剧情其实已经收了**，只是摘要没写进 foreshadowingResolved ⇒ "
                     + "**伏笔跨度口径被系统性低估**（真实跨度更长）。"
-                    + "先在摘要侧强化「已兑现则必须登记回收」，再读跨度类指标");
+                    + "摘要侧已强化「已兑现则必须登记回收」，并保证已过计划回收章的线一定在登记清单里；"
+                    + "在这两项生效前，跨度类指标先按此条读数打折");
         }
     }
 
@@ -1074,39 +1089,11 @@ public class BatchHealthService {
             return;
         }
         // 实际时间标记：最新摘要的年龄事实 + 最新 timePoint 的年份（与时序锚渲染同源）
-        Integer actualAge = null;
-        Integer actualYear = null;
-        for (int i = chapters.size() - 1; i >= 0; i--) {
-            ChapterSummaryEntity s = chapters.get(i);
-            if (s == null) {
-                continue;
-            }
-            if (actualAge == null && s.getConsistencyFacts() != null) {
-                for (ChapterSummaryEntity.ConsistencyFact f : s.getConsistencyFacts()) {
-                    if (f == null || f.getType() == null || !"NUMBER".equalsIgnoreCase(f.getType().trim())) {
-                        continue;
-                    }
-                    String subj = StringUtils.defaultString(f.getSubject());
-                    if (!subj.contains("年龄") && !subj.contains("月龄") && !subj.contains("岁")) {
-                        continue;
-                    }
-                    Integer parsed = parseAgeValue(f.getValue());
-                    if (parsed != null) {
-                        actualAge = parsed;
-                        break;
-                    }
-                }
-            }
-            if (actualYear == null && s.getTimePoint() != null) {
-                java.util.regex.Matcher ym = java.util.regex.Pattern.compile("(\\d{4})年").matcher(s.getTimePoint());
-                if (ym.find()) {
-                    actualYear = Integer.parseInt(ym.group(1));
-                }
-            }
-            if (actualAge != null && actualYear != null) {
-                break;
-            }
-        }
+        // 两个维度都走 StoryPacing 统一口径——观测层自写正则会被模型的写法变化击穿：
+        // 实测两轮误报，①年份写成"二〇〇八年"读不到（回溯到第 1 章的 2002，报滞后 6 段）；
+        // ②年龄把「陆瑾瑜四岁涂2026」这类叙述串当成当前年龄（contains("岁") 过宽，读成 4 岁）
+        Integer actualAge = StoryPacing.latestAnchorAge(chapters);
+        Integer actualYear = StoryPacing.latestAnchorYear(chapters);
 
         // 滞后计算：可数值比较的维度取 max（年龄滞后 / 年份滞后），无量纲维度豁免
         int ageLag = (budget.ageEnd() != null && actualAge != null)
@@ -1135,22 +1122,6 @@ public class BatchHealthService {
         }
     }
 
-
-    /** 年龄值解析：兼容阿拉伯数字（"9岁""14"）与中文数字（"四岁""十一岁"）；"未提及"等返回 null */
-    private static Integer parseAgeValue(String value) {
-        if (StringUtils.isBlank(value)) {
-            return null;
-        }
-        java.util.regex.Matcher am = java.util.regex.Pattern.compile("(\\d{1,3})\\s*岁?").matcher(value);
-        if (am.find()) {
-            return Integer.parseInt(am.group(1));
-        }
-        java.util.regex.Matcher cm = java.util.regex.Pattern.compile("([一二三四五六七八九十]{1,3})\\s*岁").matcher(value);
-        if (cm.find()) {
-            return OutlineSegmentParser.chineseNumeral(cm.group(1));
-        }
-        return null;
-    }
 
     private BatchHealthReport.Level overall(List<BatchHealthReport.Metric> metrics) {
         BatchHealthReport.Level worst = BatchHealthReport.Level.OK;

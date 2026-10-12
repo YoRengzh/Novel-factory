@@ -2,7 +2,10 @@ package cn.novel.yonren.domain.novel.service.armory.memory;
 
 import cn.novel.yonren.domain.novel.model.entity.StyleStatEntity;
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+
+import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -32,8 +35,7 @@ class StyleStatServiceTest {
     }
 
     @Test
-    void merge_detectsCrossChapterRepeatedSentence() {
-        String sentence = "林尘在夜色中悄然潜入后山废矿深处，脚步轻得像一片落叶";
+    void merge_detectsCrossChapterRepeatedSentence() {        String sentence = "林尘在夜色中悄然潜入后山废矿深处，脚步轻得像一片落叶";
         service.merge(stat, sentence + "。本章其余内容。");
         service.merge(stat, "另一章的内容。" + sentence + "。");
 
@@ -169,7 +171,7 @@ class StyleStatServiceTest {
         assertTrue(!stat.getUsedSentences().contains(first), "最老的句子应被挤出");
     }
 
-    /** 由三组互不相同的短句拼成的长句；索引组合覆盖 5×5×5=125 种，足够 90 句互不重复 */
+    /** 由三组互不相同的短句拼成的长句；索引组合覆盖 5×5×5=125 种，足够 300+ 句互不重复（四维共 625 种） */
     private static String sentence(int i) {
         String[] subjects = {
                 "陆建国推着那辆永久牌自行车", "林婉端着搪瓷盆从灶间出来", "陆瑾瑜蹲在弄堂口的青石板上",
@@ -180,9 +182,15 @@ class StyleStatServiceTest {
         String[] tails = {
                 "心里盘算着这个月还差多少", "嘴上应着手上却没停", "打算等雨小些再去铺子里",
                 "想着明早还得去一趟供销社", "把东西归整齐了才坐下"};
+        // 第四维：句集窗口 2026-10-10 由 80 上调到 300，125 种组合已不够铺满窗口，
+        // 这里补一维把种类提到 5×5×5×5=625（夹具仍须"两两不同"，否则会被近重复判据吃掉）
+        String[] marks = {
+                "门口的梧桐叶落了一地", "灶上的水壶正冒着白汽", "墙根的猫换了个姿势",
+                "街对面的喇叭响了两声", "桌上的搪瓷缸挪了半寸"};
         return subjects[i % subjects.length]
                 + actions[(i / subjects.length) % actions.length]
-                + tails[(i / (subjects.length * actions.length)) % tails.length] + "。";
+                + tails[(i / (subjects.length * actions.length)) % tails.length]
+                + marks[(i / (subjects.length * actions.length * tails.length)) % marks.length] + "。";
     }
 
     @Test
@@ -190,6 +198,59 @@ class StyleStatServiceTest {
         service.merge(stat, null);
         service.merge(null, "内容");
         assertEquals(0, stat.getUsedSentences().size());
+    }
+
+    /**
+     * 跨章对白逐字重复必须查得到（2026-10-10）。
+     *
+     * <p>实测第 100 章与第 102 章一字不差地问了同一句「三班还等得到吗？」，而当时**两处都查不到**：
+     * 通用句集上限只有 80 句（约一章的量），第 100 章那句在第 102 章生成前已被第 101 章的句子挤出去。
+     * 对白句因此单独入一个大得多的窗口。
+     */
+    @Test
+    @DisplayName("跨章对白查重：短对白也要查得到，窗口须跨越两章以上")
+    void crossChapterDialogueRepeats_findsShortLineAcrossChapters() {
+        String line = "「三班还等得到吗？」";
+        service.merge(stat, "她凑过来看那张通知。" + line + "他没有回答。");
+        // 隔一章灌入大量长句，把通用句集窗口彻底挤满（复刻"隔两章"的真实条件）
+        StringBuilder filler = new StringBuilder();
+        for (int i = 0; i < 120; i++) {
+            filler.append("这是第").append(i).append("句足够长的填充叙述用来把通用句集窗口挤满。");
+        }
+        service.merge(stat, filler.toString());
+
+        List<String> repeats = service.crossChapterDialogueRepeats(stat,
+                "梧桐树底下她站住了。" + line + "陆瑾瑜没答。");
+
+        assertEquals(List.of(line), repeats, "短对白隔章重复必须被查到——句集窗口不够长是原来的漏洞");
+    }
+
+    /** 只认逐字相等：近重复与超短对白不进这条 BLOCKING 口径，仍走风格警示的软记账 */
+    @Test
+    @DisplayName("跨章对白查重：近重复与超短应答不算")
+    void crossChapterDialogueRepeats_ignoresNearDuplicateAndTooShort() {
+        service.merge(stat, "「三班还等得到吗？」「好。」");
+
+        assertEquals(List.of("「三班还等得到吗？」"),
+                service.crossChapterDialogueRepeats(stat, "「三班还等得到吗？」"));
+        assertTrue(service.crossChapterDialogueRepeats(stat, "「三班还等得到吧？」").isEmpty(),
+                "改一个字属近重复，走软通道不进 BLOCKING");
+        assertTrue(service.crossChapterDialogueRepeats(stat, "「好。」").isEmpty(),
+                "超短应答不入索引（称呼与应答复用是正常文体）");
+    }
+
+    /** 门槛标定：套话短答（含引号 6 字）不进这条 BLOCKING 口径——它们在正常文里本来就会自然复现 */
+    @Test
+    @DisplayName("跨章对白查重：套话短答不触发（门槛 8 字，实测标定）")
+    void crossChapterDialogueRepeats_ignoresFormulaicShortReplies() {
+        service.merge(stat, "「我知道了。」「明天再说。」「三班还等得到吗？」");
+
+        assertTrue(service.crossChapterDialogueRepeats(stat, "「我知道了。」").isEmpty(),
+                "「我知道了。」含引号 6 字，低于 8 字门槛：把套话扫进 BLOCKING 等于白改一稿");
+        assertTrue(service.crossChapterDialogueRepeats(stat, "「明天再说。」").isEmpty());
+        assertEquals(List.of("「三班还等得到吗？」"),
+                service.crossChapterDialogueRepeats(stat, "「三班还等得到吗？」"),
+                "真重复（10 字问句）必须抓到——它就是本条判据的标定样本");
     }
 
 }

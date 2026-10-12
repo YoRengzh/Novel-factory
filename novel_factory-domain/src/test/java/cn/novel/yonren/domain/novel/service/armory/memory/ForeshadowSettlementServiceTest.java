@@ -83,6 +83,53 @@ class ForeshadowSettlementServiceTest {
         assertNull(service.settle(module(), stage(), null, breakers(), summaries(), null));
     }
 
+    /**
+     * DONE 是第三个出口：线其实已在已写章节里兑现，回写排期并停止追问。
+     *
+     * <p>原 schema 只有 RECOVER / VOID，而逾期排期线的题面标注是「已过计划回收章——欠账」，
+     * 模型只能选 RECOVER（= 结转下一阶段再收一次），闭环于是永远关不上。
+     * 但 DONE 必须带章号才可用：没有章号无法核验、也无法回写排期表——降级回 RECOVER，
+     * 因为误关会永久丢掉一条真伏笔。
+     */
+    @Test
+    void settle_doneRequiresPayoffChapterOrDowngradesToRecover() {
+        stubModel("{\"results\":["
+                + "{\"index\":1,\"decision\":\"DONE\",\"reason\":\"第18章已确认\"},"
+                + "{\"index\":2,\"decision\":\"DONE\",\"reason\":\"第30章已确认\",\"actualPayoffChapter\":30}]}");
+
+        List<ForeshadowSettlementEntity.SettlementDecision> decisions =
+                service.settle(module(), stage(), null, breakers(), summaries(), null);
+
+        assertEquals(ForeshadowSettlementEntity.DECISION_RECOVER, decisions.get(0).getDecision(),
+                "缺章号的 DONE 必须降级为 RECOVER（继续追踪）");
+        assertNull(decisions.get(0).getActualPayoffChapter());
+        assertTrue(decisions.get(0).getReason().contains("降级"), decisions.get(0).getReason());
+        assertEquals(ForeshadowSettlementEntity.DECISION_DONE, decisions.get(1).getDecision());
+        assertEquals(30, decisions.get(1).getActualPayoffChapter().intValue());
+    }
+
+    /**
+     * PARKED 是第四个出口：有意慢慢养的长线保留追踪但不再每段催收——这正是「2026」那条被催了
+     * 几十章、只催出一连串静态动作的解法。
+     *
+     * <p>但它必须说明"为什么是长线"：没有理由的在养与"被写忘了的线"无法区分，
+     * 而两者的处置正好相反（前者不催、后者要催），故缺理由时降级回 RECOVER 继续追踪。
+     */
+    @Test
+    void settle_parkedRequiresReasonOrDowngradesToRecover() {
+        stubModel("{\"results\":["
+                + "{\"index\":1,\"decision\":\"PARKED\",\"reason\":\"\"},"
+                + "{\"index\":2,\"decision\":\"PARKED\",\"reason\":\"指向身份暴露危机，是贯穿全书的暗线\"}]}");
+
+        List<ForeshadowSettlementEntity.SettlementDecision> decisions =
+                service.settle(module(), stage(), null, breakers(), summaries(), null);
+
+        assertEquals(ForeshadowSettlementEntity.DECISION_RECOVER, decisions.get(0).getDecision(),
+                "缺理由的 PARKED 必须降级为 RECOVER（否则与「被写忘了的线」无法区分）");
+        assertTrue(decisions.get(0).getReason().contains("降级"), decisions.get(0).getReason());
+        assertEquals(ForeshadowSettlementEntity.DECISION_PARKED, decisions.get(1).getDecision());
+    }
+
     @Test
     void settlementLedger_extractsVoidedContentsAndRecoverTargets() {
         ForeshadowSettlementEntity settlement = ForeshadowSettlementEntity.builder()

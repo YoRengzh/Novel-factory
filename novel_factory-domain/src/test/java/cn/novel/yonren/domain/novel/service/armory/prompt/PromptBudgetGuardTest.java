@@ -65,16 +65,43 @@ class PromptBudgetGuardTest {
     @Test
     void oversizedTruncatableBlockTruncatedAtParagraphBoundary() {
         properties.setTotalPrefixChars(500);
+        // 指纹块取 60 字 > 摘要截断后的剩余余量（58 字）：预算确已耗尽、整块丢弃。
+        // 截断后余量继续装填小块的行为由 truncationMustNotZeroOutRemainingBudget 单独锁定
         String result = guard.assembleChapterPrefix(3, List.of(
                 PrefixBlock.EDGE_STATE.toBlock("红线".repeat(10)),
                 new Block("近章摘要", 2, true, paragraphs(100, 10)),
-                PrefixBlock.STYLE_FINGERPRINT.toBlock("指纹".repeat(10))));
+                PrefixBlock.STYLE_FINGERPRINT.toBlock("指纹".repeat(30))));
 
         assertTrue(result.length() <= 500, "结果长度必须受总预算约束，实际 " + result.length());
         assertTrue(result.startsWith("红线".repeat(10)), "最高优先块必须完整保留且置于最顶部");
         assertTrue(result.contains("[本块已按前缀总预算截断]"), "超限的可截断块应按段落截断并标注");
         assertTrue(result.contains("甲"), "截断后应保留该块头部内容");
         assertFalse(result.contains("指纹"), "预算耗尽后低优先级块应被丢弃");
+    }
+
+    /**
+     * 诚实记账的回归用例：截断必须按实际占用扣减余量，不得清零。
+     *
+     * <p>原实现在截断后直接 {@code remaining = 0}，排在截断块之后的所有块不分优先级整批出局——
+     * 旧系统实测第 111/112/115 章「截断[一致性索引]；丢弃[情节模式黑名单、审校反馈、久远唤醒、文风指纹]」，
+     * 截断后的余量本可装入小纠正通道却被白白扔掉。本用例锁定：摘要截断剩 58 字余量时，
+     * 20 字的审校反馈（4 档）必须存活；40 字的文风指纹（5 档）装不下、仍应丢弃。
+     */
+    @Test
+    void truncationMustNotZeroOutRemainingBudget() {
+        properties.setTotalPrefixChars(500);
+        // 近章摘要 1018 字：截到段落边界 406 字 + 标记 14 字 = 420 字，余量 500 - 20 - 2 - 420 = 58 字
+        String result = guard.assembleChapterPrefix(3, List.of(
+                PrefixBlock.EDGE_STATE.toBlock("红线".repeat(10)),
+                new Block("近章摘要", 2, true, paragraphs(100, 10)),
+                PrefixBlock.REVIEW_FEEDBACK.toBlock("反馈".repeat(10)),
+                PrefixBlock.STYLE_FINGERPRINT.toBlock("指纹".repeat(20))));
+
+        assertTrue(result.contains("[本块已按前缀总预算截断]"), "近章摘要应被段落截断");
+        assertTrue(result.contains("反馈".repeat(10)),
+                "截断后的余量（58 字）必须继续装填后续小块——审校反馈应存活，实际：" + result);
+        assertFalse(result.contains("指纹".repeat(20)), "余量装不下的大块仍应被丢弃");
+        assertTrue(result.length() <= 500, "结果长度必须受总预算约束，实际 " + result.length());
     }
 
     @Test
@@ -206,6 +233,35 @@ class PromptBudgetGuardTest {
                 new Block("审校反馈", 4, true, "审校反馈" + "甲".repeat(20)),
                 new Block("久远唤醒", 5, true, "久远唤醒" + "乙".repeat(20))));
         assertTrue(result.contains("审校反馈"), "行为指导块应存活，实际：" + result);
+        assertFalse(result.contains("久远唤醒"), "久远唤醒应先被淘汰，实际：" + result);
+    }
+
+    /**
+     * 情节模式黑名单必须与行为指导块同档，不得再排到"久远唤醒"之后。
+     *
+     * <p>它是**唯一**专门防重复情节的块，原先 priority 最低。实测旧系统第 96-100 章前缀预算
+     * 连续 99-100% 打满、**五章全部丢弃本块**——那批在提示词层面完全没有防重复约束，
+     * 随即出现跨章重演同一场景（第 96/99 章）与同一条伏笔被排两遍（第 97/100 章）。
+     */
+    @Test
+    void patternBlacklistOutlivesRecallAndFingerprintUnderBudget() {
+        final int recallPriority = 5;
+        int pattern = PrefixBlock.USED_PATTERN_BLACKLIST.toBlock("x").priority();
+        int fingerprint = PrefixBlock.STYLE_FINGERPRINT.toBlock("x").priority();
+
+        assertTrue(pattern < recallPriority,
+                "情节模式黑名单必须高于久远唤醒(" + recallPriority + ")，实际 " + pattern);
+        assertTrue(pattern > PrefixBlock.SECRECY_GUARD.toBlock("x").priority(),
+                "但它不得挤掉禁泄清单这类核心事实约束");
+        assertTrue(fingerprint <= recallPriority,
+                "文风指纹不高于久远唤醒即可——它是正向激励，不承担纠错职责，实际 " + fingerprint);
+
+        // 端到端：预算只够一块内容时，防重复块存活、久远唤醒先被淘汰
+        properties.setTotalPrefixChars(30);
+        String result = guard.assembleChapterPrefix(3, List.of(
+                new Block("情节模式黑名单", pattern, true, "情节模式黑名单" + "甲".repeat(20)),
+                new Block("久远唤醒", recallPriority, true, "久远唤醒" + "乙".repeat(20))));
+        assertTrue(result.contains("情节模式黑名单"), "防重复块应存活，实际：" + result);
         assertFalse(result.contains("久远唤醒"), "久远唤醒应先被淘汰，实际：" + result);
     }
 

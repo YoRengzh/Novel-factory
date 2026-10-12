@@ -714,4 +714,234 @@ class ChapterPlanPromptServiceTest {
                 sched("与本段无关的线", 40, 45, ForeshadowScheduleEntity.STATUS_PLANNED)), 21, 25);
         assertEquals("", sb2.toString());
     }
+
+    /**
+     * 同一条线在多个阶段块里各存一份时必须去重，且**保留最后一条**。
+     *
+     * <p>实测（第 96-100 章那批）：8 个逾期注入名额里 5 条逐字是同一条、2 条是同一条弹珠，
+     * 整份清单只覆盖 3 件事——规划层被反复命令去收同三样东西，这就是"重复拖沓"的来源。
+     */
+    @Test
+    void scheduleBlock_dedupesSameIntentAcrossBlocks() {
+        List<ForeshadowScheduleEntity> twoBlocks = List.of(
+                ForeshadowScheduleEntity.builder().stageNo(1).items(new ArrayList<>(List.of(
+                        sched("主角无意识写出2026年的日期", 5, 19,
+                                ForeshadowScheduleEntity.STATUS_PLANTED)))).build(),
+                ForeshadowScheduleEntity.builder().stageNo(2).items(new ArrayList<>(List.of(
+                        sched("主角无意识写出2026年的日期", 5, 17,
+                                ForeshadowScheduleEntity.STATUS_PLANTED)))).build());
+        StringBuilder sb = new StringBuilder();
+
+        ChapterPlanPromptService.appendForeshadowScheduleBlock(sb, twoBlocks, 21, 25);
+
+        String text = sb.toString();
+        int at = text.indexOf("主角无意识写出2026年的日期");
+        assertTrue(at >= 0, "逾期条目必须注入：" + text);
+        assertEquals(-1, text.indexOf("主角无意识写出2026年的日期", at + 1),
+                "同一 intent 跨块出现只应注入一次：" + text);
+        assertTrue(text.contains("第17章"), "同键时应保留最后一条（payoff 17 在块 2）：" + text);
+        assertFalse(text.contains("第19章"), "被覆盖的那条不应出现：" + text);
+    }
+
+    /**
+     * 去重必须发生在**条数上限之前**：否则上限仍会被重复项吃满，其它线进不了注入。
+     * 样本复刻实测形态（5 条重复 + 6 条独立 = 11 条，上限 8）。
+     */
+    @Test
+    void scheduleBlock_overdueLimitNotConsumedByDuplicates() {
+        List<ForeshadowScheduleEntity.ScheduleItem> items = new ArrayList<>();
+        for (int i = 0; i < 5; i++) {
+            items.add(sched("主角无意识写出2026年的日期", 5, 19,
+                    ForeshadowScheduleEntity.STATUS_PLANTED));
+        }
+        for (int i = 1; i <= 6; i++) {
+            items.add(sched("第" + i + "条独立的线", 5, 19,
+                    ForeshadowScheduleEntity.STATUS_PLANTED));
+        }
+        StringBuilder sb = new StringBuilder();
+
+        ChapterPlanPromptService.appendForeshadowScheduleBlock(sb,
+                schedulesOf(items.toArray(new ForeshadowScheduleEntity.ScheduleItem[0])), 21, 25);
+
+        String text = sb.toString();
+        assertTrue(text.contains("第1条独立的线"), text);
+        assertTrue(text.contains("第6条独立的线"),
+                "7 条不同条目应全部装进 8 条上限——去重前的实现只能装下前 3 条：" + text);
+    }
+
+    /**
+     * 与【卷末清账·限期回收】块去重：同一条线被两块各说一遍时，保留结算块那条
+     * （它带连接点信息，对规划更有用），排期块让位。
+     */
+    @Test
+    void scheduleBlock_skipsIntentsAlreadyListedBySettlement() {
+        String content = "主角无意识写出2026年的日期";
+        List<ForeshadowSettlementEntity> settlements = List.of(ForeshadowSettlementEntity.builder()
+                .stageNo(1)
+                .stageEndChapter(20)
+                .decisions(new ArrayList<>(List.of(ForeshadowSettlementEntity.SettlementDecision.builder()
+                        .content(content).chapterNo(5)
+                        .decision(ForeshadowSettlementEntity.DECISION_RECOVER)
+                        .reason("第95章已由周秀兰点出").build())))
+                .build());
+        StringBuilder sb = new StringBuilder();
+
+        ChapterPlanPromptService.appendForeshadowScheduleBlock(sb,
+                schedulesOf(sched(content, 5, 19, ForeshadowScheduleEntity.STATUS_PLANTED)), 21, 25,
+                ChapterPlanPromptService.settlementListedIntents(settlements, 21));
+
+        assertEquals("", sb.toString(), "结算块已列出的线不应在排期块重复下令：" + sb);
+    }
+
+    /**
+     * 逾期挂起：逾期 ≥ 30 章的线**停止自动补收**，改入「逾期挂起·待人工裁定」块。
+     *
+     * <p>标定依据（第 96-100 章实测逾期分布，正好两簇）：仍在推进的条目逾期 11-22 章，
+     * 卡死的三条逾期 48-74 章。继续每段下令的实测后果是规划层每段都把它安排一遍——
+     * 同一件事被反复重写（"藏信/格子纸"重复拖沓的机制）。
+     */
+    @Test
+    void scheduleBlock_suspendsChronicallyOverdueInsteadOfReordering() {
+        StringBuilder sb = new StringBuilder();
+
+        ChapterPlanPromptService.appendForeshadowScheduleBlock(sb, schedulesOf(
+                sched("主角无意识写出2026年的日期", 5, 45, ForeshadowScheduleEntity.STATUS_PLANTED),
+                sched("蓝玻璃弹珠信物", 9, 26, ForeshadowScheduleEntity.STATUS_PLANTED)), 96, 100);
+
+        String text = sb.toString();
+        assertTrue(text.contains("逾期挂起·待人工裁定"), text);
+        assertTrue(text.contains("已逾期 51 章"), "必须写明逾期了多少章：" + text);
+        assertTrue(text.contains("本段不再自动安排"), text);
+        assertFalse(text.contains("本段必须补收"), "挂起项不得再带「必须补收」的命令：" + text);
+    }
+
+    /** 未达挂起阈值的逾期线仍走「必须补收」——挂起只针对慢性欠账，不放过普通逾期 */
+    @Test
+    void scheduleBlock_stillOrdersRecoveryBelowSuspendThreshold() {
+        StringBuilder sb = new StringBuilder();
+
+        ChapterPlanPromptService.appendForeshadowScheduleBlock(sb, schedulesOf(
+                sched("一条刚过期的线", 5, 49, ForeshadowScheduleEntity.STATUS_PLANTED)), 51, 55);
+
+        String text = sb.toString();
+        assertTrue(text.contains("逾期补收"), text);
+        assertTrue(text.contains("本段必须补收"), text);
+        assertFalse(text.contains("逾期挂起·待人工裁定"),
+                "只逾期 2 章的线不该被挂起（尾句的豁免说明不算）：" + text);
+    }
+
+    /**
+     * 长线在养：阶段出口判 PARKED 的线不再被要求回收，但必须**明说这是有意为之**——
+     * 否则规划层会把它当"被忘了的线"自发安排回收（实测 2026 那条就是这样被反复重写的）。
+     */
+    @Test
+    void scheduleBlock_showsParkedLongLinesWithoutOrderingRecovery() {
+        ForeshadowScheduleEntity.ScheduleItem parked = sched("主角无意识写出2026年的日期", 5, 45,
+                ForeshadowScheduleEntity.STATUS_PLANTED);
+        parked.setParkedAtChapter(100);
+        StringBuilder sb = new StringBuilder();
+
+        ChapterPlanPromptService.appendForeshadowScheduleBlock(sb, schedulesOf(parked,
+                sched("另一条刚过期的线", 5, 49, ForeshadowScheduleEntity.STATUS_PLANTED)), 51, 55);
+
+        String text = sb.toString();
+        assertTrue(text.contains("长线在养·本段不主动安排"), text);
+        assertTrue(text.contains("主角无意识写出2026年的日期"), "在养项仍要点名（否则会被当忘了）：" + text);
+        assertFalse(text.contains("《主角无意识写出2026年的日期》（原计划"),
+                "在养项不得再进逾期桶被要求补收：" + text);
+        assertTrue(text.contains("另一条刚过期的线"), "其它线照常催收：" + text);
+    }
+
+    /** 在养必须压过「逾期挂起」：前者是有意为之、后者是待人工裁定，两者不该同时出现 */
+    @Test
+    void scheduleBlock_parkedLineNeverFallsIntoOverdueOrSuspended() {
+        ForeshadowScheduleEntity.ScheduleItem parked = sched("主角无意识写出2026年的日期", 5, 45,
+                ForeshadowScheduleEntity.STATUS_PLANTED);
+        parked.setParkedAtChapter(95);
+        StringBuilder sb = new StringBuilder();
+
+        // 逾期 51 章：若不看在养标记，这本该落进「逾期挂起」
+        ChapterPlanPromptService.appendForeshadowScheduleBlock(sb, schedulesOf(parked), 96, 100);
+
+        String text = sb.toString();
+        assertTrue(text.contains("长线在养"), text);
+        assertFalse(text.contains("■ **逾期挂起·待人工裁定**"),
+                "在养项不该再进挂起块（尾句的豁免说明不算）：" + text);
+        assertFalse(text.contains("本段必须补收"), "在养项不该再被催收：" + text);
+    }
+
+    // ==================== 对白坍缩反馈块（2026-10-09） ====================
+
+    /**
+     * 最近 5 章里有轮次密度低于劣化线的章 → 注入【对白坍缩反馈】，责令本段把冲突写进台词。
+     *
+     * <p>实测第 96 章 4.4 次/千字（劣化线 6.0，同批其它章 12-27）：计划的 4 条关键事件里
+     * 有 2 条是对话承载，**数量合规**，但篇幅最大的那条是纯独白推导——规则只管条数、
+     * 不管篇幅占比，写手于是交付了动作分解。责任在规划层。
+     */
+    @Test
+    void dialogueCollapseFeedback_injectedWhenRecentChapterCollapsed() {
+        List<ChapterSummaryEntity> summaries = new ArrayList<>();
+        for (int ch = 91; ch <= 95; ch++) {
+            ChapterSummaryEntity s = ChapterSummaryEntity.builder()
+                    .chapterNo(ch)
+                    .validChars(ch == 95 ? 2066 : 2000)
+                    .dialogueUtterances(ch == 95 ? 9 : 25)
+                    .build();
+            summaries.add(s);
+        }
+        StringBuilder sb = new StringBuilder();
+
+        ChapterPlanPromptService.appendDialogueCollapseFeedback(sb, summaries);
+
+        String text = sb.toString();
+        assertTrue(text.contains("【对白坍缩反馈】"), text);
+        assertTrue(text.contains("第95章"), "必须点名崩掉的章号：" + text);
+        assertTrue(text.contains("4.4"), "必须给出实测密度供规划层定位：" + text);
+        assertTrue(text.contains("对话承载事件提到 ≥2 条"), text);
+    }
+
+    /** 反向：对白密度健康时不注入（欠采样与健康态都不唠叨，否则模型会当噪声忽略） */
+    @Test
+    void dialogueCollapseFeedback_absentWhenHealthy() {
+        List<ChapterSummaryEntity> summaries = new ArrayList<>();
+        for (int ch = 91; ch <= 95; ch++) {
+            summaries.add(ChapterSummaryEntity.builder()
+                    .chapterNo(ch).validChars(2000).dialogueUtterances(25).build());
+        }
+        StringBuilder sb = new StringBuilder();
+
+        ChapterPlanPromptService.appendDialogueCollapseFeedback(sb, summaries);
+
+        assertEquals("", sb.toString(), "健康态不应注入反馈块：" + sb);
+    }
+
+    /**
+     * 计划层必须把"对白承载"与"场面级事件"写成硬要求（2026-10-10）。
+     *
+     * <p>实测：同一段章节、同一份计划重跑一次，对白句数从 139 掉到 97（平均 28→19/章，
+     * 而历史 45 章稳在 31-57）。当时的规定是"每章关键事件至少 **1** 个由对话承载"——
+     * 一章只有一个对话事件时，其余三个关键事件都写成静态交代，全章就对白塌方，而规则字面上仍然满足。
+     * 计划的写法直接决定正文的写法：一句话的事件在正文里只会被展开成一句过渡叙述。
+     */
+    @Test
+    void segmentPrompt_requiresTwoDialogueEventsAndSceneLevelKeyEvents() {
+        StageBlueprintEntity blueprint = StageBlueprintEntity.builder()
+                .stageNo(3).startChapter(16).endChapter(20).build();
+        DefaultArmoryFactory.DynamicContext ctx = DefaultArmoryFactory.DynamicContext.builder()
+                .stageBlueprint(blueprint)
+                .chapterSummaries(new ArrayList<>())
+                .build();
+
+        String prompt = service.buildPlanPrompt(ctx, 16, 20, blueprint, false, null, null);
+
+        assertTrue(prompt.contains("至少 2 个**由人物当面的对话/冲突/协作承载"), prompt);
+        assertTrue(prompt.contains("谁对谁、围绕什么分歧"), prompt);
+        assertTrue(prompt.contains("必须写到「场面」级"), prompt);
+        assertTrue(prompt.contains("在场人物 + 起因或分歧 + 落点或结果"), prompt);
+        // 对话承载的执法通道：字段必须进输出示例——"字段不进示例就等于不存在"（mainLineAdvance 事故同款）
+        assertTrue(prompt.contains("\"dialogueScenes\":["), "输出示例必须含 dialogueScenes 字段：" + prompt);
+        assertTrue(prompt.contains("逐字复制**进该章 dialogueScenes"), prompt);
+        assertTrue(prompt.contains("transition 章至少 1 个"), prompt);
+    }
 }

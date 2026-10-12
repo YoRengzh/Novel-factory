@@ -2,6 +2,7 @@ package cn.novel.yonren.domain.novel.service.armory.memory;
 
 import cn.novel.yonren.domain.novel.model.entity.ChapterSummaryEntity;
 import cn.novel.yonren.domain.novel.model.entity.ForeshadowScheduleEntity;
+import cn.novel.yonren.domain.novel.model.entity.ForeshadowSettlementEntity;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
@@ -175,5 +176,81 @@ class ForeshadowScheduleServiceTest {
     void stamp_emptySafe() {
         assertTrue(!service.stamp(null, null).changed());
         assertTrue(!service.stamp(chapter(1), null).changed());
+    }
+
+    /**
+     * 阶段出口裁决判 DONE 的线必须回写 PAID——闭环的最后一段。
+     *
+     * <p>只把 DONE 写进结算文件而不回写排期表，它下一段仍会以「逾期补收」再被下一次令：
+     * 实测「2026」那条线（第 5 章埋、原计划第 45 章收）到第 100 章仍在被逐段下令补收，
+     * 而它其实已在第 93/95 章兑现，只是 {@code matchPayoff} 认不出来。
+     */
+    @Test
+    @DisplayName("applySettlementOutcomes：判 DONE 的线回写 PAID，未判的不得被误关")
+    void applySettlementOutcomes_marksPaidAndIgnoresMismatch() {
+        ForeshadowScheduleEntity.ScheduleItem done = item("主角无意识写出2026年的日期", 5, 45);
+        done.setStatus(ForeshadowScheduleEntity.STATUS_PLANTED);
+        done.setActualPlantChapter(5);
+        ForeshadowScheduleEntity.ScheduleItem untouched = item("另一条尚未兑现的线", 5, 45);
+        untouched.setStatus(ForeshadowScheduleEntity.STATUS_PLANTED);
+        List<ForeshadowScheduleEntity> schedules = scheduleWith(done, untouched);
+
+        int written = service.applySettlementOutcomes(schedules, List.of(
+                ForeshadowSettlementEntity.SettlementDecision.builder()
+                        // 归一化后相等即可命中（去空白/引号是仓库统一口径）
+                        .content(" 主角无意识写出2026年的日期 ")
+                        .decision(ForeshadowSettlementEntity.DECISION_DONE)
+                        .actualPayoffChapter(95).build(),
+                ForeshadowSettlementEntity.SettlementDecision.builder()
+                        .content("另一条尚未兑现的线")
+                        .decision(ForeshadowSettlementEntity.DECISION_RECOVER)
+                        .build()), 100);
+
+        assertEquals(1, written);
+        assertEquals(ForeshadowScheduleEntity.STATUS_PAID, done.getStatus());
+        assertEquals(95, done.getActualPayoffChapter().intValue());
+        assertEquals(ForeshadowScheduleEntity.STATUS_PLANTED, untouched.getStatus(),
+                "未判 DONE 的线不得被误关——误关会永久丢掉一条真伏笔");
+    }
+
+    /** DONE 缺章号时不可回写：无法核验的"已完成"宁可继续追踪 */
+    @Test
+    @DisplayName("applySettlementOutcomes：缺章号的 DONE 不回写")
+    void applySettlementOutcomes_ignoresDoneWithoutChapter() {
+        ForeshadowScheduleEntity.ScheduleItem item = item("主角无意识写出2026年的日期", 5, 45);
+        item.setStatus(ForeshadowScheduleEntity.STATUS_PLANTED);
+
+        int written = service.applySettlementOutcomes(scheduleWith(item), List.of(
+                ForeshadowSettlementEntity.SettlementDecision.builder()
+                        .content("主角无意识写出2026年的日期")
+                        .decision(ForeshadowSettlementEntity.DECISION_DONE)
+                        .build()), 100);
+
+        assertEquals(0, written);
+        assertEquals(ForeshadowScheduleEntity.STATUS_PLANTED, item.getStatus());
+    }
+
+    /**
+     * PARKED 回写：记下"在哪一章出口被裁定为长线"，**不改 status**——它要继续被追踪、
+     * 真兑现时仍能自动关账（改 status 会被 {@code carriableItems} 静默丢掉，等于停止追踪）。
+     */
+    @Test
+    @DisplayName("applySettlementOutcomes：判 PARKED 的线打上在养标记且保持 PLANTED")
+    void applySettlementOutcomes_marksParkedWithoutChangingStatus() {
+        ForeshadowScheduleEntity.ScheduleItem parked = item("主角无意识写出2026年的日期", 5, 45);
+        parked.setStatus(ForeshadowScheduleEntity.STATUS_PLANTED);
+
+        int written = service.applySettlementOutcomes(scheduleWith(parked), List.of(
+                ForeshadowSettlementEntity.SettlementDecision.builder()
+                        .content("主角无意识写出2026年的日期")
+                        .decision(ForeshadowSettlementEntity.DECISION_PARKED)
+                        .reason("指向身份暴露危机，是贯穿全书的暗线").build()), 100);
+
+        assertEquals(1, written);
+        assertTrue(parked.parked(), "应打上在养标记");
+        assertEquals(100, parked.getParkedAtChapter().intValue());
+        assertEquals(ForeshadowScheduleEntity.STATUS_PLANTED, parked.getStatus(),
+                "在养不是关账也不是出账：status 必须保持 PLANTED，它仍要被结转与自动兑现");
+        assertTrue(parked.active(), "在养条目仍是活线（否则会被排期表结转丢掉）");
     }
 }

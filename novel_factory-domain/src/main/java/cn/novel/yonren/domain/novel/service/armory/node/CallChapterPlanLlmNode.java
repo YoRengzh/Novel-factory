@@ -9,6 +9,7 @@ import cn.novel.yonren.domain.novel.model.entity.StoryContextEntity;
 import cn.novel.yonren.domain.novel.service.armory.AbstractArmorySupport;
 import cn.novel.yonren.domain.novel.service.armory.factory.DefaultArmoryFactory;
 import cn.novel.yonren.domain.novel.service.armory.plan.ChapterPlanSegmentPlanner;
+import cn.novel.yonren.domain.novel.service.armory.memory.ChapterMemoryService;
 import cn.novel.yonren.domain.novel.service.armory.memory.RollingOutlineService;
 import cn.novel.yonren.domain.novel.service.job.GenerationJob;
 import cn.novel.yonren.domain.novel.service.armory.prompt.valobj.PromptContext;
@@ -39,6 +40,9 @@ public class CallChapterPlanLlmNode extends AbstractArmorySupport {
 
     @Resource
     private ParseChapterPlanNode parseChapterPlanNode;
+
+    @Resource
+    private ChapterMemoryService chapterMemoryService;
 
     @Override
     public StrategyHandler<ArmoryCommandEntity, DefaultArmoryFactory.DynamicContext, StoryGenerateResultAggregate> get(ArmoryCommandEntity requestParameter, DefaultArmoryFactory.DynamicContext dynamicContext) {
@@ -84,6 +88,8 @@ public class CallChapterPlanLlmNode extends AbstractArmorySupport {
     ChapterPlanAggregate invokePlanWithFallback(ArmoryCommandEntity requestParameter,
                                                 DefaultArmoryFactory.DynamicContext dynamicContext,
                                                 PromptContext ctx) {
+        // 对话承载闸门的人名来源：角色账本名册（新书首段摘要为空 → 空名册，闸门自动降级）
+        List<String> rosterNames = chapterMemoryService.characterRoster(dynamicContext.getChapterSummaries());
         List<RollingOutlineService.StageSegment> segments = dynamicContext.getPlanSegments();
         if (segments == null || segments.size() <= 1) {
             // 单段批次：合成覆盖整批的一段走规划器——分支推演/降级重试/闸门口径与分段路径完全一致
@@ -91,7 +97,7 @@ public class CallChapterPlanLlmNode extends AbstractArmorySupport {
             int batchEnd = batchStart + requestParameter.getStoryContextEntity().getChapterCount() - 1;
             ChapterPlanSegmentPlanner.PlannedSegment planned = planner.planSegment(
                     requestParameter.getStoryVO(), ctx, dynamicContext.getPrompt(),
-                    batchStart, batchEnd, dynamicContext.getStageBlueprint(),
+                    batchStart, batchEnd, dynamicContext.getStageBlueprint(), rosterNames,
                     dynamicContext.getUsedPromptMap());
             dynamicContext.setRawResult(planned.raw());
             dynamicContext.setChapterPlanAggregate(planned.plan());
@@ -105,7 +111,7 @@ public class CallChapterPlanLlmNode extends AbstractArmorySupport {
             RollingOutlineService.StageSegment segment = segments.get(i);
             ChapterPlanSegmentPlanner.PlannedSegment parsed = planner.planSegment(
                     requestParameter.getStoryVO(), ctx, prompts.get(i),
-                    segment.startChapter(), segment.endChapter(), segment.blueprint(),
+                    segment.startChapter(), segment.endChapter(), segment.blueprint(), rosterNames,
                     dynamicContext.getUsedPromptMap());
             mergedChapters.addAll(parsed.plan().getChapters());
             rawSegments.add(parsed.raw());

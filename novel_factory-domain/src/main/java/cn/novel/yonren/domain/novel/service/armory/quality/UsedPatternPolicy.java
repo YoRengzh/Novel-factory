@@ -29,7 +29,7 @@ public final class UsedPatternPolicy {
     /** 同一（舞台 × 章型）组合达到该次数即点名 */
     private static final int COMBO_REPEAT_ALERT = 3;
 
-    /** 内容复述部分单章摘要的截断长度 */
+    /** 聚合统计里"典型样例"的摘要截断长度 */
     private static final int SUMMARY_EXCERPT = 80;
 
 
@@ -63,7 +63,7 @@ public final class UsedPatternPolicy {
 
         StringBuilder sb = new StringBuilder();
         sb.append("\n\n【已用情节模式·本章必须避开】（以下为最近 ")
-                .append(window.size()).append(" 章已使用的舞台与核心情节）");
+                .append(window.size()).append(" 章已使用的舞台与情节模式）");
 
         // 一、模式指纹：按舞台聚合，重复达到阈值即点名
         Map<String, List<ChapterSummaryEntity>> byPlace = new LinkedHashMap<>();
@@ -95,17 +95,11 @@ public final class UsedPatternPolicy {
             }
         }
 
-        // 二、内容复述：保留原黑名单的信息量（模型需要知道"具体发生过什么"才谈得上避开）
-        sb.append("\n二、各章核心情节：");
-        for (ChapterSummaryEntity s : window) {
-            sb.append("\n- 第").append(s.getChapterNo()).append("章（")
-                    .append(placeLabel(s)).append(" · ").append(typeLabel(s)).append("）：")
-                    .append(excerpt(s.getSummary()));
-            String beat = firstBeat(s);
-            if (beat != null) {
-                sb.append("；").append(beat);
-            }
-        }
+        // 二、内容复述节（逐章"第N章（舞台 · 章型）：摘要节选；目标→结果"）已删除。两条理由，缺一条都不足以删：
+        //  ① 重复：逐章摘要节选与【近章摘要】块（2 档、窗口更大）是同一份内容的第二遍；
+        //  ② 预算：它是本块唯一随窗口线性膨胀的部分，"目标→结果"处不设长度上限——本块因此在
+        //     第 4 档里装不下而被截断。现在本块只剩聚合统计（舞台复用、冲突发起频次、能力展示频次），
+        //     篇幅与窗口基本解耦，"模式指纹"才名副其实。
 
         Map<String, List<ChapterSummaryEntity>> conflictByRole = new LinkedHashMap<>();
         Map<String, String> sampleByRole = new LinkedHashMap<>();
@@ -246,21 +240,5 @@ public final class UsedPatternPolicy {
         }
         String trimmed = summary.trim();
         return trimmed.length() > SUMMARY_EXCERPT ? trimmed.substring(0, SUMMARY_EXCERPT) + "…" : trimmed;
-    }
-
-    /** 首个角色节拍的 goal→consequence；无节拍返回 null */
-    private static String firstBeat(ChapterSummaryEntity summary) {
-        if (summary.getCharacterBeats() == null || summary.getCharacterBeats().isEmpty()) {
-            return null;
-        }
-        for (ChapterSummaryEntity.CharacterBeat beat : summary.getCharacterBeats()) {
-            if (beat == null || StringUtils.isBlank(beat.getGoal())) {
-                continue;
-            }
-            String text = "目标：" + beat.getGoal();
-            return StringUtils.isBlank(beat.getConsequence())
-                    ? text : text + "→结果：" + beat.getConsequence();
-        }
-        return null;
     }
 }

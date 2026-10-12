@@ -2,13 +2,18 @@ package cn.novel.yonren.domain.novel.service.armory.memory;
 
 import cn.novel.yonren.domain.novel.model.entity.ChapterSummaryEntity;
 import cn.novel.yonren.domain.novel.model.entity.ForeshadowScheduleEntity;
+import cn.novel.yonren.domain.novel.model.entity.ForeshadowSettlementEntity;
 import cn.novel.yonren.domain.novel.service.armory.quality.ForeshadowSpanPolicy;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.lang3.StringUtils;
 import org.springframework.stereotype.Service;
 
+import java.util.HashMap;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 
 @Slf4j
@@ -150,6 +155,75 @@ public class ForeshadowScheduleService {
             }
         }
         return paid;
+    }
+
+    /**
+     * 把阶段出口裁决的结果回写到排期表：{@code DONE} → 置 PAID，{@code PARKED} → 记长线在养。
+     *
+     * <p><b>闭环的最后一段</b>：裁决说"这条线已在第 X 章完成"，排期项就必须真的关掉。
+     * 只把 DONE 写进结算文件而不回写排期表，它下一段仍会以「逾期补收」再被下令一次——
+     * 那正是"藏信/格子纸反复出现"的机制本身。一条线可能早已在第 93/95 章兑现，只是
+     * {@link #matchPayoff} 认不出来（那边只比对摘要里的短句，见该方法注释）。
+     *
+     * <p><b>PARKED 是另一半</b>：有些线判 DONE 不对（它确实还没兑现），
+     * 判 RECOVER 也不对（没有可指定的回收章，只会被每段催一遍）。它们在排期项上打
+     * {@code parkedAtChapter} 标记——保留追踪、但不再进逾期补收/挂起，也不再被送回裁决。
+     *
+     * <p>匹配口径用**归一化 intent 精确相等**：裁决的 content 来自账本、排期项的 intent 来自蓝图，
+     * 两者实测逐字相同；不相等就静默跳过——宁可不回写，也不能把另一条线误判为已兑现
+     * （误关会永久丢掉一条真伏笔，代价不可逆）。
+     *
+     * @param decidedAtChapter 本次裁决发生在哪一章的出口（记录进 {@code parkedAtChapter} 供复盘）
+     * @return 实际回写条数（0 = 无 DONE/PARKED 或无命中）
+     */
+    public int applySettlementOutcomes(List<ForeshadowScheduleEntity> schedules,
+                                       List<ForeshadowSettlementEntity.SettlementDecision> decisions,
+                                       int decidedAtChapter) {
+        if (schedules == null || schedules.isEmpty() || decisions == null || decisions.isEmpty()) {
+            return 0;
+        }
+        Map<String, Integer> payoffByIntent = new HashMap<>();
+        Set<String> parkedIntents = new HashSet<>();
+        for (ForeshadowSettlementEntity.SettlementDecision decision : decisions) {
+            if (decision == null || StringUtils.isBlank(decision.getContent())) {
+                continue;
+            }
+            String key = ForeshadowSpanPolicy.normalize(decision.getContent());
+            if (ForeshadowSettlementEntity.DECISION_DONE.equals(decision.getDecision())
+                    && decision.getActualPayoffChapter() != null) {
+                payoffByIntent.put(key, decision.getActualPayoffChapter());
+            } else if (ForeshadowSettlementEntity.DECISION_PARKED.equals(decision.getDecision())) {
+                parkedIntents.add(key);
+            }
+        }
+        if (payoffByIntent.isEmpty() && parkedIntents.isEmpty()) {
+            return 0;
+        }
+        int written = 0;
+        for (ForeshadowScheduleEntity schedule : schedules) {
+            for (ForeshadowScheduleEntity.ScheduleItem item : ForeshadowScheduleEntity.itemsOf(schedule)) {
+                if (item == null || !ForeshadowScheduleEntity.STATUS_PLANTED.equals(item.getStatus())) {
+                    continue;
+                }
+                String key = ForeshadowSpanPolicy.normalize(item.getIntent());
+                Integer payoff = payoffByIntent.get(key);
+                if (payoff != null) {
+                    item.setStatus(ForeshadowScheduleEntity.STATUS_PAID);
+                    item.setActualPayoffChapter(payoff);
+                    written++;
+                    continue;
+                }
+                if (parkedIntents.contains(key) && !item.parked()) {
+                    item.setParkedAtChapter(decidedAtChapter);
+                    written++;
+                }
+            }
+        }
+        if (written > 0) {
+            log.info("阶段出口裁决回写排期：{} 条更新（已完成→PAID {}；长线在养→PARKED {}）",
+                    written, payoffByIntent.size(), parkedIntents.size());
+        }
+        return written;
     }
 
     private int expireUnplanted(List<ForeshadowScheduleEntity.ScheduleItem> items, int chapterNo) {

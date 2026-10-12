@@ -43,10 +43,15 @@ public class PromptBudgetGuard {
         CONSISTENCY("一致性索引", 4, true),
         /** 本章禁泄清单：伏笔谜底关键词（与逐字扫描同源，截断会静默丢词，故不可截断——放不下就整块弃） */
         SECRECY_GUARD("禁泄清单", 3, false),
-        /** 文风指纹库：本书已建立的风格基准（正向激励） */
-        STYLE_FINGERPRINT("文风指纹", 7, true),
-        /** 已用情节模式黑名单：防重复套路 */
-        USED_PATTERN_BLACKLIST("情节模式黑名单", 8, true),
+        /** 文风指纹库：本书已建立的风格基准（正向激励）；上调至 5（行为指导优先于背景补完） */
+        STYLE_FINGERPRINT("文风指纹", 5, true),
+        /**
+         * 已用情节模式黑名单：防重复套路，上调至 4。理由：它是**唯一**专门防重复情节的块，
+         * 却曾排在优先级最低位，实测旧系统第 96-100 章前缀预算连续打满、五章全部丢弃本块——
+         * 那批于是在提示词层面完全没有防重复约束，出现跨章重演同一场景与同一伏笔被安排两遍。
+         * 按本类准则"行为指导块必须优先于背景补完块"，它不该排在"久远唤醒"（5）之下。
+         */
+        USED_PATTERN_BLACKLIST("情节模式黑名单", 4, true),
         /** 上章审校反馈（P2）：语义 MINOR 压缩要点——审校报出的问题首次产生行动通道（2026-10-01 由 5 上调至 4） */
         REVIEW_FEEDBACK("审校反馈", 4, true);
 
@@ -117,10 +122,15 @@ public class PromptBudgetGuard {
             }
             int room = remaining - separator;
             if (block.truncatable() && room >= MIN_TRUNCATED_BLOCK_CHARS) {
-                admitted.add(new Block(block.label(), block.priority(), true, truncate(block.content(), room)));
+                String truncatedContent = truncate(block.content(), room);
+                admitted.add(new Block(block.label(), block.priority(), true, truncatedContent));
                 truncated.add(block.label());
                 truncatedBlocks.add(block);
-                remaining = 0;
+                // 按实际占用扣减（truncate 保证返回长度 ≤ room，余量恒非负）：
+                // 截断不清零余量，其后同档/低档块仍按规则继续装填。原实现此处直接 remaining=0，
+                // 排在截断块之后的所有块不分优先级整批出局——旧系统实测（96-100、111-115 两批）
+                // 把情节模式黑名单/审校反馈两个小纠正通道整批误杀
+                remaining -= separator + truncatedContent.length();
                 continue;
             }
             skipped.add(block);

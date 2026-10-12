@@ -208,6 +208,38 @@ class ChapterMemoryServiceTest {
         assertTrue(!context.contains("伏笔5"));
     }
 
+    /**
+     * 逾期项必须保证在登记清单里。
+     *
+     * <p>此前是纯"最新 N 条"，于是**埋得越早的线越看不见**；而摘要 prompt 要求回收条目
+     * "逐字沿用账中描述"——一条掉出清单的线，模型根本无从登记，于是它永远关不掉账、
+     * 被后续每一段反复要求回收。老书实测埋在第 0 章的那条早就掉出了最新 20 条之外，
+     * 体检同时报出「清账静默兑现」高占比，两者是同一个缺口的两面。
+     */
+    @Test
+    void foreshadowContext_reservesSlotsForOverdueEntries() {
+        List<ChapterSummaryEntity> summaries = new ArrayList<>();
+        for (int ch = 1; ch <= ChapterMemoryService.FORESHADOW_CONTEXT_LIMIT + 5; ch++) {
+            summaries.add(summary(ch, states(state("林尘", "炼气"))));
+            summaries.get(ch - 1).setForeshadowingNew(List.of("伏笔" + ch));
+        }
+        // 第 1 章那条：声明了兑现义务、带排期且回收章早已过（逾期），位置又远在最旧的一端
+        ChapterSummaryEntity.SeedEntry overdueSeed =
+                new ChapterSummaryEntity.SeedEntry("伏笔1", null, 4);
+        overdueSeed.setResolvable(Boolean.TRUE);
+        overdueSeed.setScheduledPayoffChapter(5);
+        summaries.get(0).setForeshadowSeeds(new ArrayList<>(List.of(overdueSeed)));
+
+        List<String> context = service.buildForeshadowContextList(
+                summaries, ChapterMemoryService.FORESHADOW_CONTEXT_LIMIT);
+
+        assertEquals(ChapterMemoryService.FORESHADOW_CONTEXT_LIMIT, context.size(), "总量仍封顶");
+        assertTrue(context.contains("伏笔1"),
+                "逾期项必须占到位（否则最早埋的线永远看不见、也就永远关不掉账）：" + context);
+        assertTrue(context.contains("伏笔" + (ChapterMemoryService.FORESHADOW_CONTEXT_LIMIT + 5)),
+                "最新项照常保留：" + context);
+    }
+
     @Test
     void auditForeshadowListExcludesBreakerButRegistrationKeeps() {
         List<ChapterSummaryEntity> summaries = new ArrayList<>();

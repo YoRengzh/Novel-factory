@@ -359,4 +359,33 @@ class StoryGenerateServiceTest {
         when(handler.apply(any(ArmoryCommandEntity.class), any(DefaultArmoryFactory.DynamicContext.class)))
                 .thenReturn(StoryGenerateResultAggregate.builder().build());
     }
+
+    /**
+     * 续写时人物档案必须由 bible **强制回填**（2026-10-10）。
+     *
+     * <p>实测：正文把女主宋知渔写成「他」连写三章，而账本里没有任何可对照的锚——
+     * 性别、志愿这类"跨章不变的设定"只能由作者在 bible 里声明一次。
+     * 之所以在后端回填而不是依赖前端把字段带回来：漏带不会报错，只会表现为"锚悄悄消失"，
+     * 而那正是这三章能一路写错的原因。
+     */
+    @Test
+    void generate_resumeRestoresCharacterProfilesFromBible() throws Exception {
+        ArmoryCommandEntity command = ArmoryCommandEntity.builder()
+                .resumeStoryDir("20260831-story-0001")
+                .storyContextEntity(StoryContextEntity.builder().novel_title("甲").build())
+                .build();
+        Path storyDir = Paths.get("docs/workspace/stories/20260831-story-0001");
+        String roster = "宋知渔（女，用「她」）。既定事实：宋知渔报名志愿二班";
+        when(storyRepository.resolveStoryDirectory("20260831-story-0001")).thenReturn(storyDir);
+        when(storyRepository.readStoryBible(storyDir))
+                .thenReturn("小说名称: 甲\n主要人物: " + roster + "\n");
+        when(storyRepository.readChapterSummaries(storyDir)).thenReturn(List.of());
+        when(storyRepository.readChapterNumbers(storyDir)).thenReturn(List.of());
+        stubStrategyReturn();
+
+        storyGenerateService.generate(command);
+
+        assertEquals(roster, command.getStoryContextEntity().getCharacterProfiles(),
+                "人物档案必须从 bible 回填，不能依赖前端带回来");
+    }
 }

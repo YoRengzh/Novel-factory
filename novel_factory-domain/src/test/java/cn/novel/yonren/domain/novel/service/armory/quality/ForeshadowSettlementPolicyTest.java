@@ -28,6 +28,27 @@ class ForeshadowSettlementPolicyTest {
                 .stageNo(3).stageEndChapter(20).decisions(List.of(ds)).build();
     }
 
+    /**
+     * 静默兑现的口径必须**同时含裁决补认的「已完成」**（2026-10-10）。
+     *
+     * <p>裁决新增 DONE 之后，"账记为未填、实际已兑现"的条目不再走 {@code VOID + 【已兑现】}，
+     * 而是判 DONE。若指标仍只数 VOID 那一支，它会随着 DONE 的启用**凭空变好**——
+     * 而摘要层漏记的问题一点没变。被判 DONE 恰恰证明自动匹配没认出那次兑现，是同一份证据。
+     */
+    @Test
+    @DisplayName("口径自洽：DONE 与 VOID-【已兑现】同属「摘要漏记回收」的证据")
+    void doneIsPartOfTheOmissionEvidence() {
+        ForeshadowSettlementEntity settlement = block(
+                decision("VOID", "【已兑现】第12章已给出答案"),
+                decision("DONE", "第15章已确认"),
+                decision("RECOVER", "后续剧情可自然接住"),
+                decision("PARKED", "指向身份暴露危机，是长线"));
+
+        assertEquals(1, ForeshadowSettlementPolicy.silentPayoffCount(List.of(settlement)));
+        assertEquals(1, ForeshadowSettlementPolicy.doneCount(List.of(settlement)));
+        assertEquals(1, ForeshadowSettlementPolicy.voidCount(List.of(settlement)));
+    }
+
     /** 真实措辞：这些都不是"闲笔"，而是"已兑现但漏记账" */
     @Test
     @DisplayName("looksSilentlyResolved：识别真实裁决里的静默兑现措辞")

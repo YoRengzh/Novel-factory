@@ -27,6 +27,32 @@ public class ForeshadowSettlementEntity {
     /** 决策：弃置出账（剧情已走远，强行回收会注水，不再追踪） */
     public static final String DECISION_VOID = "VOID";
 
+    /**
+     * 决策：**已完成**（这条线其实已在已写章节里自然兑现，回写排期并停止追问）。
+     *
+     * <p>原 schema 只有 RECOVER / VOID 两个出口，而逾期排期线的标注是「已过计划回收章——欠账」，
+     * 题面又写着"存疑一律 VOID"，模型只能选 RECOVER（结转下一阶段前段再收一次），闭环永远关不上：
+     * RECOVER → 逾期补收 → 写手再写一遍 → 回收匹配器不认 → 排期项仍是 PLANTED → 下一阶段又 RECOVER。
+     * 最常见的真相其实是"已经写了、但账本没认出来"——DONE 就是给这条出口补的名分。
+     */
+    public static final String DECISION_DONE = "DONE";
+
+    /**
+     * 决策：**长线在养**（这条线是设计上就要慢慢养的，保留追踪但**不再每段要求回收**）。
+     *
+     * <p>RECOVER 的处置是"结转下一阶段前段限期回收"，一条被判 RECOVER 的长线会被每一段重新
+     * 下令回收一次，被催出来的只是"格子纸又一次被折好塞进口袋"这类静态动作。
+     *
+     * <p>与其它三档的处置差异：
+     * <ul>
+     *   <li>不像 {@link #DECISION_VOID} 那样出账——线仍在伏笔账里，观察者仍可能提到它；</li>
+     *   <li>不像 {@link #DECISION_RECOVER} 那样注入【限期回收】——本段不主动安排它；</li>
+     *   <li>不像 {@link #DECISION_DONE} 那样关账——排期项保持 PLANTED，真的兑现时
+     *       {@code matchPayoff} 仍会自动置 PAID（在养是可自动解除的）。</li>
+     * </ul>
+     */
+    public static final String DECISION_PARKED = "PARKED";
+
     // 清账发生的阶段号
     private Integer stageNo;
 
@@ -38,7 +64,8 @@ public class ForeshadowSettlementEntity {
 
     /**
      * 单条裁决：content=伏笔登记原文（账本按文本匹配，出账以此精确对齐），
-     * chapterNo=埋设章号，decision=RECOVER|VOID，reason=裁决理由（RECOVER 必须含自然连接点）
+     * chapterNo=埋设章号，decision=RECOVER|VOID|DONE|PARKED，reason=裁决理由（RECOVER 必须含自然连接点），
+     * actualPayoffChapter=判 DONE 时该线实际兑现的章号（缺省为 null）
      */
     @Data
     @Builder
@@ -49,14 +76,31 @@ public class ForeshadowSettlementEntity {
         private String content;
         // 埋设章号
         private Integer chapterNo;
-        // 裁决：RECOVER（限期回收）/ VOID（弃置出账）
+        // 裁决：RECOVER（限期回收）/ VOID（弃置出账）/ DONE（已完成）/ PARKED（长线在养）
         private String decision;
         // 裁决理由（RECOVER 必须含自然连接点）
         private String reason;
+        /** 判 DONE 时必填：该线在已写章节中实际兑现的章号；缺失或非法时 DONE 会被降级回 RECOVER */
+        private Integer actualPayoffChapter;
     }
 
     /** 提取全部弃置条目的登记原文（跨阶段聚合、去重），供伏笔账出账剔除 */
     public static List<String> voidedContents(List<ForeshadowSettlementEntity> settlements) {
+        return contentsOf(settlements, DECISION_VOID);
+    }
+
+    /**
+     * 提取全部"长线在养"条目的登记原文（跨阶段聚合、去重）。
+     *
+     * <p>用途与 {@link #voidedContents} **不同**：在养的线不出账（它仍在账本里、观察者仍可能提到它），
+     * 只用于把"漏收伏笔数"这类指标里的在养项排除——该指标定位是
+     * "「有意养的长线」与「被写忘了的线」的分界线"，在养项已被明确裁定为前者，不该再算它漏收。
+     */
+    public static List<String> parkedContents(List<ForeshadowSettlementEntity> settlements) {
+        return contentsOf(settlements, DECISION_PARKED);
+    }
+
+    private static List<String> contentsOf(List<ForeshadowSettlementEntity> settlements, String decision) {
         if (settlements == null) {
             return List.of();
         }
@@ -64,7 +108,7 @@ public class ForeshadowSettlementEntity {
                 .filter(Objects::nonNull)
                 .filter(s -> s.getDecisions() != null)
                 .flatMap(s -> s.getDecisions().stream())
-                .filter(d -> d != null && DECISION_VOID.equals(d.getDecision())
+                .filter(d -> d != null && decision.equals(d.getDecision())
                         && d.getContent() != null && !d.getContent().isBlank())
                 .map(d -> d.getContent().trim())
                 .distinct()

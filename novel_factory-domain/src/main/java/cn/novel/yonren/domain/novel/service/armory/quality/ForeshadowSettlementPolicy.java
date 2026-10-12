@@ -58,4 +58,27 @@ public final class ForeshadowSettlementPolicy {
                 .filter(d -> d != null && ForeshadowSettlementEntity.DECISION_VOID.equals(d.getDecision()))
                 .count();
     }
+
+    /**
+     * 全部结算里被判 DONE（已完成）的条数——与静默兑现是同一现象，只是出口换了。
+     *
+     * <p>裁决新增 DONE 后，"账记为未填、实际已兑现"的条目不再走 VOID + 【已兑现】，
+     * 而是判 DONE 并回填兑现章号。若指标仍只数 VOID 那一支，这条指标会随着 DONE 的启用
+     * 凭空变好——而摘要层漏记的问题一点没变。它被判 DONE 恰恰证明自动匹配没认出那次兑现，
+     * 是漏记的另一份证据。
+     */
+    public static long doneCount(List<ForeshadowSettlementEntity> settlements) {
+        return countOf(settlements, ForeshadowSettlementEntity.DECISION_DONE);
+    }
+
+    private static long countOf(List<ForeshadowSettlementEntity> settlements, String decision) {
+        if (settlements == null || settlements.isEmpty()) {
+            return 0L;
+        }
+        return settlements.stream()
+                .filter(s -> s != null && s.getDecisions() != null)
+                .flatMap(s -> s.getDecisions().stream())
+                .filter(d -> d != null && decision.equals(d.getDecision()))
+                .count();
+    }
 }

@@ -176,7 +176,9 @@ public class StoryGenerateService {
         // 目录不存在直接硬失败：绝不在错误目录上重起炉灶
         Path storyDir = storyRepository.resolveStoryDirectory(resumeStoryDir);
         dynamicContext.setStoryDir(storyDir);
-        restoreStoryFeatures(command, storyRepository.readStoryBible(storyDir));
+        String bible = storyRepository.readStoryBible(storyDir);
+        restoreStoryFeatures(command, bible);
+        restoreCharacterProfiles(command, bible);
 
         List<ChapterSummaryEntity> history = storyRepository.readChapterSummaries(storyDir);
         dynamicContext.setChapterSummaries(new ArrayList<>(history));
@@ -218,6 +220,23 @@ public class StoryGenerateService {
 
         log.info("续写模式：目录 {}（原目录追加），历史 {} 章，新章从 {} 开始",
                 resumeStoryDir, history.size(), chapterOffset + 1);
+    }
+
+    /**
+     * 续写时从 bible **强制回填**人物档案（与 {@link #restoreStoryFeatures} 同款理由：bible 是唯一权威）。
+     *
+     * <p>为什么必须由后端回填、而不是依赖前端把该字段原样带回来：漏带不会报错，只会表现为
+     * "人物代词与既定事实悄悄消失"——而它正是防代词/班级写错的那道锚。
+     * bible 没有这一行（老故事）时不动作，保持既有行为。
+     */
+    private void restoreCharacterProfiles(ArmoryCommandEntity command, String bible) {
+        if (command == null || command.getStoryContextEntity() == null || bible == null || bible.isBlank()) {
+            return;
+        }
+        String profiles = StoryBibleParser.parse(bible).characters();
+        if (profiles != null && !profiles.isBlank()) {
+            command.getStoryContextEntity().setCharacterProfiles(profiles);
+        }
     }
 
     private void restoreStoryFeatures(ArmoryCommandEntity command, String bible) {

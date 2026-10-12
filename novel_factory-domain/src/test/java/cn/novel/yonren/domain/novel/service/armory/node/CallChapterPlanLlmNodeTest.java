@@ -36,12 +36,23 @@ import static org.mockito.Mockito.when;
  */
 class CallChapterPlanLlmNodeTest {
 
+    /**
+     * 合规计划夹具：双人名事件 + dialogueScenes 逐字声明——对话承载闸门（2026-10-10）上线后，
+     * 缺声明的计划会被打回重规划，单次调用断言的用例必须默认过全部闸门。
+     * 事件文本以章号开头、模板片段 ≤8 字：两章间共享段不触"跨章场景重演"10 字判定线
+     */
     private static final String GOOD_PLAN =
             "{\"chapters\":[{\"chapterNo\":1,\"title\":\"第一章\",\"goal\":\"目标\","
-                    + "\"characters\":[\"角色A\"],\"keyEvents\":[\"事件1\"],\"timeAdvance\":\"推进3天，至2002年7月20日\",\"endingHook\":\"悬念\",\"chapterType\":\"normal\"}]}";
+                    + "\"characters\":[\"甲\",\"乙\"],"
+                    + "\"keyEvents\":[\"第1幕：甲与乙交锋\",\"第1场：乙向甲让步\"],"
+                    + "\"dialogueScenes\":[\"第1幕：甲与乙交锋\",\"第1场：乙向甲让步\"],"
+                    + "\"timeAdvance\":\"推进3天，至2002年7月20日\",\"endingHook\":\"悬念\",\"chapterType\":\"normal\"}]}";
     private static final String DANGLING_COMMA_PLAN =
             "{\"chapters\":[{\"chapterNo\":1,\"title\":\"第一章\",\"goal\":\"目标\","
-                    + "\"characters\":[\"角色A\"],\"keyEvents\":[\"事件1\"],\"timeAdvance\":\"推进3天，至2002年7月20日\",\"endingHook\":\"悬念\",\"chapterType\":\"normal\",}]}";
+                    + "\"characters\":[\"甲\",\"乙\"],"
+                    + "\"keyEvents\":[\"第1幕：甲与乙交锋\",\"第1场：乙向甲让步\"],"
+                    + "\"dialogueScenes\":[\"第1幕：甲与乙交锋\",\"第1场：乙向甲让步\"],"
+                    + "\"timeAdvance\":\"推进3天，至2002年7月20日\",\"endingHook\":\"悬念\",\"chapterType\":\"normal\",}]}";
 
     @Mock
     private LlmInvokeService llmInvokeService;
@@ -49,15 +60,23 @@ class CallChapterPlanLlmNodeTest {
     @Mock
     private cn.novel.yonren.domain.novel.service.armory.llm.PlanBranchService planBranchService;
 
+    @Mock
+    private cn.novel.yonren.domain.novel.service.armory.memory.ChapterMemoryService chapterMemoryService;
+
     private CallChapterPlanLlmNode node;
 
     private DefaultArmoryFactory.DynamicContext dynamicContext;
 
     @BeforeEach
-    void setUp() {
+    void setUp() throws Exception {
         MockitoAnnotations.openMocks(this);
         org.mockito.Mockito.when(planBranchService.enabled()).thenReturn(false);
         node = new CallChapterPlanLlmNode(new ChapterPlanSegmentPlanner(llmInvokeService, planBranchService));
+        // 节点经 @Resource 注入记忆服务（对话承载闸门的人名来源）：单测用反射接线，名册给空表走降级口径
+        java.lang.reflect.Field memoryField = CallChapterPlanLlmNode.class.getDeclaredField("chapterMemoryService");
+        memoryField.setAccessible(true);
+        memoryField.set(node, chapterMemoryService);
+        org.mockito.Mockito.when(chapterMemoryService.characterRoster(any())).thenReturn(List.of());
         dynamicContext = new DefaultArmoryFactory.DynamicContext();
         dynamicContext.setPrompt("测试 prompt");
     }
@@ -198,9 +217,15 @@ class CallChapterPlanLlmNodeTest {
             if (i > 0) {
                 sb.append(",");
             }
-            sb.append("{\"chapterNo\":").append(chapterNos[i])
-                    .append(",\"title\":\"第").append(chapterNos[i]).append("章\",\"goal\":\"目标\",")
-                    .append("\"characters\":[\"角色\"],\"keyEvents\":[\"事件\"],\"timeAdvance\":\"推进3天，至2002年7月20日\",\"endingHook\":\"悬念\",\"chapterType\":\"normal\"}");
+            int no = chapterNos[i];
+            String scene1 = "第" + no + "幕：甲与乙交锋";
+            String scene2 = "第" + no + "场：乙向甲让步";
+            sb.append("{\"chapterNo\":").append(no)
+                    .append(",\"title\":\"第").append(no).append("章\",\"goal\":\"目标\",")
+                    .append("\"characters\":[\"甲\",\"乙\"],")
+                    .append("\"keyEvents\":[\"").append(scene1).append("\",\"").append(scene2).append("\"],")
+                    .append("\"dialogueScenes\":[\"").append(scene1).append("\",\"").append(scene2).append("\"],")
+                    .append("\"timeAdvance\":\"推进3天，至2002年7月20日\",\"endingHook\":\"悬念\",\"chapterType\":\"normal\"}");
         }
         return sb.append("]}").toString();
     }

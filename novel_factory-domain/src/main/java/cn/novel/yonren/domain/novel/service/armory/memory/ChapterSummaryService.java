@@ -113,6 +113,8 @@ public class ChapterSummaryService {
                     summary.setTitle(item.getTitle());
                     validateForeshadowSeeds(summary, content);
                     filterRestatedForeshadows(summary, pendingForeshadowing);
+                    summary.setForeshadowingResolved(
+                            sanitizeResolved(summary.getForeshadowingResolved(), pendingForeshadowing));
                     validateStateEvidence(summary, content);
                     validateConsistencyEvidence(summary, content);
                     log.info("章节摘要生成完成，chapterNo: {}, 一致性偏差 {} 条", globalNo,
@@ -281,8 +283,19 @@ public class ChapterSummaryService {
                 .append("正确示例：\"foreshadowingNew\":[\"剑冢封印松动\"],\"foreshadowSeeds\":[{\"content\":\"剑冢封印松动\",\"excerpt\":\"…\",\"importance\":4}]；")
                 .append("错误示例：\"foreshadowingNew\":[{\"content\":\"剑冢封印松动\"}]（对象不能放进 foreshadowingNew）。")
                 .append("\n7. foreshadowingResolved：本章兑现的伏笔，只能从【此前埋设、尚未回收的伏笔账】中选取，")
-                .append("条目必须逐字沿用账中描述，严禁改写——账本按文本匹配核销；")
-                .append("仅登记此前章节埋设、本章兑现的伏笔，本章新埋的内容与回收无关，没有则为空数组；")
+                .append("条目必须逐字沿用账中描述，严禁改写——账本按文本核对销账。")
+                .append("\n   ⚠️ **这是一项义务，不是可选项**：凡账中某条线在本章产生了它要的那个结果——")
+                .append("谁因此知道了什么、谁做了那个决定、什么被确认或被公开、什么东西被交出或被销毁——")
+                .append("**必须逐条登记**。漏记的后果不是「少记一笔」：该线永远关不掉账，")
+                .append("会在后续每一段被反复要求回收，把同一件事重写很多遍。")
+                .append("\n   判断口径：看**状态是否变化**，不是看物件是否出现。"
+                        + "「格子纸又出现在桌上」不算兑现；「父亲说出我不问了、等他自己开口」算关系/认知变化。")
+                .append("\n   ✅ 正确：[\"陆远山与周秀兰就2026达成不再追问的默契\"]（这是账中那条线的原话，逐字沿用）")
+                .append("\n   ❌ 错误一：用自己的话复述事件经过（如「父亲把纸放进铁盒」）——账本按文本匹配，对不上就等于没登记；")
+                .append("\n   ❌ 错误二：因为「这条线埋得太久了、像是老账」就留空——老账恰恰最需要登记，")
+                .append("它正是被反复催收的那一批；")
+                .append("\n   ❌ 错误三：把本章**新埋**的线写进这里（新埋的归 foreshadowingNew）；")
+                .append("\n   确实一条都没兑现时，才输出空数组；")
                 .append("\n8. timePoint：本章结束时的**时间**（只写时间不写地点），如\"外门大比当日深夜\"；")
                 .append("\n9. placePoint：本章结束时主角所在的**地点**（只写地点不写时间），")
                 .append("用 2-12 字的稳定地名，如\"林尘小院\"\"后山北坡第三号防御节点\"；")
@@ -379,6 +392,55 @@ public class ChapterSummaryService {
                 .limit(PAYOFF_HINT_MAX_COUNT)
                 .toList();
         seed.setPayoffHints(cleaned.isEmpty() ? null : cleaned);
+    }
+
+    /**
+     * 回收清单的机械兜底：去空白、去重，并统计有多少条**在待收账本里找不到**（措辞漂移）。
+     *
+     * <p><b>刻意不丢弃未命中条目</b>：真实兑现的措辞可能与账本不完全一致（账本核销用的是
+     * "互相包含"口径，见 {@code ChapterMemoryService.buildPendingForeshadowDetailed}），
+     * 误删等于永久丢掉一次回收——而回收一旦丢失，该线就再也不会关账。
+     * 未命中只作**观测信号**：它是"摘要把事件经过写成了自己的话、而不是逐字沿用账中描述"的
+     * 早期迹象，与体检的「清账静默兑现」同源（那边度量的是同一问题的存量）。
+     */
+    private List<String> sanitizeResolved(List<String> resolved, List<String> pendingForeshadowing) {
+        if (resolved == null || resolved.isEmpty()) {
+            return List.of();
+        }
+        List<String> cleaned = resolved.stream()
+                .filter(StringUtils::isNotBlank)
+                .map(String::trim)
+                .distinct()
+                .toList();
+        if (cleaned.isEmpty()) {
+            return List.of();
+        }
+        if (pendingForeshadowing != null && !pendingForeshadowing.isEmpty()) {
+            long matched = cleaned.stream().filter(r -> matchesLedger(r, pendingForeshadowing)).count();
+            if (matched == 0) {
+                log.warn("本章回收清单 {} 条在待收账本里一条都没匹配上（措辞漂移？）——账本按文本核销，"
+                        + "对不上就不会关账，该线会被反复要求回收：{}", cleaned.size(), cleaned);
+            }
+        }
+        return cleaned;
+    }
+
+    /** 与账本核销同口径：互相包含即视为同一条线 */
+    private static boolean matchesLedger(String resolved, List<String> pendingForeshadowing) {
+        String r = resolved == null ? "" : resolved.trim();
+        if (r.isEmpty()) {
+            return false;
+        }
+        for (String pending : pendingForeshadowing) {
+            if (StringUtils.isBlank(pending)) {
+                continue;
+            }
+            String p = pending.trim();
+            if (p.contains(r) || r.contains(p)) {
+                return true;
+            }
+        }
+        return false;
     }
 
     /**

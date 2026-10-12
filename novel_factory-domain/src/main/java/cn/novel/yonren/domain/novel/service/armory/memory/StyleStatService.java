@@ -1,6 +1,7 @@
 package cn.novel.yonren.domain.novel.service.armory.memory;
 
 import cn.novel.yonren.domain.novel.model.entity.StyleStatEntity;
+import cn.novel.yonren.domain.novel.service.armory.quality.DialogueRatioPolicy;
 import org.apache.commons.lang3.StringUtils;
 import org.springframework.stereotype.Service;
 
@@ -24,14 +25,35 @@ public class StyleStatService {
 
     /** 长句判定下限：短于此的句子不参与查重（称呼、短句复用是正常文体） */
     public static final int MIN_SENTENCE_LENGTH = 10;
-    /** 已见句集滚动上限（挤出最老句子，防无界增长） */
-    public static final int MAX_USED_SENTENCES = 80;
+    /**
+     * 已见句集滚动上限（挤出最老句子，防无界增长）。
+     *
+     * <p>由 80 上调至 300：80 句约等于**一章**的量，于是"隔两章的重复"根本进不了视野
+     * ——实测第 100 章与第 102 章一字不差重复了同一句，查重两侧都查不到。该列表不参与 prompt 渲染
+     * （渲染的只有 {@link #MAX_REPEATED_SENTENCES} 条重复句），所以放宽窗口只增加一点内存与比对，
+     * 不增加 prompt 体积。
+     */
+    public static final int MAX_USED_SENTENCES = 300;
     /** 跨章重复句保留上限（警示渲染用） */
     public static final int MAX_REPEATED_SENTENCES = 20;
     /** 警示渲染的重复句条数上限 */
     private static final int RENDER_REPEATED_COUNT = 10;
     /** 疲劳词警示阈值：全篇出现达到该次数即进超频名单 */
     public static final int FATIGUE_THRESHOLD = 5;
+
+    /**
+     * 对白句入库下限：**含引号**长度。
+     *
+     * <p>取 8 是两头的取舍（实测标定）：要抓的真重复是 10 字的
+     * 「三班还等得到吗？」，而套话短答（「我知道了。」6 字、「明天再说。」6 字、「我先走了。」6 字）
+     * 在正常文里本来就会自然复现——那条判据要进 BLOCKING 驱动改稿，把套话扫进来等于白改一稿。
+     */
+    public static final int MIN_DIALOGUE_LINE_LENGTH = 8;
+    /**
+     * 对白句集滚动上限。远大于句集：对白每章只有二三十句、句子又短，
+     * 而"人物反复问同一句"是读者最容易察觉的重复形态，值得看住整卷。
+     */
+    public static final int MAX_USED_DIALOGUE_LINES = 400;
 
     private static final double NEAR_DUPLICATE_JACCARD = 0.70;
 
@@ -60,11 +82,12 @@ public class StyleStatService {
                 .usedSentences(new ArrayList<>())
                 .repeatedSentences(new ArrayList<>())
                 .fatigueWords(new LinkedHashMap<>())
+                .usedDialogueLines(new ArrayList<>())
                 .build();
     }
 
     /**
-     * 滚动合并一章正文：长句查重（与已见句集相交即记为跨章重复）→ 新句并入 → 疲劳词累加
+     * 滚动合并一章正文：长句查重（与已见句集相交即记为跨章重复）→ 新句并入 → 对白句入库 → 疲劳词累加
      */
     public void merge(StyleStatEntity stat, String content) {
         if (stat == null || StringUtils.isBlank(content)) {
@@ -91,12 +114,56 @@ public class StyleStatService {
                 }
             }
         }
+        // 对白句单独入长窗口索引：它们短、少，但"人物反复问同一句"是最刺眼的重复形态，
+        // 而通用句集的窗口（一章量）看不住它。入库时去掉空白，比对时同一口径（见 crossChapterDialogueRepeats）
+        if (stat.getUsedDialogueLines() == null) {
+            stat.setUsedDialogueLines(new ArrayList<>());
+        }
+        for (String utterance : DialogueRatioPolicy.utterances(normalized)) {
+            String line = utterance.replaceAll("\\s", "").trim();
+            if (line.length() < MIN_DIALOGUE_LINE_LENGTH) {
+                continue;
+            }
+            if (!stat.getUsedDialogueLines().contains(line)) {
+                stat.getUsedDialogueLines().add(line);
+                if (stat.getUsedDialogueLines().size() > MAX_USED_DIALOGUE_LINES) {
+                    stat.getUsedDialogueLines().remove(0);
+                }
+            }
+        }
         for (String word : FATIGUE_WORDS) {
             int count = countOccurrences(normalized, word);
             if (count > 0) {
                 stat.getFatigueWords().merge(word, count, Integer::sum);
             }
         }
+    }
+
+    /**
+     * 本章对白中**与早期章节逐字相同**的句子（去空白后精确相等）。
+     *
+     * <p>只认精确相等，不做近重复：这条判据要进 BLOCKING 走定向修订，误报的代价是白改一稿；
+     * 而"同一句台词隔几章一字不差地又出现"本身就是硬伤，放宽口径反而会把正常呼应也扫进来。
+     * 近重复（改一两个字）仍走 {@link #merge} 的 MINOR 记账与风格警示那条通道。
+     *
+     * @return 重复的对白原文（含引号，已去空白）；无重复时返回空表
+     */
+    public List<String> crossChapterDialogueRepeats(StyleStatEntity stat, String content) {
+        if (stat == null || StringUtils.isBlank(content) || stat.getUsedDialogueLines() == null
+                || stat.getUsedDialogueLines().isEmpty()) {
+            return List.of();
+        }
+        List<String> repeats = new ArrayList<>();
+        for (String utterance : DialogueRatioPolicy.utterances(content)) {
+            String line = utterance.replaceAll("\\s", "").trim();
+            if (line.length() < MIN_DIALOGUE_LINE_LENGTH || repeats.contains(line)) {
+                continue;
+            }
+            if (stat.getUsedDialogueLines().contains(line)) {
+                repeats.add(line);
+            }
+        }
+        return repeats;
     }
 
     /**

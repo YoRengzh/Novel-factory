@@ -35,5 +35,14 @@ public class StoryContextEntity {
     private String chapterGoal;
     // 系列/共享世界观 ID（可选，五期）：同系列故事共享世界观向量集合
     private String worldId;
+    /**
+     * 主要人物档案（代词与既定事实）：书写为「姓名（性别，用「他/她」）＋既定事实」的纯文本，如
+     * 「沈清欢（女，用「她」，志愿师大附中一班）；宋知渔（女，用「她」，志愿二班）」。
+     *
+     * <p>由 story-bible 的「主要人物」行提供、续写时后端从 bible 强制回填（bible 是唯一权威）。
+     * 注入规划/正文/审计三处 prompt：前者避免安排出矛盾的剧情，中者避免写错代词，
+     * 后者拿到"可对照的锚"才有资格把代词/班级写错判成事实矛盾。
+     */
+    private String characterProfiles;
 
 }

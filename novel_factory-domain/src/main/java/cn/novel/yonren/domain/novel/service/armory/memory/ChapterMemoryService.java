@@ -9,6 +9,7 @@ import cn.novel.yonren.domain.novel.model.entity.StageBlueprintEntity;
 import cn.novel.yonren.domain.novel.model.entity.VolumeBlueprintEntity;
 import cn.novel.yonren.domain.novel.model.valobj.LedgerEntry;
 import cn.novel.yonren.domain.novel.service.armory.prompt.PromptBudgetGuard;
+import cn.novel.yonren.domain.novel.service.armory.quality.ForeshadowSpanPolicy;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.lang3.StringUtils;
 import org.springframework.stereotype.Service;
@@ -17,6 +18,7 @@ import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Comparator;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -348,12 +350,12 @@ public class ChapterMemoryService {
         appendLedger(ledger, "角色账本·当前状态", ordered, ChapterSummaryEntity::getCharacterStates, latestNo, true);
         appendLedger(ledger, "物品账本·当前状态", ordered, ChapterSummaryEntity::getItemStates, latestNo, false);
         appendLedger(ledger, "势力账本·当前状态", ordered, ChapterSummaryEntity::getFactionStates, latestNo, false);
-        blocks.add(section("三账本", MEMORY_PRIORITY_LEDGER, true, ledger));
+        blocks.add(section(LEDGER_BLOCK_LABEL, MEMORY_PRIORITY_LEDGER, true, ledger));
 
         // 伏笔账：新埋减去已回收；动态权重分级渲染（新埋/硬/软/背景/未填），尾部为最低分背景条目
         StringBuilder foreshadow = new StringBuilder();
         renderForeshadowing(foreshadow, ordered);
-        blocks.add(section("伏笔账", MEMORY_PRIORITY_LEDGER, true, foreshadow));
+        blocks.add(section(FORESHADOW_BLOCK_LABEL, MEMORY_PRIORITY_LEDGER, true, foreshadow));
 
         // 上一章一致性偏差警示（软校验结果回灌，本章以账本为准修正）
         StringBuilder conflicts = new StringBuilder();
@@ -400,6 +402,14 @@ public class ChapterMemoryService {
     private static final int MEMORY_PRIORITY_RECENT = 2;
     private static final int MEMORY_PRIORITY_DIRECTION = 3;
     private static final int MEMORY_PRIORITY_LEDGER = 4;
+
+    /**
+     * 两个账本块的 label（公开供 ChapterWorker 按 label 抽取）：正文前缀中这两个块被挪到
+     * 门禁类块之后——它们是第 4 档的主要消耗方（常合计 5k+ 字），排末尾才能让同档的
+     * 情节模式黑名单/审校反馈两个小纠正通道先入场、由账本承担截断（见 ChapterWorker 装配处注释）
+     */
+    public static final String LEDGER_BLOCK_LABEL = "三账本";
+    public static final String FORESHADOW_BLOCK_LABEL = "伏笔账";
 
     private static final int MEMORY_PRIORITY_RECALL = 5;
 
@@ -642,6 +652,20 @@ public class ChapterMemoryService {
     }
 
     /**
+     * **角色名册（仅姓名）**：规划层「对话承载」机械校验的人名来源——
+     * "事件里是否出现两个已知人物"的判定基准。只认账本里真实登场过的角色，
+     * 不含物品/势力（同名条目在三类账本间互不混用）。空摘要（新书首段）安全返回空表，
+     * 调用方据此降级为人名核验跳过（见 validateDialogueCarriage 的池不足口径）。
+     */
+    public List<String> characterRoster(List<ChapterSummaryEntity> summaries) {
+        return buildLedger(summaries, ChapterSummaryEntity::getCharacterStates, true).stream()
+                .map(LedgerEntry::getName)
+                .filter(StringUtils::isNotBlank)
+                .distinct()
+                .toList();
+    }
+
+    /**
      * 渲染当前三账本（角色/物品/势力）文本，作为摘要一致性校验与审校账本比对基准
      */
     public String renderLedgerPrompt(List<ChapterSummaryEntity> summaries) {
@@ -822,16 +846,46 @@ public class ChapterMemoryService {
     }
 
     /**
-     * 待回收伏笔登记清单：按埋设章号新->旧取前 limit 条内容。
+     * 待回收伏笔登记清单：**逾期项优先占位**，其余按埋设章号新→旧填满，总量封顶 limit。
      * 供摘要登记使用——未填（冻结）条目保留在内，剧情自然触达时仍可逐字登记核销出账；
-     * 全量清单随章节数线性膨胀，此处统一封顶
+     * 全量清单随章节数线性膨胀，此处统一封顶。
+     *
+     * <p><b>为什么要给逾期项留位</b>：此前是纯"最新 N 条"，于是**埋得越早的线越看不见**。
+     * 而摘要 prompt 要求回收条目"逐字沿用账中描述"——一条掉出清单的线，模型根本无从逐字登记，
+     * 于是它永远关不掉账、被反复要求回收。一条埋在第 0 章的老线早就掉出最新 20 条之外；
+     * 体检同时报出「清账静默兑现」高占比，两者是同一个缺口的两面。
+     *
+     * <p>逾期 = 已过计划回收章（{@code scheduledPayoffChapter}），与"漏收伏笔数"指标同一口径——
+     * 那个指标度量的问题，这里正是它的成因之一。
      */
     public List<String> buildForeshadowContextList(List<ChapterSummaryEntity> summaries, int limit) {
-        return buildPendingForeshadowDetailed(summaries).stream()
-                .sorted(Comparator.comparingInt(PendingForeshadow::chapterNo).reversed())
-                .limit(limit)
+        List<PendingForeshadow> pending = buildPendingForeshadowDetailed(summaries);
+        if (pending.isEmpty() || limit <= 0) {
+            return List.of();
+        }
+        List<ChapterSummaryEntity> ordered = ordered(summaries);
+        int latestNo = ordered.get(ordered.size() - 1) == null
+                ? 0 : (ordered.get(ordered.size() - 1).getChapterNo() == null
+                ? 0 : ordered.get(ordered.size() - 1).getChapterNo());
+        Set<String> overdueContents = ForeshadowSpanPolicy.pending(summaries, latestNo, List.of()).stream()
+                .filter(p -> p.scheduledPayoffChapter() != null && latestNo > p.scheduledPayoffChapter())
+                .map(ForeshadowSpanPolicy.Pending::content)
+                .filter(StringUtils::isNotBlank)
+                .collect(Collectors.toSet());
+
+        LinkedHashSet<String> merged = new LinkedHashSet<>();
+        // ① 逾期项先占位，滞留最久（埋设章号最小）的靠前
+        pending.stream()
+                .filter(p -> overdueContents.contains(p.content()))
+                .sorted(Comparator.comparingInt(PendingForeshadow::chapterNo))
                 .map(PendingForeshadow::content)
-                .toList();
+                .forEach(merged::add);
+        // ② 再用最新若干填满（保持原有行为）
+        pending.stream()
+                .sorted(Comparator.comparingInt(PendingForeshadow::chapterNo).reversed())
+                .map(PendingForeshadow::content)
+                .forEach(merged::add);
+        return merged.stream().limit(limit).toList();
     }
 
     /**

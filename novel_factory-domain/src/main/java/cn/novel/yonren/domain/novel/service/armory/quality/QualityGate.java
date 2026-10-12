@@ -6,6 +6,7 @@ import cn.novel.yonren.domain.novel.model.entity.ChapterContentEntity;
 import cn.novel.yonren.domain.novel.model.entity.ChapterIssueEntity;
 import cn.novel.yonren.domain.novel.model.entity.ChapterPlanItemEntity;
 import cn.novel.yonren.domain.novel.model.entity.ChapterSummaryEntity;
+import cn.novel.yonren.domain.novel.model.entity.StoryContextEntity;
 import cn.novel.yonren.domain.novel.model.entity.StyleStatEntity;
 import cn.novel.yonren.domain.novel.model.valobj.properties.StoryProperties;
 import cn.novel.yonren.domain.novel.service.armory.audit.AuditSampleService;
@@ -27,6 +28,9 @@ import java.util.List;
  * 审校是质量门：彻底失败抛异常终止本批（绝不等价于零问题）；
  * 修订失败则保留原稿并把 BLOCKING 问题作为质量债返回（审校结论不因修订失败而丢失）。
  * 从 GenerateChapterContentNode 自然拆出（D8），逐行等价
+ * 八期扩展：正文级对话承载对账——计划声明了 dialogueScenes 的章，轮次密度坍缩从 MINOR
+ * 升级 BLOCKING 进修订闭环（计划承诺的对话被写成动作/沉默是写手违约），缺失场景由
+ * {@link DialoguePresencePolicy} 识别并作为修订靶点下发，修订采纳后机械重扫闭环。
  */
 @Service
 @Slf4j
@@ -49,6 +53,10 @@ public class QualityGate {
 
     @Resource
     private ConsistencyIndexService consistencyIndexService;
+
+    /** 跨章对白逐字重复检测（机械）：对白句索引与查重口径都在那里，此处只消费 */
+    @Resource
+    private cn.novel.yonren.domain.novel.service.armory.memory.StyleStatService styleStatService;
 
     public boolean auditEnabled() {
         return storyProperties != null && storyProperties.getAudit().isEnabled();
@@ -179,6 +187,28 @@ public class QualityGate {
                     bracketIssues.stream().map(ChapterIssueEntity::getEvidence).toList());
         }
         mechanicalIssues.addAll(bracketIssues);
+        // 对白轮次坍缩检测（机械，P1，2026-10-09）：篇幅够、关键事件也落地了，但轮次密度低于劣化线——
+        // 典型形态是通篇动作分解与内心推演（实测第 96 章 4.4 次/千字，劣化线 6.0，同批其它章 12-27）。
+        // 与上面两条的分工：那两条判**格式**（引号有没有、是不是括号），这条判**有没有戏**。
+        // 为什么必须落债：已有的 ContentDensityPolicy 预警（<25 句）只进审校 prompt，而审校规则里
+        // BLOCKING 仅限四类硬伤、MINOR 明写"只记录不触发修订"——它在设计上就不会产生任何动作，
+        // 实测第 96 章报了预警后原稿照样放行。落成质量债才会随记忆回灌到规划层与下一章 prompt。
+        List<ChapterIssueEntity> densityCollapse = dialogueDensityCollapse(item, chapterContent, summaries);
+        if (!densityCollapse.isEmpty()) {
+            log.warn("第 {} 章对白轮次坍缩：{}", globalNo,
+                    densityCollapse.stream().map(ChapterIssueEntity::getDescription).toList());
+        }
+        mechanicalIssues.addAll(densityCollapse);
+        // 跨章对白逐字重复（机械，2026-10-10）：同一句台词与早期章节一字不差 → BLOCKING，走定向修订。
+        // 此前这类重复只进「风格警示」（下一章的软提示）与 MINOR 记账，于是第 100 章与第 102 章
+        // 一字不差地问了同一句「三班还等得到吗？」——两句都留在了成稿里。对白重复是读者最容易
+        // 察觉的硬伤（人物像在复读），修法又机械（改掉这一句），所以放进 BLOCKING 让它真的被改。
+        List<ChapterIssueEntity> dialogueRepeat = dialogueRepeatIssues(chapterContent, styleStat);
+        if (!dialogueRepeat.isEmpty()) {
+            log.warn("第 {} 章跨章对白逐字重复 {} 句：{}", globalNo, dialogueRepeat.size(),
+                    dialogueRepeat.stream().map(ChapterIssueEntity::getEvidence).toList());
+        }
+        mechanicalIssues.addAll(dialogueRepeat);
         // 严重度分层：机械问题按档分流——BLOCKING 进修订闭环，
         // MINOR（文风程度问题）只记录、不触发修订也不触发候选，见 GateResult 类注释
         List<ChapterIssueEntity> mechanicalMinor = nonBlockingOf(mechanicalIssues);
@@ -211,7 +241,7 @@ public class QualityGate {
         }
         String auditGuard = joinBlocks(
                 joinBlocks(joinBlocks(joinBlocks(secrecyGuard.promptBlock(), adherenceHint), densityHint), chapterRefHint),
-                joinBlocks(registerContract, timeAnchor));
+                joinBlocks(joinBlocks(registerContract, timeAnchor), characterProfileHint(requestParameter)));
         // 修订输入保留禁泄清单与语域契约（防修订环节修好事实、却引入时代错位或人物失语）
         String reviseForeshadowing = joinBlocks(joinBlocks(foreshadowing, secrecyGuard.promptBlock()), registerContract);
 
@@ -294,6 +324,9 @@ public class QualityGate {
                 if (StringUtils.isNotBlank(chapterContent.getTitle())) {
                     rescan.addAll(ChapterTitlePolicy.check(chapterContent.getTitle(), summaries));
                 }
+                // 对白轮次坍缩重算（2026-10-11）：声明了对话场景的章它是 BLOCKING——修订真的把
+                // 对话补进正文即机械闭环；未声明的章是 MINOR。降档项以最终稿重算，口径与上面一致
+                rescan.addAll(dialogueDensityCollapse(item, chapterContent, summaries));
                 // 降档项以最终稿重扫结果为准：修订可能清掉或改变文风问题，留旧版记录会误导观测层
                 mechanicalMinor = nonBlockingOf(rescan);
                 List<ChapterIssueEntity> newBlocking = new java.util.ArrayList<>(blockingOf(rescan));
@@ -389,6 +422,155 @@ public class QualityGate {
         return auditResult.getIssues().stream()
                 .filter(issue -> "BLOCKING".equalsIgnoreCase(issue.getSeverity()))
                 .toList();
+    }
+
+    /**
+     * 人物档案锚（代词与既定事实），注入审校 guard。
+     *
+     * <p><b>为什么必须给审校</b>（2026-10-10）：正文把女主宋知渔写成「他」连写了三章，而审校
+     * 只有 MINOR 叙事问题、一条 BLOCKING 都没报——不是它没看见，而是**没有可对照的锚**：
+     * 账本里既没有"宋知渔是女"也没有"她报二班"，判"事实矛盾"无从下嘴。
+     * 给了锚之后，代词写错、班级/亲属写错就落在审校规则既有的「事实矛盾」类里，可判 BLOCKING。
+     */
+    private static String characterProfileHint(ArmoryCommandEntity requestParameter) {
+        StoryContextEntity ctx = requestParameter == null ? null : requestParameter.getStoryContextEntity();
+        String profiles = ctx == null ? null : ctx.getCharacterProfiles();
+        if (StringUtils.isBlank(profiles)) {
+            return null;
+        }
+        return "【人物档案·代词与既定事实】（作者声明的事实锚，判定时以此为准）\n" + profiles
+                + "\n与档案冲突的写法属**事实矛盾**：代词用错（把女角色写成「他」）、"
+                + "班级/年级/志愿写错、亲属关系写错、已声明的事实被改写——"
+                + "这类错误读者一眼能看出，必须记 BLOCKING 并给出正文中的确切位置。";
+    }
+
+    /**
+     * 跨章对白逐字重复（机械，2026-10-10）：本章有台词与早期章节一字不差 → 每句一条 BLOCKING。
+     *
+     * <p><b>口径只认精确相等</b>（去空白后）：这条要进 BLOCKING 驱动修订，误报的代价是白改一稿；
+     * 而"同一句台词隔几章一字不差地又出现"本身就是硬伤，放宽口径会把正常呼应也扫进来。
+     * 近重复（改一两个字）仍走风格警示那条软通道，不进这里。
+     *
+     * <p>{@code styleStat} 在本章 merge 之前传进来（ChapterWorker 的调用顺序），所以索引里
+     * 只有历史章节的对白——本章自己不会跟自己撞。
+     */
+    private List<ChapterIssueEntity> dialogueRepeatIssues(ChapterContentEntity chapterContent,
+                                                          StyleStatEntity styleStat) {
+        if (chapterContent == null || StringUtils.isBlank(chapterContent.getContent())) {
+            return List.of();
+        }
+        List<String> repeats = styleStatService.crossChapterDialogueRepeats(styleStat, chapterContent.getContent());
+        if (repeats.isEmpty()) {
+            return List.of();
+        }
+        List<ChapterIssueEntity> issues = new java.util.ArrayList<>(repeats.size());
+        for (String line : repeats) {
+            ChapterIssueEntity issue = new ChapterIssueEntity();
+            issue.setDimension("aesthetic");
+            issue.setSeverity("BLOCKING");
+            issue.setEvidence(line);
+            issue.setDescription("跨章对白逐字重复：本章这句台词与早期章节一字不差（" + line
+                    + "）——读者会认为人物在复读同一句话。");
+            issue.setSuggestion("只改这一句：换一个问法或说法，或把这次交流改成动作/神态等非对白表达；"
+                    + "不要只改标点、增减语气词或换成同义句来糊过去。其余正文不要改动。");
+            issues.add(issue);
+        }
+        return issues;
+    }
+
+    /**
+     * 对白轮次坍缩（机械，P1）：轮次密度低于题材劣化线时记一条问题——严重度按「计划是否
+     * 声明过对话承载」分流（2026-10-11）：
+     *
+     * <ul>
+     *   <li><b>声明了 dialogueScenes</b>：规划层已经承诺"这些事件以对话承载"（对话承载闸门
+     *       放行），正文仍开不了腔就是<b>写手违约</b>——记 BLOCKING 进修订闭环，缺失清单由
+     *       {@link DialoguePresencePolicy#missingScenes} 识别并作为修订靶点下发（实测第 110 章
+     *       形态：声明两句、成文一句，「嗯」被降级成点头——计划层闸门管不到正文兑现）。</li>
+     *   <li><b>未声明</b>：根因在规划层没给料，照旧记 MINOR 落债回灌。</li>
+     * </ul>
+     *
+     * <p><b>三处必须同源</b>：体检的 {@code dialogueCollapseShare}、规划层的【对白坍缩反馈】、
+     * 这里的质量债，都用 {@link DialogueRatioPolicy#densityDegraded} 这同一根线。口径一旦分叉，
+     * 就会出现"体检说崩了、债里没记、规划层没收到"的分裂——本项目在"两份 LCS 阈值不一致"
+     * 上已经吃过同类亏。
+     *
+     * <p>过渡章豁免、短样本豁免（与 {@code DialogueRatioPolicy} 的其它检测同款：宁可漏报不误伤）。
+     * 题材取自摘要的机械字段 storyGenre，与体检口径一致。
+     */
+    private static List<ChapterIssueEntity> dialogueDensityCollapse(ChapterPlanItemEntity item,
+                                                                   ChapterContentEntity chapterContent,
+                                                                   List<ChapterSummaryEntity> summaries) {
+        if (chapterContent == null || StringUtils.isBlank(chapterContent.getContent())) {
+            return List.of();
+        }
+        if (item.getChapterType() != null && item.getChapterType().isTransition()) {
+            return List.of();
+        }
+        String content = chapterContent.getContent();
+        int effectiveChars = ChapterLengthPolicy.effectiveCharacterCount(content);
+        if (effectiveChars < DialogueRatioPolicy.FORMAT_COLLAPSE_MIN_CHARS) {
+            return List.of();
+        }
+        String genre = summaries == null ? null : summaries.stream()
+                .filter(java.util.Objects::nonNull)
+                .map(ChapterSummaryEntity::getStoryGenre)
+                .filter(java.util.Objects::nonNull)
+                .findFirst().orElse(null);
+        int utterances = DialogueRatioPolicy.utteranceCount(content);
+        double density = DialogueRatioPolicy.utteranceDensity(utterances, effectiveChars);
+        double line = DialogueRatioPolicy.densityDegraded(genre);
+        if (density >= line) {
+            return List.of();
+        }
+        List<String> declaredScenes = item.getDialogueScenes();
+        boolean carriagePromised = declaredScenes != null && !declaredScenes.isEmpty();
+        ChapterIssueEntity issue = new ChapterIssueEntity();
+        issue.setDimension("aesthetic");
+        if (carriagePromised) {
+            List<String> missing = DialoguePresencePolicy.missingScenes(declaredScenes, content);
+            issue.setSeverity("BLOCKING");
+            issue.setEvidence(String.format(
+                    "全章 %d 有效字，对白轮次 %d 次，密度 %.1f 次/千字；计划声明对话场景 %d 条，台词未落进正文 %d 条",
+                    effectiveChars, utterances, density, declaredScenes.size(), missing.size()));
+            issue.setDescription(String.format(
+                    "对白轮次坍缩（对话承载违约）：计划已声明 %d 条对话承载场景（对话承载闸门放行的承诺），"
+                            + "正文轮次密度仍只有 %.1f 次/千字，低于劣化线 %.1f（健康线 %.1f）——"
+                            + "写手把承诺的对话写成了动作、神态或沉默。计划层闸门只校验声明存在，"
+                            + "管不到正文兑现，此处即「声明→正文」的机械对账。",
+                    declaredScenes.size(), density, line, DialogueRatioPolicy.densityOk(genre)));
+            issue.setSuggestion(restorationSuggestion(declaredScenes, missing));
+        } else {
+            issue.setSeverity("MINOR");
+            issue.setEvidence(String.format("全章 %d 有效字，对白轮次 %d 次，密度 %.1f 次/千字", effectiveChars, utterances, density));
+            issue.setDescription(String.format("对白轮次坍缩：轮次密度 %.1f 次/千字，低于劣化线 %.1f"
+                    + "（健康线 %.1f）。篇幅与事件可能都够，但角色几乎不开腔——通篇动作分解与内心推演，"
+                    + "读者读到的是一份流程说明而不是戏。", density, line,
+                    DialogueRatioPolicy.densityOk(genre)));
+            issue.setSuggestion("规划层把「对话承载事件」提到 ≥2 条，并写明谁对谁、围绕什么分歧；"
+                    + "节拍表的 dialogue 供给要写出具体交锋，不要只给动作分解。"
+                    + "正文层不要靠增加环境描写或心理独白凑篇幅。");
+        }
+        return List.of(issue);
+    }
+
+    /**
+     * 修订靶点（BLOCKING 档专用）：缺失场景逐条列出（允许等价改写，不得整场改成动作或沉默）；
+     * 声明台词全部已落地时改为要求把场景扩写成有来有回的交锋——此时坍缩的根因是声明本身太薄
+     * （两句短语撑不起一场戏），补对话仍是对的修法，但不能怪写手丢了台词。
+     */
+    private static String restorationSuggestion(List<String> declaredScenes, List<String> missing) {
+        StringBuilder sb = new StringBuilder("把计划声明的对话场景落成引号对白：只补对话与必要的动作衔接，其余正文不要改动。");
+        if (missing.isEmpty()) {
+            sb.append("声明的台词均已在正文，但轮次总量仍不足——把这些场景扩写成有来有回的交锋，不要靠环境描写或心理独白凑数。");
+            return sb.toString();
+        }
+        sb.append("以下场景的台词未在正文出现，必须补回（允许等价改写，不得只改成动作或神态）：");
+        for (int i = 0; i < missing.size(); i++) {
+            String scene = missing.get(i);
+            sb.append('\n').append(i + 1).append(". ").append(scene.length() <= 60 ? scene : scene.substring(0, 60) + "…");
+        }
+        return sb.toString();
     }
 
     /**

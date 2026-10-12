@@ -326,8 +326,13 @@ public class ChapterWorker {
             // 已用情节模式黑名单：防止LLM重复使用相同情节套路（如"演武场演示→长老震惊→获授权"被用了两次）
             String usedPatternBlacklist = buildUsedPatternBlacklist(summaries, globalNo);
             // 前缀总预算守门：各块独立封顶之和仍可能击穿模型输入窗口，统一按优先级装配——
-            // 渲染顺序仍为旧版拼接顺序：末态红线 → 记忆各节（buildMemoryBlocks） → 门禁类块；
-            // 记忆拆为子块：整块截尾会先牺牲最近/纠错类尾部，分块后牺牲顺序由 priority 决定
+            // 渲染顺序：末态红线 → 记忆各节（buildMemoryBlocks） → 门禁类块 → 三账本/伏笔账；
+            // 记忆拆为子块：整块截尾会先牺牲最近/纠错类尾部，分块后牺牲顺序由 priority 决定。
+            // 第 4 档内按入参顺序贪心填装，三账本/伏笔账（常合计 5k+ 字，第 4 档主要消耗方）抽到末尾——
+            // 预算吃紧时由它们承担截断，保住情节模式黑名单/审校反馈两个小纠正通道
+            //（截断不清零余量后，同档大块排末位才轮得到它挨刀。伏笔账按动态权重
+            //  分级渲染、尾部为最低分背景条目，是最抗截的块，见 ChapterMemoryService.renderForeshadowing）
+            List<PromptBudgetGuard.Block> ledgerBlocks = detachLedgerBlocks(memoryBlocks);
             List<PromptBudgetGuard.Block> prefixBlocks = new ArrayList<>();
             prefixBlocks.add(PrefixBlock.EDGE_STATE.toBlock(edgeState));
             prefixBlocks.addAll(memoryBlocks);
@@ -341,6 +346,7 @@ public class ChapterWorker {
             if (StringUtils.isNotBlank(reviewFeedback)) {
                 prefixBlocks.add(PrefixBlock.REVIEW_FEEDBACK.toBlock(reviewFeedback));
             }
+            prefixBlocks.addAll(ledgerBlocks);
             String fullPrefix = promptBudgetGuard.assembleChapterPrefix(globalNo, prefixBlocks);
 
             // 章节契约 + 生成模式：契约把"任务层"从一段文本提升为可判定对象；
@@ -918,9 +924,11 @@ public class ChapterWorker {
                 .style(requestParameter.getStoryContextEntity().getStyle())
                 .totalChapters(requestParameter.getStoryContextEntity().getChapterCount())
                 .build();
+        // 对话承载闸门的人名来源：按当前最新记忆构建角色名册（空摘要安全降级）
+        List<String> rosterNames = chapterMemoryService.characterRoster(summaries);
         ChapterPlanSegmentPlanner.PlannedSegment planned = planSegmentPlanner.planSegment(
                 requestParameter.getStoryVO(), planCtx, prompt,
-                segment.startChapter(), segment.endChapter(), segment.blueprint(),
+                segment.startChapter(), segment.endChapter(), segment.blueprint(), rosterNames,
                 dynamicContext.getUsedPromptMap());
 
         ChapterPlanAggregate aggregate = dynamicContext.getChapterPlanAggregate();
@@ -1043,17 +1051,31 @@ public class ChapterWorker {
             return;
         }
         dynamicContext.setForeshadowSettlements(settlements);
+        // 回写排期表：判 DONE 的线必须真的关账（置 PAID）、判 PARKED 的线要记长线在养——
+        // 否则下一段仍会以「逾期补收」再下一次令，那正是"同一条伏笔被反复安排"的机制本身
+        int paid = foreshadowScheduleService.applySettlementOutcomes(
+                dynamicContext.getForeshadowSchedules(), decisions,
+                stageBlueprint.getEndChapter() == null ? 0 : stageBlueprint.getEndChapter());
         if (storyDir != null) {
             try {
                 storyRepository.writeForeshadowSettlements(storyDir, settlements);
+                if (paid > 0) {
+                    storyRepository.writeForeshadowSchedule(storyDir, dynamicContext.getForeshadowSchedules());
+                }
             } catch (Exception e) {
                 log.error("卷末清账结算落盘失败，本轮仅内存生效（崩溃恢复时弃置条目可能回账，下次出口重新裁决）", e);
             }
         }
         long recoverCount = decisions.stream()
                 .filter(d -> ForeshadowSettlementEntity.DECISION_RECOVER.equals(d.getDecision())).count();
-        log.info("卷末清账完成：第{}阶段，未填 {} 条 = 弃置 {} + 限期回收 {}（回收项将注入下一段规划）",
-                stageBlueprint.getStageNo(), decisions.size(), decisions.size() - recoverCount, recoverCount);
+        long doneCount = decisions.stream()
+                .filter(d -> ForeshadowSettlementEntity.DECISION_DONE.equals(d.getDecision())).count();
+        long parkedCount = decisions.stream()
+                .filter(d -> ForeshadowSettlementEntity.DECISION_PARKED.equals(d.getDecision())).count();
+        log.info("卷末清账完成：第{}阶段，未填 {} 条 = 已完成 {} + 长线在养 {} + 弃置 {} + 限期回收 {}"
+                        + "（已完成项已置 PAID；在养项不再催收；回收项将注入下一段规划）",
+                stageBlueprint.getStageNo(), decisions.size(), doneCount, parkedCount,
+                decisions.size() - recoverCount - doneCount - parkedCount, recoverCount);
     }
 
     /** 上一阶段（结束于 beforeChapter-1）未达成的退出条件块；无则返回 null */
@@ -1362,6 +1384,22 @@ public class ChapterWorker {
         }
     }
 
+
+    /**
+     * 把三账本/伏笔账从记忆块列表中抽出（原地移除、保持相对顺序），调用方将其追加到正文前缀末尾。
+     * Block 是 record：label 在场景内唯一（装配器不变式），按 label 匹配再 removeAll 不会误伤其他块
+     */
+    private static List<PromptBudgetGuard.Block> detachLedgerBlocks(List<PromptBudgetGuard.Block> memoryBlocks) {
+        List<PromptBudgetGuard.Block> ledgers = new ArrayList<>();
+        for (PromptBudgetGuard.Block block : memoryBlocks) {
+            if (ChapterMemoryService.LEDGER_BLOCK_LABEL.equals(block.label())
+                    || ChapterMemoryService.FORESHADOW_BLOCK_LABEL.equals(block.label())) {
+                ledgers.add(block);
+            }
+        }
+        memoryBlocks.removeAll(ledgers);
+        return ledgers;
+    }
 
     private String buildUsedPatternBlacklist(List<ChapterSummaryEntity> summaries, int chapterNo) {
         return UsedPatternPolicy.render(summaries, chapterNo, UsedPatternPolicy.BODY_LOOKBACK);

@@ -182,4 +182,34 @@ class UsedPatternPolicyTest {
                 .abilityDisplayForm(form)
                 .build();
     }
+
+    /**
+     * 本块篇幅必须与"摘要写得多详细 / 节拍写得多长"解耦（内容复述节已移除）。
+     *
+     * <p>它原先逐章渲染"摘要前 80 字 + 目标→结果"，而"目标→结果"处**不设长度上限**。
+     * 实测后果：本块在前缀预算里装不下 → 被部分截断 → 连带把排在它后面的【审校反馈】整块挤掉
+     * （一次截断会把剩余预算清零，见 {@code PromptBudgetGuard.assemble} 的修正说明）。
+     * 故此处用"极长摘要 + 极长节拍"锁住这条性质：只留聚合统计，不复述内容。
+     */
+    @Test
+    @DisplayName("篇幅与内容详略解耦：内容复述节已移除，不再随摘要/节拍长度膨胀")
+    void blockSizeDoesNotScaleWithSummaryVerbosity() {
+        String longText = "冗".repeat(600);
+        List<ChapterSummaryEntity> terse = List.of(
+                chapter(1, "老陆五金铺", "normal", "一句话。"),
+                chapter(2, "陆家客厅", "normal", "一句话。"),
+                chapter(3, "院门口", "normal", "一句话。"));
+        List<ChapterSummaryEntity> verbose = List.of(
+                withBeats(chapter(1, "老陆五金铺", "normal", longText), beat("胖墩", longText)),
+                withBeats(chapter(2, "陆家客厅", "normal", longText), beat("胖墩", longText)),
+                withBeats(chapter(3, "院门口", "normal", longText), beat("胖墩", longText)));
+
+        String terseBlock = UsedPatternPolicy.render(terse, 4, 5);
+        String verboseBlock = UsedPatternPolicy.render(verbose, 4, 5);
+
+        assertFalse(verboseBlock.contains("各章核心情节"), "内容复述节必须已被移除：" + verboseBlock);
+        assertFalse(verboseBlock.contains(longText.substring(0, 50)), "不得再复述摘要/节拍正文：" + verboseBlock);
+        int delta = Math.abs(verboseBlock.length() - terseBlock.length());
+        assertTrue(delta < 200, "篇幅应与内容详略解耦，实际相差 " + delta + " 字：" + verboseBlock);
+    }
 }

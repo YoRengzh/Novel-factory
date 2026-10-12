@@ -13,6 +13,7 @@ import cn.novel.yonren.domain.novel.service.armory.memory.StoryMemoryService;
 import cn.novel.yonren.domain.novel.service.armory.prompt.PromptBudgetGuard;
 import cn.novel.yonren.domain.novel.service.armory.quality.ChapterLengthPolicy;
 import cn.novel.yonren.domain.novel.service.armory.quality.ChapterTitlePolicy;
+import cn.novel.yonren.domain.novel.service.armory.quality.DialogueRatioPolicy;
 import cn.novel.yonren.domain.novel.service.armory.quality.ForeshadowSpanPolicy;
 import cn.novel.yonren.domain.novel.service.armory.quality.PlaceTrajectoryPolicy;
 import cn.novel.yonren.domain.novel.service.armory.quality.UsedPatternPolicy;
@@ -26,7 +27,10 @@ import org.springframework.stereotype.Service;
 
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Set;
+import java.util.stream.Collectors;
 
 /**
  * 章节计划 prompt 装配服务（自 BuildChapterPlanPromptNode 拆出）：
@@ -68,6 +72,8 @@ public class ChapterPlanPromptService {
     private static final int LOW_DENSITY_CHARS = 1500;
     /** 密度反馈回看窗口：只看最近 N 章，早期章节已不可改不回溯 */
     private static final int DENSITY_LOOKBACK = 5;
+    /** 对白坍缩反馈回看窗口：与密度反馈同窗口，同样只看最近 N 章 */
+    private static final int DIALOGUE_LOOKBACK = 5;
 
     /**
      * 组装规划 prompt（整批单段、沿用上下文默认蓝图与起始章号；包级可见供单测）
@@ -235,10 +241,16 @@ public class ChapterPlanPromptService {
         // 伏笔排期块：把"本段必须埋什么、必须收什么、哪些逾期了"摆到规划那一刻。
         // 这是 P2 唯一真正把"兑现时机"交给长视野的地方——没有它，段计划仍只能本段内自产自销。
         if (endNo != null) {
-            appendForeshadowScheduleBlock(sb, dynamicContext.getForeshadowSchedules(), startNo, endNo);
+            // 与上一块去重：同一批条目可能同时挂在结算台账与排期表上（实测同一条线被两块各说一遍，
+            // 措辞还不同）——规划层会收到两条"必须收"的命令却只有一条线。结算块带连接点信息、
+            // 对规划更有用，故保留结算块那条，排期块让位。
+            appendForeshadowScheduleBlock(sb, dynamicContext.getForeshadowSchedules(), startNo, endNo,
+                    settlementListedIntents(dynamicContext.getForeshadowSettlements(), startNo));
         }
         // 密度反馈：前文有"料少字少"的章节时，责令本段计划提高事件密度（治本的反注水）
         appendDensityFeedback(sb, dynamicContext.getChapterSummaries());
+        // 对白坍缩反馈：前文有"篇幅够、事件也在，但角色不开腔"的章节时，责令本段把冲突写进台词
+        appendDialogueCollapseFeedback(sb, dynamicContext.getChapterSummaries());
         // 伏笔长度反馈：伏笔"埋了就收"是长篇读起来浅的直接原因；
         // 埋多长由计划决定，所以必须在规划层治，写手无权改
         appendForeshadowSpanFeedback(sb, dynamicContext.getChapterSummaries());
@@ -272,14 +284,30 @@ public class ChapterPlanPromptService {
                 .append("它豁免'关键事件 ≥ 3'，但仍须落在已建立的地点里，并带来一处实质变化。");
         sb.append("\n\n【冲突编排指令】【禁止对称出场】多方势力交锋时，严禁让他们像开会一样同时到达并轮流发言")
                 .append("必须制造信息差和时间差（例如：一方暗中潜伏，一方迟到，一方只派低阶试探），让冲突呈现非对称性和意外感");
-        sb.append("\n\n【事件密度】每章 keyEvents 3-5 条：normal 章以 **4 条**为基准（其中至少 1 条对话承载事件），")
+        // 事件密度：keyEvents 是写手的供给清单——示例只给 2 条时，
+        // 模型稳定交付 3 条/章（正文 1100-1400 字），供给不足直接变成正文注水或独白章。
+        // 示例条数就是有效 schema（教训 #1），示例与要求同步提到 4 条基准。
+        // 加 dialogueScenes：散文规则"至少 2 条对话承载"无人执法（第 105 章 0 条照样放行），
+        // 声明 + 机械校验才是执法通道（见 ChapterPlanChecks.validateDialogueCarriage）
+        sb.append("\n\n【事件密度】每章 keyEvents 3-5 条：normal 章以 **4 条**为基准（其中**至少 "
+                        + ChapterPlanChecks.DIALOGUE_SCENES_MIN + " 条**由对话承载、逐字复制进 dialogueScenes，"
+                        + "并写明谁对谁、围绕什么分歧），")
                 .append("transition 章可 2-3 条；条数不足的章，写手只能靠注水或独白凑篇幅。")
+                // 场面级要求：实测同一章重跑一次，字数掉 30%、对白掉 70%——
+                // 计划供给（4 条事件、250 字）两轮逐字相同，差别只在"事件被写成一场戏还是被一句话交代"。
+                // 计划的写法直接决定正文的写法：一句话的事件，正文里只会被展开成一句过渡叙述。
+                .append("**每条 keyEvent 必须写到「场面」级**：在场人物 + 起因或分歧 + 落点或结果（如"
+                        + "「周秀兰在灶房把日历翻到背面补第五道杠，陆远山站在门口问'又记上了'，两人就"
+                        + "『孩子的事按孩子节奏来』达成一致」），**禁止**写成「谁做了什么」的一句话"
+                        + "（如「周秀兰记录了日历」）——后者在正文里只能被展开成一句过渡叙述。")
                 .append("每章必须声明 timeAdvance（本章结束时的时间，相对上一章推进 3-7 天；每段至少 1 章跳月），")
                 .append("全段单调递增并与阶段末目标（stageEnd）一致——它是年龄/时间推进的唯一合法通道。");
         sb.append("\n\n").append(PLAN_SCHEMA_MARKER).append(":")
                 .append("\n{\"chapters\":[{\"chapterNo\":").append(startNo)
                 .append(",\"title\":\"章节标题\",\"goal\":\"本章目标\",\"characters\":[\"角色A\"],")
-                .append("\"keyEvents\":[\"关键事件1\",\"关键事件2\",\"关键事件3\",\"关键事件4\"],\"timeAdvance\":\"推进2周，至XXXX年10月下旬\",\"endingHook\":\"结尾悬念\",")
+                .append("\"keyEvents\":[\"关键事件1\",\"关键事件2\",\"关键事件3\",\"关键事件4\"],")
+                .append("\"dialogueScenes\":[\"对话承载事件①（逐字取自keyEvents）\",\"对话承载事件②（逐字取自keyEvents）\"],")
+                .append("\"timeAdvance\":\"推进2周，至XXXX年10月下旬\",\"endingHook\":\"结尾悬念\",")
                 .append("\"chapterType\":\"normal\",\"suspenseBeat\":\"档位表原文之一\"");
         if (blueprint != null && blueprint.getMainLineByChapter() != null
                 && !blueprint.getMainLineByChapter().isEmpty()) {
@@ -322,7 +350,21 @@ public class ChapterPlanPromptService {
                 .append("而不是每章单发一个展示时刻。");
         // 对话承载规则：关键事件里若混入"内心梳理/制定计划"型独白事件，
         // 写手交付的对白句数会明显偏低——独白事件写不出互动。
-        rule.append("\n【对话承载·硬约束】每章关键事件**至少 1 个**由人物当面的对话/冲突/协作承载；")
+        // 由"至少 1 个"提到"至少 2 个"：实测同一段章节、同一份计划重跑一次，
+        // 对白句数从 139 掉到 97（平均从 28/章 掉到 19/章，历史 45 章稳在 31-57），
+        // 而"至少 1 个"这条字面上仍然满足——一章只有一个对话事件时，
+        // 其余三个关键事件都写成静态交代，全章就对白塌方。同时要求写清对谁、分歧是什么，
+        // 否则计划里写"二人交谈"，写手只能产出寒暄。
+        // 再补 dialogueScenes 声明 + 机械校验：散文规则只劝不罚——第 105 章 5 条关键事件
+        // 0 条对话承载（characters 写着"电脑屏幕"）照样放行。阈值常量单点在 ChapterPlanChecks，
+        // 此处引用拼接，防两侧口径漂移（与 hasUsableLadder 同套路）
+        rule.append("\n【对话承载·硬约束】每章关键事件**至少 ").append(ChapterPlanChecks.DIALOGUE_SCENES_MIN)
+                .append(" 个**由人物当面的对话/冲突/协作承载（transition 章至少 ")
+                .append(ChapterPlanChecks.DIALOGUE_SCENES_MIN_TRANSITION).append(" 个），")
+                .append("且每条这样的关键事件必须写明**谁对谁、围绕什么分歧**（人物写全名，代词不算）——只写「二人交谈」等于没写；")
+                .append("把这 ≥").append(ChapterPlanChecks.DIALOGUE_SCENES_MIN)
+                .append(" 条事件**逐字复制**进该章 dialogueScenes 字段——校验器会逐条比对：")
+                .append("对不上 keyEvents、事件里不足两个人物全名、或单人事件超过一半，整段计划会被驳回重规划；")
                 .append("**禁止**整章关键事件全部由\"内心梳理/制定计划/复盘总结/能力自评\"类独白事件构成——")
                 .append("独白事件不产生互动，写手只能交付独白章；")
                 .append("相邻两章不得连续独白主导；主角需要\"想明白一件事\"时，")
@@ -382,6 +424,57 @@ public class ChapterPlanPromptService {
                     .append("过渡章尤其不得因为没事发生就用环境描写与寒暄把篇幅填满——过渡章应当更短。")
                     .append("同一场景内若只剩反复确认已知状态的对话，请合并或直接跳到下一个事件。");
         }
+    }
+
+    /**
+     * **对白坍缩反馈**：扫描最近 {@value #DIALOGUE_LOOKBACK} 章的轮次密度，发现
+     * "篇幅够、关键事件也在，但角色不开腔"的章节时注入指令。
+     *
+     * <p><b>为什么必须在规划层治</b>：对白塌了的根因往往不在写手——计划把关键事件写成
+     * "谁做了什么"的动作清单时，写手只能交付动作分解。实测第 96 章：4 条关键事件里有 2 条是
+     * 对话承载，**数量合规**，但篇幅最大的那条是纯独白推导，规则只管条数、不管篇幅占比，
+     * 于是全章有效对话 9 句、轮次密度 4.4/千字（劣化线 6.0，同批其它章 12-27）。
+     *
+     * <p>与 {@link #appendDensityFeedback}（篇幅）、{@link #appendForeshadowSpanFeedback}（伏笔跨度）
+     * 完全同构：机械观测 → 回灌规划 → 治本。过渡章不计入：过渡章本就允许留白，
+     * 计入会逼规划层给留白也塞对话。
+     */
+    static void appendDialogueCollapseFeedback(StringBuilder sb, List<ChapterSummaryEntity> summaries) {
+        if (summaries == null || summaries.isEmpty()) {
+            return;
+        }
+        String genre = summaries.stream()
+                .filter(java.util.Objects::nonNull)
+                .map(ChapterSummaryEntity::getStoryGenre)
+                .filter(java.util.Objects::nonNull)
+                .findFirst().orElse(null);
+        double line = DialogueRatioPolicy.densityDegraded(genre);
+        List<ChapterSummaryEntity> recent = summaries.subList(
+                Math.max(0, summaries.size() - DIALOGUE_LOOKBACK), summaries.size());
+        List<String> collapsed = recent.stream()
+                .filter(s -> s != null && s.getDialogueUtterances() != null && s.getValidChars() != null
+                        && s.getValidChars() > 0)
+                .filter(s -> !ChapterTypeVO.of(s.getChapterType()).isTransition())
+                .filter(s -> DialogueRatioPolicy.utteranceDensity(
+                        s.getDialogueUtterances(), s.getValidChars()) < line)
+                .map(s -> "第" + s.getChapterNo() + "章（" + String.format("%.1f",
+                        DialogueRatioPolicy.utteranceDensity(s.getDialogueUtterances(), s.getValidChars()))
+                        + " 次/千字）")
+                .toList();
+        if (collapsed.isEmpty()) {
+            return;
+        }
+        sb.append("\n\n【对白坍缩反馈】以下章节篇幅不短、关键事件也落地了，但**角色不开腔**：")
+                .append(String.join("、", collapsed))
+                .append("（健康线 ≥ ").append(String.format("%.1f", line)).append(" 次/千字）。")
+                .append("通篇动作分解与内心推演，读者读到的是一份流程说明，不是一场戏。")
+                .append("\n本段计划必须按此修正：")
+                .append("\n1. **对话承载事件提到 ≥2 条**——不是「至少 1 条」占位就够，"
+                        + "而是让冲突与分歧在台词里发生；")
+                .append("\n2. 每条对话承载事件必须写清**谁对谁、围绕什么分歧**——"
+                        + "只写「二人交谈」等于没写，写手只能产出寒暄，"
+                        + "并把这几条事件**逐字复制**进该章 dialogueScenes 字段；")
+                .append("\n3. 人物只在动作里出场、不用台词表达意图的事件，改写为一次具体的交锋或谈判。");
     }
 
     static void appendForeshadowSpanFeedback(StringBuilder sb, List<ChapterSummaryEntity> summaries) {
@@ -447,9 +540,56 @@ public class ChapterPlanPromptService {
     /** 排期块注入条数上限（与限期回收同款：超出部分留在排期表，后续段各自注入，避免吃掉前缀预算） */
     private static final int SCHEDULE_INJECTION_LIMIT = 8;
 
+    /**
+     * 逾期挂起阈值（章）：逾期 ≥ 该值仍未收回的线**停止自动补收**，改入「逾期挂起·待人工裁定」。
+     *
+     * <p><b>标定依据</b>（实测逾期分布正好两簇）：仍在推进的条目逾期 11-22 章，
+     * 真正卡死的几条逾期 48-74 章——30 落在两簇之间。
+     *
+     * <p>为什么必须有个停手点：卡死的线跨多个排期块被反复结转、每段都带着
+     * 「本段必须补收，不要再往后拖」，规划层于是每段都把它们安排一遍——这就是
+     * "伏笔重复拖沓"的机制。而它们关不掉的原因多半是**已经写了、账本没认出来**，
+     * 继续下令不会让它变得更真，只会让同一件事被重写。
+     */
+    static final int OVERDUE_SUSPEND_CHAPTERS = 30;
+
+    /** 挂起块注入条数上限：每次只摆 3 条，避免挂起清单自己膨胀成新的噪声源 */
+    private static final int SUSPEND_INJECTION_LIMIT = 3;
+
+    /** 「长线在养」注入条数上限：只给条目名，仍然限量——它不该成为新的前缀负担 */
+    private static final int PARKED_INJECTION_LIMIT = 5;
+
+    /**
+     * **伏笔排期块**：五块——必须埋 / 必须兑现 / **逾期补收** / **逾期挂起·待人工裁定** /
+     * **长线在养·本段不主动安排**。
+     *
+     * <p><b>「本段不得兑现」这半句是把"不要埋了就收"的抽象要求
+     * 落成了可执行的单条约束</b>——否则段计划看到"本段要埋 X"的第一反应就是顺手把它收掉。
+     *
+     * <p><b>为什么必须有"逾期补收"块</b>：只注入"payoff 落在本段内"的条目时，
+     * 逾期未收的线会彻底消失——它既不在本段要收的窗口里，又没人提醒它欠着账，
+     * 而阶段可长达 30-80 章。故逾期项**每段持续注入**，直到收掉或被清账裁决。
+     *
+     * <p>无排期表时整块不出现（老故事/未启用），与引入前行为完全一致。
+     *
+     * <p><b>注入前必须去重</b>：同一条线在多个阶段块里各存一份，各桶上限又按条数截断，
+     * 不去重就会把名额全花在少数几条上、并让规划层反复安排同样的事。见 {@link #dedupeByIntent}。
+     */
     static void appendForeshadowScheduleBlock(StringBuilder sb,
                                               List<ForeshadowScheduleEntity> schedules,
                                               int startNo, int endNo) {
+        appendForeshadowScheduleBlock(sb, schedules, startNo, endNo, Set.of());
+    }
+
+    /**
+     * 注入排期块，并跳过已在其它块列出过的条目（{@code alreadyListedIntents} 存归一化文本）。
+     *
+     * <p>去重与"谁让位"的取舍见 {@link #dedupeByIntent} 与方法注释。
+     */
+    static void appendForeshadowScheduleBlock(StringBuilder sb,
+                                              List<ForeshadowScheduleEntity> schedules,
+                                              int startNo, int endNo,
+                                              Set<String> alreadyListedIntents) {
         List<ForeshadowScheduleEntity.ScheduleItem> items = schedules == null || schedules.isEmpty()
                 ? List.of()
                 : schedules.stream()
@@ -457,6 +597,7 @@ public class ChapterPlanPromptService {
                         .flatMap(sc -> ForeshadowScheduleEntity.itemsOf(sc).stream())
                         .filter(java.util.Objects::nonNull)
                         .toList();
+        items = dedupeByIntent(items);
         if (items.isEmpty()) {
             return;
         }
@@ -464,14 +605,26 @@ public class ChapterPlanPromptService {
         List<String> mustPlant = new ArrayList<>();
         List<String> mustPay = new ArrayList<>();
         List<String> overdue = new ArrayList<>();
+        List<String> suspended = new ArrayList<>();
+        List<String> parked = new ArrayList<>();
         // MISSED 过滤：已判"到期未埋"的线不再注入【必须埋设】——判死条目重复注入
         // 会让规划层反复安排同一条线（实测会连续多段 MISSED）
+        // 已列过滤：同一条线在【卷末清账·限期回收】里已说过就不再重复下令
+        Set<String> alreadyListed = alreadyListedIntents == null ? Set.of() : alreadyListedIntents;
         List<ForeshadowScheduleEntity.ScheduleItem> live = items.stream()
                 .filter(item -> item != null && !ForeshadowScheduleEntity.STATUS_MISSED.equals(item.getStatus()))
+                .filter(item -> !alreadyListed.contains(ForeshadowSpanPolicy.normalize(item.getIntent())))
                 .toList();
         for (ForeshadowScheduleEntity.ScheduleItem item : live) {
             if (item.getPlantChapter() == null || item.getPayoffChapter() == null
                     || StringUtils.isBlank(item.getIntent())) {
+                continue;
+            }
+            if (item.parked()) {
+                // 长线在养（阶段出口裁定，见 ForeshadowSettlementEntity.DECISION_PARKED）：
+                // 不再要求回收，但必须**明说这是有意为之**——否则模型会"好心"自己把它安排上，
+                // 而实测那正是伏笔被反复重写的通道
+                parked.add("  - 《" + brief(item.getIntent()) + "》");
                 continue;
             }
             if (ForeshadowScheduleEntity.STATUS_PLANNED.equals(item.getStatus())
@@ -485,12 +638,21 @@ public class ChapterPlanPromptService {
                             + "章埋 → 计划第" + item.getPayoffChapter() + "章收）：本段第 "
                             + item.getPayoffChapter() + " 章必须安排回收");
                 } else if (item.getPayoffChapter() < startNo) {
-                    overdue.add("  - 《" + brief(item.getIntent()) + "》（原计划第" + item.getPayoffChapter()
-                            + "章收，**已逾期**）：本段必须补收，不要再往后拖");
+                    int overdueBy = startNo - item.getPayoffChapter();
+                    if (overdueBy >= OVERDUE_SUSPEND_CHAPTERS) {
+                        // 逾期过久：继续每段下令实测毫无效果（同一条线跨多个排期块被反复结转，
+                        // 规划层只好反复安排同一件事），停止自动补收，改交人工裁定
+                        suspended.add("  - 《" + brief(item.getIntent()) + "》（原计划第"
+                                + item.getPayoffChapter() + "章收，**已逾期 " + overdueBy + " 章**）");
+                    } else {
+                        overdue.add("  - 《" + brief(item.getIntent()) + "》（原计划第" + item.getPayoffChapter()
+                                + "章收，**已逾期**）：本段必须补收，不要再往后拖");
+                    }
                 }
             }
         }
-        if (mustPlant.isEmpty() && mustPay.isEmpty() && overdue.isEmpty()) {
+        if (mustPlant.isEmpty() && mustPay.isEmpty() && overdue.isEmpty()
+                && suspended.isEmpty() && parked.isEmpty()) {
             return;
         }
 
@@ -508,7 +670,83 @@ public class ChapterPlanPromptService {
             sb.append("\n■ **逾期补收**（计划回收章已过，属欠账而非闲笔）：");
             overdue.stream().limit(SCHEDULE_INJECTION_LIMIT).forEach(sb::append);
         }
-        sb.append("\n排期是长视野决策，单段无权改写——确需调整请在计划里说明原因，不要静默忽略。");
+        if (!suspended.isEmpty()) {
+            // 停手块：逾期过久的线不再自动下令。继续下令的实测后果是规划层每段都把它安排一遍，
+            // 而它之所以关不掉，多半是**已经写了、账本没认出来**
+            // ——回收匹配只比对摘要短句与伏笔的抽象措辞。故出口有两个：本段显式声明已完成，
+            // 或留待阶段出口裁决判 DONE（见 ForeshadowSettlementEntity.DECISION_DONE）
+            sb.append("\n■ **逾期挂起·待人工裁定**（已逾期 ≥ ").append(OVERDUE_SUSPEND_CHAPTERS)
+                    .append(" 章仍没收，**本段不再自动安排**——继续每段下令只会让同一件事被反复重写）：");
+            suspended.stream().limit(SUSPEND_INJECTION_LIMIT).forEach(sb::append);
+            sb.append("\n  处理方式（二选一）：")
+                    .append("\n  ① 若本段剧情**确已自然完成**该线，在该段末章 goal 末尾注明"
+                            + "「已完成：第N章已兑现」并说清兑现的是什么——阶段出口会据此关账；")
+                    .append("\n  ② 否则保持不动，交人工复盘裁定兑现或弃置——"
+                            + "**严禁为清账强行编排无关剧情**。");
+            if (suspended.size() > SUSPEND_INJECTION_LIMIT) {
+                sb.append("\n  （另有 ").append(suspended.size() - SUSPEND_INJECTION_LIMIT)
+                        .append(" 条同样挂起，未在此展开）");
+            }
+        }
+        if (!parked.isEmpty()) {
+            // 在养块：唯一的作用是**明确说"这条线我们是有意不动的"**。不说的话，规划层会把它
+            // 当成"被忘了的线"自发安排回收——实测老长线就是这样被反复重写的。
+            sb.append("\n■ **长线在养·本段不主动安排**（以下几条是设计上就要长跑的线，"
+                    + "已由阶段出口裁定不再催收——**不要**为清账给它们安排回收，除非剧情自然触及）：");
+            parked.stream().limit(PARKED_INJECTION_LIMIT).forEach(sb::append);
+            if (parked.size() > PARKED_INJECTION_LIMIT) {
+                sb.append("\n  （另有 ").append(parked.size() - PARKED_INJECTION_LIMIT)
+                        .append(" 条同样在养，未在此展开）");
+            }
+        }
+        sb.append("\n排期是长视野决策，单段无权改写——确需调整请在计划里说明原因，不要静默忽略"
+                + "（「逾期挂起」与「长线在养」那几条除外：前者已交人工裁定、后者是刻意不动的，"
+                + "都不要自行安排）。");
+    }
+
+    /**
+     * 按归一化 intent 去重，**保留最后一条**（同键时位置取首次出现处，结果确定）。
+     *
+     * <p><b>为什么必须去重</b>：排期表按阶段分块落盘，同一条线会在
+     * "历史块 + 各阶段结转块"里各存一份，而各桶的注入上限是**按条数**截断的。
+     * 实测一批 8 条逾期命令里 5 条逐字是同一条线——8 个名额被花光，规划层于是被反复
+     * 命令去收同几样东西，这正是"伏笔重复拖沓"的直接来源。
+     *
+     * <p>保留最后一条与 {@code ForeshadowScheduleService} 的跨版本口径一致（那边同样是"保留最后一个"），
+     * 两处若不一致，同一份数据在打标与注入上会给出相反结论。
+     */
+    static List<ForeshadowScheduleEntity.ScheduleItem> dedupeByIntent(
+            List<ForeshadowScheduleEntity.ScheduleItem> items) {
+        if (items == null || items.isEmpty()) {
+            return List.of();
+        }
+        LinkedHashMap<String, ForeshadowScheduleEntity.ScheduleItem> byIntent = new LinkedHashMap<>();
+        for (ForeshadowScheduleEntity.ScheduleItem item : items) {
+            String key = ForeshadowSpanPolicy.normalize(item.getIntent());
+            if (key.isEmpty()) {
+                // 无 intent 的条目本就在分桶时被跳过（无法渲染），此处一并丢弃以免互相覆盖
+                continue;
+            }
+            byIntent.put(key, item);
+        }
+        return new ArrayList<>(byIntent.values());
+    }
+
+    /**
+     * 【卷末清账·限期回收】块实际会列出的伏笔（归一化文本），供排期块去重。
+     *
+     * <p>口径取"精确相等"而非模糊匹配：结算台账的 {@code content} 是伏笔登记原文，
+     * 排期项的 {@code intent} 是蓝图意图——两者在实测中逐字相同，但**不保证**总是相同。
+     * 不相等时退化为旧行为（两块各列一遍），不会漏注入；反过来用模糊匹配则可能把
+     * 本段真正该收的线误吞掉，代价不对等。
+     */
+    static Set<String> settlementListedIntents(List<ForeshadowSettlementEntity> settlements, int startNo) {
+        return ForeshadowSettlementEntity.recoverTargets(settlements, startNo).stream()
+                .filter(java.util.Objects::nonNull)
+                .map(ForeshadowSettlementEntity.SettlementDecision::getContent)
+                .filter(StringUtils::isNotBlank)
+                .map(ForeshadowSpanPolicy::normalize)
+                .collect(Collectors.toSet());
     }
 
     /** 注入用短文本（intent 可能较长） */

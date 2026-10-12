@@ -131,4 +131,29 @@ class StoryBibleParserTest {
         assertEquals("甲", bible.novelTitle());
         assertEquals("乙", bible.theme());
     }
+
+    /**
+     * 主要人物档案（代词与既定事实）必须能读回来（2026-10-10）。
+     *
+     * <p>它是防"代词写错、志愿写错"的事实锚：正文曾把女主宋知渔写成「他」连写三章，
+     * 而账本里没有任何可对照的事实。读取侧与写入侧共用 {@code LABEL_CHARACTERS} 常量，
+     * 本用例守住"写进去能读出来"——值解析不出来不报错，只会表现为设定悄悄丢失。
+     */
+    @Test
+    void parse_characterProfilesRoundTrip() {
+        String roster = "陆瑾瑜（男，用「他」）；宋知渔（女，用「她」）。既定事实（不得改写）：宋知渔报名志愿二班";
+
+        StoryBibleParser.Snapshot bible = StoryBibleParser.parse(
+                "小说名称: 甲\n主人公: 陆瑾瑜\n主要人物: " + roster + "\n故事概述: 乙\n");
+
+        assertEquals(roster, bible.characters());
+        assertEquals("陆瑾瑜", bible.protagonist());
+        assertEquals("乙", bible.outline(), "人物档案是单行值，不能把后面的行吃掉");
+    }
+
+    /** 老 bible 没有这一行：返回 null（调用方据此不渲染，而不是渲染一个空栏） */
+    @Test
+    void parse_characterProfilesNullForLegacyBible() {
+        assertNull(StoryBibleParser.parse("小说名称: 甲\n").characters());
+    }
 }

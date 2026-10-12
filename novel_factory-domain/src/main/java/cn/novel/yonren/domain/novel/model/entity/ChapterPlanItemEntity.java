@@ -23,6 +23,21 @@ public class ChapterPlanItemEntity {
     private List<String> characters;
     //关键事件
     private List<String> keyEvents;
+
+    /**
+     * **对话承载事件的声明**（2026-10-10 新增）：把本章 keyEvents 中由 ≥2 个人物**当面对话/冲突/协作**
+     * 承载的那几条**逐字复制**到这里——normal/climax/finale 章 ≥2 条、transition 章 ≥1 条。
+     *
+     * <p><b>为什么需要独立字段</b>：keyEvents 是自由文本，事件的性质（有戏可演 / 单人独处）
+     * 不在结构里，机械校验数不出来——第 105 章 5 条关键事件 0 条对话承载（characters 里甚至写着
+     * "电脑屏幕"）、第 96 章"2 条对话承载数量合规但最大事件是独白"，都是这么放行的。
+     * 声明是**可机械核验**的契约：见 {@code ChapterPlanChecks.validateDialogueCarriage}——
+     * 逐字命中 keyEvents、匹配事件写到 ≥2 个人物全名、单人事件不得过半；不达标驳回重规划一次。
+     *
+     * <p>消费方仅规划层闸门（写手/节拍/审计只见 keyEvents，声明是它的子集，无需重复下达）。
+     * 老数据为 null：新计划缺声明计违规，老计划不回溯（闸门只在生成时跑）。
+     */
+    private List<String> dialogueScenes;
     //结尾悬念
     private String endingHook;
     // 本章时间推进声明（时序锚）：唯一合法的年龄/时间推进通道——写手据此渲染锁定锚，

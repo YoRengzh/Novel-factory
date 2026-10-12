@@ -35,7 +35,11 @@ import static org.mockito.Mockito.when;
  */
 class ChapterPlanSegmentPlannerTest {
 
-    private static final List<String> LADDER = List.of("双方不知", "一方起疑", "双方持证", "摊牌");
+    /**
+     * 四档文案互不共享字符：夹具事件以档位原文收尾，若档位间共享前缀（如"双方"），
+     * 会把事件模板的共享段顶过 10 字判定线、误触跨章场景重演校验（实测踩过）
+     */
+    private static final List<String> LADDER = List.of("彼此不知", "有人起疑", "互持实证", "摊牌对质");
 
     @Mock
     private LlmInvokeService llmInvokeService;
@@ -69,18 +73,41 @@ class ChapterPlanSegmentPlannerTest {
         return planJson("1", LADDER.get(0), "2", LADDER.get(1), "3", LADDER.get(2));
     }
 
+    /** 与 {@link #planJson} 同构但**缺 dialogueScenes**：专测对话承载闸门的"缺声明"分支 */
+    private static String planJsonMissingDialogue(String... noAndBeat) {
+        return planJson(false, noAndBeat);
+    }
+
     private static String planJson(String... noAndBeat) {
+        return planJson(true, noAndBeat);
+    }
+
+    /**
+     * 计划 JSON 夹具。事件文本以**档位原文收尾**：档位逐章不同时，跨章关键事件的共享模板
+     * 片段均 &lt;10 字，不会误触「跨章场景重演」校验（stagnant 夹具全章同档，属预期失败用例，
+     * 多报一条重演不影响断言）。dialogueScenes 为合规声明（≥2 条逐字复制 + 双人名 + 单人事件
+     * 不过半），使夹具默认通过对话承载闸门，各用例只针对自己要测的闸门。
+     */
+    private static String planJson(boolean withDialogueScenes, String... noAndBeat) {
         StringBuilder sb = new StringBuilder("{\"chapters\":[");
         for (int i = 0; i < noAndBeat.length; i += 2) {
             if (i > 0) {
                 sb.append(",");
             }
+            String beat = noAndBeat[i + 1];
+            String scene1 = "角色甲与角色乙商议" + beat;
+            String scene2 = "角色乙向角色甲求证" + beat;
             sb.append("{\"chapterNo\":").append(noAndBeat[i])
                     .append(",\"title\":\"第").append(noAndBeat[i]).append("章\",\"goal\":\"目标\",")
-                    .append("\"characters\":[\"角色\"],\"keyEvents\":[\"事件\"],")
-                    .append("\"timeAdvance\":\"推进3天，至2003年1月").append(noAndBeat[i]).append("日\",")
+                    .append("\"characters\":[\"角色甲\",\"角色乙\"],")
+                    .append("\"keyEvents\":[\"").append(scene1).append("\",\"").append(scene2)
+                    .append("\",\"角色甲独自复盘").append(beat).append("\"],");
+            if (withDialogueScenes) {
+                sb.append("\"dialogueScenes\":[\"").append(scene1).append("\",\"").append(scene2).append("\"],");
+            }
+            sb.append("\"timeAdvance\":\"推进3天，至2003年1月").append(noAndBeat[i]).append("日\",")
                     .append("\"endingHook\":\"悬念\",")
-                    .append("\"chapterType\":\"normal\",\"suspenseBeat\":\"").append(noAndBeat[i + 1]).append("\"}");
+                    .append("\"chapterType\":\"normal\",\"suspenseBeat\":\"").append(beat).append("\"}");
         }
         return sb.append("]}").toString();
     }
@@ -118,7 +145,7 @@ class ChapterPlanSegmentPlannerTest {
 
         ChapterPlanSegmentPlanner.PlannedSegment planned = planner.planSegment(
                 new StoryVO(), PromptContext.builder().build(), "prompt",
-                1, 3, blueprintWithMainLine(), usedPromptMap);
+                1, 3, blueprintWithMainLine(), null, usedPromptMap);
 
         assertEquals(3, planned.plan().getChapters().size());
         verify(llmInvokeService, times(2)).invoke(any(), any(), any(), anyString(), any());
@@ -137,7 +164,7 @@ class ChapterPlanSegmentPlannerTest {
 
         ChapterPlanSegmentPlanner.PlannedSegment planned = planner.planSegment(
                 new StoryVO(), PromptContext.builder().build(), "prompt",
-                1, 3, blueprintWithLadder(), usedPromptMap);
+                1, 3, blueprintWithLadder(), null, usedPromptMap);
 
         assertEquals(3, planned.plan().getChapters().size());
         verify(llmInvokeService, times(2)).invoke(any(), any(), any(), anyString(), any());
@@ -156,7 +183,47 @@ class ChapterPlanSegmentPlannerTest {
 
         ChapterPlanSegmentPlanner.PlannedSegment planned = planner.planSegment(
                 new StoryVO(), PromptContext.builder().build(), "prompt",
-                1, 3, blueprintWithLadder(), usedPromptMap);
+                1, 3, blueprintWithLadder(), null, usedPromptMap);
+
+        assertNotNull(planned);
+        assertEquals(3, planned.plan().getChapters().size());
+        verify(llmInvokeService, times(2)).invoke(any(), any(), any(), anyString(), any());
+    }
+
+    /**
+     * 2026-10-10：对话承载闸门必须接进规划器——计划未声明 dialogueScenes 时打回重规划，
+     * 回注文本必须点名问题，并给出"里程碑是落点不是事件本体"的修正方向
+     * （解开蓝图逐字锁与"要有戏"的死结，否则模型只会原样重生成一遍）。
+     */
+    @Test
+    void planSegment_dialogueGateRejectsAndReplansWithFeedback() {
+        when(llmInvokeService.invoke(any(), any(), any(), anyString(), any()))
+                .thenReturn(planJsonMissingDialogue("1", LADDER.get(0), "2", LADDER.get(1), "3", LADDER.get(2)),
+                        compliantPlan());
+
+        ChapterPlanSegmentPlanner.PlannedSegment planned = planner.planSegment(
+                new StoryVO(), PromptContext.builder().build(), "prompt",
+                1, 3, blueprintWithLadder(), List.of("角色甲", "角色乙"), usedPromptMap);
+
+        assertEquals(3, planned.plan().getChapters().size());
+        ArgumentCaptor<String> promptCaptor = ArgumentCaptor.forClass(String.class);
+        verify(llmInvokeService, times(2)).invoke(any(), any(), any(), promptCaptor.capture(), any());
+        assertTrue(promptCaptor.getAllValues().get(1).contains("对话承载被机械驳回"),
+                "回注重规划必须带上对话承载的差异化修正指令：" + promptCaptor.getAllValues().get(1));
+        assertTrue(promptCaptor.getAllValues().get(1).contains("不是**事件本体**"),
+                "修正指令必须解开'蓝图逐字锁'死结：" + promptCaptor.getAllValues().get(1));
+    }
+
+    @Test
+    void planSegment_dialogueGateFailsTwice_warnsAndReleases() {
+        // 两轮都缺声明：重规划一次后告警放行（与其它推进校验同款软闸门，不因规划僵持终止整批）
+        when(llmInvokeService.invoke(any(), any(), any(), anyString(), any()))
+                .thenReturn(planJsonMissingDialogue("1", LADDER.get(0), "2", LADDER.get(1), "3", LADDER.get(2)),
+                        planJsonMissingDialogue("1", LADDER.get(0), "2", LADDER.get(1), "3", LADDER.get(2)));
+
+        ChapterPlanSegmentPlanner.PlannedSegment planned = planner.planSegment(
+                new StoryVO(), PromptContext.builder().build(), "prompt",
+                1, 3, blueprintWithLadder(), List.of("角色甲", "角色乙"), usedPromptMap);
 
         assertNotNull(planned);
         assertEquals(3, planned.plan().getChapters().size());
@@ -171,7 +238,7 @@ class ChapterPlanSegmentPlannerTest {
 
         ChapterPlanSegmentPlanner.PlannedSegment planned = planner.planSegment(
                 new StoryVO(), PromptContext.builder().build(), "prompt",
-                1, 3, null, usedPromptMap);
+                1, 3, null, null, usedPromptMap);
 
         assertEquals(3, planned.plan().getChapters().size());
         verify(llmInvokeService, times(1)).invoke(any(), any(), any(), anyString(), any());
@@ -190,7 +257,7 @@ class ChapterPlanSegmentPlannerTest {
 
         ChapterPlanSegmentPlanner.PlannedSegment planned = planner.planSegment(
                 new StoryVO(), PromptContext.builder().build(), "prompt",
-                1, 3, null, usedPromptMap);
+                1, 3, null, null, usedPromptMap);
 
         assertEquals(3, planned.plan().getChapters().size());
         verify(llmInvokeService, times(2)).invoke(any(), any(), any(), anyString(), any());
@@ -204,7 +271,7 @@ class ChapterPlanSegmentPlannerTest {
 
         ChapterPlanSegmentPlanner.PlannedSegment planned = planner.planSegment(
                 new StoryVO(), PromptContext.builder().build(), "prompt",
-                71, 73, blueprintWithLadder(), usedPromptMap);
+                71, 73, blueprintWithLadder(), null, usedPromptMap);
 
         assertEquals(List.of(71, 72, 73),
                 planned.plan().getChapters().stream().map(c -> c.getChapterNo()).toList());
@@ -218,7 +285,7 @@ class ChapterPlanSegmentPlannerTest {
 
         assertThrows(AppException.class, () -> planner.planSegment(
                 new StoryVO(), PromptContext.builder().build(), "prompt",
-                1, 1, blueprintWithLadder(), usedPromptMap));
+                1, 1, blueprintWithLadder(), null, usedPromptMap));
     }
 
     @Test
@@ -229,7 +296,7 @@ class ChapterPlanSegmentPlannerTest {
 
         ChapterPlanSegmentPlanner.PlannedSegment planned = planner.planSegment(
                 new StoryVO(), PromptContext.builder().build(), "prompt",
-                1, 3, blueprintWithLadder(), usedPromptMap);
+                1, 3, blueprintWithLadder(), null, usedPromptMap);
 
         assertEquals(3, planned.plan().getChapters().size());
         ArgumentCaptor<String> promptCaptor = ArgumentCaptor.forClass(String.class);
@@ -248,7 +315,7 @@ class ChapterPlanSegmentPlannerTest {
 
         ChapterPlanSegmentPlanner.PlannedSegment planned = planner.planSegment(
                 new StoryVO(), PromptContext.builder().build(), "prompt",
-                1, 3, blueprintWithLadder(), usedPromptMap);
+                1, 3, blueprintWithLadder(), null, usedPromptMap);
 
         assertNotNull(planned);
         assertEquals(3, planned.plan().getChapters().size());
@@ -267,7 +334,7 @@ class ChapterPlanSegmentPlannerTest {
 
         ChapterPlanSegmentPlanner.PlannedSegment planned = planner.planSegment(
                 new StoryVO(), PromptContext.builder().build(), "prompt",
-                1, 3, blueprintWithLadder(), usedPromptMap);
+                1, 3, blueprintWithLadder(), null, usedPromptMap);
 
         assertEquals(3, planned.plan().getChapters().size());
         verify(llmInvokeService, times(1)).invoke(any(), any(), any(), anyString(), any());
