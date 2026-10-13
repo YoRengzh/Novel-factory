@@ -227,7 +227,8 @@ story:
       cache-enabled: true    # 按 场景+题材+章节类型 缓存选择结果；false 则每章实时选择
       max-selected: 3        # 单次最多注入的资料份数
       # 默认用 llm，让 Continue with ChatGPT 在没有独立 Embedding Key 时也能完整生成。
-      # 配好 embedding-api 的 Key 后可改为 vector；vector 链路失败仍会快速终止，不静默降级。
+      # 配好 embedding-api 的 Key + Qdrant（story.vector-store）后建议改为 vector，语义检索比索引挑选更准；
+      # vector 链路失败仍会快速终止，不静默降级。
       mode: llm                 # llm = LLM 索引选择；vector = 向量语义检索
       top-k: 3               # 向量检索命中点数（聚合到文件级后受 max-selected 截断）
       min-score: 0.35        # 向量检索最低相似分（Cosine 越大越相近）；过滤无关命中
