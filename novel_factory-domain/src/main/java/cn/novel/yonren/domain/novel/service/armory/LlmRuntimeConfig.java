@@ -30,11 +30,15 @@ import java.util.stream.Collectors;
 @Component
 public class LlmRuntimeConfig {
 
+    public static final String AUTH_API_KEY = "api-key";
+    public static final String AUTH_CHATGPT = "chatgpt";
+
     /** 覆盖文件：相对进程工作目录（与 usage 记账目录 data/log 同层） */
     private static final Path DEFAULT_FILE = Path.of("data", "llm-config-override.json");
 
     @Data
     public static class Overlay {
+        private String authMode;
         private String baseUrl;
         private String apiKey;
         private String model;
@@ -54,7 +58,8 @@ public class LlmRuntimeConfig {
         private Integer embedDimensions;
 
         public boolean isEmpty() {
-            return StringUtils.isBlank(baseUrl) && StringUtils.isBlank(apiKey)
+            return !AUTH_CHATGPT.equals(authMode)
+                    && StringUtils.isBlank(baseUrl) && StringUtils.isBlank(apiKey)
                     && StringUtils.isBlank(model) && maxTokens == null
                     && (scenes == null || scenes.isEmpty())
                     && sceneApiEnabled == null
@@ -120,6 +125,15 @@ public class LlmRuntimeConfig {
             return view();
         }
         Overlay current = overlay == null ? new Overlay() : overlay;
+        if (request.getAuthMode() != null) {
+            String requestedMode = request.getAuthMode().trim().toLowerCase();
+            if (!AUTH_API_KEY.equals(requestedMode) && !AUTH_CHATGPT.equals(requestedMode)) {
+                throw new IllegalArgumentException("不支持的 LLM 认证方式：" + request.getAuthMode());
+            }
+            next.setAuthMode(AUTH_CHATGPT.equals(requestedMode) ? AUTH_CHATGPT : null);
+        } else {
+            next.setAuthMode(current.getAuthMode());
+        }
         if (StringUtils.isNotBlank(request.getBaseUrl())) {
             next.setBaseUrl(request.getBaseUrl().trim());
         } else {
@@ -363,6 +377,7 @@ public class LlmRuntimeConfig {
     public LlmConfigDTO view() {
         Overlay o = overlay;
         LlmConfigDTO dto = new LlmConfigDTO();
+        dto.setAuthMode(usesChatGptAuth() ? AUTH_CHATGPT : AUTH_API_KEY);
         // 场景级 API 开关：覆盖里没设过则回 null（前端按"未设置=场景可自带 API"展示）
         dto.setSceneApiEnabled(o == null ? null : o.getSceneApiEnabled());
         if (o == null || o.isEmpty()) {
@@ -378,6 +393,12 @@ public class LlmRuntimeConfig {
             dto.setApiKeyMasked(mask(o.getApiKey()));
         }
         return dto;
+    }
+
+    /** 主聊天模型是否使用 Continue with ChatGPT；Embedding 始终保持独立配置。 */
+    public boolean usesChatGptAuth() {
+        Overlay current = overlay;
+        return current != null && AUTH_CHATGPT.equals(current.getAuthMode());
     }
 
     /**

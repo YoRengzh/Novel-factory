@@ -330,10 +330,25 @@
                     <h2 class="section-title" data-page-node-id="sfCcfegkh2hdiOBSBjTe39">模型接入设置</h2>
                     <p class="settings-hint" data-page-node-id="rrPQmPdb0b7IvAC2nZDzCt">
                         配置映射到后端运行时覆盖（data/llm-config-override.json），保存即生效、跨重启保留；
-                        留空字段保持当前值，全部留空时仍走本地 yml 静态配置。API Key 即 Bearer Token，不回显原文。
+                        可使用 API Key，或通过 Continue with ChatGPT 使用符合条件的 ChatGPT 套餐；登录令牌只保存在本机且不回传页面。
                     </p>
                     <form id="llm-config-form" data-page-node-id="ZY2cNi8MuRs5rq4b3UNhpA">
                         <div class="form-grid" data-page-node-id="ywPMI8GYskyuZUM7pQV323">
+                            <div class="form-group full-width">
+                                <label for="llm_authMode">认证方式</label>
+                                <select id="llm_authMode">
+                                    <option value="api-key">API Key / Token</option>
+                                    <option value="chatgpt">Continue with ChatGPT（订阅授权）</option>
+                                </select>
+                            </div>
+                            <div id="chatgpt-auth-panel" class="form-group full-width hidden">
+                                <div id="chatgpt-auth-status" class="config-status">正在检查 ChatGPT 登录状态…</div>
+                                <div class="form-actions">
+                                    <button type="button" id="btn-chatgpt-login" class="btn-primary">Continue with ChatGPT</button>
+                                    <button type="button" id="btn-chatgpt-logout" class="btn-secondary hidden">退出 ChatGPT 登录</button>
+                                </div>
+                                <p class="settings-hint">ChatGPT 模式使用官方 Responses API；模型列表来自当前账号。该授权不包含 Embedding，向量检索仍使用下方独立 API Key。</p>
+                            </div>
                             <div class="form-group full-width" data-page-node-id="ehUJpYpS5rRkcXOGWR04wL">
                                 <label for="llm_baseUrl" data-page-node-id="EUMPpI57BrjHvKp5FetCky">Base URL（接口地址）</label>
                                 <input type="text" id="llm_baseUrl" placeholder="https://dashscope.aliyuncs.com/compatible-mode" autocomplete="off" data-page-node-id="Y4pKmSBIqmyJIeEOcgzNtA">
@@ -344,7 +359,8 @@
                             </div>
                             <div class="form-group" data-page-node-id="F3AWguuOGKwqoUr58Qsssx">
                                 <label for="llm_model" data-page-node-id="qKRtb2BmcK3EUjGHyhoMYn">模型名（model）</label>
-                                <input type="text" id="llm_model" placeholder="qwen3.8-flash" autocomplete="off" data-page-node-id="JdKtPhR3f7rxHlf8ruKdF2">
+                                <input type="text" id="llm_model" list="chatgpt-model-options" placeholder="qwen3.8-flash" autocomplete="off" data-page-node-id="JdKtPhR3f7rxHlf8ruKdF2">
+                                <datalist id="chatgpt-model-options"></datalist>
                             </div>
                             <div class="form-group" data-page-node-id="FRmqQFFDO0PM9fxWaOyM02">
                                 <label for="llm_maxTokens" data-page-node-id="61SJLrkXJSlZMfE4ycGe8F">最大输出 Token</label>

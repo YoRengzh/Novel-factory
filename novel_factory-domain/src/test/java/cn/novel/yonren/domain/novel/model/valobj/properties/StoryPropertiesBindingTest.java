@@ -25,6 +25,21 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class StoryPropertiesBindingTest {
 
     @Test
+    void defaultReferenceSelectorDoesNotRequireASeparateEmbeddingApiKey() throws Exception {
+        YamlPropertySourceLoader loader = new YamlPropertySourceLoader();
+        List<PropertySource<?>> sources = loader.load("novel-gen",
+                new FileSystemResource("../novel_factory-app/src/main/resources/novel-generation.yml"));
+        Binder binder = new Binder(ConfigurationPropertySources.from(sources));
+
+        ReferenceSelectorProperties selector = binder.bind(
+                        "story.prompt.reference-selector", ReferenceSelectorProperties.class)
+                .orElseThrow(() -> new AssertionError("story.prompt.reference-selector 绑定失败"));
+
+        assertEquals("llm", selector.getMode(),
+                "默认配置必须允许仅使用 ChatGPT 登录；配置独立 Embedding Key 后可显式切换为 vector");
+    }
+
+    @Test
     void bindsSceneModelsFromRealYaml() throws Exception {
         YamlPropertySourceLoader loader = new YamlPropertySourceLoader();
         List<PropertySource<?>> sources = loader.load("novel-gen",

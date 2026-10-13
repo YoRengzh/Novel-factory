@@ -14,6 +14,8 @@ import java.util.Map;
  */
 @Data
 public class LlmConfigSaveRequestDTO {
+    /** 主聊天模型认证方式：api-key 或 chatgpt；null=保持现状 */
+    private String authMode;
     /** 接口地址覆盖；留空/空白=保留现有值 */
     private String baseUrl;
     /** 新密钥；留空/空白=保留现有值（原文不回显，避免被误清空） */

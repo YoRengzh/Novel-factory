@@ -1,9 +1,9 @@
 (function () {
     'use strict';
 
-    // API 基础地址：页面从后端同源打开(8080)时用相对路径；
-    // 从 IDEA 静态预览(63342 等)打开时自动指向本地后端，配合后端 CORS 白名单跨域调用
-    var API_BASE = (location.port === '8080' || location.port === '') ? '' : 'http://localhost:8080';
+    // 后端实际端口可由 server.port 覆盖，因此正常部署一律使用页面同源地址。
+    // 只有 IDEA 内置静态预览（63342）需要转发到默认的本地后端端口。
+    var API_BASE = location.port === '63342' ? 'http://localhost:8080' : '';
 
     const THEME_KEY = 'novel_factory_theme';
 
@@ -1667,6 +1667,12 @@
     const inputApiKey = document.getElementById('llm_apiKey');
     const inputModel = document.getElementById('llm_model');
     const inputMaxTokens = document.getElementById('llm_maxTokens');
+    const inputAuthMode = document.getElementById('llm_authMode');
+    const chatGptPanel = document.getElementById('chatgpt-auth-panel');
+    const chatGptStatus = document.getElementById('chatgpt-auth-status');
+    const btnChatGptLogin = document.getElementById('btn-chatgpt-login');
+    const btnChatGptLogout = document.getElementById('btn-chatgpt-logout');
+    const chatGptModelOptions = document.getElementById('chatgpt-model-options');
     const sceneMatrixDiv = document.getElementById('scene-matrix');
     const sceneUnifiedNote = document.getElementById('scene-unified-note');
     const sceneStatusDiv = document.getElementById('scene-config-status');
@@ -1676,10 +1682,12 @@
     const sceneApiHint = document.getElementById('scene-api-hint');
 
     function renderLlmConfig(data) {
+        inputAuthMode.value = data.authMode || 'api-key';
         inputBaseUrl.value = data.baseUrl || '';
         inputApiKey.value = '';
         inputModel.value = data.model || '';
         inputMaxTokens.value = data.maxTokens != null ? data.maxTokens : '';
+        renderAuthMode();
         if (!data.configured) {
             llmStatusDiv.className = 'config-status';
             llmStatusDiv.textContent = '当前无运行时覆盖，调用全部走本地 yml 静态配置';
@@ -1691,6 +1699,45 @@
         }
         renderSceneMatrix(data);
         renderEmbedding(data.embedding);
+    }
+
+    function renderAuthMode() {
+        const chatGpt = inputAuthMode.value === 'chatgpt';
+        chatGptPanel.classList.toggle('hidden', !chatGpt);
+        inputBaseUrl.disabled = chatGpt;
+        inputApiKey.disabled = chatGpt;
+        inputMaxTokens.disabled = chatGpt;
+        if (chatGpt) loadChatGptStatus();
+    }
+
+    function loadChatGptStatus() {
+        fetchJson('/api/auth/chatgpt/status').then(function (status) {
+            btnChatGptLogin.classList.toggle('hidden', status.authorized);
+            btnChatGptLogout.classList.toggle('hidden', !status.authorized);
+            chatGptStatus.className = 'config-status' + (status.authorized ? ' has-config' : '');
+            chatGptStatus.textContent = status.authorized
+                ? '已登录 ChatGPT：' + (status.email || '账号已授权')
+                : '尚未登录。点击 Continue with ChatGPT 在浏览器中授权。';
+            if (status.authorized) loadChatGptModels();
+        }).catch(function (err) {
+            chatGptStatus.className = 'config-status';
+            chatGptStatus.textContent = 'ChatGPT 登录状态读取失败：' + err.message;
+        });
+    }
+
+    function loadChatGptModels() {
+        fetchJson('/api/auth/chatgpt/models').then(function (models) {
+            chatGptModelOptions.innerHTML = (models || []).map(function (model) {
+                return '<option value="' + esc(model.slug) + '">' + esc(model.displayName || model.slug) + '</option>';
+            }).join('');
+            const slugs = (models || []).map(function (model) { return model.slug; });
+            if (slugs.length && slugs.indexOf(inputModel.value.trim()) < 0) {
+                inputModel.value = slugs[0];
+                chatGptStatus.textContent += ' · 已选择可用模型 ' + slugs[0] + '，请保存配置。';
+            }
+        }).catch(function (err) {
+            chatGptStatus.textContent += ' · 模型列表读取失败：' + err.message;
+        });
     }
 
     // 场景模型矩阵：静态生效值 + 覆盖输入（留空=清除该字段覆盖，整表提交后端全量替换）
@@ -1848,7 +1895,7 @@
 
     llmConfigForm.addEventListener('submit', function (e) {
         e.preventDefault();
-        const body = { reset: false };
+        const body = { reset: false, authMode: inputAuthMode.value };
         if (inputBaseUrl.value.trim() !== '') body.baseUrl = inputBaseUrl.value.trim();
         if (inputApiKey.value.trim() !== '') body.apiKey = inputApiKey.value.trim();
         if (inputModel.value.trim() !== '') body.model = inputModel.value.trim();
@@ -1869,6 +1916,46 @@
             showToast('配置保存失败：' + err.message);
         })
         .finally(function () { btnSaveLlmConfig.disabled = false; });
+    });
+
+    inputAuthMode.addEventListener('change', renderAuthMode);
+
+    btnChatGptLogin.addEventListener('click', function () {
+        const popup = window.open('', 'novel-factory-chatgpt-login', 'width=720,height=760');
+        btnChatGptLogin.disabled = true;
+        fetchJson('/api/auth/chatgpt/start', { method: 'POST' })
+        .then(function (result) {
+            if (!popup) throw new Error('浏览器阻止了登录窗口，请允许本站弹窗');
+            popup.location.href = result.url;
+            popup.focus();
+        })
+        .catch(function (err) {
+            if (popup) popup.close();
+            showToast('ChatGPT 登录启动失败：' + err.message);
+        })
+        .finally(function () { btnChatGptLogin.disabled = false; });
+    });
+
+    btnChatGptLogout.addEventListener('click', function () {
+        btnChatGptLogout.disabled = true;
+        fetchJson('/api/auth/chatgpt', { method: 'DELETE' })
+        .then(function () {
+            loadChatGptStatus();
+            showToast('已退出 ChatGPT 登录');
+        })
+        .catch(function (err) { showToast('退出失败：' + err.message); })
+        .finally(function () { btnChatGptLogout.disabled = false; });
+    });
+
+    window.addEventListener('message', function (event) {
+        if (!event.data || event.data.type !== 'chatgpt-auth-complete') return;
+        if (event.data.success) {
+            inputAuthMode.value = 'chatgpt';
+            renderAuthMode();
+            showToast('ChatGPT 登录成功，请确认模型并保存配置');
+        } else {
+            loadChatGptStatus();
+        }
     });
 
     btnResetLlmConfig.addEventListener('click', function () {

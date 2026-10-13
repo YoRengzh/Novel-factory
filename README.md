@@ -18,7 +18,7 @@
 
 | 档位 | 需要准备 | 能得到什么 |
 |---|---|---|
-| **必需（最低）** | 一个 OpenAI 兼容端点的 **API Key** | 全流程可跑通。文件侧记忆完整工作：三账本、章节摘要、伏笔排期、一致性索引、批末体检——长篇要的那套约束一个都不少 |
+| **必需（最低）** | 一个 OpenAI 兼容端点的 **API Key**，或符合条件的 ChatGPT 套餐授权 | 全流程可跑通。文件侧记忆完整工作：三账本、章节摘要、伏笔排期、一致性索引、批末体检——长篇要的那套约束一个都不少 |
 | **推荐（质量档）** | 上面那个 Key + 一个 **embedding 模型 API Key** + 一个 **Qdrant**（Docker 一条命令） | 再开启**向量增强**：跨章记忆的语义唤醒、动态参考资料按需注入。这两项直接决定"写到第 60 章还记不记得第 8 章埋的线" |
 
 只准备第一档也完全可用，缺 Qdrant 时系统以"无向量增强"模式运行，并且批末体检的**「无检索唤醒章数占比」指标会明确告诉你哪几章是裸跑的**——不静默降级，是这套设计的通则。
@@ -101,10 +101,10 @@ docker run -d --name qdrant -p 6333:6333 -p 6334:6334 qdrant/qdrant
 
 ## 快速开始
 
-四步：**配 Key → 打包 → 启动 → 打开工作台**。完整版（含截图与排错）见[快速开始](docs/quickstart.md)。
+四步：**打包 → 启动 → 配置模型 → 打开工作台**。完整版（含截图与排错）见[快速开始](docs/quickstart.md)。
 
 ```bash
-# 1) 配置密钥（唯一必改项）——二选一：
+# 1) API Key 模式可先配置密钥（ChatGPT 登录模式跳过这步）：
 export LLM_API_KEY=sk-你的密钥
 #   或复制 config/application-local.example.yml 到
 #   novel_factory-app/src/main/resources/application-local.yml 后填入
@@ -118,6 +118,7 @@ java -jar novel_factory-app/target/novel_factory-app.jar
 
 # 4) 打开工作台
 #    http://localhost:8080
+#    设置 → 认证方式：可选择 API Key，或 Continue with ChatGPT 完成浏览器授权
 ```
 
 > 开发时想反复重启，用 `mvn install -DskipTests` 装齐 6 个模块一次，之后 `mvn -pl novel_factory-app spring-boot:run` 即可（改代码不用重打包）。
@@ -175,6 +176,7 @@ DEGRADED 进度对齐        7段（目标 ≤1 段） ｜ 第 65 章按大纲�
 ## 路线图
 
 - [x] 配置页 UI 化（密钥/模型表单化，嵌入模型分区）
+- [x] Continue with ChatGPT（OAuth/PKCE、令牌轮换、Responses API 流式调用）
 - [x] 批末体检报告前端渲染（26 项指标上页面）
 - [x] 前端随 jar 同源提供（打包后单进程即可用）
 - [x] 本地密钥覆盖文件（`application-local.yml`）真正生效
