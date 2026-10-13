@@ -1,5 +1,6 @@
 package cn.novel.yonren.infrastructure.gateway;
 
+import cn.novel.yonren.domain.novel.adapter.llm.ChatGptGateway;
 import cn.novel.yonren.domain.novel.adapter.llm.LlmGateway;
 import cn.novel.yonren.domain.novel.model.valobj.LlmCall;
 import cn.novel.yonren.domain.novel.model.valobj.StoryVO;
@@ -26,6 +27,7 @@ import org.springframework.ai.openai.api.OpenAiApi;
 import org.springframework.ai.openai.api.ResponseFormat;
 import org.springframework.ai.retry.TransientAiException;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.client.ClientHttpRequestFactory;
 import org.springframework.http.client.ClientHttpRequestInterceptor;
 import org.springframework.http.client.ClientHttpResponse;
@@ -79,14 +81,27 @@ public class SpringAiLlmGateway implements LlmGateway {
     /** 预算熔断：每次 usage 记账顺路上报 token，超阈值置位 job 停机信号（不反噬调用链） */
     private final LlmBudgetFuse budgetFuse;
 
+    /** Continue with ChatGPT：封装 OAuth 凭据与 Responses API，主网关不接触令牌。 */
+    private final ChatGptGateway chatGptGateway;
+
+    /** 保留离线校准工具的旧构造签名；这些工具只走 API Key 模式。 */
+    public SpringAiLlmGateway(int maxAttempts, int connectTimeoutSeconds, int readTimeoutSeconds,
+                              LlmRuntimeConfig llmRuntimeConfig, LlmBudgetFuse budgetFuse) {
+        this(maxAttempts, connectTimeoutSeconds, readTimeoutSeconds, llmRuntimeConfig, budgetFuse,
+                new UnavailableChatGptGateway());
+    }
+
+    @Autowired
     public SpringAiLlmGateway(@Value("${spring.ai.retry.max-attempts:1}") int maxAttempts,
                               @Value("${novel.llm.connect-timeout-seconds:20}") int connectTimeoutSeconds,
                               @Value("${novel.llm.read-timeout-seconds:600}") int readTimeoutSeconds,
                               LlmRuntimeConfig llmRuntimeConfig,
-                              LlmBudgetFuse budgetFuse) {
+                              LlmBudgetFuse budgetFuse,
+                              ChatGptGateway chatGptGateway) {
         this.maxAttempts = maxAttempts;
         this.llmRuntimeConfig = llmRuntimeConfig;
         this.budgetFuse = budgetFuse;
+        this.chatGptGateway = chatGptGateway;
         // 超时是"卡死"的唯一刹车：无超时则供应商静默不回包会永久阻塞 worker 线程
         this.requestFactory = HttpTimeouts.requestFactory(connectTimeoutSeconds, readTimeoutSeconds);
         this.retryTemplate = RetryTemplate.builder()
@@ -99,12 +114,25 @@ public class SpringAiLlmGateway implements LlmGateway {
                 maxAttempts, connectTimeoutSeconds, readTimeoutSeconds);
     }
 
+    private static final class UnavailableChatGptGateway implements ChatGptGateway {
+        private IllegalStateException unavailable() { return new IllegalStateException("Continue with ChatGPT 未装配"); }
+        public AuthStatus status() { return new AuthStatus(false, null, null); }
+        public Authorization beginAuthorization(String redirectUri) { throw unavailable(); }
+        public AuthStatus finishAuthorization(String code, String state, String clientId, String redirectUri) { throw unavailable(); }
+        public void logout() { }
+        public List<ModelOption> models() { return List.of(); }
+        public Completion complete(String model, String instructions, String input) { throw unavailable(); }
+    }
+
     @Override
     public String complete(StoryVO.Module module, LlmCall call) {
         StoryVO.Module effective = llmRuntimeConfig.applyApi(module);
         // 场景感知覆盖：场景覆盖 > 全局覆盖 > yml 静态（场景条目缺项已由 resolveChatModel 回落统一模型）
         StoryVO.Module.ChatModel primary = llmRuntimeConfig.applyModel(
                 call.getScene(), resolveChatModel(effective, call.getScene()));
+        if (llmRuntimeConfig.usesChatGptAuth()) {
+            return completeWithChatGpt(effective, primary, call);
+        }
         // 场景级降级链：主模型 → 该场景备选 → default 备选（阶段六，见 ModelFallbackChain）
         List<StoryVO.Module.ChatModel> chain = ModelFallbackChain.build(effective, call.getScene(), primary);
         if (chain.isEmpty()) {
@@ -137,6 +165,25 @@ public class SpringAiLlmGateway implements LlmGateway {
         }
         // 循环内必然 return 或 throw，此处不可达；保留以满足编译器
         throw new IllegalStateException("降级链耗尽但未捕获到异常：scene=" + call.getScene());
+    }
+
+    private String completeWithChatGpt(StoryVO.Module module, StoryVO.Module.ChatModel selected, LlmCall call) {
+        if (selected == null || StringUtils.isBlank(selected.getModel())) {
+            IllegalStateException missing = new IllegalStateException("ChatGPT 模式缺少模型配置");
+            recordUsage(module, selected, call, null, 0L, null, missing);
+            throw missing;
+        }
+        long start = System.currentTimeMillis();
+        try {
+            ChatGptGateway.Completion response = chatGptGateway.complete(
+                    selected.getModel(), call.getSystemPrompt(), call.getUserPrompt());
+            recordUsageValues(selected, call, response.content(), System.currentTimeMillis() - start,
+                    response.promptTokens(), response.completionTokens(), response.totalTokens(), null);
+            return response.content();
+        } catch (Exception e) {
+            recordUsage(module, selected, call, null, System.currentTimeMillis() - start, null, e);
+            throw e;
+        }
     }
 
     /** 单次真实调用：消息组装 + 每调用级 runtime options 合并 */
@@ -317,6 +364,15 @@ public class SpringAiLlmGateway implements LlmGateway {
 
     private void recordUsage(StoryVO.Module module, StoryVO.Module.ChatModel selected, LlmCall call,
                              String content, long durationMs, Usage usage, Exception error) {
+        recordUsageValues(selected, call, content, durationMs,
+                usage == null ? null : Long.valueOf(usage.getPromptTokens()),
+                usage == null ? null : Long.valueOf(usage.getCompletionTokens()),
+                usage == null ? null : Long.valueOf(usage.getTotalTokens()), error);
+    }
+
+    private void recordUsageValues(StoryVO.Module.ChatModel selected, LlmCall call,
+                                   String content, long durationMs, Long promptTokens,
+                                   Long completionTokens, Long totalTokens, Exception error) {
         try {
             ObjectNode line = JSON.createObjectNode();
             line.put("ts", Instant.now().toString());
@@ -333,10 +389,10 @@ public class SpringAiLlmGateway implements LlmGateway {
             line.put("responseChars", content == null ? 0 : content.length());
             line.put("durationMs", durationMs);
             line.put("success", error == null);
-            if (usage != null) {
-                line.put("promptTokens", usage.getPromptTokens());
-                line.put("completionTokens", usage.getCompletionTokens());
-                line.put("totalTokens", usage.getTotalTokens());
+            if (totalTokens != null) {
+                line.put("promptTokens", promptTokens);
+                line.put("completionTokens", completionTokens);
+                line.put("totalTokens", totalTokens);
             }
             if (error != null) {
                 String message = error.getClass().getSimpleName() + ": " + error.getMessage();
@@ -349,7 +405,7 @@ public class SpringAiLlmGateway implements LlmGateway {
             }
             // 预算熔断上报：usage 缺失（部分供应商异常响应）时记 0 不影响累计语义；
             // fuse 内部自吞异常，绝不反噬调用链
-            budgetFuse.record(jobId, usage == null ? null : Long.valueOf(usage.getTotalTokens()));
+            budgetFuse.record(jobId, totalTokens);
         } catch (Exception e) {
             log.warn("usage 记账失败（不影响生成）：{}", e.getMessage());
         }

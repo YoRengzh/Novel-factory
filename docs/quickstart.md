@@ -19,10 +19,10 @@
 
 | 档位 | 需要准备 | 能得到什么 |
 |---|---|---|
-| **必需** | JDK 17+ / Maven 3.9+，以及**一个 OpenAI 兼容端点的 API Key** | 全流程可跑通，文件侧记忆（三账本/摘要/伏笔排期/一致性索引/批末体检）一个不少 |
+| **必需** | JDK 17+ / Maven 3.9+，以及**一个 OpenAI 兼容端点的 API Key**或符合条件的 ChatGPT 套餐授权 | 全流程可跑通，文件侧记忆（三账本/摘要/伏笔排期/一致性索引/批末体检）一个不少 |
 | **推荐** | 上面那个 Key + **embedding 模型 API Key** + **Qdrant** | 向量增强：跨章记忆的语义唤醒 + 动态参考资料按需注入 |
 
-用 DashScope 的话，对话与嵌入可以是同一把 Key（默认配置里 `embedding-api.api-key` 就回落到 `LLM_API_KEY`）。要分开配置见 [§3](#3-配置密钥)。
+用 DashScope 的话，对话与嵌入可以是同一把 Key（默认配置里 `embedding-api.api-key` 就回落到 `LLM_API_KEY`）。主聊天模型也可在启动后进入「设置 → 认证方式 → Continue with ChatGPT」完成浏览器授权；该授权不覆盖 Embedding。要分开配置见 [§3](#3-配置密钥)。
 
 Qdrant 一条命令起（没装 Docker 可以先跳过，不影响启动）：
 

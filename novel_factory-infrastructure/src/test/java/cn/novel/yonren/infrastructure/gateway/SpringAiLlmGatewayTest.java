@@ -1,10 +1,17 @@
 package cn.novel.yonren.infrastructure.gateway;
 
+import cn.novel.yonren.domain.novel.adapter.llm.ChatGptGateway;
+import cn.novel.yonren.domain.novel.model.valobj.LlmCall;
 import cn.novel.yonren.domain.novel.model.valobj.StoryVO;
+import cn.novel.yonren.domain.novel.service.armory.LlmRuntimeConfig;
+import cn.novel.yonren.domain.novel.service.job.LlmBudgetFuse;
 import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
 
 /**
  * LLM 网关测试：模型客户端缓存键必须区分 buildChatModel 固化的全部参数——
@@ -12,6 +19,27 @@ import static org.junit.jupiter.api.Assertions.assertNotEquals;
  * 先构建者的温度对后者生效（summary 0.2 vs chapter-content 0.5 碰撞）
  */
 class SpringAiLlmGatewayTest {
+
+    @Test
+    void complete_routesChatGptModeToResponsesGateway() {
+        LlmRuntimeConfig runtime = mock(LlmRuntimeConfig.class);
+        LlmBudgetFuse budget = mock(LlmBudgetFuse.class);
+        ChatGptGateway chatGpt = mock(ChatGptGateway.class);
+        StoryVO.Module module = new StoryVO.Module();
+        module.setAiApi(api());
+        StoryVO.Module.ChatModel model = chatModel("gpt-6.1-sol", 16384L, 0.2);
+        module.setChatModel(model);
+        LlmCall call = LlmCall.builder().systemPrompt("system").userPrompt("user").build();
+        when(runtime.usesChatGptAuth()).thenReturn(true);
+        when(runtime.applyApi(module)).thenReturn(module);
+        when(runtime.applyModel(null, model)).thenReturn(model);
+        when(chatGpt.complete("gpt-6.1-sol", "system", "user"))
+                .thenReturn(new ChatGptGateway.Completion("{\"ok\":true}", 10, 5, 15));
+        SpringAiLlmGateway gateway = new SpringAiLlmGateway(1, 20, 600, runtime, budget, chatGpt);
+
+        assertEquals("{\"ok\":true}", gateway.complete(module, call));
+        verify(chatGpt).complete("gpt-6.1-sol", "system", "user");
+    }
 
     @Test
     void cacheKeyDistinguishesAllBuildParameters() {

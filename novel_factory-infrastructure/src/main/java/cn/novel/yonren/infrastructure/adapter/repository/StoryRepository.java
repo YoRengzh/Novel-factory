@@ -584,14 +584,13 @@ public class StoryRepository implements IStoryRepository {
             throw new AppException(ResponseCode.UN_ERROR.getCode(),
                     "续写失败：故事目录不存在 " + storyDir.toAbsolutePath() + "，请检查 resumeStoryDir");
         }
-        Files.createDirectories(storyDir.resolve(StorageKeys.MEMORY_DIR));
-
         Path workspaceRoot = workspace.toRealPath();
         Path realStoryDir = storyDir.toRealPath();
         if (!realStoryDir.startsWith(workspaceRoot) || !realStoryDir.getParent().equals(workspaceRoot)) {
             throw new AppException(ResponseCode.UN_ERROR.getCode(),
                     "续写失败：故事目录真实路径越出 workspace 边界（疑似符号链接）：" + storyDirName);
         }
+        Files.createDirectories(storyDir.resolve(StorageKeys.MEMORY_DIR));
         return storyDir;
     }
 

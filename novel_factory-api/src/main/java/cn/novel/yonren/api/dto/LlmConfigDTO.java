@@ -12,6 +12,8 @@ import java.util.List;
  */
 @Data
 public class LlmConfigDTO {
+    /** 主聊天模型认证方式：api-key（默认）或 chatgpt（Continue with ChatGPT） */
+    private String authMode;
     /** 接口地址（非机密，原文返回便于表单回显） */
     private String baseUrl;
     /** 是否存在 apiKey 覆盖（区别于空值） */

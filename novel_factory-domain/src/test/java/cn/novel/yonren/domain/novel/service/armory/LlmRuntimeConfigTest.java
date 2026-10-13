@@ -447,4 +447,24 @@ class LlmRuntimeConfigTest {
 
         assertNull(config.view().getSceneApiEnabled());
     }
+
+    @Test
+    void authMode_chatGptPersistsAndResetReturnsToApiKey() {
+        Path file = tmp.resolve("override.json");
+        LlmRuntimeConfig config = new LlmRuntimeConfig(file);
+        LlmConfigSaveRequestDTO request = new LlmConfigSaveRequestDTO();
+        request.setAuthMode("chatgpt");
+
+        config.save(request);
+
+        assertTrue(config.usesChatGptAuth());
+        assertEquals("chatgpt", config.view().getAuthMode());
+        assertTrue(new LlmRuntimeConfig(file).usesChatGptAuth());
+
+        LlmConfigSaveRequestDTO reset = new LlmConfigSaveRequestDTO();
+        reset.setReset(true);
+        config.save(reset);
+        assertFalse(config.usesChatGptAuth());
+        assertEquals("api-key", config.view().getAuthMode());
+    }
 }
