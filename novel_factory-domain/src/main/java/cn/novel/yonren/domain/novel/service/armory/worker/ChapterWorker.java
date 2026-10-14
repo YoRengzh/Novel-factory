@@ -179,6 +179,9 @@ public class ChapterWorker {
     @Resource
     private IStoryRepository storyRepository;
 
+    @Resource
+    private cn.novel.yonren.domain.novel.service.armory.quality.MechanicalEventRecorder mechanicalEventRecorder;
+
     /**
      * 执行整批逐章生成，完成后把正文/摘要/质量债/风格统计回写 DynamicContext，
      * 树尾持久化节点据此统一落盘
@@ -318,6 +321,8 @@ public class ChapterWorker {
             String styleWarning = styleStatService.renderWarning(styleStat);
             // 疲劳词前置预警：把机械门禁词表与红线亮给初稿，降低初稿超标率、省一轮修订
             String fatigueBlacklist = styleStatService.renderContentFatigueBlacklist(styleStat);
+            // 重复意象警示：全书累计超频的具体意象点名 + 替换方向（词表外置、按题材取用）
+            String imageryWarning = styleStatService.renderImageryWarning(styleStat);
             String consistencyPrompt = consistencyIndexService.renderPrompt(dynamicContext.getConsistencyIndex());
             // 伏笔保密边界：本章禁泄清单（已埋未揭伏笔的谜底关键词，揭示章按计划豁免）前置亮给写手
             String secrecyGuardPrompt = chapterMemoryService.buildSecrecyGuard(summaries, item).promptBlock();
@@ -342,6 +347,7 @@ public class ChapterWorker {
             prefixBlocks.add(PrefixBlock.SECRECY_GUARD.toBlock(secrecyGuardPrompt));
             prefixBlocks.add(PrefixBlock.STYLE_FINGERPRINT.toBlock(fingerprintPrompt));
             prefixBlocks.add(PrefixBlock.USED_PATTERN_BLACKLIST.toBlock(usedPatternBlacklist));
+            prefixBlocks.add(PrefixBlock.IMAGERY_WARNING.toBlock(imageryWarning));
             // 上章审校反馈（P2）：批内滚动——第 1 章无反馈（null 块由装配器过滤）
             if (StringUtils.isNotBlank(reviewFeedback)) {
                 prefixBlocks.add(PrefixBlock.REVIEW_FEEDBACK.toBlock(reviewFeedback));
@@ -434,18 +440,40 @@ public class ChapterWorker {
                 }
             }
 
-            // 机械层风格统计滚动合并（使用最终采纳稿）
-            styleStatService.merge(styleStat, chapterContent.getContent());
+            // 机械层风格统计滚动合并（使用最终采纳稿）。
+            // 题材随调用传入：重复意象清单按题材分组取用（{@code repetition-watchlist.txt}），
+            // 题材取自故事设定（与摘要落盘的 storyGenre 同一来源，口径一致）
+            styleStatService.merge(styleStat, chapterContent.getContent(),
+                    GenreTypeVO.match(storyContext == null ? null : storyContext.getTheme(),
+                            storyContext == null ? null : storyContext.getStyle()).getCode());
 
             // 摘要立即生成，供下一章记忆前缀使用。摘要是质量门：三级降级+抢救均失败抛异常终止本批，
             // 抢救成功返回 partial 标记的残缺记忆（仅剧情摘要，账本状态缺失）
             String ledgerPrompt = chapterMemoryService.renderLedgerPrompt(summaries);
-            // 摘要携带待回收伏笔账（新→旧封顶），回收登记才能逐字沿用原文、账本核销匹配才可靠
-            List<String> pendingForeshadowing = chapterMemoryService.buildForeshadowContextList(
+            // 摘要携带待回收伏笔账（新→旧封顶），回收登记才能逐字沿用原文、账本核销匹配才可靠。
+            // 带 ID 前缀版：模型可回抄 [F章号-序号] 精确销账，不再依赖措辞吻合
+            List<String> pendingForeshadowing = chapterMemoryService.buildForeshadowContextListWithIds(
                     summaries, ChapterMemoryService.FORESHADOW_CONTEXT_LIMIT);
             ChapterSummaryEntity summary = chapterSummaryService.summarize(
                     requestParameter.getStoryVO(), item, chapterContent.getContent(), globalNo,
-                    ledgerPrompt, pendingForeshadowing);
+                    ledgerPrompt, pendingForeshadowing, summaries);
+            // 账本失配留痕：本章回收清单与待收账本一条都没匹配上时，把失配事实结构化落盘——
+            // 这是"账本按文本核销"这条设计的漏损计量点，只写 WARN 日志无法聚合
+            //（伏笔结构化 ID 改造的效果验证依赖这个数字）。fail-soft
+            ChapterSummaryService.LedgerMismatch ledgerMismatch = chapterSummaryService.consumeLedgerMismatch();
+            if (ledgerMismatch != null) {
+                mechanicalEventRecorder.recordLedgerMismatch(storyDir, globalNo,
+                        ledgerMismatch.resolvedCount(), ledgerMismatch.pendingCount(),
+                        ledgerMismatch.resolved());
+            }
+            // 种子补 new 留痕：模型偶尔只填 foreshadowSeeds 漏填 foreshadowingNew，
+            // 机械层已无条件补齐（ChapterSummaryService.syncSeedsIntoNew）——补齐事实落结构化流水，
+            // 用于回答"漏填率多高、补进来的条目后来有没有被回收"。fail-soft 同上一块
+            ChapterSummaryService.SeedNewSync seedNewSync = chapterSummaryService.consumeSeedNewSync();
+            if (seedNewSync != null) {
+                mechanicalEventRecorder.recordSeedNewSync(storyDir, globalNo,
+                        seedNewSync.addedCount(), seedNewSync.added());
+            }
             // 账本挂起裁决（L1 兜底）：机械分档仍挂起的「部分短语命中」条目，回读本章正文由 LLM 判定，
             // 补出可逐字核对的引文——引文须再经 EvidenceMatch 才入账（拟稿→机械校验，裁决层不是后门）。
             // 必须在 summaries.add 之前完成：本章记忆前缀与后续章节账本才拿得到救回的事实。
@@ -607,7 +635,10 @@ public class ChapterWorker {
                 candidateSampleService == null ? null : candidateSampleService.readStats(storyDir),
                 dynamicContext.getForeshadowSettlements(),
                 requestParameter.getStoryContextEntity() == null
-                        ? null : requestParameter.getStoryContextEntity().getChapterGoal());
+                        ? null : requestParameter.getStoryContextEntity().getChapterGoal(),
+                // 质量评分读数（唯一的 LLM 主观打分通道）：此前只落盘无人读，读完接进体检。
+                // 读取失败不该影响体检——读不到就当没有这行
+                readQualityTrendSafely(storyDir));
         // 体检结果挂到作业对象：前端轮询作业状态即可看到本批 24 项指标与建议（依旧只报不动作）
         if (job != null) {
             job.setLastHealthReport(health);
@@ -1430,5 +1461,16 @@ public class ChapterWorker {
                     .append(StringUtils.abbreviate(issue.getDescription(), 80));
         }
         return sb.toString();
+    }
+
+    /** 质量趋势读取（fail-soft）：读不到/解析不出都返回空表，由体检层跳过该行指标 */
+    private List<String> readQualityTrendSafely(Path storyDir) {
+        try {
+            List<String> lines = storyRepository.readQualityTrend(storyDir);
+            return lines == null ? List.of() : lines;
+        } catch (Exception e) {
+            log.warn("质量趋势读取失败，体检跳过质量评分行：{}", e.getMessage());
+            return List.of();
+        }
     }
 }

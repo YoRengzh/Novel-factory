@@ -210,7 +210,7 @@ class ConsistencyIndexServiceTest {
         //（首发事故为"十一个月婴儿写数论证明"，重跑又绕道为"涂鸦=答案/观察者附会"）
         ChapterSummaryEntity ch16 = ChapterSummaryEntity.builder().chapterNo(16).timePoint("正月十六上午")
                 .consistencyFacts(List.of(new ChapterSummaryEntity.ConsistencyFact(
-                        "NUMBER", "陆瑾瑜月龄", "十一个月", "陆瑾瑜", "证据")))
+                        "NUMBER", "某角色月龄", "十一个月", "角色丙", "证据")))
                 .build();
         ChapterSummaryEntity ch25 = ChapterSummaryEntity.builder().chapterNo(25).timePoint("正月某日下午").build();
 
@@ -218,7 +218,7 @@ class ConsistencyIndexServiceTest {
 
         assertTrue(anchor.contains("【时序锚】"));
         assertTrue(anchor.contains("正月某日下午"), "取最新时间点");
-        assertTrue(anchor.contains("陆瑾瑜年龄：十一个月"));
+        assertTrue(anchor.contains("角色丙年龄：十一个月"));
         assertTrue(anchor.contains("第16章摘要记录"), "必须标注年龄来源章，供按故事时间推算");
         assertTrue(anchor.contains("认知可以超前"), "认知/媒介两分法必须写进锚里");
         assertTrue(anchor.contains("媒介不能超前"));
@@ -241,12 +241,12 @@ class ConsistencyIndexServiceTest {
     void renderSettingsAgeAnchor_extractsChildAgeBoundToStageWord() {
         // 新书首段无摘要 → 摘要锚为空，需用设定兜底锚顶上（否则第一章/首段计划零年龄约束）
         String anchor = ConsistencyIndexService.renderSettingsAgeAnchor(
-                "2002年的平行现实世界。主角陆瑾瑜在2002年以4岁幼童的身份苏醒。",
-                "陆瑾瑜，灵魂是前世科技公司创始人",
-                "化作江南旧弄堂里一个4岁幼童。");
+                "2002年的平行现实世界。主角角色丙在2002年以4岁幼童的身份苏醒。",
+                "角色丙，灵魂是前世科技公司创始人",
+                "化作江南旧巷子里一个4岁幼童。");
 
         assertTrue(anchor.contains("【时序锚】"));
-        assertTrue(anchor.contains("陆瑾瑜起始年龄：4岁"), "人名取自主人公字段头部");
+        assertTrue(anchor.contains("角色丙起始年龄：4岁"), "人名取自主人公字段头部");
         assertTrue(anchor.contains("来自故事设定"));
         assertTrue(anchor.contains("认知可以超前"), "必须共用摘要锚的硬约束正文");
         assertTrue(anchor.contains("媒介不能超前"));
@@ -286,19 +286,19 @@ class ConsistencyIndexServiceTest {
     void renderTimeAnchor_picksLatestAgeFactAndFallsBackToSubjectName() {
         ChapterSummaryEntity ch10 = ChapterSummaryEntity.builder().chapterNo(10)
                 .consistencyFacts(List.of(new ChapterSummaryEntity.ConsistencyFact(
-                        "NUMBER", "陆瑾瑜月龄", "十个月", "陆瑾瑜", "证据")))
+                        "NUMBER", "某角色月龄", "十个月", "角色丙", "证据")))
                 .build();
-        // scope 缺失：人物名从 subject 去掉年龄后缀兜底（"陆瑾瑜年龄"→"陆瑾瑜"）
+        // scope 缺失：人物名从 subject 去掉年龄后缀兜底（"角色丙年龄"→"某角色"）
         ChapterSummaryEntity ch16 = ChapterSummaryEntity.builder().chapterNo(16)
                 .consistencyFacts(List.of(new ChapterSummaryEntity.ConsistencyFact(
-                        "NUMBER", "陆瑾瑜年龄", "十一个月", null, "证据")))
+                        "NUMBER", "角色丙年龄", "十一个月", null, "证据")))
                 .build();
 
         String anchor = ConsistencyIndexService.renderTimeAnchor(List.of(ch16, ch10));
 
         assertTrue(anchor.contains("十一个月"), "取章号最大的年龄事实");
         assertFalse(anchor.contains("十个月"));
-        assertTrue(anchor.contains("陆瑾瑜年龄："), "scope 缺失时用 subject 去后缀兜底");
+        assertTrue(anchor.contains("角色丙年龄："), "scope 缺失时用 subject 去后缀兜底");
     }
 
     @Test
@@ -306,7 +306,7 @@ class ConsistencyIndexServiceTest {
         // 只有 NUMBER 类型的年龄事实才算锚点：TERM 里出现"月龄"字样不应被误采
         ChapterSummaryEntity summary = ChapterSummaryEntity.builder().chapterNo(5)
                 .consistencyFacts(List.of(new ChapterSummaryEntity.ConsistencyFact(
-                        "TERM", "月龄", "十个月", "陆瑾瑜", "证据")))
+                        "TERM", "月龄", "十个月", "角色丙", "证据")))
                 .build();
         assertEquals("", ConsistencyIndexService.renderTimeAnchor(List.of(summary)));
     }

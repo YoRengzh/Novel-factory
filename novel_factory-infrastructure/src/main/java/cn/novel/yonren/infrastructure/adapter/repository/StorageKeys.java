@@ -44,6 +44,8 @@ class StorageKeys {
 
     /** 全书质量评分趋势（每 N 章追加一行 JSONL；rubric 版本号随行落盘，防止两把尺子的读数混成一条曲线） */
     static final String QUALITY_TREND_FILE = "quality-trend.jsonl";
+    /** 机械校验事件流水（伏笔账本失配/种子补齐/降级解析等；单行 JSON、追加写） */
+    static final String MECHANICAL_EVENTS_FILE = "mechanical-events.jsonl";
     static final String STYLE_FINGERPRINT_FILE = "style-fingerprints.json";
     /** 完结上限元数据（sticky cap）：首次确立后不可被后续请求抬高 */
     static final String STORY_META_FILE = "story-meta.json";

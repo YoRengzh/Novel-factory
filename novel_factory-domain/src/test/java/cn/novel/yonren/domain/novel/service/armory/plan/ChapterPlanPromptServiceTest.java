@@ -427,7 +427,7 @@ class ChapterPlanPromptServiceTest {
         List<ChapterSummaryEntity> summaries = new ArrayList<>();
         for (int ch = 1; ch <= 6; ch++) {
             summaries.add(ChapterSummaryEntity.builder()
-                    .chapterNo(ch).placePoint(ch <= 4 ? "阵法堂" : "后山禁地")
+                    .chapterNo(ch).placePoint(ch <= 4 ? "讲堂" : "后山禁地")
                     .build());
         }
 
@@ -435,7 +435,7 @@ class ChapterPlanPromptServiceTest {
                 .renderTrajectory(summaries);
 
         assertNotNull(block);
-        assertTrue(block.contains("阵法堂×4"), "复用地点应被列出供规划层继续复用");
+        assertTrue(block.contains("讲堂×4"), "复用地点应被列出供规划层继续复用");
         assertFalse(block.contains("⚠ 警示"), "有复用即不算每章换场");
     }
 
@@ -677,8 +677,8 @@ class ChapterPlanPromptServiceTest {
         StringBuilder sb = new StringBuilder();
         ChapterPlanPromptService.appendForeshadowScheduleBlock(sb, schedulesOf(
                 sched("顾老头是否收徒", 22, 35, ForeshadowScheduleEntity.STATUS_PLANNED),
-                sched("鸿运科技骗局清算", 18, 23, ForeshadowScheduleEntity.STATUS_PLANTED),
-                sched("陆周氏银锁承诺", 12, 19, ForeshadowScheduleEntity.STATUS_PLANTED)), 21, 25);
+                sched("远大科技骗局清算", 18, 23, ForeshadowScheduleEntity.STATUS_PLANTED),
+                sched("陆周氏旧锁承诺", 12, 19, ForeshadowScheduleEntity.STATUS_PLANTED)), 21, 25);
         String text = sb.toString();
 
         assertTrue(text.contains("必须埋设"), text);
@@ -718,26 +718,26 @@ class ChapterPlanPromptServiceTest {
     /**
      * 同一条线在多个阶段块里各存一份时必须去重，且**保留最后一条**。
      *
-     * <p>实测（第 96-100 章那批）：8 个逾期注入名额里 5 条逐字是同一条、2 条是同一条弹珠，
+     * <p>实测（第 96-100 章那批）：8 个逾期注入名额里 5 条逐字是同一条、2 条是同一条石子，
      * 整份清单只覆盖 3 件事——规划层被反复命令去收同三样东西，这就是"重复拖沓"的来源。
      */
     @Test
     void scheduleBlock_dedupesSameIntentAcrossBlocks() {
         List<ForeshadowScheduleEntity> twoBlocks = List.of(
                 ForeshadowScheduleEntity.builder().stageNo(1).items(new ArrayList<>(List.of(
-                        sched("主角无意识写出2026年的日期", 5, 19,
+                        sched("主角无意识写出未来年份的日期", 5, 19,
                                 ForeshadowScheduleEntity.STATUS_PLANTED)))).build(),
                 ForeshadowScheduleEntity.builder().stageNo(2).items(new ArrayList<>(List.of(
-                        sched("主角无意识写出2026年的日期", 5, 17,
+                        sched("主角无意识写出未来年份的日期", 5, 17,
                                 ForeshadowScheduleEntity.STATUS_PLANTED)))).build());
         StringBuilder sb = new StringBuilder();
 
         ChapterPlanPromptService.appendForeshadowScheduleBlock(sb, twoBlocks, 21, 25);
 
         String text = sb.toString();
-        int at = text.indexOf("主角无意识写出2026年的日期");
+        int at = text.indexOf("主角无意识写出未来年份的日期");
         assertTrue(at >= 0, "逾期条目必须注入：" + text);
-        assertEquals(-1, text.indexOf("主角无意识写出2026年的日期", at + 1),
+        assertEquals(-1, text.indexOf("主角无意识写出未来年份的日期", at + 1),
                 "同一 intent 跨块出现只应注入一次：" + text);
         assertTrue(text.contains("第17章"), "同键时应保留最后一条（payoff 17 在块 2）：" + text);
         assertFalse(text.contains("第19章"), "被覆盖的那条不应出现：" + text);
@@ -751,7 +751,7 @@ class ChapterPlanPromptServiceTest {
     void scheduleBlock_overdueLimitNotConsumedByDuplicates() {
         List<ForeshadowScheduleEntity.ScheduleItem> items = new ArrayList<>();
         for (int i = 0; i < 5; i++) {
-            items.add(sched("主角无意识写出2026年的日期", 5, 19,
+            items.add(sched("主角无意识写出未来年份的日期", 5, 19,
                     ForeshadowScheduleEntity.STATUS_PLANTED));
         }
         for (int i = 1; i <= 6; i++) {
@@ -775,14 +775,14 @@ class ChapterPlanPromptServiceTest {
      */
     @Test
     void scheduleBlock_skipsIntentsAlreadyListedBySettlement() {
-        String content = "主角无意识写出2026年的日期";
+        String content = "主角无意识写出未来年份的日期";
         List<ForeshadowSettlementEntity> settlements = List.of(ForeshadowSettlementEntity.builder()
                 .stageNo(1)
                 .stageEndChapter(20)
                 .decisions(new ArrayList<>(List.of(ForeshadowSettlementEntity.SettlementDecision.builder()
                         .content(content).chapterNo(5)
                         .decision(ForeshadowSettlementEntity.DECISION_RECOVER)
-                        .reason("第95章已由周秀兰点出").build())))
+                        .reason("第95章已由角色甲点出").build())))
                 .build());
         StringBuilder sb = new StringBuilder();
 
@@ -798,15 +798,15 @@ class ChapterPlanPromptServiceTest {
      *
      * <p>标定依据（第 96-100 章实测逾期分布，正好两簇）：仍在推进的条目逾期 11-22 章，
      * 卡死的三条逾期 48-74 章。继续每段下令的实测后果是规划层每段都把它安排一遍——
-     * 同一件事被反复重写（"藏信/格子纸"重复拖沓的机制）。
+     * 同一件事被反复重写（"藏物/记号纸"重复拖沓的机制）。
      */
     @Test
     void scheduleBlock_suspendsChronicallyOverdueInsteadOfReordering() {
         StringBuilder sb = new StringBuilder();
 
         ChapterPlanPromptService.appendForeshadowScheduleBlock(sb, schedulesOf(
-                sched("主角无意识写出2026年的日期", 5, 45, ForeshadowScheduleEntity.STATUS_PLANTED),
-                sched("蓝玻璃弹珠信物", 9, 26, ForeshadowScheduleEntity.STATUS_PLANTED)), 96, 100);
+                sched("主角无意识写出未来年份的日期", 5, 45, ForeshadowScheduleEntity.STATUS_PLANTED),
+                sched("蓝玻璃石子信物", 9, 26, ForeshadowScheduleEntity.STATUS_PLANTED)), 96, 100);
 
         String text = sb.toString();
         assertTrue(text.contains("逾期挂起·待人工裁定"), text);
@@ -832,11 +832,11 @@ class ChapterPlanPromptServiceTest {
 
     /**
      * 长线在养：阶段出口判 PARKED 的线不再被要求回收，但必须**明说这是有意为之**——
-     * 否则规划层会把它当"被忘了的线"自发安排回收（实测 2026 那条就是这样被反复重写的）。
+     * 否则规划层会把它当"被忘了的线"自发安排回收（实测 那条年份线索就是这样被反复重写的）。
      */
     @Test
     void scheduleBlock_showsParkedLongLinesWithoutOrderingRecovery() {
-        ForeshadowScheduleEntity.ScheduleItem parked = sched("主角无意识写出2026年的日期", 5, 45,
+        ForeshadowScheduleEntity.ScheduleItem parked = sched("主角无意识写出未来年份的日期", 5, 45,
                 ForeshadowScheduleEntity.STATUS_PLANTED);
         parked.setParkedAtChapter(100);
         StringBuilder sb = new StringBuilder();
@@ -846,8 +846,8 @@ class ChapterPlanPromptServiceTest {
 
         String text = sb.toString();
         assertTrue(text.contains("长线在养·本段不主动安排"), text);
-        assertTrue(text.contains("主角无意识写出2026年的日期"), "在养项仍要点名（否则会被当忘了）：" + text);
-        assertFalse(text.contains("《主角无意识写出2026年的日期》（原计划"),
+        assertTrue(text.contains("主角无意识写出未来年份的日期"), "在养项仍要点名（否则会被当忘了）：" + text);
+        assertFalse(text.contains("《主角无意识写出未来年份的日期》（原计划"),
                 "在养项不得再进逾期桶被要求补收：" + text);
         assertTrue(text.contains("另一条刚过期的线"), "其它线照常催收：" + text);
     }
@@ -855,7 +855,7 @@ class ChapterPlanPromptServiceTest {
     /** 在养必须压过「逾期挂起」：前者是有意为之、后者是待人工裁定，两者不该同时出现 */
     @Test
     void scheduleBlock_parkedLineNeverFallsIntoOverdueOrSuspended() {
-        ForeshadowScheduleEntity.ScheduleItem parked = sched("主角无意识写出2026年的日期", 5, 45,
+        ForeshadowScheduleEntity.ScheduleItem parked = sched("主角无意识写出未来年份的日期", 5, 45,
                 ForeshadowScheduleEntity.STATUS_PLANTED);
         parked.setParkedAtChapter(95);
         StringBuilder sb = new StringBuilder();

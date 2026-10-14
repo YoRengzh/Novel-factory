@@ -29,7 +29,7 @@ public class ChapterBeatsEntity {
     public static class Beat {
         /** 场景地点 */
         private String location;
-        /** 在场角色（容错：模型常输出 [{"陆瑾瑜":"婴儿"}] 形式，取键为角色名，见 CharacterNameListDeserializer） */
+        /** 在场角色（容错：模型常输出 [{"角色名":"婴儿"}] 形式，取键为角色名，见 CharacterNameListDeserializer） */
         @JsonDeserialize(using = CharacterNameListDeserializer.class)
         private List<String> characters;
         /** 本拍核心冲突/动作 */

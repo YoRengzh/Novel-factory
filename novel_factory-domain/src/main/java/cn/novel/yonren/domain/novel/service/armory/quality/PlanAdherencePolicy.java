@@ -85,14 +85,18 @@ public final class PlanAdherencePolicy {
         return text.replaceAll("[（(][^（）()]*[)）]", "");
     }
 
-    /** 最长公共连续子串长度（一维滚动 DP，O(m*n)，正文数千字 × 关键事件几十字，量级可忽略）。伏笔揭示章豁免匹配复用 */
-    public static int longestCommonSubstring(String a, String b) {
+    /**
+     * 最长公共连续**片段文本**（一维滚动 DP，O(m*n)）：供"跨章场景重演"这类需要把
+     * 重合片段回显给模型的判据使用（只报长度对模型没有行动价值，报片段才知道改哪里）。
+     */
+    public static String longestCommonSubstringText(String a, String b) {
         if (a == null || b == null || a.isEmpty() || b.isEmpty()) {
-            return 0;
+            return "";
         }
         int n = b.length();
         int[] dp = new int[n + 1];
         int max = 0;
+        int maxEnd = 0;
         for (int i = 1; i <= a.length(); i++) {
             int prev = 0;
             for (int j = 1; j <= n; j++) {
@@ -101,6 +105,7 @@ public final class PlanAdherencePolicy {
                     dp[j] = prev + 1;
                     if (dp[j] > max) {
                         max = dp[j];
+                        maxEnd = i;
                     }
                 } else {
                     dp[j] = 0;
@@ -108,7 +113,12 @@ public final class PlanAdherencePolicy {
                 prev = temp;
             }
         }
-        return max;
+        return max == 0 ? "" : a.substring(maxEnd - max, maxEnd);
+    }
+
+    /** 最长公共连续子串长度（一维滚动 DP，O(m*n)，正文数千字 × 关键事件几十字，量级可忽略）。伏笔揭示章豁免匹配复用 */
+    public static int longestCommonSubstring(String a, String b) {
+        return longestCommonSubstringText(a, b).length();
     }
 
     private static List<String> validEvents(List<String> keyEvents) {

@@ -32,19 +32,19 @@ class ChapterMemoryServiceDossierTest {
 
     @Test
     void dossier_itemMentionsDormantCharacter_injectsArchive() {
-        // 老周只在第 1 章出现（lastChapterNo=1），最新 15 章 → 休眠；本章计划又涉及他
+        // 老陈只在第 1 章出现（lastChapterNo=1），最新 15 章 → 休眠；本章计划又涉及他
         List<ChapterSummaryEntity> summaries = List.of(
-                summary(1, "老周", "铁匠铺掌柜"),
-                summary(15, "林尘", "主角"));
+                summary(1, "老陈", "铁匠铺掌柜"),
+                summary(15, "小陈", "主角"));
         ChapterPlanItemEntity item = ChapterPlanItemEntity.builder()
                 .chapterNo(16).title("回铁匠铺").goal("重返铁匠铺")
-                .characters(List.of("林尘", "老周")).keyEvents(List.of("买兵器")).build();
+                .characters(List.of("小陈", "老陈")).keyEvents(List.of("买兵器")).build();
 
         List<PromptBudgetGuard.Block> blocks = service.buildEntityDossierBlocks(summaries, item, null);
 
         assertEquals(1, blocks.size());
         String body = blocks.get(0).content();
-        assertTrue(body.contains("【实体档案·老周】"), body);
+        assertTrue(body.contains("【实体档案·老陈】"), body);
         assertTrue(body.contains("首见第1章"), body);
         assertTrue(body.contains("上次出现第1章"), body);
         assertTrue(body.contains("当前状态：铁匠铺掌柜"), body);
@@ -52,13 +52,13 @@ class ChapterMemoryServiceDossierTest {
 
     @Test
     void dossier_activeEntity_notInjected() {
-        // 老周休眠但本章不涉及他；林尘活跃（近章摘要已覆盖，不需要档案）
+        // 老陈休眠但本章不涉及他；小陈活跃（近章摘要已覆盖，不需要档案）
         List<ChapterSummaryEntity> summaries = List.of(
-                summary(1, "老周", "铁匠铺掌柜"),
-                summary(15, "林尘", "主角"));
+                summary(1, "老陈", "铁匠铺掌柜"),
+                summary(15, "小陈", "主角"));
         ChapterPlanItemEntity item = ChapterPlanItemEntity.builder()
-                .chapterNo(16).title("独自行动").goal("林尘闭关")
-                .characters(List.of("林尘")).build();
+                .chapterNo(16).title("独自行动").goal("小陈闭关")
+                .characters(List.of("小陈")).build();
 
         List<PromptBudgetGuard.Block> blocks = service.buildEntityDossierBlocks(summaries, item, null);
 
@@ -67,36 +67,36 @@ class ChapterMemoryServiceDossierTest {
 
     @Test
     void dossier_planningMode_nullItem_takesOldestFirst_cappedAtThree() {
-        // 四个休眠实体：老周/老王/老李 last=1（最久），阿七 last=5；规划路径取最久未见的前 3 个
+        // 四个休眠实体：老陈/老王/老李 last=1（最久），阿七 last=5；规划路径取最久未见的前 3 个
         List<ChapterSummaryEntity> summaries = List.of(
-                summary(1, "老周", "甲"),
+                summary(1, "老陈", "甲"),
                 summary(2, "老王", "乙"),
                 summary(3, "老李", "丙"),
                 summary(5, "阿七", "丁"),
-                summary(15, "林尘", "主角"));
+                summary(15, "小陈", "主角"));
 
         List<PromptBudgetGuard.Block> blocks = service.buildEntityDossierBlocks(summaries, null, null);
 
         // 所有实体合并进同一个块：预算守卫要求场景内 label 唯一，多块同 label 会炸规划路径
         assertEquals(1, blocks.size());
         String joined = blocks.get(0).content();
-        assertTrue(joined.contains("老周") && joined.contains("老王") && joined.contains("老李"),
+        assertTrue(joined.contains("老陈") && joined.contains("老王") && joined.contains("老李"),
                 "最久未见的实体优先：" + joined);
         assertFalse(joined.contains("【实体档案·阿七】"), "最近休眠的让位给更久的");
     }
 
     @Test
     void dossier_relationAndEarlyFact_included() {
-        ChapterSummaryEntity first = summary(1, "老周", "铁匠铺掌柜");
+        ChapterSummaryEntity first = summary(1, "老陈", "铁匠铺掌柜");
         ChapterSummaryEntity.ConsistencyFact fact = new ChapterSummaryEntity.ConsistencyFact();
         fact.setType("INJURY");
-        fact.setSubject("老周");
+        fact.setSubject("老陈");
         fact.setValue("左臂被妖兽咬伤");
         first.setConsistencyFacts(List.of(fact));
-        List<ChapterSummaryEntity> summaries = List.of(first, summary(15, "林尘", "主角"));
+        List<ChapterSummaryEntity> summaries = List.of(first, summary(15, "小陈", "主角"));
 
         ConsistencyIndexEntity.RelationEntry relation = new ConsistencyIndexEntity.RelationEntry();
-        relation.setPair("老周与林尘");
+        relation.setPair("老陈与小陈");
         relation.setRelation("师徒");
         relation.setFirstChapter(1);
         relation.setLastChapter(3);
@@ -106,12 +106,12 @@ class ChapterMemoryServiceDossierTest {
 
         List<PromptBudgetGuard.Block> blocks = service.buildEntityDossierBlocks(
                 summaries, ChapterPlanItemEntity.builder()
-                        .chapterNo(16).goal("去找老周").characters(List.of("老周")).build(),
+                        .chapterNo(16).goal("去找老陈").characters(List.of("老陈")).build(),
                 index);
 
         assertEquals(1, blocks.size());
         String body = blocks.get(0).content();
-        assertTrue(body.contains("关系：老周与林尘——师徒（第3章）"), body);
+        assertTrue(body.contains("关系：老陈与小陈——师徒（第3章）"), body);
         assertTrue(body.contains("第1章：左臂被妖兽咬伤"), body);
     }
 

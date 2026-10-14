@@ -27,7 +27,7 @@ public class BatchHealthService {
 
     /** 阈值标定基准说明：写在代码里，避免后人把初值当圣旨 */
     public static final String THRESHOLD_NOTE =
-            "阈值为 2026-09-16 改造前 162 章基线的标定初值，第一批改造后数据出齐后必须重新校准";
+            "阈值为改造前整本书基线的标定初值，第一批改造后数据出齐后必须重新校准";
 
     /** 体检最小样本：低于此章数各项比率噪声过大，直接返回"数据不足" */
     public static final int MIN_SAMPLE_CHAPTERS = 5;
@@ -161,6 +161,24 @@ public class BatchHealthService {
                                     CandidateSampleService.CandidateStats candidates,
                                     List<ForeshadowSettlementEntity> settlements,
                                     String chapterGoal) {
+        return assess(summaries, debts, blueprints, candidates, settlements, chapterGoal, List.of());
+    }
+
+    /**
+     * 体检入口（增质量评分行）。
+     *
+     * <p><b>为什么把质量评分接进来</b>：那个通道（强模型每 10 章抽 3 章打 5 维分）此前
+     * **只落盘、无人读**——每轮花的钱换来的读数直接躺在文件里。接进体检的用意不是让它当门禁，
+     * 而是让"这本书在变好还是变差"和"主观尺子在哪些维度不可信"进入批末结论。
+     * 它是**唯一的 LLM 主观打分通道**，与其余纯机械指标互补。
+     */
+    public BatchHealthReport assess(List<ChapterSummaryEntity> summaries,
+                                    List<QualityDebtEntity> debts,
+                                    List<StageBlueprintEntity> blueprints,
+                                    CandidateSampleService.CandidateStats candidates,
+                                    List<ForeshadowSettlementEntity> settlements,
+                                    String chapterGoal,
+                                    List<String> qualityTrendLines) {
         List<ChapterSummaryEntity> chapters = summaries == null ? List.of() : summaries.stream()
                 .filter(s -> s != null && s.getChapterNo() != null)
                 .sorted(Comparator.comparing(ChapterSummaryEntity::getChapterNo))
@@ -212,6 +230,10 @@ public class BatchHealthService {
         notMissed.addAll(ForeshadowSettlementEntity.parkedContents(settlements));
         addForeshadowMissed(metrics, recommendations, chapters, notMissed);
         addSettlementAudit(metrics, recommendations, settlements);
+        // 主观质量评分（唯一的 LLM 打分通道）与"评分-机械背离"：读数与自检，不作门禁
+        addQualityReview(metrics, recommendations,
+                cn.novel.yonren.domain.novel.service.armory.memory.QualityReviewService
+                        .latestSnapshot(qualityTrendLines));
 
         BatchHealthReport.Level overall = overall(metrics);
         return new BatchHealthReport(chapters.size(), metrics, overall, recommendations);
@@ -808,6 +830,55 @@ public class BatchHealthService {
             recommendations.add("短章偏多：这是规划层「计划供给不足」，不是正文层问题——"
                     + "核对密度反馈块是否已注入，以及本段计划的关键事件是否给足");
         }
+        addRecentLowDensityShare(metrics, chapters);
+    }
+
+    /** 近期窗口章数：与全量累计值并列展示的"当前水平"读数 */
+    private static final int RECENT_WINDOW = 10;
+
+    /**
+     * **近期低密度章占比**：只统计**最后 {@value #RECENT_WINDOW} 章**，
+     * 与全量累计值（{@link #addLowDensityShare}）并列展示。
+     *
+     * <p><b>为什么必须有两个口径</b>：累计值把全书历史一起算，于是**早期几十章的坏数据
+     * 会永久压着这个指标**——即使规划层已经把后续章节治好，读数也永远回不到健康区，
+     * "改好了没有"这个问题在体检单上没有答案。近期口径直接回答它。
+     * 两者背离（累计差、近期好）是**修复生效**的正常形态，不应被读成矛盾。
+     */
+    private void addRecentLowDensityShare(List<BatchHealthReport.Metric> metrics,
+                                          List<ChapterSummaryEntity> chapters) {
+        if (chapters == null || chapters.isEmpty()) {
+            return;
+        }
+        List<ChapterSummaryEntity> recent = new ArrayList<>();
+        for (int i = chapters.size() - 1; i >= 0 && recent.size() < RECENT_WINDOW; i--) {
+            ChapterSummaryEntity s = chapters.get(i);
+            if (s == null) {
+                continue;
+            }
+            recent.add(s);
+        }
+        int counted = 0;
+        int low = 0;
+        for (ChapterSummaryEntity s : recent) {
+            if (s.getValidChars() == null || ChapterTypeVO.of(s.getChapterType()).isTransition()) {
+                continue;
+            }
+            counted++;
+            if (s.getValidChars() < LOW_DENSITY_CHARS) {
+                low++;
+            }
+        }
+        if (counted == 0) {
+            return;
+        }
+        double share = (double) low / counted;
+        BatchHealthReport.Level level = lowerIsBetter(share, LOW_DENSITY_OK, LOW_DENSITY_DEGRADED);
+        metrics.add(new BatchHealthReport.Metric("recentLowDensityShare",
+                "近期低密度章占比（近" + counted + "章）",
+                share * 100, "%", "≤" + pct(LOW_DENSITY_OK) + "（同上口径，但只统计最近 " + RECENT_WINDOW + " 章）",
+                BatchHealthReport.Direction.LOWER_IS_BETTER, level,
+                low + " / " + counted + " 章——本指标反映**当前**水平；上方累计值含不可变的历史章，两者背离属正常"));
     }
 
     /** 未核销质量债：债是跨章回灌信号，积压说明同类问题反复复发没被治住 */
@@ -1023,6 +1094,108 @@ public class BatchHealthService {
                     + "恋爱/智斗题材的拉扯感来自高频短交锋（3-5 字一句、一来一回十几轮）——"
                     + "规划层应把对白写成多次短往返，而不是少数长段落");
         }
+        addDialogueCollapseShare(metrics, recommendations, chapters, genre);
+    }
+
+    /** 对白坍缩章占比的判定线（逐章口径；与低密度章占比同款形状） */
+    private static final double DIALOGUE_COLLAPSE_OK = 0.15;
+    private static final double DIALOGUE_COLLAPSE_DEGRADED = 0.35;
+
+    /**
+     * **对白坍缩章占比**（逐章口径）：非过渡章中轮次密度低于劣化线的比例。
+     *
+     * <p><b>为什么必须单开一个占比口径</b>：已有的「对白轮次密度」只报批次均值与最小值——
+     * 均值会被正常章拉平，最小值只给一个数字、不给章号。实测某章轮次密度远低于劣化线
+     * （同批其它章成倍于它），而批次均值照样落在健康区间，于是这一章从体检单上消失了，
+     * 直到读者反馈"对话崩了"才被发现。占比口径直接回答"崩了几章、是哪几章"。
+     *
+     * <p>排除过渡章的理由与 {@link #addLowDensityShare} 同款：过渡章本就该短、该留白。
+     */
+    private void addDialogueCollapseShare(List<BatchHealthReport.Metric> metrics,
+                                          List<String> recommendations,
+                                          List<ChapterSummaryEntity> chapters,
+                                          String genre) {
+        double line = DialogueRatioPolicy.densityDegraded(genre);
+        int counted = 0;
+        int collapsed = 0;
+        StringBuilder collapsedChapters = new StringBuilder();
+        for (ChapterSummaryEntity s : chapters) {
+            if (s == null || s.getDialogueUtterances() == null || s.getValidChars() == null
+                    || s.getValidChars() <= 0 || ChapterTypeVO.of(s.getChapterType()).isTransition()) {
+                continue;
+            }
+            counted++;
+            double density = DialogueRatioPolicy.utteranceDensity(s.getDialogueUtterances(), s.getValidChars());
+            if (density < line) {
+                collapsed++;
+                if (collapsedChapters.length() > 0) {
+                    collapsedChapters.append("、");
+                }
+                collapsedChapters.append("第").append(s.getChapterNo()).append("章(")
+                        .append(String.format("%.1f", density)).append(")");
+            }
+        }
+        if (counted == 0) {
+            return;
+        }
+        double share = (double) collapsed / counted;
+        BatchHealthReport.Level level = lowerIsBetter(share, DIALOGUE_COLLAPSE_OK, DIALOGUE_COLLAPSE_DEGRADED);
+        metrics.add(new BatchHealthReport.Metric("dialogueCollapseShare", "对白坍缩章占比",
+                share * 100, "%", "≤" + pct(DIALOGUE_COLLAPSE_OK) + "（非过渡章中轮次密度 <"
+                + trim(line) + " 的比例）",
+                BatchHealthReport.Direction.LOWER_IS_BETTER, level,
+                collapsed == 0
+                        ? collapsed + " / " + counted + " 章（已排除过渡章）"
+                        : collapsed + " / " + counted + " 章：" + collapsedChapters + "（已排除过渡章）"));
+        if (level != BatchHealthReport.Level.OK) {
+            recommendations.add("对白坍缩章偏多：这些章**篇幅够、事件也在，但角色不开腔**——"
+                    + "通篇是动作分解与内心推演，读起来像流程说明而不是戏。"
+                    + "修复靠规划层：关键事件要由对话承载（不是「至少 1 条」占位，"
+                    + "而是让冲突在台词里发生），并核对该章节拍表的 dialogue 供给是否给足");
+        }
+    }
+
+    /** 质量评分读数的分级线：rubric 里 6=合格、7=良好（8=优秀）。实测分数集中在 7-9，故只作趋势读数 */
+    private static final double QUALITY_OVERALL_OK = 7.0;
+    private static final double QUALITY_OVERALL_DEGRADED = 6.0;
+
+    /**
+     * 质量评分（主观）与「评分-机械背离」两行读数。
+     *
+     * <p><b>为什么背离要单独报</b>：那是"两把尺子对同一章给出相反结论"的计数——
+     * 实测有章被机械判对白坍缩（密度低于劣化线）而主观给 dialogue=8、问题 0 条。
+     * 分数本身只是观测值，但**背离率高说明那把主观尺子在该维度没有分辨力**，
+     * 不能拿它去驱动规划层调整（要先改 rubric，或改成与上一窗口成对比较）。
+     */
+    private void addQualityReview(List<BatchHealthReport.Metric> metrics,
+                                  List<String> recommendations,
+                                  cn.novel.yonren.domain.novel.service.armory.memory.QualityReviewService
+                                          .QualitySnapshot snapshot) {
+        if (snapshot == null) {
+            return;
+        }
+        String window = "第" + snapshot.windowStart() + "-" + snapshot.windowEnd() + "章窗口";
+        if (snapshot.overall() != null) {
+            metrics.add(new BatchHealthReport.Metric("qualityOverall", "质量评分（主观）",
+                    snapshot.overall(), "分",
+                    "≥" + BatchHealthReport.format(QUALITY_OVERALL_OK)
+                            + "（rubric 里 6=合格 / 7=良好 / 8=优秀；实测分数集中在 7-9，只作趋势读数不作判据）",
+                    BatchHealthReport.Direction.HIGHER_IS_BETTER,
+                    higherIsBetter(snapshot.overall(), QUALITY_OVERALL_OK, QUALITY_OVERALL_DEGRADED),
+                    window + "；各维度 " + snapshot.avg()));
+        }
+        List<String> divergences = snapshot.divergences();
+        if (divergences != null && !divergences.isEmpty()) {
+            metrics.add(new BatchHealthReport.Metric("qualityDivergence", "评分与机械背离",
+                    divergences.size(), "项",
+                    "=0（主观给 8 分及以上、而机械判该维度劣化的章数）",
+                    BatchHealthReport.Direction.LOWER_IS_BETTER, BatchHealthReport.Level.WATCH,
+                    String.join("；", divergences)));
+            recommendations.add("主观评分与机械指标背离 " + divergences.size() + " 项（" + window + "）："
+                    + "这些章机械判对白坍缩、主观却给了 8 分以上——该维度**以机械判据为准**。"
+                    + "反复出现说明这把主观尺子在该维度没有分辨力，不要用它驱动规划层调整；"
+                    + "要么给 rubric 加锚点样本，要么改成与上一窗口成对比较");
+        }
     }
 
     /** 整数阈值去掉小数尾巴（8.0 → 8），小数阈值保留一位 */
@@ -1091,7 +1264,7 @@ public class BatchHealthService {
         // 实际时间标记：最新摘要的年龄事实 + 最新 timePoint 的年份（与时序锚渲染同源）
         // 两个维度都走 StoryPacing 统一口径——观测层自写正则会被模型的写法变化击穿：
         // 实测两轮误报，①年份写成"二〇〇八年"读不到（回溯到第 1 章的 2002，报滞后 6 段）；
-        // ②年龄把「陆瑾瑜四岁涂2026」这类叙述串当成当前年龄（contains("岁") 过宽，读成 4 岁）
+        // ②年龄把「人物四岁+年份数字」这类叙述串当成当前年龄（contains("岁") 过宽，读成 4 岁）
         Integer actualAge = StoryPacing.latestAnchorAge(chapters);
         Integer actualYear = StoryPacing.latestAnchorYear(chapters);
 

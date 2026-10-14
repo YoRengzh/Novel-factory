@@ -27,15 +27,15 @@ class StyleStatServiceTest {
 
     @Test
     void merge_collectsLongSentencesAndSkipsShort() {
-        service.merge(stat, "林尘在夜色中悄然潜入后山废矿深处。短句。他握紧了怀中那面沉默的古镜。");
+        service.merge(stat, "小陈在夜色中悄然潜入后山废矿深处。短句。他握紧了怀中那面沉默的古物。");
         // 句末标点被切分符剥掉，句集条目不含标点；短句（2 字）不参与
         System.out.println("切分结果: " + stat.getUsedSentences());
         assertEquals(2, stat.getUsedSentences().size());
-        assertTrue(stat.getUsedSentences().contains("林尘在夜色中悄然潜入后山废矿深处"));
+        assertTrue(stat.getUsedSentences().contains("小陈在夜色中悄然潜入后山废矿深处"));
     }
 
     @Test
-    void merge_detectsCrossChapterRepeatedSentence() {        String sentence = "林尘在夜色中悄然潜入后山废矿深处，脚步轻得像一片落叶";
+    void merge_detectsCrossChapterRepeatedSentence() {        String sentence = "小陈在夜色中悄然潜入后山废矿深处，脚步轻得像一片落叶";
         service.merge(stat, sentence + "。本章其余内容。");
         service.merge(stat, "另一章的内容。" + sentence + "。");
 
@@ -58,8 +58,8 @@ class StyleStatServiceTest {
     @Test
     void merge_doesNotFlagUnrelatedSentences() {
         // 阈值取偏保守：宁可漏报，也不要把正常文体误标成重复
-        service.merge(stat, "陆建国把自行车推到弄堂口，链条上沾满了泥。");
-        service.merge(stat, "林婉端着搪瓷盆从灶间出来，盆里是刚晾好的绿豆汤。");
+        service.merge(stat, "角色戊把自行车推到巷口，链条上沾满了泥。");
+        service.merge(stat, "角色癸端着旧脸盆从厨房出来，盆里是刚晾好的绿豆汤。");
 
         assertTrue(stat.getRepeatedSentences().isEmpty(),
                 "内容无关的句子不得被误判为重复：" + stat.getRepeatedSentences());
@@ -174,8 +174,8 @@ class StyleStatServiceTest {
     /** 由三组互不相同的短句拼成的长句；索引组合覆盖 5×5×5=125 种，足够 300+ 句互不重复（四维共 625 种） */
     private static String sentence(int i) {
         String[] subjects = {
-                "陆建国推着那辆永久牌自行车", "林婉端着搪瓷盆从灶间出来", "陆瑾瑜蹲在弄堂口的青石板上",
-                "王阿婆拎着煤球篮子走过去", "沈清欢把碎花布罩在电视机上"};
+                "角色戊推着那辆某牌自行车", "角色癸端着旧脸盆从厨房出来", "角色丙蹲在巷口的青石板上",
+                "王阿婆拎着煤球篮子走过去", "角色庚把碎花布罩在电视机上"};
         String[] actions = {
                 "说要赶在晌午前把账对完", "顺手把窗台上的灰抹了一遍", "听见远处传来一阵自行车的铃响",
                 "把口袋里的零钱数了两遍", "抬头看了看天边压过来的乌云"};
@@ -186,7 +186,7 @@ class StyleStatServiceTest {
         // 这里补一维把种类提到 5×5×5×5=625（夹具仍须"两两不同"，否则会被近重复判据吃掉）
         String[] marks = {
                 "门口的梧桐叶落了一地", "灶上的水壶正冒着白汽", "墙根的猫换了个姿势",
-                "街对面的喇叭响了两声", "桌上的搪瓷缸挪了半寸"};
+                "街对面的喇叭响了两声", "桌上的旧茶缸挪了半寸"};
         return subjects[i % subjects.length]
                 + actions[(i / subjects.length) % actions.length]
                 + tails[(i / (subjects.length * actions.length)) % tails.length]
@@ -203,14 +203,14 @@ class StyleStatServiceTest {
     /**
      * 跨章对白逐字重复必须查得到（2026-10-10）。
      *
-     * <p>实测第 100 章与第 102 章一字不差地问了同一句「三班还等得到吗？」，而当时**两处都查不到**：
+     * <p>实测第 100 章与第 102 章一字不差地问了同一句「那句话还会不会兑现？」，而当时**两处都查不到**：
      * 通用句集上限只有 80 句（约一章的量），第 100 章那句在第 102 章生成前已被第 101 章的句子挤出去。
      * 对白句因此单独入一个大得多的窗口。
      */
     @Test
     @DisplayName("跨章对白查重：短对白也要查得到，窗口须跨越两章以上")
     void crossChapterDialogueRepeats_findsShortLineAcrossChapters() {
-        String line = "「三班还等得到吗？」";
+        String line = "「那句话还会不会兑现？」";
         service.merge(stat, "她凑过来看那张通知。" + line + "他没有回答。");
         // 隔一章灌入大量长句，把通用句集窗口彻底挤满（复刻"隔两章"的真实条件）
         StringBuilder filler = new StringBuilder();
@@ -220,7 +220,7 @@ class StyleStatServiceTest {
         service.merge(stat, filler.toString());
 
         List<String> repeats = service.crossChapterDialogueRepeats(stat,
-                "梧桐树底下她站住了。" + line + "陆瑾瑜没答。");
+                "梧桐树底下她站住了。" + line + "角色丙没答。");
 
         assertEquals(List.of(line), repeats, "短对白隔章重复必须被查到——句集窗口不够长是原来的漏洞");
     }
@@ -229,11 +229,11 @@ class StyleStatServiceTest {
     @Test
     @DisplayName("跨章对白查重：近重复与超短应答不算")
     void crossChapterDialogueRepeats_ignoresNearDuplicateAndTooShort() {
-        service.merge(stat, "「三班还等得到吗？」「好。」");
+        service.merge(stat, "「那句话还会不会兑现？」「好。」");
 
-        assertEquals(List.of("「三班还等得到吗？」"),
-                service.crossChapterDialogueRepeats(stat, "「三班还等得到吗？」"));
-        assertTrue(service.crossChapterDialogueRepeats(stat, "「三班还等得到吧？」").isEmpty(),
+        assertEquals(List.of("「那句话还会不会兑现？」"),
+                service.crossChapterDialogueRepeats(stat, "「那句话还会不会兑现？」"));
+        assertTrue(service.crossChapterDialogueRepeats(stat, "「丙班还等得到吧？」").isEmpty(),
                 "改一个字属近重复，走软通道不进 BLOCKING");
         assertTrue(service.crossChapterDialogueRepeats(stat, "「好。」").isEmpty(),
                 "超短应答不入索引（称呼与应答复用是正常文体）");
@@ -243,13 +243,13 @@ class StyleStatServiceTest {
     @Test
     @DisplayName("跨章对白查重：套话短答不触发（门槛 8 字，实测标定）")
     void crossChapterDialogueRepeats_ignoresFormulaicShortReplies() {
-        service.merge(stat, "「我知道了。」「明天再说。」「三班还等得到吗？」");
+        service.merge(stat, "「我知道了。」「明天再说。」「那句话还会不会兑现？」");
 
         assertTrue(service.crossChapterDialogueRepeats(stat, "「我知道了。」").isEmpty(),
                 "「我知道了。」含引号 6 字，低于 8 字门槛：把套话扫进 BLOCKING 等于白改一稿");
         assertTrue(service.crossChapterDialogueRepeats(stat, "「明天再说。」").isEmpty());
-        assertEquals(List.of("「三班还等得到吗？」"),
-                service.crossChapterDialogueRepeats(stat, "「三班还等得到吗？」"),
+        assertEquals(List.of("「那句话还会不会兑现？」"),
+                service.crossChapterDialogueRepeats(stat, "「那句话还会不会兑现？」"),
                 "真重复（10 字问句）必须抓到——它就是本条判据的标定样本");
     }
 

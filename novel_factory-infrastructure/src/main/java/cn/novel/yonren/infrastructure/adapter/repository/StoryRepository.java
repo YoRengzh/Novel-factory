@@ -38,6 +38,7 @@ import java.nio.file.StandardOpenOption;
 import java.nio.charset.StandardCharsets;
 import java.time.LocalDate;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.List;
 import java.util.Objects;
 import java.util.concurrent.ConcurrentHashMap;
@@ -61,6 +62,8 @@ public class StoryRepository implements IStoryRepository {
 
     /** 序号竞争重试上限：连续被抢占 50 次视为异常（单机单用户场景几乎不可能触发） */
     private static final int MAX_SEQUENCE_ATTEMPTS = 50;
+    /** run 记录目录保留上限（环形回收；每个 job 一个目录、含全量 prompt 与逐章原始返回） */
+    private static final int RUN_RETENTION = 20;
 
     /** 每故事写锁：并发批次写同一故事目录时串行化落盘，配合原子替换保证文件永远是完整快照 */
     private final ConcurrentHashMap<String, ReentrantLock> storyLocks = new ConcurrentHashMap<>();
@@ -195,6 +198,10 @@ public class StoryRepository implements IStoryRepository {
     public Path createRunDirectory(Path storyDir, String jobId) throws IOException {
         Path recordRoot = storyDir.resolve(StorageKeys.RECORD);
         Files.createDirectories(recordRoot);
+        // 环形回收：每个 job 一个 run 目录、内含完整 input.json（全量 prompt）
+        // 与逐章原始返回，若不清理会随续写线性累积，且 readChapterPlanItem 每次都要全扫这些目录。
+        // 挂在创建点触发，无需额外调度。
+        pruneRunDirectories(recordRoot);
         if (jobId != null && !jobId.isEmpty()) {
             // runId 与 jobId 同源：冲突即异常不重试（jobId 全局唯一，冲突说明状态已异常）
             return Files.createDirectory(recordRoot.resolve(StorageKeys.JOB_RUN_PREFIX + jobId));
@@ -212,8 +219,37 @@ public class StoryRepository implements IStoryRepository {
         }
     }
 
-    private static int nextRunNumber(Path recordRoot) throws IOException {
-        int max;
+    /**
+     * 回收超出保留上限的 run 目录（按最后修改时间保留最新 {@value #RUN_RETENTION} 个）。
+     *
+     * <p>与检查点清理同款环形回收：保留量足以回看近期批次即可，
+     * 失败仅告警——观测产物清理不该反噬生成主流程。
+     */
+    private void pruneRunDirectories(Path recordRoot) {
+        try (Stream<Path> stream = Files.list(recordRoot)) {
+            List<Path> dirs = stream.filter(Files::isDirectory).toList();
+            if (dirs.size() <= RUN_RETENTION) {
+                return;
+            }
+            List<Path> byTime = new ArrayList<>(dirs);
+            byTime.sort(Comparator.comparingLong(p -> {
+                try {
+                    return Files.getLastModifiedTime(p).toMillis();
+                } catch (IOException e) {
+                    return 0L;
+                }
+            }));
+            for (int i = 0; i + RUN_RETENTION < byTime.size(); i++) {
+                Path oldest = byTime.get(i);
+                deleteRecursively(oldest);
+                log.info("run 记录目录超过保留上限（{}），回收最旧：{}", RUN_RETENTION, oldest.getFileName());
+            }
+        } catch (Exception e) {
+            log.warn("run 记录目录回收失败，已跳过：{}", e.getMessage());
+        }
+    }
+
+    private static int nextRunNumber(Path recordRoot) throws IOException {        int max;
         try (Stream<Path> stream = Files.list(recordRoot)) {
             max = stream.filter(Files::isDirectory)
                     .map(path -> path.getFileName().toString())
@@ -421,6 +457,29 @@ public class StoryRepository implements IStoryRepository {
             Files.writeString(file, jsonlLine + System.lineSeparator(),
                     StandardOpenOption.CREATE, StandardOpenOption.APPEND);
         });
+    }
+
+    @Override
+    public void appendMechanicalEvent(Path storyDir, String jsonlLine) throws IOException {
+        Path memoryDir = storyDir.resolve(StorageKeys.MEMORY_DIR);
+        Path file = memoryDir.resolve(StorageKeys.MECHANICAL_EVENTS_FILE);
+        withStoryLock(storyDir, () -> {
+            Files.createDirectories(memoryDir);
+            // 与其它观测文件同语义：单行 JSON、追加写，崩溃最多丢半行
+            Files.writeString(file, jsonlLine + System.lineSeparator(),
+                    StandardOpenOption.CREATE, StandardOpenOption.APPEND);
+        });
+    }
+
+    @Override
+    public List<String> readQualityTrend(Path storyDir) throws IOException {
+        Path file = storyDir.resolve(StorageKeys.MEMORY_DIR).resolve(StorageKeys.QUALITY_TREND_FILE);
+        if (!Files.isRegularFile(file)) {
+            return List.of();
+        }
+        return Files.readAllLines(file).stream()
+                .filter(line -> line != null && !line.isBlank())
+                .toList();
     }
 
     @Override

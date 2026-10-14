@@ -215,7 +215,7 @@ class QualityGateTest {
     /**
      * 跨章对白逐字重复必须是 BLOCKING 并真的驱动一次修订（2026-10-10）。
      *
-     * <p>实测第 100 章与第 102 章一字不差问了同一句「三班还等得到吗？」，两句都留在了成稿里——
+     * <p>实测第 100 章与第 102 章一字不差问了同一句「那句话还会不会兑现？」，两句都留在了成稿里——
      * 因为这类重复原先只进「风格警示」（下一章的软提示）与 MINOR 记账，没有任何一条能驱动修订。
      * 对白重复是读者最容易察觉的硬伤（人物像在复读），修法又机械（改这一句），所以升级为 BLOCKING。
      */
@@ -223,7 +223,7 @@ class QualityGateTest {
     void crossChapterDialogueRepeat_isBlocking_andDrivesRevision() {
         revise.setEnabled(true);
         when(styleStatService.crossChapterDialogueRepeats(any(), any()))
-                .thenReturn(List.of("「三班还等得到吗？」"));
+                .thenReturn(List.of("「那句话还会不会兑现？」"));
         when(chapterAuditService.audit(any(), any(), any(), any(), any(), any(), anyInt(), any()))
                 .thenReturn(AuditResultEntity.builder().issues(List.of()).build());
         when(chapterReviseService.revise(any(), any(), any(), anyList(), any(), any(), any(), anyInt(), any()))
@@ -235,7 +235,7 @@ class QualityGateTest {
                 qualityGate.auditAndReviseIfEnabled(command, item, chapterContent, List.of(), styleStat, 102, null);
 
         assertTrue(result.unresolvedBlocking().stream()
-                        .anyMatch(i -> i.getEvidence() != null && i.getEvidence().contains("三班还等得到吗")),
+                        .anyMatch(i -> i.getEvidence() != null && i.getEvidence().contains("那句话还会不会兑现")),
                 "跨章对白重复应记 BLOCKING：" + result.unresolvedBlocking());
         verify(chapterReviseService, atLeastOnce()).revise(any(), any(), any(), anyList(), any(), any(), any(), anyInt(), any());
     }
@@ -497,9 +497,9 @@ class QualityGateTest {
     @Test
     void secrecyKeywordLeak_isBlocking_evenWhenAuditClean() {
         // 伏笔保密边界：已埋未揭伏笔的谜底关键词逐字命中即 BLOCKING（修订关闭时直接成质量债）
-        chapterContent.setContent("他握紧怀中的血玉，忽然想起古书上的话——血玉实为封印钥匙。");
+        chapterContent.setContent("他握紧怀中的旧玉佩，忽然想起古书上的话——那枚玉佩实为关键凭证。");
         when(chapterMemoryService.buildSecrecyGuard(anyList(), any())).thenReturn(new ChapterMemoryService.SecrecyGuard(
-                List.of("血玉实为封印钥匙"), "【本章禁泄清单】……"));
+                List.of("那枚玉佩实为关键凭证"), "【本章禁泄清单】……"));
         audit.setEnabled(false);
         revise.setEnabled(false);
 
@@ -508,7 +508,7 @@ class QualityGateTest {
 
         assertEquals(1, result.unresolvedBlocking().size());
         assertEquals("foreshadow", result.unresolvedBlocking().get(0).getDimension());
-        assertTrue(result.unresolvedBlocking().get(0).getEvidence().contains("血玉实为封印钥匙×1"));
+        assertTrue(result.unresolvedBlocking().get(0).getEvidence().contains("那枚玉佩实为关键凭证×1"));
         verify(chapterAuditService, never()).audit(any(), any(), any(), any(), any(), any(), anyInt(), any());
     }
 
@@ -516,7 +516,7 @@ class QualityGateTest {
     void secrecyGuard_promptBlock_passedToAuditAndRevise() {
         // 禁泄 prompt 块要同时注入审校（判变相泄露）与修订（防修订引入泄露）
         when(chapterMemoryService.buildSecrecyGuard(anyList(), any())).thenReturn(new ChapterMemoryService.SecrecyGuard(
-                List.of("魔气源头是宗主"), "【本章禁泄清单】魔气源头是宗主"));
+                List.of("事故背后另有主使"), "【本章禁泄清单】事故背后另有主使"));
         when(chapterAuditService.audit(any(), any(), any(), any(), any(), any(), anyInt(), anyString()))
                 .thenReturn(AuditResultEntity.builder().build());
         audit.setEnabled(true);
@@ -530,7 +530,7 @@ class QualityGateTest {
     @Test
     void lowPlanCoverage_injectsAdherenceHintIntoAuditGuard() {
         // 大纲偏离检测：覆盖率 < 60% 时给审校注入加审预警（不直接 BLOCKING）
-        item.setKeyEvents(List.of("林尘在藏经阁偶得上古残卷", "陆瑶察觉宗门长老的异动"));
+        item.setKeyEvents(List.of("小陈在藏经阁偶得上古残卷", "陆瑶察觉宗门长老的异动"));
         chapterContent.setContent("他推开门，看见桌上的信。信封没有落款，只有一枚烧焦的蜡印。");
         when(chapterAuditService.audit(any(), any(), any(), any(), any(), any(), anyInt(), any()))
                 .thenReturn(AuditResultEntity.builder().build());
@@ -545,8 +545,8 @@ class QualityGateTest {
     @Test
     void goodPlanCoverage_noAdherenceHint() {
         // 覆盖率达标（含 4 字以上公共片段视为覆盖）不注入预警
-        item.setKeyEvents(List.of("林尘在藏经阁偶得上古残卷"));
-        chapterContent.setContent("林尘在藏经阁偶得上古残卷，指尖抚过封皮上斑驳的纹路。");
+        item.setKeyEvents(List.of("小陈在藏经阁偶得上古残卷"));
+        chapterContent.setContent("小陈在藏经阁偶得上古残卷，指尖抚过封皮上斑驳的纹路。");
         when(chapterAuditService.audit(any(), any(), any(), any(), any(), any(), anyInt(), any()))
                 .thenReturn(AuditResultEntity.builder().build());
         audit.setEnabled(true);
@@ -595,7 +595,7 @@ class QualityGateTest {
         // 有效字只数中文/字母/数字（不含标点），故这里堆够 800 才能进入坍缩判定
         StringBuilder longText = new StringBuilder("他把信纸摊开，折好，塞进信封，指腹把折痕压平。");
         for (int i = 0; i < 50; i++) {
-            longText.append("桌面上只剩算术本和一张报名表复印件，红章露出半截。");
+            longText.append("桌面上只剩习题册和一张报名表复印件，红章露出半截。");
         }
         longText.append("「明天寄。」");
         chapterContent.setContent(longText.toString());
@@ -638,11 +638,11 @@ class QualityGateTest {
         audit.setEnabled(false);
         revise.setEnabled(false);
         item.setDialogueScenes(List.of(
-                "周秀兰：「既然记着，这个也记上。」",
-                "陆远山：「嗯。」"));
+                "角色甲：「既然记着，这个也记上。」",
+                "角色乙：「嗯。」"));
         StringBuilder longText = new StringBuilder("他把信纸摊开，折好，塞进信封，指腹把折痕压平。");
         for (int i = 0; i < 50; i++) {
-            longText.append("桌面上只剩算术本和一张报名表复印件，红章露出半截。");
+            longText.append("桌面上只剩习题册和一张报名表复印件，红章露出半截。");
         }
         longText.append("「既然记着，这个也记上。」");
         chapterContent.setContent(longText.toString());
@@ -655,7 +655,7 @@ class QualityGateTest {
         assertEquals("BLOCKING", blocking.getSeverity());
         assertTrue(blocking.getDescription().contains("对话承载违约"),
                 "描述应点明这是计划承诺的违约：" + blocking.getDescription());
-        assertTrue(blocking.getSuggestion().contains("陆远山"),
+        assertTrue(blocking.getSuggestion().contains("角色乙"),
                 "缺失场景应作为修订靶点列出：" + blocking.getSuggestion());
     }
 
@@ -665,11 +665,11 @@ class QualityGateTest {
         audit.setEnabled(false);
         revise.setEnabled(false);
         item.setDialogueScenes(List.of(
-                "周秀兰：「既然记着，这个也记上。」",
-                "陆远山：「嗯。」"));
+                "角色甲：「既然记着，这个也记上。」",
+                "角色乙：「嗯。」"));
         StringBuilder longText = new StringBuilder("他把信纸摊开，折好，塞进信封，指腹把折痕压平。");
         for (int i = 0; i < 50; i++) {
-            longText.append("桌面上只剩算术本和一张报名表复印件，红章露出半截。");
+            longText.append("桌面上只剩习题册和一张报名表复印件，红章露出半截。");
         }
         longText.append("「既然记着，这个也记上。」").append("「嗯。」");
         chapterContent.setContent(longText.toString());
@@ -686,7 +686,7 @@ class QualityGateTest {
     @Test
     void declaredDialogueScenes_healthyDensity_noDebt() {
         audit.setEnabled(false);
-        item.setDialogueScenes(List.of("宋知渔：「这题我一个人做不完，你来补后半段。」"));
+        item.setDialogueScenes(List.of("角色己：「这题我一个人做不完，你来补后半段。」"));
         StringBuilder text = new StringBuilder();
         for (int i = 0; i < 70; i++) {
             text.append("「你明天去邮局吗。」「去。」「那我也去。」「行。」");
@@ -708,10 +708,10 @@ class QualityGateTest {
     void transitionChapter_withDeclaredScenes_stillExempt() {
         audit.setEnabled(false);
         item.setChapterType(cn.novel.yonren.types.enums.ChapterTypeVO.TRANSITION);
-        item.setDialogueScenes(List.of("陆远山：「嗯。」"));
+        item.setDialogueScenes(List.of("角色乙：「嗯。」"));
         StringBuilder longText = new StringBuilder("他把信纸摊开，折好，塞进信封，指腹把折痕压平。");
         for (int i = 0; i < 50; i++) {
-            longText.append("桌面上只剩算术本和一张报名表复印件，红章露出半截。");
+            longText.append("桌面上只剩习题册和一张报名表复印件，红章露出半截。");
         }
         chapterContent.setContent(longText.toString());
 
@@ -731,17 +731,17 @@ class QualityGateTest {
         audit.setEnabled(false);
         revise.setEnabled(true);
         revise.setMaxAttempts(1);
-        item.setDialogueScenes(List.of("陆远山：「嗯。」"));
+        item.setDialogueScenes(List.of("角色乙：「嗯。」"));
         StringBuilder collapsed = new StringBuilder("他把信纸摊开，折好，塞进信封，指腹把折痕压平。");
         for (int i = 0; i < 50; i++) {
-            collapsed.append("桌面上只剩算术本和一张报名表复印件，红章露出半截。");
+            collapsed.append("桌面上只剩习题册和一张报名表复印件，红章露出半截。");
         }
         collapsed.append("「既然记着，这个也记上。」");
         chapterContent.setContent(collapsed.toString());
 
         StringBuilder repaired = new StringBuilder();
         for (int i = 0; i < 40; i++) {
-            repaired.append("桌面上只剩算术本和一张报名表复印件，红章露出半截。");
+            repaired.append("桌面上只剩习题册和一张报名表复印件，红章露出半截。");
         }
         for (int i = 0; i < 20; i++) {
             repaired.append("「嗯。」「知道。」「先放着吧。」");

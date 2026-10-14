@@ -144,7 +144,7 @@ class StoryPacingTest {
         f.setType("NUMBER");
         f.setSubject(subject);
         f.setValue(value);
-        f.setScope("陆瑾瑜");
+        f.setScope("角色丙");
         s.setConsistencyFacts(new ArrayList<>(List.of(f)));
         return s;
     }
@@ -171,25 +171,25 @@ class StoryPacingTest {
         assertNull(StoryPacing.parseAge("十一个月"));
         // 长叙述串（"六年前四岁"）：整体匹配不命中，不从中抠数字
         assertNull(StoryPacing.parseAge("六年前四岁"));
-        assertNull(StoryPacing.parseAge("陆瑾瑜四岁涂2026"));
+        assertNull(StoryPacing.parseAge("某角色幼时写下成年年份"));
     }
 
     // ===== isAgeSubject：subject 筛选（本次修复的核心）=====
 
     @Test
     void isAgeSubject_acceptsStateKeywords() {
-        assertTrue(StoryPacing.isAgeSubject("陆瑾瑜年龄"));
+        assertTrue(StoryPacing.isAgeSubject("角色丙年龄"));
         assertTrue(StoryPacing.isAgeSubject("主角年龄"));
-        assertTrue(StoryPacing.isAgeSubject("陆瑾瑜月龄"));
+        assertTrue(StoryPacing.isAgeSubject("某角色月龄"));
         assertTrue(StoryPacing.isAgeSubject("年龄"));
     }
 
     @Test
     void isAgeSubject_rejectsNarrativeWithSui() {
-        // 实测反例：叙述"六年前四岁时涂的格子纸"——含"岁"但不是在陈述当前年龄
-        assertFalse(StoryPacing.isAgeSubject("陆瑾瑜四岁涂2026"));
+        // 实测反例：叙述"六年前四岁时涂的记号纸"——含"岁"但不是在陈述当前年龄
+        assertFalse(StoryPacing.isAgeSubject("某角色幼时写下成年年份"));
         assertFalse(StoryPacing.isAgeSubject("四岁那年搬家"));
-        assertFalse(StoryPacing.isAgeSubject("陆瑾瑜四岁"));
+        assertFalse(StoryPacing.isAgeSubject("角色丙四岁"));
         assertFalse(StoryPacing.isAgeSubject(null));
         assertFalse(StoryPacing.isAgeSubject(""));
     }
@@ -199,9 +199,9 @@ class StoryPacingTest {
     @Test
     void latestAnchorAge_skipsNarrativeFactAndFindsRealAge() {
         List<ChapterSummaryEntity> chapters = new ArrayList<>();
-        chapters.add(withAge(80, "六月初六清晨", "陆瑾瑜年龄", "四岁"));
-        chapters.add(withAge(87, "七月初二夜", "陆瑾瑜四岁涂2026", "四岁")); // 叙述串 → 必须跳过
-        chapters.add(withAge(84, "当日傍晚六点过后", "陆瑾瑜年龄", "11岁"));
+        chapters.add(withAge(80, "六月初六清晨", "角色丙年龄", "四岁"));
+        chapters.add(withAge(87, "七月初二夜", "某角色幼时写下成年年份", "四岁")); // 叙述串 → 必须跳过
+        chapters.add(withAge(84, "当日傍晚六点过后", "角色丙年龄", "11岁"));
 
         // 末章是 87 的叙述串，但回溯应拿到 84 的真实年龄
         assertEquals(11, StoryPacing.latestAnchorAge(chapters));
@@ -210,7 +210,7 @@ class StoryPacingTest {
     @Test
     void latestAnchorAge_readsChineseNumeralAge() {
         List<ChapterSummaryEntity> chapters = new ArrayList<>();
-        chapters.add(withAge(71, "五月八日礼拜五深夜", "陆瑾瑜年龄", "十一"));
+        chapters.add(withAge(71, "五月八日礼拜五深夜", "角色丙年龄", "十一"));
 
         assertEquals(11, StoryPacing.latestAnchorAge(chapters));
     }
@@ -224,7 +224,7 @@ class StoryPacingTest {
         assertNull(StoryPacing.latestAnchorAge(none));
         // 有事实但全非年龄类 → 仍为 null（不臆造）
         List<ChapterSummaryEntity> other = new ArrayList<>();
-        other.add(withAge(5, "傍晚", "铁盒位置", "抽屉最里层"));
+        other.add(withAge(5, "傍晚", "木匣位置", "抽屉最里层"));
         assertNull(StoryPacing.latestAnchorAge(other));
     }
 }

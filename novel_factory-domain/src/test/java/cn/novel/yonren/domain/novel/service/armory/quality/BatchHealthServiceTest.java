@@ -41,7 +41,7 @@ class BatchHealthServiceTest {
                     .validChars(2200)
                     .chapterType(ch == 2 || ch == 7 ? ChapterTypeVO.TRANSITION.getCode()
                             : ChapterTypeVO.NORMAL.getCode())
-                    .placePoint(ch <= 3 ? "阵法堂" : (ch <= 6 ? "后山禁地" : "议事厅"))
+                    .placePoint(ch <= 3 ? "讲堂" : (ch <= 6 ? "后山禁地" : "议事厅"))
                     .characterStates(List.of(entry("陆沉", "exact")))
                     .build());
         }

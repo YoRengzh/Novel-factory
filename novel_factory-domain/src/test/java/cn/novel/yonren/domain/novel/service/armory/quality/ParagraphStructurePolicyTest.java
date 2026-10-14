@@ -88,7 +88,7 @@ class ParagraphStructurePolicyTest {
     @Test
     void reparagraph_repairsDialogueRatioInvariant() {
         String narration = "他把碗放下，看了一眼窗外，天已经黑透了，屋里的煤球炉只剩下一点暗红的微响，"
-                + "弄堂里有人在收晾在外面的衣裳，竹竿磕在窗框上，一下，又一下，听得人心里发空。";
+                + "巷子里有人在收晾在外面的衣裳，竹竿磕在窗框上，一下，又一下，听得人心里发空。";
         String speech = "「你来了。」";
         // 叙述:对白 ≈ 8:1，贴近真实正文
         String dialogueBlob = (narration.repeat(4) + speech).repeat(10);

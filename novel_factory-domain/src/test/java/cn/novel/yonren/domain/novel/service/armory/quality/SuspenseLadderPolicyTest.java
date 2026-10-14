@@ -211,7 +211,7 @@ class SuspenseLadderPolicyTest {
     @Test
     @DisplayName("duplicateBeat：五章逐字相同必须报违规")
     void duplicateBeat_realCase() {
-        String same = "档位2：陆瑾瑜以「早慧幼儿」身份首次展示识字能力（第11-15章）";
+        String same = "档位2：角色丙以「早慧幼儿」身份首次展示识字能力（第11-15章）";
         List<SuspenseLadderPolicy.Beat> beats = List.of(
                 beat(11, same, false), beat(12, same, false), beat(13, same, false),
                 beat(14, same, false), beat(15, same, false));
@@ -239,8 +239,8 @@ class SuspenseLadderPolicyTest {
     @DisplayName("duplicateBeat：同档但描述不同不违规")
     void duplicateBeat_sameRungDifferentTextPasses() {
         List<SuspenseLadderPolicy.Beat> beats = List.of(
-                beat(11, "一方起疑并留下物证——陆建国注意到凭证被翻动（第11章）", false),
-                beat(12, "一方起疑并留下物证——王秀兰开始记录孩子的异常（第12章）", false));
+                beat(11, "一方起疑并留下物证——角色戊注意到凭证被翻动（第11章）", false),
+                beat(12, "一方起疑并留下物证——角色辰开始记录孩子的异常（第12章）", false));
 
         assertTrue(SuspenseLadderPolicy.duplicateBeatViolations(beats).isEmpty(),
                 "同档位下写清各章差异的不应被判重复");

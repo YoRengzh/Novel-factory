@@ -30,14 +30,14 @@ class ChapterMemoryServiceTest {
     @Test
     void ledger_mergesByChapterOrderAndOverwrites() {
         List<ChapterSummaryEntity> summaries = List.of(
-                summary(2, states(state("林尘", "炼气一层，藏身外门石缝"), state("赵阔", "派人监视林尘"))),
-                summary(1, states(state("林尘", "丹田被废，重伤昏迷"))),
-                summary(3, states(state("林尘", "炼气一层，大比连胜六场"), state("许衡", "外门弟子，被林尘击败"))));
+                summary(2, states(state("小陈", "炼气一层，藏身外门石缝"), state("赵阔", "派人监视小陈"))),
+                summary(1, states(state("小陈", "丹田被废，重伤昏迷"))),
+                summary(3, states(state("小陈", "炼气一层，大比连胜六场"), state("许衡", "外门弟子，被小陈击败"))));
 
         List<LedgerEntry> ledger = service.buildCharacterLedger(summaries);
 
         assertEquals(3, ledger.size());
-        LedgerEntry lin = byName(ledger, "林尘");
+        LedgerEntry lin = byName(ledger, "小陈");
         // 后章覆盖前章状态；首登场章保留第 1 章，最近更新章为第 3 章
         assertEquals("炼气一层，大比连胜六场", lin.getStatus());
         assertEquals(1, lin.getFirstChapterNo());
@@ -45,25 +45,25 @@ class ChapterMemoryServiceTest {
         LedgerEntry zhao = byName(ledger, "赵阔");
         assertEquals(2, zhao.getFirstChapterNo());
         // 第 3 章未更新赵阔，状态停留在第 2 章
-        assertEquals("派人监视林尘", zhao.getStatus());
+        assertEquals("派人监视小陈", zhao.getStatus());
     }
 
     @Test
     void ledger_skipsBlankEntries() {
         List<ChapterSummaryEntity> summaries = List.of(
-                summary(1, states(state("", "无名状态"), state("林尘", "重伤"), null)));
+                summary(1, states(state("", "无名状态"), state("小陈", "重伤"), null)));
 
         List<LedgerEntry> ledger = service.buildCharacterLedger(summaries);
 
         assertEquals(1, ledger.size());
-        assertEquals("林尘", ledger.get(0).getName());
+        assertEquals("小陈", ledger.get(0).getName());
     }
 
     @Test
     void ledger_itemAndFactionExtractors() {
-        List<ChapterSummaryEntity> summaries = List.of(summary(1, states(state("林尘", "重伤"))));
+        List<ChapterSummaryEntity> summaries = List.of(summary(1, states(state("小陈", "重伤"))));
         summaries.get(0).setItemStates(new ArrayList<>(Arrays.asList(
-                new ChapterSummaryEntity.StateEntry("古镜", "首次显威，吞灵续命", null))));
+                new ChapterSummaryEntity.StateEntry("古物", "首次显威，异动续命", null))));
         summaries.get(0).setFactionStates(new ArrayList<>(Arrays.asList(
                 new ChapterSummaryEntity.StateEntry("幽冥谷", "暗手伸向外门", null))));
 
@@ -72,7 +72,7 @@ class ChapterMemoryServiceTest {
         List<LedgerEntry> characters = service.buildCharacterLedger(summaries);
 
         assertEquals(1, items.size());
-        assertEquals("古镜", items.get(0).getName());
+        assertEquals("古物", items.get(0).getName());
         assertEquals(1, factions.size());
         assertEquals(1, characters.size());
     }
@@ -86,12 +86,12 @@ class ChapterMemoryServiceTest {
     @Test
     void ledger_recordsPrevStatusOnRealTransitionsOnly() {
         List<ChapterSummaryEntity> summaries = List.of(
-                summary(1, states(state("林尘", "重伤"))),
-                summary(3, states(state("林尘", "轻伤"))),
-                summary(5, states(state("林尘", "轻伤"))),
-                summary(7, states(state("林尘", "痊愈"))));
+                summary(1, states(state("小陈", "重伤"))),
+                summary(3, states(state("小陈", "轻伤"))),
+                summary(5, states(state("小陈", "轻伤"))),
+                summary(7, states(state("小陈", "痊愈"))));
 
-        LedgerEntry lin = byName(service.buildCharacterLedger(summaries), "林尘");
+        LedgerEntry lin = byName(service.buildCharacterLedger(summaries), "小陈");
 
         assertEquals("痊愈", lin.getStatus());
         // 第5章同值重复更新不得冲掉前次变化记录
@@ -101,9 +101,9 @@ class ChapterMemoryServiceTest {
 
     @Test
     void ledger_firstAppearanceHasNoTrajectory() {
-        List<ChapterSummaryEntity> summaries = List.of(summary(1, states(state("林尘", "重伤"))));
+        List<ChapterSummaryEntity> summaries = List.of(summary(1, states(state("小陈", "重伤"))));
 
-        LedgerEntry lin = byName(service.buildCharacterLedger(summaries), "林尘");
+        LedgerEntry lin = byName(service.buildCharacterLedger(summaries), "小陈");
 
         assertNull(lin.getPrevStatus());
         assertEquals("", ChapterMemoryService.trajectorySuffix(lin));
@@ -113,10 +113,10 @@ class ChapterMemoryServiceTest {
     void ledger_carriesEvidenceFromLatestState() {
         // 证据随状态滚动：最近一次更新的证据成为账本条目的当前证据
         List<ChapterSummaryEntity> summaries = List.of(
-                summary(1, states(new ChapterSummaryEntity.StateEntry("林尘", "重伤", "林尘咬破舌尖，强行催动古镜"))),
-                summary(3, states(new ChapterSummaryEntity.StateEntry("林尘", "痊愈", "他咳出一口血，缓缓睁眼"))));
+                summary(1, states(new ChapterSummaryEntity.StateEntry("小陈", "重伤", "小陈咬破舌尖，强行催动古物"))),
+                summary(3, states(new ChapterSummaryEntity.StateEntry("小陈", "痊愈", "他咳出一口血，缓缓睁眼"))));
 
-        LedgerEntry lin = byName(service.buildCharacterLedger(summaries), "林尘");
+        LedgerEntry lin = byName(service.buildCharacterLedger(summaries), "小陈");
 
         assertEquals("痊愈", lin.getStatus());
         assertEquals("他咳出一口血，缓缓睁眼", lin.getEvidence());
@@ -157,8 +157,8 @@ class ChapterMemoryServiceTest {
         //（见 prefix_singleMentionEntryRendersNameOnly）——原 fixture 只有一章，
         // 实际上测的是"单次出现"而非"稳定"，属于命名与数据不符
         List<ChapterSummaryEntity> summaries = List.of(
-                summary(1, states(state("林尘", "重伤"))),
-                summary(2, states(state("林尘", "重伤"))));
+                summary(1, states(state("小陈", "重伤"))),
+                summary(2, states(state("小陈", "重伤"))));
 
         String prefix = service.buildMemoryPrefix(summaries, null, null);
 
@@ -168,9 +168,9 @@ class ChapterMemoryServiceTest {
     @Test
     void factsAsOf_truncatesSummariesBeforeChapter() {
         List<ChapterSummaryEntity> summaries = List.of(
-                summary(1, states(state("林尘", "重伤"))),
-                summary(2, states(state("林尘", "轻伤"))),
-                summary(3, states(state("林尘", "痊愈"))));
+                summary(1, states(state("小陈", "重伤"))),
+                summary(2, states(state("小陈", "轻伤"))),
+                summary(3, states(state("小陈", "痊愈"))));
 
         List<LedgerEntry> asOfTwo = service.factsAsOf(summaries, 3, ChapterSummaryEntity::getCharacterStates);
 
@@ -182,19 +182,19 @@ class ChapterMemoryServiceTest {
     @Test
     void prefix_rendersTransitionTrajectory() {
         List<ChapterSummaryEntity> summaries = List.of(
-                summary(1, states(state("林尘", "重伤"))),
-                summary(7, states(state("林尘", "痊愈"))));
+                summary(1, states(state("小陈", "重伤"))),
+                summary(7, states(state("小陈", "痊愈"))));
 
         String prefix = service.buildMemoryPrefix(summaries, null, null);
 
-        assertTrue(prefix.contains("林尘（第1章登场）：痊愈（第7章变化：重伤 → 痊愈）"));
+        assertTrue(prefix.contains("小陈（第1章登场）：痊愈（第7章变化：重伤 → 痊愈）"));
     }
 
     @Test
     void foreshadowContext_capsToNewestEntries() {
         List<ChapterSummaryEntity> summaries = new ArrayList<>();
         for (int ch = 1; ch <= ChapterMemoryService.FORESHADOW_CONTEXT_LIMIT + 5; ch++) {
-            summaries.add(summary(ch, states(state("林尘", "炼气"))));
+            summaries.add(summary(ch, states(state("小陈", "炼气"))));
             summaries.get(ch - 1).setForeshadowingNew(List.of("伏笔" + ch));
         }
 
@@ -220,7 +220,7 @@ class ChapterMemoryServiceTest {
     void foreshadowContext_reservesSlotsForOverdueEntries() {
         List<ChapterSummaryEntity> summaries = new ArrayList<>();
         for (int ch = 1; ch <= ChapterMemoryService.FORESHADOW_CONTEXT_LIMIT + 5; ch++) {
-            summaries.add(summary(ch, states(state("林尘", "炼气"))));
+            summaries.add(summary(ch, states(state("小陈", "炼气"))));
             summaries.get(ch - 1).setForeshadowingNew(List.of("伏笔" + ch));
         }
         // 第 1 章那条：声明了兑现义务、带排期且回收章早已过（逾期），位置又远在最旧的一端
@@ -244,7 +244,7 @@ class ChapterMemoryServiceTest {
     void auditForeshadowListExcludesBreakerButRegistrationKeeps() {
         List<ChapterSummaryEntity> summaries = new ArrayList<>();
         for (int ch = 1; ch <= 15; ch++) {
-            summaries.add(summary(ch, states(state("林尘", "炼气"))));
+            summaries.add(summary(ch, states(state("小陈", "炼气"))));
         }
         // 默认 3 档：第 1 章埋的滞留 14 章 → 30 + 70 = 100 熔断；第 15 章新埋
         summaries.get(0).setForeshadowingNew(List.of("陈年伏笔"));
@@ -267,7 +267,7 @@ class ChapterMemoryServiceTest {
         }
         List<ChapterSummaryEntity> summaries = List.of(
                 summary(1, crowd.toArray(new ChapterSummaryEntity.StateEntry[0])),
-                summary(25, states(state("林尘", "闭关修炼"))));
+                summary(25, states(state("小陈", "闭关修炼"))));
 
         String prefix = service.buildMemoryPrefix(summaries, null, null);
 
@@ -280,26 +280,26 @@ class ChapterMemoryServiceTest {
     @Test
     void prefix_containsAllLayers() {
         List<ChapterSummaryEntity> summaries = List.of(
-                summary(1, states(state("林尘", "丹田被废"))),
-                summary(2, states(state("林尘", "炼气一层"))));
+                summary(1, states(state("小陈", "丹田被废"))),
+                summary(2, states(state("小陈", "炼气一层"))));
         summaries.get(0).setForeshadowingNew(List.of("赵阔的灰黑劲气来路不明"));
-        summaries.get(1).setForeshadowingResolved(List.of("古镜是否为废铁"));
+        summaries.get(1).setForeshadowingResolved(List.of("古物是否为废铁"));
         summaries.get(1).setTimePoint("外门大比当日深夜");
 
-        String prefix = service.buildMemoryPrefix(summaries, "夜色深沉，林尘握紧了古镜。", null);
+        String prefix = service.buildMemoryPrefix(summaries, "夜色深沉，小陈握紧了古物。", null);
 
         assertTrue(prefix.contains("前情记忆"));
-        assertTrue(prefix.contains("第1章《废丹田》：林尘被赵阔废去丹田。\n"));
-        assertTrue(prefix.contains("第2章《古镜吞灵》：林尘踏入炼气一层。\n"));
+        assertTrue(prefix.contains("第1章《废丹田》：小陈被赵阔废去丹田。\n"));
+        assertTrue(prefix.contains("第2章《古物奇谈》：小陈踏入炼气一层。\n"));
         assertTrue(prefix.contains("最新时点：外门大比当日深夜"));
         assertTrue(prefix.contains("角色账本"));
-        assertTrue(prefix.contains("林尘（第1章登场）：炼气一层"));
+        assertTrue(prefix.contains("小陈（第1章登场）：炼气一层"));
         // 新埋减去已回收
         assertTrue(prefix.contains("赵阔的灰黑劲气来路不明"));
         assertTrue(prefix.contains("伏笔账"));
         // 上一章结尾原文
         assertTrue(prefix.contains("上一章结尾原文"));
-        assertTrue(prefix.contains("夜色深沉，林尘握紧了古镜。"));
+        assertTrue(prefix.contains("夜色深沉，小陈握紧了古物。"));
     }
 
     @Test
@@ -307,17 +307,17 @@ class ChapterMemoryServiceTest {
         // 物品须跨两章出现（状态未变）才完整渲染；只出现一次的条目已降为仅列名，
         // 故原单章 fixture 不再适用
         List<ChapterSummaryEntity> summaries = new ArrayList<>(List.of(
-                summary(1, states(state("林尘", "重伤"))),
-                summary(2, states(state("林尘", "轻伤")))));
+                summary(1, states(state("小陈", "重伤"))),
+                summary(2, states(state("小陈", "轻伤")))));
         summaries.get(0).setItemStates(new ArrayList<>(Arrays.asList(
-                new ChapterSummaryEntity.StateEntry("古镜", "吞灵显威", null))));
+                new ChapterSummaryEntity.StateEntry("古物", "异动显威", null))));
         summaries.get(1).setItemStates(new ArrayList<>(Arrays.asList(
-                new ChapterSummaryEntity.StateEntry("古镜", "吞灵显威", null))));
+                new ChapterSummaryEntity.StateEntry("古物", "异动显威", null))));
 
         String prefix = service.buildMemoryPrefix(summaries, null, null);
 
         assertTrue(prefix.contains("物品账本"));
-        assertTrue(prefix.contains("古镜（第1章登场）：吞灵显威"));
+        assertTrue(prefix.contains("古物（第1章登场）：异动显威"));
         // 无势力条目则不渲染该节
         assertTrue(!prefix.contains("势力账本"));
     }
@@ -326,22 +326,22 @@ class ChapterMemoryServiceTest {
     void prefix_activeWindowSplitsLedger() {
         // 第 1 章登场的角色，最近更新在第 20 章；最新章为第 20 章 → 窗口 [11,20]，第 1 章角色沉寂
         List<ChapterSummaryEntity> summaries = new ArrayList<>();
-        summaries.add(summary(1, states(state("严执事", "冷漠旁观"), state("林尘", "重伤"))));
+        summaries.add(summary(1, states(state("执事", "冷漠旁观"), state("小陈", "重伤"))));
         for (int no = 2; no <= 20; no++) {
-            summaries.add(summary(no, states(state("林尘", "炼气" + no + "层推进中"))));
+            summaries.add(summary(no, states(state("小陈", "炼气" + no + "层推进中"))));
         }
 
         String prefix = service.buildMemoryPrefix(summaries, null, null);
 
-        // 林尘最近更新仍在窗口内，逐条列出；严执事沉入沉淀名单，只留名字不列状态
-        assertTrue(prefix.contains("林尘（第1章登场）：炼气20层推进中"));
-        assertTrue(prefix.contains("早期沉寂条目：严执事(第1章)"));
-        assertTrue(!prefix.contains("严执事（第1章登场）"));
+        // 小陈最近更新仍在窗口内，逐条列出；执事沉入沉淀名单，只留名字不列状态
+        assertTrue(prefix.contains("小陈（第1章登场）：炼气20层推进中"));
+        assertTrue(prefix.contains("早期沉寂条目：执事(第1章)"));
+        assertTrue(!prefix.contains("执事（第1章登场）"));
     }
 
     @Test
     void prefix_foreshadowFreshZoneRendersLatestPlantsWithExcerpt() {
-        List<ChapterSummaryEntity> summaries = List.of(summary(1, states(state("林尘", "重伤"))));
+        List<ChapterSummaryEntity> summaries = List.of(summary(1, states(state("小陈", "重伤"))));
         List<String> many = new ArrayList<>();
         for (int i = 1; i <= ChapterMemoryService.MAX_FRESH_LINES + 5; i++) {
             many.add("伏笔" + i);
@@ -361,8 +361,8 @@ class ChapterMemoryServiceTest {
     @Test
     void prefix_foreshadowHardOverflowFallsBackToContentLines() {
         List<ChapterSummaryEntity> summaries = new ArrayList<>();
-        summaries.add(summary(4, states(state("林尘", "炼气"))));
-        summaries.add(summary(12, states(state("林尘", "炼气"))));
+        summaries.add(summary(4, states(state("小陈", "炼气"))));
+        summaries.add(summary(12, states(state("小陈", "炼气"))));
         List<String> many = new ArrayList<>();
         List<ChapterSummaryEntity.SeedEntry> seeds = new ArrayList<>();
         for (int i = 1; i <= ChapterMemoryService.MAX_HARD_LINES + 1; i++) {
@@ -385,7 +385,7 @@ class ChapterMemoryServiceTest {
     void prefix_foreshadowSpineNeverBreaks() {
         List<ChapterSummaryEntity> summaries = new ArrayList<>();
         for (int ch = 1; ch <= 12; ch++) {
-            summaries.add(summary(ch, states(state("林尘", "炼气"))));
+            summaries.add(summary(ch, states(state("小陈", "炼气"))));
         }
         // 5 分主线谜题第 1 章埋，第 12 章时 50 + 55 = 105：超熔断线但保持硬级可见
         summaries.get(0).setForeshadowingNew(List.of("主线核心谜题"));
@@ -404,7 +404,7 @@ class ChapterMemoryServiceTest {
     void prefix_foreshadowTiersEscalateByStagnation() {
         List<ChapterSummaryEntity> summaries = new ArrayList<>();
         for (int ch = 1; ch <= 16; ch++) {
-            summaries.add(summary(ch, states(state("林尘", "炼气"))));
+            summaries.add(summary(ch, states(state("小陈", "炼气"))));
             summaries.get(ch - 1).setForeshadowingNew(List.of("伏笔" + ch));
         }
 
@@ -426,8 +426,8 @@ class ChapterMemoryServiceTest {
     @Test
     void prefix_foreshadowImportanceDrivesTier() {
         List<ChapterSummaryEntity> summaries = List.of(
-                summary(1, states(state("林尘", "重伤"))),
-                summary(3, states(state("林尘", "炼气三层"))));
+                summary(1, states(state("小陈", "重伤"))),
+                summary(3, states(state("小陈", "炼气三层"))));
         summaries.get(0).setForeshadowingNew(List.of("主线伏笔", "闲笔伏笔"));
         summaries.get(0).setForeshadowSeeds(List.of(
                 new ChapterSummaryEntity.SeedEntry("主线伏笔", null, 5),
@@ -444,9 +444,9 @@ class ChapterMemoryServiceTest {
     @Test
     void prefix_foreshadowTop5NewestFirstWithSeedExcerpts() {
         List<ChapterSummaryEntity> summaries = List.of(
-                summary(1, states(state("林尘", "重伤"))),
-                summary(2, states(state("林尘", "炼气一层"))),
-                summary(3, states(state("林尘", "炼气三层"))));
+                summary(1, states(state("小陈", "重伤"))),
+                summary(2, states(state("小陈", "炼气一层"))),
+                summary(3, states(state("小陈", "炼气三层"))));
         summaries.get(0).setForeshadowingNew(List.of("旧伏笔甲"));
         summaries.get(0).setForeshadowSeeds(List.of(
                 new ChapterSummaryEntity.SeedEntry("旧伏笔甲", "旧伏笔甲的正文原句。", null)));
@@ -467,7 +467,7 @@ class ChapterMemoryServiceTest {
 
     @Test
     void prefix_foreshadowSeedWithoutExcerptRendersContentOnly() {
-        List<ChapterSummaryEntity> summaries = List.of(summary(1, states(state("林尘", "重伤"))));
+        List<ChapterSummaryEntity> summaries = List.of(summary(1, states(state("小陈", "重伤"))));
         summaries.get(0).setForeshadowingNew(List.of("某伏笔"));
         summaries.get(0).setForeshadowSeeds(List.of(
                 new ChapterSummaryEntity.SeedEntry("某伏笔", null, null)));
@@ -480,7 +480,7 @@ class ChapterMemoryServiceTest {
 
     @Test
     void prefix_qualityDebtsRecentTwoChaptersCappedFive() {
-        List<ChapterSummaryEntity> summaries = List.of(summary(1, states(state("林尘", "重伤"))));
+        List<ChapterSummaryEntity> summaries = List.of(summary(1, states(state("小陈", "重伤"))));
         List<QualityDebtEntity> debts = List.of(
                 debt(1, issue("consistency", "第1章债：境界矛盾", "建议甲"), issue("pacing", "第1章债2", null)),
                 debt(5, issue("hook", "第5章债：钩子断裂", "建议乙"), issue("aesthetic", "第5章债2", null),
@@ -500,7 +500,7 @@ class ChapterMemoryServiceTest {
     void prefix_qualityDebtsBlockingTakesSlotsBeforeStyleMinor() {
         // 严重度分层的消费端护栏：降档的机械文风 MINOR 与真 BLOCKING 混在同一条债里时，
         // 5 条前缀槽位必须先给 BLOCKING，否则文风提示会把真硬伤挤出回灌前缀
-        List<ChapterSummaryEntity> summaries = List.of(summary(1, states(state("林尘", "重伤"))));
+        List<ChapterSummaryEntity> summaries = List.of(summary(1, states(state("小陈", "重伤"))));
         List<QualityDebtEntity> debts = List.of(
                 debt(4, minor("aesthetic", "第4章文风：副词密度"),
                         minor("aesthetic", "第4章文风：章末升华"),
@@ -518,7 +518,7 @@ class ChapterMemoryServiceTest {
 
     @Test
     void prefix_qualityDebtsSkipsResolvedAndNullChapters() {
-        List<ChapterSummaryEntity> summaries = List.of(summary(1, states(state("林尘", "重伤"))));
+        List<ChapterSummaryEntity> summaries = List.of(summary(1, states(state("小陈", "重伤"))));
         List<QualityDebtEntity> debts = List.of(
                 debt(3, issue("hook", "已修复的债", null)),
                 debt(6, issue("pacing", "未修复的债", null)));
@@ -534,18 +534,18 @@ class ChapterMemoryServiceTest {
 
     @Test
     void prefix_rendersStageBlueprintBeforeSummaries() {
-        List<ChapterSummaryEntity> summaries = List.of(summary(1, states(state("林尘", "重伤"))));
+        List<ChapterSummaryEntity> summaries = List.of(summary(1, states(state("小陈", "重伤"))));
         StageBlueprintEntity blueprint = StageBlueprintEntity.builder()
                 .stageNo(1).startChapter(1).endChapter(10)
-                .stageGoal("主角站稳外门，古镜秘密初现")
-                .tasks(List.of("主角突破至炼气三层", "揭开古镜来历的一半"))
+                .stageGoal("主角站稳外门，古物秘密初现")
+                .tasks(List.of("主角突破至炼气三层", "揭开某关键物来历的一半"))
                 .carriedTasks(List.of(new StageBlueprintEntity.CarriedTaskEntity("与赵阔首次交锋", "进行中", "已铺垫仇恨")))
                 .build();
 
         String prefix = service.buildMemoryPrefix(summaries, null, null, null, blueprint);
 
         assertTrue(prefix.contains("【阶段蓝图】第1阶段（第1-10章）"));
-        assertTrue(prefix.contains("阶段目标：主角站稳外门，古镜秘密初现"));
+        assertTrue(prefix.contains("阶段目标：主角站稳外门，古物秘密初现"));
         assertTrue(prefix.contains("阶段任务（里程碑，按剧情自然推进，无需每章推进，严禁为凑任务注水）"));
         assertTrue(prefix.contains("- 主角突破至炼气三层"));
         assertTrue(prefix.contains("- 与赵阔首次交锋（进行中，已铺垫仇恨）"));
@@ -555,7 +555,7 @@ class ChapterMemoryServiceTest {
 
     @Test
     void prefix_omitsStageBlueprintWhenNull() {
-        List<ChapterSummaryEntity> summaries = List.of(summary(1, states(state("林尘", "重伤"))));
+        List<ChapterSummaryEntity> summaries = List.of(summary(1, states(state("小陈", "重伤"))));
 
         String prefix = service.buildMemoryPrefix(summaries, null, null, null, null);
 
@@ -566,7 +566,7 @@ class ChapterMemoryServiceTest {
     void prefix_rendersVolumeDirectionBeforeStageBlueprint() {
         // 卷方向锚：卷主旨/承转合/卷级伏笔/卷内弧清单此前只在弧生成时可见，
         // 章节计划与正文两层看不到——正文可能偏离卷主旨、把卷级承诺一路漏到卷末清账
-        List<ChapterSummaryEntity> summaries = List.of(summary(1, states(state("林尘", "炼气一层"))));
+        List<ChapterSummaryEntity> summaries = List.of(summary(1, states(state("小陈", "炼气一层"))));
         VolumeBlueprintEntity volume = VolumeBlueprintEntity.builder()
                 .volumeNo(2).title("北荒试炼").startChapter(101).endChapter(400)
                 .themeShift("从外门立足转向北荒势力博弈")
@@ -595,7 +595,7 @@ class ChapterMemoryServiceTest {
     @Test
     void prefix_omitsVolumeDirectionWhenNoVolume() {
         // 无卷模式（两段式）/卷生成失败：不注入方向锚，行为同改造前
-        List<ChapterSummaryEntity> summaries = List.of(summary(1, states(state("林尘", "重伤"))));
+        List<ChapterSummaryEntity> summaries = List.of(summary(1, states(state("小陈", "重伤"))));
 
         String prefix = service.buildMemoryPrefix(summaries, null, null, null, null, null, null);
 
@@ -607,8 +607,8 @@ class ChapterMemoryServiceTest {
         // 分块视图：整块交给总额守门只能整体截尾（先牺牲尾部：上章结尾/质量债/偏差警示），
         // 拆分后牺牲顺序改由 priority 决定——最近与纠错类数值更小（更不可牺牲），账本/唤醒更低
         List<ChapterSummaryEntity> summaries = List.of(
-                summary(1, states(state("林尘", "炼气一层"))),
-                summary(2, states(state("林尘", "炼气二层"))));
+                summary(1, states(state("小陈", "炼气一层"))),
+                summary(2, states(state("小陈", "炼气二层"))));
         List<QualityDebtEntity> debts = List.of(debt(2, issue("hook", "末尾钩子断裂", null)));
         VolumeBlueprintEntity volume = VolumeBlueprintEntity.builder()
                 .volumeNo(1).title("外门崛起").startChapter(1).endChapter(100)
@@ -639,10 +639,10 @@ class ChapterMemoryServiceTest {
     void timeAnchor_isInjectedAtRealmLockPriorityWhenAgeFactPresent() {
         // 年龄必须像境界一样每路锁定——时序锚与境界锁定同级（priority 1）、不可截断。
         // 背景：26-30 章计划 prompt 里"当前月龄出现 0 次"，导致十一个月大的婴儿写数论证明。
-        ChapterSummaryEntity ch16 = summary(16, states(state("陆瑾瑜", "十一个月")));
+        ChapterSummaryEntity ch16 = summary(16, states(state("角色丙", "十一个月")));
         ch16.setTimePoint("正月十六上午");
         ch16.setConsistencyFacts(new ArrayList<>(List.of(new ChapterSummaryEntity.ConsistencyFact(
-                "NUMBER", "陆瑾瑜月龄", "十一个月", "陆瑾瑜", "证据"))));
+                "NUMBER", "某角色月龄", "十一个月", "角色丙", "证据"))));
 
         List<PromptBudgetGuard.Block> blocks = service.buildMemoryBlocks(
                 List.of(ch16), null, null, null, null, null, null, null);
@@ -651,7 +651,7 @@ class ChapterMemoryServiceTest {
         assertEquals(blockByLabel(blocks, "境界锁定").priority(), anchor.priority(),
                 "时序锚与境界锁定同级：都是连续性硬约束");
         assertFalse(anchor.truncatable(), "时序锚截半即误导，只允许整块留弃");
-        assertTrue(anchor.content().contains("陆瑾瑜年龄：十一个月"));
+        assertTrue(anchor.content().contains("角色丙年龄：十一个月"));
         List<String> labels = blocks.stream().map(PromptBudgetGuard.Block::label).toList();
         assertTrue(labels.indexOf("境界锁定") < labels.indexOf("时序锚"));
         assertTrue(labels.indexOf("时序锚") < labels.indexOf("卷方向锚"),
@@ -661,7 +661,7 @@ class ChapterMemoryServiceTest {
     @Test
     void timeAnchor_blockAbsentWhenNoAgeFact() {
         List<PromptBudgetGuard.Block> blocks = service.buildMemoryBlocks(
-                List.of(summary(1, states(state("林尘", "炼气一层")))), null, null, null, null, null, null, null);
+                List.of(summary(1, states(state("小陈", "炼气一层")))), null, null, null, null, null, null, null);
 
         assertTrue(blocks.stream().noneMatch(block -> block.label().equals("时序锚")),
                 "无年龄事实时整块不加入（不编造、也不留空标签占位）");
@@ -698,22 +698,22 @@ class ChapterMemoryServiceTest {
         List<PromptBudgetGuard.Block> blocks = new ArrayList<>(service.buildMemoryBlocks(
                 List.of(), null, null, null, blueprint, null, null, null));
         service.prependSettingsAnchorIfNoSummaries(blocks, List.of(),
-                "主角在2002年以4岁幼童的身份苏醒", "陆瑾瑜，灵魂是前世科技公司创始人", "化作弄堂里的4岁幼童");
+                "主角在2002年以4岁幼童的身份苏醒", "角色丙，灵魂是前世科技公司创始人", "化作巷子里的4岁幼童");
 
         PromptBudgetGuard.Block anchor = blockByLabel(blocks, "时序锚");
         assertNotNull(anchor, "无摘要时必须补设定兜底年龄锚（否则第一章零年龄约束）");
         assertFalse(anchor.truncatable(), "兜底锚同样不可截断");
         assertTrue(anchor.priority() < blockByLabel(blocks, "阶段蓝图").priority(),
                 "年龄锚必须高于方向类块（与境界锁定同级）");
-        assertTrue(anchor.content().contains("陆瑾瑜起始年龄：4岁"));
+        assertTrue(anchor.content().contains("角色丙起始年龄：4岁"));
 
         // 有摘要时不再追加：以摘要锚为准，防起始年龄钉死在中期
-        List<ChapterSummaryEntity> summaries = List.of(summary(1, states(state("林尘", "炼气一层"))));
+        List<ChapterSummaryEntity> summaries = List.of(summary(1, states(state("小陈", "炼气一层"))));
         List<PromptBudgetGuard.Block> withSummaries = new ArrayList<>(
                 service.buildMemoryBlocks(summaries, null, null, null, null, null, null, null));
         int sizeBefore = withSummaries.size();
         service.prependSettingsAnchorIfNoSummaries(withSummaries, summaries,
-                "主角在2002年以4岁幼童的身份苏醒", "陆瑾瑜", null);
+                "主角在2002年以4岁幼童的身份苏醒", "角色丙", null);
         assertEquals(sizeBefore, withSummaries.size(), "有摘要时不追加设定兜底锚");
     }
 
@@ -722,7 +722,7 @@ class ChapterMemoryServiceTest {
         // 命中从严：设定里只有成人年龄（"前世38岁"）时不锚——宁可不锚，绝不误锚
         List<PromptBudgetGuard.Block> blocks = new ArrayList<>();
         service.prependSettingsAnchorIfNoSummaries(blocks, List.of(),
-                "主角前世是38岁的创始人", "陆瑾瑜，灵魂是……", "中年重生");
+                "主角前世是38岁的创始人", "某角色，灵魂是……", "中年重生");
         assertTrue(blocks.isEmpty(), "成人年龄不得被锚成当前年龄");
     }
 
@@ -730,8 +730,8 @@ class ChapterMemoryServiceTest {
     void buildMemoryPrefix_equalsJoinedBlocks() {
         // 整串视图（章节计划输入段消费）与分块视图（正文装配消费）同源：内容一致，仅块间分隔符口径
         List<ChapterSummaryEntity> summaries = List.of(
-                summary(1, states(state("林尘", "炼气一层"))),
-                summary(2, states(state("林尘", "炼气二层"))));
+                summary(1, states(state("小陈", "炼气一层"))),
+                summary(2, states(state("小陈", "炼气二层"))));
         List<String> conflicts = List.of("上章偏差：位置跳变");
         List<QualityDebtEntity> debts = List.of(debt(2, issue("hook", "末尾钩子断裂", null)));
 
@@ -748,7 +748,7 @@ class ChapterMemoryServiceTest {
     void blueprintForeshadowList_ordersHardSoftBreakerExcludesBackground() {
         List<ChapterSummaryEntity> summaries = new ArrayList<>();
         for (int ch = 1; ch <= 16; ch++) {
-            summaries.add(summary(ch, states(state("林尘", "炼气"))));
+            summaries.add(summary(ch, states(state("小陈", "炼气"))));
             summaries.get(ch - 1).setForeshadowingNew(List.of("伏笔" + ch));
         }
 
@@ -799,9 +799,9 @@ class ChapterMemoryServiceTest {
     @Test
     void prefix_locksLatestRealmAtTop() {
         List<ChapterSummaryEntity> summaries = new ArrayList<>(Arrays.asList(
-                summary(1, states(state("林尘", "重伤"))),
-                summary(2, states(state("林尘", "炼气一层"))),
-                summary(3, states(state("林尘", "炼气三层")))));
+                summary(1, states(state("小陈", "重伤"))),
+                summary(2, states(state("小陈", "炼气一层"))),
+                summary(3, states(state("小陈", "炼气三层")))));
         summaries.get(1).setCultivationRealm("炼气一层");
         summaries.get(2).setCultivationRealm("炼气三层");
 
@@ -815,7 +815,7 @@ class ChapterMemoryServiceTest {
 
     @Test
     void prefix_noRealmSectionWhenNeverRecorded() {
-        List<ChapterSummaryEntity> summaries = List.of(summary(1, states(state("林尘", "重伤"))));
+        List<ChapterSummaryEntity> summaries = List.of(summary(1, states(state("小陈", "重伤"))));
 
         String prefix = service.buildMemoryPrefix(summaries, null, null);
 
@@ -824,10 +824,10 @@ class ChapterMemoryServiceTest {
 
     @Test
     void prefix_rendersPendingConflictsWarning() {
-        List<ChapterSummaryEntity> summaries = List.of(summary(1, states(state("林尘", "重伤"))));
+        List<ChapterSummaryEntity> summaries = List.of(summary(1, states(state("小陈", "重伤"))));
 
         String prefix = service.buildMemoryPrefix(summaries, null,
-                List.of("第2章写林尘后腰被踹，但账本与第1章均无此情节"));
+                List.of("第2章写小陈后腰被踹，但账本与第1章均无此情节"));
 
         assertTrue(prefix.contains("上章偏差警示"));
         assertTrue(prefix.contains("以账本为准"));
@@ -836,21 +836,21 @@ class ChapterMemoryServiceTest {
 
     @Test
     void prefix_noConflictSectionWhenNull() {
-        List<ChapterSummaryEntity> summaries = List.of(summary(1, states(state("林尘", "重伤"))));
+        List<ChapterSummaryEntity> summaries = List.of(summary(1, states(state("小陈", "重伤"))));
 
         assertTrue(!service.buildMemoryPrefix(summaries, null, null).contains("上章偏差警示"));
     }
 
     @Test
     void prefix_resolvedForeshadowingRemoved() {
-        List<ChapterSummaryEntity> summaries = List.of(summary(1, states(state("林尘", "重伤"))));
-        summaries.get(0).setForeshadowingNew(List.of("古镜来历", "严执事的态度"));
-        summaries.get(0).setForeshadowingResolved(List.of("古镜来历"));
+        List<ChapterSummaryEntity> summaries = List.of(summary(1, states(state("小陈", "重伤"))));
+        summaries.get(0).setForeshadowingNew(List.of("古物来历", "执事的态度"));
+        summaries.get(0).setForeshadowingResolved(List.of("古物来历"));
 
         String prefix = service.buildMemoryPrefix(summaries, null, null);
 
-        assertTrue(prefix.contains("严执事的态度"));
-        assertTrue(!prefix.contains("- 古镜来历"));
+        assertTrue(prefix.contains("执事的态度"));
+        assertTrue(!prefix.contains("- 古物来历"));
     }
 
     @Test
@@ -892,7 +892,7 @@ class ChapterMemoryServiceTest {
 
     @Test
     void prefix_rendersRecallHitsSection() {
-        List<ChapterSummaryEntity> summaries = List.of(summary(1, state("林尘", "重伤")));
+        List<ChapterSummaryEntity> summaries = List.of(summary(1, state("小陈", "重伤")));
 
         String prefix = service.buildMemoryPrefix(summaries, null, null, null, null,
                 List.of(new StoryMemoryService.RecallHit("第2章《旧事》：旧事重提。\n伏笔线索", 0.82)));
@@ -904,7 +904,7 @@ class ChapterMemoryServiceTest {
 
     @Test
     void prefix_omitsRecallSectionWhenEmpty() {
-        List<ChapterSummaryEntity> summaries = List.of(summary(1, state("林尘", "重伤")));
+        List<ChapterSummaryEntity> summaries = List.of(summary(1, state("小陈", "重伤")));
 
         String prefix = service.buildMemoryPrefix(summaries, null, null, null, null, List.of());
 
@@ -914,8 +914,8 @@ class ChapterMemoryServiceTest {
     @Test
     void breakerForeshadows_onlyBreakerTierWithLatestNoFromStageEnd() {
         List<ChapterSummaryEntity> summaries = new ArrayList<>();
-        summaries.add(summary(1, state("林尘", "炼气")));
-        summaries.add(summary(30, state("林尘", "炼气")));
+        summaries.add(summary(1, state("小陈", "炼气")));
+        summaries.add(summary(30, state("小陈", "炼气")));
         // 重要度 4 第 1 章埋，第 30 章时 40 + 145 = 185 → 熔断；重要度 4 第 29 章埋 → 背景区
         summaries.get(0).setForeshadowingNew(List.of("旧笔记本里的借书卡"));
         summaries.get(0).setForeshadowSeeds(List.of(
@@ -935,8 +935,8 @@ class ChapterMemoryServiceTest {
     @Test
     void stripVoidedForeshadows_removesByExactContentAndKeepsOthers() {
         List<ChapterSummaryEntity> summaries = new ArrayList<>();
-        summaries.add(summary(1, state("林尘", "炼气")));
-        summaries.add(summary(2, state("林尘", "炼气")));
+        summaries.add(summary(1, state("小陈", "炼气")));
+        summaries.add(summary(2, state("小陈", "炼气")));
         // List.of 不可变清单也应可剔除（strip 以替换整表实现，不就地改写）
         summaries.get(0).setForeshadowingNew(List.of("废弃的转发链路线索", "旧笔记本里的借书卡"));
         summaries.get(1).setForeshadowingNew(Arrays.asList("刚埋的新钩子", " 废弃的转发链路线索 "));
@@ -953,28 +953,28 @@ class ChapterMemoryServiceTest {
     @Test
     void prefix_singleMentionEntryRendersNameOnly() {
         // 只出现一次的条目降为"仅列名"：实测本书物品账本近一半渲染字数是这类
-        // 一次性布景道具（油纸包桃酥 / 绿豆汤 / 洛阳轴承厂纸盒…），不会再被引用却持续吃前缀预算。
+        // 一次性布景道具（油纸包点心 / 绿豆汤 / 洛阳轴承厂纸盒…），不会再被引用却持续吃前缀预算。
         // 判定依据：buildLedger 里 lastChapterNo 每次提及都会刷新，故"首现章 == 最近提及章"
         // 等价于"全篇只在一章出现过"——这是本规则能成立的前提，须由本用例守住。
         List<ChapterSummaryEntity> summaries = List.of(
-                summary(1, states(state("陆瑾瑜", "重生为四岁幼童"),
-                        state("油纸包桃酥", "从供销社买回，油纸已渗油"))),
-                summary(2, states(state("陆瑾瑜", "学会打算盘"))));
+                summary(1, states(state("角色丙", "重生为四岁幼童"),
+                        state("油纸包点心", "从供销社买回，油纸已渗油"))),
+                summary(2, states(state("角色丙", "学会打算盘"))));
 
         String prefix = service.buildMemoryPrefix(summaries, null, null);
 
-        assertTrue(prefix.contains("陆瑾瑜（第1章登场）："), "被复用的条目应完整渲染：" + prefix);
+        assertTrue(prefix.contains("角色丙（第1章登场）："), "被复用的条目应完整渲染：" + prefix);
         assertTrue(prefix.contains("学会打算盘"), "被复用条目的状态必须保留");
         assertTrue(prefix.contains("仅出现过一次的条目"), "应有一段降级展示：" + prefix);
-        assertTrue(prefix.contains("油纸包桃酥"), "一次性条目仍保留名字（防后文生造同名物）");
+        assertTrue(prefix.contains("油纸包点心"), "一次性条目仍保留名字（防后文生造同名物）");
         assertFalse(prefix.contains("油纸已渗油"), "一次性条目的状态不得渲染——这是省预算的主要来源");
     }
 
     private ChapterSummaryEntity summary(int chapterNo, ChapterSummaryEntity.StateEntry... states) {
         ChapterSummaryEntity entity = ChapterSummaryEntity.builder()
                 .chapterNo(chapterNo)
-                .title(chapterNo == 1 ? "废丹田" : chapterNo == 2 ? "古镜吞灵" : "第" + chapterNo + "章")
-                .summary(chapterNo == 1 ? "林尘被赵阔废去丹田。" : chapterNo == 2 ? "林尘踏入炼气一层。" : "剧情推进。")
+                .title(chapterNo == 1 ? "废丹田" : chapterNo == 2 ? "古物奇谈" : "第" + chapterNo + "章")
+                .summary(chapterNo == 1 ? "小陈被赵阔废去丹田。" : chapterNo == 2 ? "小陈踏入炼气一层。" : "剧情推进。")
                 .build();
         if (states.length > 0) {
             entity.setCharacterStates(new ArrayList<>(Arrays.asList(states)));

@@ -151,12 +151,12 @@ class StoryManageControllerTest {
         when(storyRepository.resolveStoryDirectory("20260902-story-0001")).thenReturn(storyDir);
         when(bookExportService.exportChapters(eq(storyDir), eq(BookFormat.TXT))).thenReturn(
                 BookExport.builder()
-                        .fileName("雾港拾骨-分章TXT-2章-20261011.zip")
+                        .fileName("示例书-分章TXT-2章-20261011.zip")
                         .fileBytes(new byte[]{1, 2, 3})
                         .format(BookFormat.TXT)
                         .chapterCount(2)
                         .effectiveChars(100L)
-                        .novelTitle("雾港拾骨")
+                        .novelTitle("示例书")
                         .build());
 
         ResponseEntity<byte[]> response = controller.exportBook("20260902-story-0001", "txt");
@@ -177,11 +177,11 @@ class StoryManageControllerTest {
         when(storyRepository.resolveStoryDirectory("20260902-story-0001")).thenReturn(storyDir);
         when(bookExportService.exportChapters(eq(storyDir), eq(BookFormat.DOCX))).thenReturn(
                 BookExport.builder()
-                        .fileName("雾港拾骨-分章DOCX-2章-20261011.zip")
+                        .fileName("示例书-分章DOCX-2章-20261011.zip")
                         .fileBytes(new byte[]{9, 8})
                         .format(BookFormat.DOCX)
                         .chapterCount(2)
-                        .novelTitle("雾港拾骨")
+                        .novelTitle("示例书")
                         .build());
 
         ResponseEntity<byte[]> response = controller.exportBook("20260902-story-0001", "docx");
@@ -332,7 +332,7 @@ class StoryManageControllerTest {
         ChapterSummaryEntity summary = ChapterSummaryEntity.builder().chapterNo(5).build();
         summary.setPendingFacts(List.of(
                 new ChapterSummaryEntity.StateEntry("赵阔", "已飞升", "正文里根本没有这句话"),
-                new ChapterSummaryEntity.StateEntry("古镜", "碎裂", "碎成了八瓣")));
+                new ChapterSummaryEntity.StateEntry("古物", "碎裂", "碎成了八瓣")));
         when(storyRepository.readChapterSummaries(storyDir)).thenReturn(List.of(summary));
 
         List<PendingFactDTO> result = controller.pendingFacts("20260902-story-0001");
@@ -341,7 +341,7 @@ class StoryManageControllerTest {
         assertEquals(5, result.get(0).getChapterNo());
         assertEquals("赵阔", result.get(0).getName());
         assertEquals("正文里根本没有这句话", result.get(0).getEvidence());
-        assertEquals("古镜", result.get(1).getName());
+        assertEquals("古物", result.get(1).getName());
     }
 
     @Test
@@ -350,22 +350,22 @@ class StoryManageControllerTest {
         when(storyRepository.resolveStoryDirectory("20260902-story-0001")).thenReturn(storyDir);
         ChapterSummaryEntity ch1 = ChapterSummaryEntity.builder().chapterNo(1).build();
         ch1.setCharacterStates(List.of(new ChapterSummaryEntity.StateEntry(
-                "林尘", "重伤", "林尘咬破舌尖，强行催动古镜")));
+                "小陈", "重伤", "小陈咬破舌尖，强行催动古物")));
         ChapterSummaryEntity ch3 = ChapterSummaryEntity.builder().chapterNo(3).build();
         ch3.setCharacterStates(List.of(new ChapterSummaryEntity.StateEntry(
-                "林尘", "痊愈", null)));
+                "小陈", "痊愈", null)));
         ch3.setItemStates(List.of(new ChapterSummaryEntity.StateEntry(
-                "古镜", "镜面裂开细纹", "镜面裂开一道细纹")));
+                "古物", "镜面裂开细纹", "镜面裂开一道细纹")));
         when(storyRepository.readChapterSummaries(storyDir)).thenReturn(List.of(ch1, ch3));
 
-        List<FactTimelineDTO> result = controller.factTimeline("20260902-story-0001", "林尘");
+        List<FactTimelineDTO> result = controller.factTimeline("20260902-story-0001", "小陈");
 
         // 精确匹配：仅角色条目命中，按章序排列，证据随条目携带
         assertEquals(2, result.size());
         assertEquals(1, result.get(0).getChapterNo());
         assertEquals("角色", result.get(0).getFactType());
         assertEquals("重伤", result.get(0).getStatus());
-        assertEquals("林尘咬破舌尖，强行催动古镜", result.get(0).getEvidence());
+        assertEquals("小陈咬破舌尖，强行催动古物", result.get(0).getEvidence());
         assertEquals(3, result.get(1).getChapterNo());
         assertNull(result.get(1).getEvidence());
     }
@@ -376,14 +376,14 @@ class StoryManageControllerTest {
         when(storyRepository.resolveStoryDirectory("20260902-story-0001")).thenReturn(storyDir);
         ChapterSummaryEntity ch1 = ChapterSummaryEntity.builder().chapterNo(1).build();
         ch1.setItemStates(List.of(new ChapterSummaryEntity.StateEntry(
-                "古镜", "首次显威", null)));
+                "古物", "首次显威", null)));
         when(storyRepository.readChapterSummaries(storyDir)).thenReturn(List.of(ch1));
 
         // 精确名无结果 → 包含匹配回退
-        List<FactTimelineDTO> result = controller.factTimeline("20260902-story-0001", "镜");
+        List<FactTimelineDTO> result = controller.factTimeline("20260902-story-0001", "物");
 
         assertEquals(1, result.size());
-        assertEquals("古镜", result.get(0).getName());
+        assertEquals("古物", result.get(0).getName());
         assertEquals("物品", result.get(0).getFactType());
         assertEquals("首次显威", result.get(0).getStatus());
     }
@@ -391,10 +391,10 @@ class StoryManageControllerTest {
     // ==================== 续写准备 ====================
 
     private static final String RESUME_BIBLE = String.join("\n",
-            "小说名称: 雾港拾骨",
+            "小说名称: 示例书",
             "小说类型: 悬疑推理",
             "小说格调: 冷硬悬疑",
-            "世界观: 雾港被旧案封锁",
+            "世界观: 旧港被旧案封锁",
             "叙述视角: 第三人称限知视角",
             "目标读者: 男频",
             "语气基调: 压抑克制",
@@ -416,7 +416,7 @@ class StoryManageControllerTest {
         StoryResumeDTO dto = controller.resume("20260902-story-0001");
 
         assertEquals("20260902-story-0001", dto.getStoryDirName());
-        assertEquals("雾港拾骨", dto.getNovelTitle());
+        assertEquals("示例书", dto.getNovelTitle());
         assertEquals(4, dto.getLatestChapterNo());
         assertEquals(5, dto.getNextChapterNo());
         assertEquals(4, dto.getExistingChapterCount());
@@ -424,9 +424,9 @@ class StoryManageControllerTest {
         assertTrue(dto.getMissingFields().isEmpty());
 
         StoryGenerateRequestDTO setting = dto.getSetting();
-        assertEquals("雾港拾骨", setting.getNovel_title());
+        assertEquals("示例书", setting.getNovel_title());
         assertEquals("悬疑推理", setting.getTheme());
-        assertEquals("雾港被旧案封锁", setting.getWorldSetting());
+        assertEquals("旧港被旧案封锁", setting.getWorldSetting());
         assertEquals("林昭，沉物打捞人", setting.getProtagonist());
         assertEquals("让读者体验解谜快感", setting.getChapterGoal());
         // 世界 ID 必须带上：它是系列共享向量集合的键

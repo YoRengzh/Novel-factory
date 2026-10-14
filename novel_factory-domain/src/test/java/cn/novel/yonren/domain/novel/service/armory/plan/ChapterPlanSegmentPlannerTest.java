@@ -127,8 +127,8 @@ class ChapterPlanSegmentPlannerTest {
                 .coreSuspense("双方身份")
                 .suspenseLadder(LADDER)
                 .mainLineByChapter(List.of(
-                        new StageBlueprintEntity.MainLineBeat(1, "陆建国首次听到投资提议"),
-                        new StageBlueprintEntity.MainLineBeat(2, "陆建国翻看凭证起疑"),
+                        new StageBlueprintEntity.MainLineBeat(1, "角色戊首次听到投资提议"),
+                        new StageBlueprintEntity.MainLineBeat(2, "角色戊翻看凭证起疑"),
                         new StageBlueprintEntity.MainLineBeat(3, "夫妻夜谈定下对策")))
                 .build();
     }

@@ -18,16 +18,16 @@ class DialoguePresencePolicyTest {
     @Test
     void ch110_deliveredOneOfTwo_reportsSecondMissing() {
         String content = """
-                周秀兰直起身，把铅笔搁回笔筒，转过头来看他。
+                角色甲直起身，把铅笔搁回笔筒，转过头来看他。
                 「既然记着，这个也记上。」
                 声音不高，跟平时叫儿子吃饭一个调。
-                陆远山点了点头。
+                角色乙点了点头。
                 两个人隔着屋子对看了一眼。""";
         List<String> missing = DialoguePresencePolicy.missingScenes(
-                List.of("周秀兰：「既然记着，这个也记上。」", "陆远山：「嗯。」"), content);
+                List.of("角色甲：「既然记着，这个也记上。」", "角色乙：「嗯。」"), content);
 
         assertEquals(1, missing.size(), "只有「嗯」那条场景缺失：" + missing);
-        assertTrue(missing.get(0).contains("陆远山"), "缺失的应是陆远山那条：" + missing);
+        assertTrue(missing.get(0).contains("角色乙"), "缺失的应是角色乙那条：" + missing);
     }
 
     /** 两句都写出（哪怕引号形态/标点有微差）→ 无缺失 */
@@ -36,10 +36,10 @@ class DialoguePresencePolicyTest {
         String content = """
                 她转过头来看他。
                 「既然记着，这个也记上。」
-                陆远山应了。
+                角色乙应了。
                 「嗯。」""";
         List<String> missing = DialoguePresencePolicy.missingScenes(
-                List.of("周秀兰：「既然记着，这个也记上。」", "陆远山：「嗯。」"), content);
+                List.of("角色甲：「既然记着，这个也记上。」", "角色乙：「嗯。」"), content);
 
         assertTrue(missing.isEmpty(), "两句都已落进正文：" + missing);
     }
@@ -47,7 +47,7 @@ class DialoguePresencePolicyTest {
     /** 第 108 章实测：整句重写（LCS 占比 0.15）按缺失报——是否触发修复由密度判定，本类只如实报告 */
     @Test
     void ch108_wholeRewrite_reportedMissing() {
-        String declared = "陆瑾瑜：「好，但你得自己把最后一步补上。」";
+        String declared = "角色丙：「好，但你得自己把最后一步补上。」";
         String content = "他把笔递过去。\n「后半段我写到这儿，剩下的你自己接。」\n她接过了笔。";
         List<String> missing = DialoguePresencePolicy.missingScenes(List.of(declared), content);
 
@@ -81,7 +81,7 @@ class DialoguePresencePolicyTest {
     /** 第 108 章实测：写手在声明台词前后加了话，但核心句原样在——包含匹配判已交付 */
     @Test
     void ch108_expandedLine_countsAsDelivered() {
-        String declared = "宋知渔：「这题我一个人做不完，你来补后半段。」";
+        String declared = "角色己：「这题我一个人做不完，你来补后半段。」";
         String content = "她把信纸推过来。\n「省里来的信里夹的。那道构造题，我一个人做不完。你来补后半段。」\n他看着那行字。";
         List<String> missing = DialoguePresencePolicy.missingScenes(List.of(declared), content);
 
@@ -92,10 +92,10 @@ class DialoguePresencePolicyTest {
     @Test
     void narrationMentionWithoutQuotes_notDelivered() {
         String content = """
-                陆远山嗯了一声，算是应了。
-                周秀兰既然记着，这个也记上了。""";
+                角色乙嗯了一声，算是应了。
+                角色甲既然记着，这个也记上了。""";
         List<String> missing = DialoguePresencePolicy.missingScenes(
-                List.of("陆远山：「嗯。」", "周秀兰：「既然记着，这个也记上。」"), content);
+                List.of("角色乙：「嗯。」", "角色甲：「既然记着，这个也记上。」"), content);
 
         assertEquals(2, missing.size(), "无引号对白一律不算交付：" + missing);
     }
@@ -105,7 +105,7 @@ class DialoguePresencePolicyTest {
     void sceneWithoutQuotedSpeech_skipped() {
         String content = "他把碗端起来又放下，一句话没说。";
         List<String> missing = DialoguePresencePolicy.missingScenes(
-                List.of("两人在灶房里低声商量报名的事"), content);
+                List.of("两人在厨房里低声商量报名的事"), content);
 
         assertTrue(missing.isEmpty(), "无台词可校验的声明不判缺失");
     }
@@ -113,7 +113,7 @@ class DialoguePresencePolicyTest {
     /** 短台词的包含匹配只认短对白：长句里的单字不构成交付（「他嗯了一声站起来」≠「嗯」） */
     @Test
     void shortSpeech_onlyMatchesShortUtterance() {
-        String declared = "陆远山：「嗯。」";
+        String declared = "角色乙：「嗯。」";
         String longOnly = "他嗯了一声站起来，走到门口。\n「走吧，不早了。」";
         assertEquals(1, DialoguePresencePolicy.missingScenes(List.of(declared), longOnly).size(),
                 "长句包含单字属噪声，不算交付");
@@ -127,7 +127,7 @@ class DialoguePresencePolicyTest {
     void nullOrEmptyInputs_safeEmpty() {
         assertTrue(DialoguePresencePolicy.missingScenes(null, "「嗯。」").isEmpty());
         assertTrue(DialoguePresencePolicy.missingScenes(List.of(), "「嗯。」").isEmpty());
-        assertTrue(DialoguePresencePolicy.missingScenes(List.of("陆远山：「嗯。」"), null).isEmpty());
-        assertTrue(DialoguePresencePolicy.missingScenes(List.of("陆远山：「嗯。」"), "  ").isEmpty());
+        assertTrue(DialoguePresencePolicy.missingScenes(List.of("角色乙：「嗯。」"), null).isEmpty());
+        assertTrue(DialoguePresencePolicy.missingScenes(List.of("角色乙：「嗯。」"), "  ").isEmpty());
     }
 }

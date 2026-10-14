@@ -2,6 +2,7 @@ package cn.novel.yonren.domain.novel.service.armory.memory;
 
 import cn.novel.yonren.domain.novel.model.entity.StyleStatEntity;
 import cn.novel.yonren.domain.novel.service.armory.quality.DialogueRatioPolicy;
+import cn.novel.yonren.domain.novel.service.armory.quality.RepetitionWatchlistCatalog;
 import org.apache.commons.lang3.StringUtils;
 import org.springframework.stereotype.Service;
 
@@ -17,7 +18,7 @@ import java.util.stream.Collectors;
 
 /**
  * 风格统计服务：机械层的风格账本——跨章逐字重复句查重 + 疲劳词计数，
- * 纯代码统计不经过 LLM，治"古镜发热/咽下血沫"式的跨章路径依赖。
+ * 纯代码统计不经过 LLM，治"同一道具反应/同一生理反应反复复用"式的跨章路径依赖。
  * 数据随正文逐章滚动合并，与三账本同思路：确定性重建、检查点落盘、前缀注入警示
  */
 @Service
@@ -29,7 +30,7 @@ public class StyleStatService {
      * 已见句集滚动上限（挤出最老句子，防无界增长）。
      *
      * <p>由 80 上调至 300：80 句约等于**一章**的量，于是"隔两章的重复"根本进不了视野
-     * ——实测第 100 章与第 102 章一字不差重复了同一句，查重两侧都查不到。该列表不参与 prompt 渲染
+     * ——实测相隔两章一字不差重复了同一句，窗口太短导致查重两侧都查不到。该列表不参与 prompt 渲染
      * （渲染的只有 {@link #MAX_REPEATED_SENTENCES} 条重复句），所以放宽窗口只增加一点内存与比对，
      * 不增加 prompt 体积。
      */
@@ -42,10 +43,17 @@ public class StyleStatService {
     public static final int FATIGUE_THRESHOLD = 5;
 
     /**
+     * 重复意象警示阈值：全篇出现达到该次数即点名（比疲劳词宽松——意象是叙事元素，
+     * 适度复现是正常的伏笔呼应；要抓的是"变成作者口头禅"那种密度）。
+     */
+    public static final int IMAGERY_THRESHOLD = 4;
+    /** 意象警示渲染条数上限 */
+    private static final int MAX_RENDER_IMAGERY = 6;
+
+    /**
      * 对白句入库下限：**含引号**长度。
      *
-     * <p>取 8 是两头的取舍（实测标定）：要抓的真重复是 10 字的
-     * 「三班还等得到吗？」，而套话短答（「我知道了。」6 字、「明天再说。」6 字、「我先走了。」6 字）
+     * <p>取 8 是两头的取舍（实测标定）：要抓的真重复是一句完整台词（十个字上下），而套话短答（「我知道了。」6 字、「明天再说。」6 字、「我先走了。」6 字）
      * 在正常文里本来就会自然复现——那条判据要进 BLOCKING 驱动改稿，把套话扫进来等于白改一稿。
      */
     public static final int MIN_DIALOGUE_LINE_LENGTH = 8;
@@ -83,6 +91,7 @@ public class StyleStatService {
                 .repeatedSentences(new ArrayList<>())
                 .fatigueWords(new LinkedHashMap<>())
                 .usedDialogueLines(new ArrayList<>())
+                .imageryWords(new LinkedHashMap<>())
                 .build();
     }
 
@@ -90,6 +99,19 @@ public class StyleStatService {
      * 滚动合并一章正文：长句查重（与已见句集相交即记为跨章重复）→ 新句并入 → 对白句入库 → 疲劳词累加
      */
     public void merge(StyleStatEntity stat, String content) {
+        merge(stat, content, null);
+    }
+
+    /**
+     * 同上，并统计**重复意象**（{@code genreCode} 决定取用清单的哪一组）。
+     *
+     * <p>意象统计与疲劳词同款：跨章逐字累计、随正文滚动合并、零 LLM 成本。
+     * 词条来自外置清单（见 {@code RepetitionWatchlistCatalog}）——题材为 null 或该题材无专属词条时，
+     * 只统计通用组；清单为空则整体不启用（行为与引入前完全一致）。
+     *
+     * @param genreCode 题材 code（{@code GenreTypeVO.code}），可空
+     */
+    public void merge(StyleStatEntity stat, String content, String genreCode) {
         if (stat == null || StringUtils.isBlank(content)) {
             return;
         }
@@ -135,6 +157,30 @@ public class StyleStatService {
             int count = countOccurrences(normalized, word);
             if (count > 0) {
                 stat.getFatigueWords().merge(word, count, Integer::sum);
+            }
+        }
+        mergeImagery(stat, normalized, genreCode);
+    }
+
+    /**
+     * 重复意象累计：按外置清单逐字统计（子串匹配，非分词）。
+     *
+     * <p>只累加不衰减——与疲劳词同语义（"全篇出现了多少次"），超频判定交给渲染侧，
+     * 因为"该不该点名"要看的是**全篇累计**而非窗口：实测被反复用作记忆锚点的同一意象
+     * 每隔几章出现一次，任何有限窗口都会漏掉（这与跨段的能力展示套路是同一类问题）。
+     */
+    private void mergeImagery(StyleStatEntity stat, String normalized, String genreCode) {
+        List<String> phrases = RepetitionWatchlistCatalog.get().forGenre(genreCode);
+        if (phrases.isEmpty()) {
+            return;
+        }
+        if (stat.getImageryWords() == null) {
+            stat.setImageryWords(new LinkedHashMap<>());
+        }
+        for (String phrase : phrases) {
+            int count = countOccurrences(normalized, phrase);
+            if (count > 0) {
+                stat.getImageryWords().merge(phrase, count, Integer::sum);
             }
         }
     }
@@ -250,8 +296,46 @@ public class StyleStatService {
         return sb.toString();
     }
 
-    public String renderReviseFatigueBlacklist(StyleStatEntity stat) {
-        StringBuilder sb = new StringBuilder("【疲劳词禁新增名单】修订稿严禁新增或推高以下词的全书累计次数（跨章累计达到")
+    /**
+     * 渲染**重复意象警示**（注入下一章正文 prompt）：把"被反复用作情绪载体的具体意象"点名，
+     * 并给替换方向。无超频意象时返回 null（调用方直接跳过，不占 prompt 预算）。
+     *
+     * <p><b>为什么要"换什么"而不只是"别再用"</b>：只下禁令时模型最容易的做法是把同一个意象
+     * 换个说法继续用（实测被反复点名的意象正是这个形态）。故点名后必须给替换方向——
+     * 这与 {@code UsedPatternPolicy} 第三节（角色冲突"至少换两项"）是同一套措辞纪律。
+     *
+     * <p>阈值取 {@link #IMAGERY_THRESHOLD}：比疲劳词宽松（意象是叙事元素，适度复现是正常的
+     * 伏笔呼应；要抓的是"变成作者口头禅"那种密度）。
+     */
+    public String renderImageryWarning(StyleStatEntity stat) {
+        List<String> overused = overusedImagery(stat);
+        if (overused.isEmpty()) {
+            return null;
+        }
+        StringBuilder sb = new StringBuilder("【重复意象警示】以下意象在全书已反复出现，");
+        sb.append("本章**不得再用它们承担抒情或前世/记忆锚点功能**：");
+        sb.append(String.join("、", overused));
+        sb.append("\n替换方向：换成**别的具体载体**——一件当时在场的普通物件、一句没说完的话、");
+        sb.append("一个具体的人或一次没赴的约；关键是让读者感到「这一次不一样」，");
+        sb.append("而不是又一次用同一个符号提醒他们旧事。同一意象若要再次出现，至少间隔 20 章以上，");
+        sb.append("且必须承担与上次**不同**的叙事功能。");
+        return sb.toString();
+    }
+
+    /** 全书累计超频（≥{@link #IMAGERY_THRESHOLD}）的意象：按次数降序，最多 {@link #MAX_RENDER_IMAGERY} 条 */
+    private List<String> overusedImagery(StyleStatEntity stat) {
+        if (stat == null || stat.getImageryWords() == null || stat.getImageryWords().isEmpty()) {
+            return List.of();
+        }
+        return stat.getImageryWords().entrySet().stream()
+                .filter(e -> e.getValue() != null && e.getValue() >= IMAGERY_THRESHOLD)
+                .sorted(Map.Entry.<String, Integer>comparingByValue().reversed())
+                .limit(MAX_RENDER_IMAGERY)
+                .map(e -> e.getKey() + "（全书已出现" + e.getValue() + "次）")
+                .collect(Collectors.toList());
+    }
+
+    public String renderReviseFatigueBlacklist(StyleStatEntity stat) {        StringBuilder sb = new StringBuilder("【疲劳词禁新增名单】修订稿严禁新增或推高以下词的全书累计次数（跨章累计达到")
                 .append(FATIGUE_THRESHOLD).append("次即进入全书风格警示，代价由后续每一章承担）：");
         for (String word : FATIGUE_WORDS) {
             sb.append("、").append(word);

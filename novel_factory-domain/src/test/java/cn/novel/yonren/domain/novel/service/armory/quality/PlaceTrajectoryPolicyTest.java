@@ -25,15 +25,15 @@ class PlaceTrajectoryPolicyTest {
 
     @Test
     void placePointTakesPriorityOverTimePoint() {
-        assertEquals("林尘小院", PlaceTrajectoryPolicy.placeOf(
-                summary(1, "林尘小院", "外门大比当日深夜，某个不一致的旧地点")));
+        assertEquals("主角居所", PlaceTrajectoryPolicy.placeOf(
+                summary(1, "主角居所", "外门大比当日深夜，某个不一致的旧地点")));
     }
 
     @Test
     void fallsBackToLastSegmentOfTimePointForLegacyData() {
         // 老数据无 placePoint：摘要 prompt 的样例是"时间，地点"，地点在后
-        assertEquals("林尘小院", PlaceTrajectoryPolicy.placeOf(
-                summary(1, null, "外门大比当日深夜，林尘小院")));
+        assertEquals("主角居所", PlaceTrajectoryPolicy.placeOf(
+                summary(1, null, "外门大比当日深夜，主角居所")));
         assertEquals("阵眼核心大殿内", PlaceTrajectoryPolicy.placeOf(
                 summary(2, null, "当日深夜，阵眼核心大殿内")));
     }
@@ -90,34 +90,34 @@ class PlaceTrajectoryPolicyTest {
         List<ChapterSummaryEntity> many = new java.util.ArrayList<>();
         many.add(summary(1, "很久以前的地方", null));
         for (int ch = 2; ch <= window + 2; ch++) {
-            many.add(summary(ch, "阵法堂", null));
+            many.add(summary(ch, "讲堂", null));
         }
 
         String block = PlaceTrajectoryPolicy.renderTrajectory(many);
 
         assertEquals(false, block.contains("很久以前的地方"));
-        // 窗口 = 最后 window 章，全部是"阵法堂"
-        assertTrue(block.contains("阵法堂×" + window));
+        // 窗口 = 最后 window 章，全部是"讲堂"
+        assertTrue(block.contains("讲堂×" + window));
         assertFalse(block.contains("⚠ 警示"), "窗口内高度复用，不应警示");
     }
 
     @Test
     void trajectoryRequiresConsistentPlaceNaming() {
         // 命名一致性改为"源头约束"而非"机械归并"：
-        // 曾按公共子串把变体名归并，但在 162 章基线上把「九渊剑冢」建筑群下 33 个子区域
+        // 曾按公共子串把变体名归并，但在 162 章基线上把「九渊封存处」建筑群下 33 个子区域
         //（外围冰瀑下 / 最高处葬剑台 / 核心虚空内 / 前往途中…）全部吞并成一个地点——
         // 同一建筑群的不同子区域与"同一处的不同叫法"字面不可分，归并会抹平真实换场。
         // 故本块保持字面统计，改为明确要求规划层统一命名。
         List<ChapterSummaryEntity> summaries = List.of(
-                summary(1, "陆家客厅", null),
-                summary(2, "陆瑾瑜老家客厅", null));
+                summary(1, "某宅客厅", null),
+                summary(2, "角色丙老家客厅", null));
 
         String block = PlaceTrajectoryPolicy.renderTrajectory(summaries);
 
         assertTrue(block.contains("命名要求"), "应给出命名一致性要求：" + block);
         assertTrue(block.contains("不得另起叫法"), block);
         // 两个叫法按字面仍是两个地点——口径诚实，不做不可靠的归并
-        assertTrue(block.contains("陆家客厅") && block.contains("陆瑾瑜老家客厅"),
+        assertTrue(block.contains("某宅客厅") && block.contains("角色丙老家客厅"),
                 "字面统计：不同叫法各自呈现，交由规划层统一：" + block);
     }
 }

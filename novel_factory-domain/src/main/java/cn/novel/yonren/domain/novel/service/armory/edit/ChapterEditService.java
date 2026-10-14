@@ -63,7 +63,8 @@ public class ChapterEditService {
             StoryVO storyVO = storyProperties.toStoryVO();
 
             String ledgerPrompt = chapterMemoryService.renderLedgerPrompt(summaries);
-            List<String> foreshadowing = chapterMemoryService.buildForeshadowContextList(
+            // 带 ID 前缀版：与生成主链路同口径，编辑回流后回收登记也能回抄 [F章号-序号]
+            List<String> foreshadowing = chapterMemoryService.buildForeshadowContextListWithIds(
                     summaries, ChapterMemoryService.FORESHADOW_CONTEXT_LIMIT);
 
             ChapterSummaryEntity newSummary = chapterSummaryService.summarize(

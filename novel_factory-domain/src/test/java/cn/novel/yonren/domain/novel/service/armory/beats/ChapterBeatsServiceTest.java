@@ -36,9 +36,9 @@ class ChapterBeatsServiceTest {
     @Test
     void buildBeats_validJson_returnsBeats() {
         when(llmGateway.complete(any(), any(LlmCall.class))).thenReturn(
-                "{\"beats\":[{\"location\":\"冰室\",\"characters\":[\"陈长安\",\"苏挽\"],"
+                "{\"beats\":[{\"location\":\"冰室\",\"characters\":[\"主角乙\",\"角色寅\"],"
                         + "\"conflict\":\"金丹大能逼宫\",\"infoGain\":\"黑剑出土\",\"weight\":\"40%\"},"
-                        + "{\"location\":\"洞口\",\"characters\":[\"陈长安\"],"
+                        + "{\"location\":\"洞口\",\"characters\":[\"主角乙\"],"
                         + "\"conflict\":\"三老拦截\",\"infoGain\":\"挥出第一剑\",\"weight\":\"60%\"}]}");
 
         ChapterBeatsEntity beats = service.buildBeats(storyVO(), item(), 5, "【前情】上一章结尾");
@@ -58,7 +58,7 @@ class ChapterBeatsServiceTest {
     @Test
     void buildBeats_tooFewBeats_returnsNull() {
         when(llmGateway.complete(any(), any(LlmCall.class))).thenReturn(
-                "{\"beats\":[{\"location\":\"冰室\",\"characters\":[\"陈长安\"],"
+                "{\"beats\":[{\"location\":\"冰室\",\"characters\":[\"主角乙\"],"
                         + "\"conflict\":\"逼宫\",\"infoGain\":\"出土\",\"weight\":\"100%\"}]}");
 
         assertNull(service.buildBeats(storyVO(), item(), 5, "【前情】上一章结尾"), "少于下限节拍数应降级");
@@ -79,14 +79,14 @@ class ChapterBeatsServiceTest {
     @Test
     void renderBeatsPrompt_withBeats_rendersAllFields() {
         ChapterBeatsEntity beats = new ChapterBeatsEntity(List.of(
-                new ChapterBeatsEntity.Beat("冰室", List.of("陈长安", "苏挽"), "大能逼宫", "黑剑出土", "40%"),
-                new ChapterBeatsEntity.Beat("洞口", List.of("陈长安"), "三老拦截", "第一剑", "60%")));
+                new ChapterBeatsEntity.Beat("冰室", List.of("主角乙", "角色寅"), "大能逼宫", "黑剑出土", "40%"),
+                new ChapterBeatsEntity.Beat("洞口", List.of("主角乙"), "三老拦截", "第一剑", "60%")));
 
         String prompt = service.renderBeatsPrompt(beats);
 
         assertTrue(prompt.contains("节拍 1"));
         assertTrue(prompt.contains("地点：冰室"));
-        assertTrue(prompt.contains("在场：陈长安、苏挽"));
+        assertTrue(prompt.contains("在场：主角乙、角色寅"));
         assertTrue(prompt.contains("冲突：大能逼宫"));
         assertTrue(prompt.contains("信息增量：黑剑出土"));
         assertTrue(prompt.contains("篇幅占比：约40%"));

@@ -74,21 +74,21 @@ class RollingOutlineServiceTest {
         previous.setStageGoal("站稳外门");
         previous.setTasks(List.of("上一任务甲"));
         List<ChapterSummaryEntity> summaries = List.of(summary(9), summary(10));
-        List<String> foreshadows = List.of("【硬】古镜来历（第2章埋）");
+        List<String> foreshadows = List.of("【硬】古物来历（第2章埋）");
         // 200 章长篇：起点 11 的窗口保持标准 30-80 章约束，不触发收束全书分支
         StoryContextEntity longStory = StoryContextEntity.builder()
-                .novel_title("镜中仙途").theme("仙侠").protagonist("林尘")
+                .novel_title("镜中仙途").theme("仙侠").protagonist("小陈")
                 .outline("主角身世之谜").chapterCount(200).build();
 
         String prompt = service.buildGenerationPrompt(longStory, previous, summaries, foreshadows,
                 RollingOutlineService.StageWindow.adaptive(2, 11), 200);
 
         assertTrue(prompt.contains("主角身世之谜"));
-        assertTrue(prompt.contains("林尘"));
+        assertTrue(prompt.contains("小陈"));
         assertTrue(prompt.contains("- 上一任务甲"));
         assertTrue(prompt.contains("第9章"));
         assertTrue(prompt.contains("第10章"));
-        assertTrue(prompt.contains("【硬】古镜来历（第2章埋）"));
+        assertTrue(prompt.contains("【硬】古物来历（第2章埋）"));
         // 后续阶段窗口不再写死：起点机械给定，终点由模型按弧线自定并钳制 30-80 章
         assertTrue(prompt.contains("起点为第 11 章"));
         assertTrue(prompt.contains("第 11 章起（第 2 阶段）"));
@@ -531,7 +531,7 @@ class RollingOutlineServiceTest {
                 new RollingOutlineService.VolumeWindow(1, 1), 300);
 
         assertTrue(prompt.contains("主角身世之谜"));
-        assertTrue(prompt.contains("林尘"));
+        assertTrue(prompt.contains("小陈"));
         assertTrue(prompt.contains("（无——这是第一卷）"));
         assertTrue(prompt.contains("（尚无章节摘要"));
         assertTrue(prompt.contains("第 1 章起（第 1 卷）"));
@@ -574,7 +574,7 @@ class RollingOutlineServiceTest {
                 .volumeNo(1).title("外门篇").startChapter(1).endChapter(300)
                 .themeShift("站稳外门，宿敌成形")
                 .beats(List.of("承甲", "转乙"))
-                .seeds(List.of("古镜"))
+                .seeds(List.of("古物"))
                 .arcPlan(List.of(VolumeBlueprintEntity.ArcPlan.builder().arcNo(1).oneLineGoal("封内门立身").build()))
                 .build();
         StageBlueprintEntity previous = blueprint(1, 1, 10);
@@ -586,7 +586,7 @@ class RollingOutlineServiceTest {
         assertTrue(prompt.contains("第 1 卷《外门篇》（第 1-300 章）"));
         assertTrue(prompt.contains("卷主旨：站稳外门，宿敌成形"));
         assertTrue(prompt.contains("卷承转合：承甲；转乙"));
-        assertTrue(prompt.contains("卷级伏笔（滚向卷尾回收）：古镜"));
+        assertTrue(prompt.contains("卷级伏笔（滚向卷尾回收）：古物"));
         assertTrue(prompt.contains("【弧1】封内门立身"));
         // 非末卷：不注入末卷细收敛框架
         assertFalse(prompt.contains("本弧位于全书末卷"));
@@ -742,7 +742,7 @@ class RollingOutlineServiceTest {
                 .novel_title("镜中仙途")
                 .theme("仙侠")
                 .style("热血")
-                .protagonist("林尘")
+                .protagonist("小陈")
                 .outline("主角身世之谜")
                 .chapterCount(5)
                 .build();
@@ -797,16 +797,16 @@ class RollingOutlineServiceTest {
 
     /**
      * 时序锚注入（2026-10-04）：新书首段零摘要时，排期补采必须带设定兜底锚——
-     * 否则会产出"4岁主角无意识写出2026年日期"这类违反时序锚的 intent
+     * 否则会产出"4岁主角无意识写出未来年份日期"这类违反时序锚的 intent
      * （实测：经【必须埋设】强压给计划与写手后，审校按锚判 BLOCKING，修订无法不丢事件地修复，整链死锁）。
      */
     @Test
     void scheduleRepairPrompt_injectsTimeAnchorForFreshBook() {
         StoryContextEntity ctx = StoryContextEntity.builder()
                 .novel_title("重生四岁").theme("都市").style("温馨")
-                .protagonist("陆瑾瑜")
-                .worldSetting("主角以4岁幼童的身份重生到2002年的江南弄堂。")
-                .outline("重生者守护家人，从弄堂起步。")
+                .protagonist("角色丙")
+                .worldSetting("主角以4岁幼童的身份重生到2002年的江南巷子。")
+                .outline("重生者守护家人，从巷子起步。")
                 .chapterCount(5)
                 .build();
         String prompt = new RollingOutlineService().buildForeshadowScheduleRepairPrompt(

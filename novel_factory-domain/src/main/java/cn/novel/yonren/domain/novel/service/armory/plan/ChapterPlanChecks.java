@@ -3,6 +3,7 @@ package cn.novel.yonren.domain.novel.service.armory.plan;
 import cn.novel.yonren.domain.novel.model.aggregate.ChapterPlanAggregate;
 import cn.novel.yonren.domain.novel.model.entity.ChapterPlanItemEntity;
 import cn.novel.yonren.domain.novel.model.entity.StageBlueprintEntity;
+import cn.novel.yonren.domain.novel.service.armory.quality.ForeshadowSpanPolicy;
 import cn.novel.yonren.domain.novel.service.armory.quality.SuspenseLadderPolicy;
 import cn.novel.yonren.types.enums.ResponseCode;
 import cn.novel.yonren.types.exception.AppException;
@@ -315,8 +316,8 @@ public final class ChapterPlanChecks {
      * **对话承载校验**：把「有没有戏可演」从散文规则变成可机械核验的结构契约。
      *
      * <p><b>为什么必须新增</b>：keyEvents 是自由文本，事件的性质（双人当面戏 / 单人独处）
-     * 不在结构里——【对话承载·硬约束】写了"至少 2 个"却无人执法，第 105 章 5 条关键事件
-     * 全是"整理私信/写笔记/看屏幕"的单人特写照样放行（characters 里甚至写着"电脑屏幕"）。
+     * 不在结构里——【对话承载·硬约束】写了"至少 2 个"却无人执法，实测有章的 5 条关键事件
+     * 全是单人特写（整理物件/写笔记/独处查看）照样放行。
      * 声明（dialogueScenes）+ 逐字比对 + 人名计数，就是这条规则的执法通道。
      *
      * <p>逐章核验五条：
@@ -325,7 +326,7 @@ public final class ChapterPlanChecks {
      *   <li><b>数量</b>：有效声明（逐字命中 keyEvents 的**不同**事件数）达标；</li>
      *   <li><b>诚实</b>：声明必须逐字取自本章 keyEvents（归一化后互为包含），防占位虚报；</li>
      *   <li><b>双人</b>：匹配到的 keyEvent 须写到 ≥2 个人名——"谁对谁"的全名落点，代词不算；</li>
-     *   <li><b>占比</b>：非 transition 章"单人事件"（人名 &lt;2）不得超过一半——治第 96 章的
+     *   <li><b>占比</b>：非 transition 章"单人事件"（人名 &lt;2）不得超过一半——治实测坍缩章的
      *       "2 条合规但其余全是独白"逃逸形态。</li>
      * </ol>
      *
@@ -413,7 +414,7 @@ public final class ChapterPlanChecks {
                 + "\n\n修正要求（逐条执行，**不得只换措辞**）："
                 + "\n1. mainLineAdvance **照旧逐字取自蓝图**——蓝图定的主线里程碑是本章的**落点**，"
                 + "不是**事件本体**：里程碑不许改，但必须由 ≥2 场双人对峙/盘问/合作/拒绝承载"
-                + "（如「把发现记录在蓝皮本」应演成「被同伴撞见锁抽屉，两人就『你还在查什么』对峙，"
+                + "（如「把某发现偷偷记在本子上」应演成「被同伴撞见并追问，两人就『你还在查什么』对峙，"
                 + "他在拒答中完成记录」——同一信息落点，戏是补出来的，不是改蓝图）；"
                 + "\n2. 每条对话承载事件写明**谁对谁、围绕什么分歧**，人物一律用**全名**（代词不计入校验）；"
                 + "\n3. 把这 ≥2 条事件（transition 章 ≥1 条）**逐字复制**进对应章的 dialogueScenes 字段；"
@@ -469,5 +470,163 @@ public final class ChapterPlanChecks {
             }
         }
         return count;
+    }
+
+
+    // ==================== 跨章场景重演校验 ====================
+
+    /**
+     * 判"同一场景/同一动作被写了两遍"的判定线：归一化后最长公共连续片段 ≥ 该字数。
+     *
+     * <p><b>取值的标定口径</b>（以历史批次的真实计划为样本）：真重演的两章关键事件共享片段
+     * 普遍在 11 字以上（同一流程被拆到两章各写一遍，或同一条伏笔的回收被排给两章）；
+     * 而正常相邻章的两两共享最长只有 4-7 字（人名、地点、标点串）。取 10 落在
+     * 误报基线（≤7）与真重复（≥11）之间且留有余量。
+     * 另一类逃逸形态：两章共用同一句档位原文、只在后章**追加一句**本章子项——
+     * 相邻逐字比对放行了它，故必须做段内两两的长片段比对。
+     */
+    static final int SCENE_REPLAY_MIN_MATCH = 10;
+
+    /**
+     * **跨章场景重演校验**：段内任意两章（**不限于相邻**）的关键事件若共享一段较长的连续文本，
+     * 判为同一场景/同一动作被安排了两遍；悬念档位与章级推进字段之间同样比对。
+     *
+     * <p><b>为什么必须新增</b>：现有去重只看**相邻**两章且要求**逐字相同**，两种逃逸同时存在：
+     * ①相隔两章的同一场景；②在共用原文后**追加一句**本章子项——后者恰是 prompt 自己建议的
+     * 写法（"档位原文之后附本章独有的推进子项"），等于给出了绕过检查的标准姿势。
+     *
+     * <p><b>为什么用归一化 LCS 而不是相似度</b>：{@code UsedPatternPolicy} 记着这条教训——
+     * 同一套路的 3-gram Jaccard 只有 0.02-0.09，抓不到；结构化标签或归一化 LCS 才行。
+     *
+     * <p>软闸门：与其它推进校验同款——带反馈重规划一次，二次仍不过则告警放行。
+     *
+     * @param suspenseLadder 档位表，用于把已命中的档位原文从推进指纹中剥离（见
+     *                       {@link #advanceFingerprint}）；无蓝图/老数据传 null——届时档位部分
+     *                       不剥离，行为与旧版一致
+     */
+    public static String validateSceneReplay(List<ChapterPlanItemEntity> chapters) {
+        return validateSceneReplay(chapters, null);
+    }
+
+    /** 带档位表的重载：调用方持有蓝图时传入，消除"同档位+各自独有推进"的误报 */
+    public static String validateSceneReplay(List<ChapterPlanItemEntity> chapters, List<String> suspenseLadder) {
+        if (chapters == null || chapters.size() < 2) {
+            return null;
+        }
+        // 推进指纹按章只算一次：剥离已命中的档位原文后，两两比对"独有推进"
+        List<String> advances = new ArrayList<>(chapters.size());
+        for (ChapterPlanItemEntity chapter : chapters) {
+            advances.add(advanceFingerprint(chapter, suspenseLadder));
+        }
+        List<String> issues = new ArrayList<>();
+        for (int i = 0; i < chapters.size(); i++) {
+            ChapterPlanItemEntity a = chapters.get(i);
+            if (a == null) {
+                continue;
+            }
+            for (int j = i + 1; j < chapters.size(); j++) {
+                ChapterPlanItemEntity b = chapters.get(j);
+                if (b == null) {
+                    continue;
+                }
+                // 同一对章至多报一条：先报事件重演（更常见、更好改），命中就不再报推进重合
+                String sharedEvents = sharedSpan(sceneFingerprint(a), sceneFingerprint(b));
+                if (sharedEvents != null) {
+                    issues.add("第 " + a.getChapterNo() + " 与第 " + b.getChapterNo()
+                            + " 章的关键事件高度重合（共享「" + sharedEvents + "」）——同一场景/同一动作"
+                            + "不得在段内两章重演，请合并到一章，或改写其中一章的事件与推进");
+                    continue;
+                }
+                String sharedAdvance = sharedSpan(advances.get(i), advances.get(j));
+                if (sharedAdvance != null) {
+                    issues.add("第 " + a.getChapterNo() + " 与第 " + b.getChapterNo()
+                            + " 章的悬念档位/主线推进描述重合（共享「" + brief(sharedAdvance) + "」）——"
+                            + "同一件事被排给了两章：请让其中一章改为推进别的事，"
+                            + "或把两章合成一章（在共用原文后追加一句话不算换了一件事）");
+                }
+            }
+        }
+        return issues.isEmpty() ? null : String.join("；", issues);
+    }
+
+    /**
+     * 事件指纹：关键事件逐条归一化后相连。
+     *
+     * <p>**刻意不含 characters**：人物名相连会拼出长片段（5 个角色名就有 15 字），
+     * 同一批配角反复出场是正常的，把它算进来会让"同一批人在场"被误判成"同一场景"。
+     * 实测人物名单独出现时把误报基线从 4-6 抬到 6-7，收益不足、风险实在。
+     */
+    private static String sceneFingerprint(ChapterPlanItemEntity item) {
+        StringBuilder sb = new StringBuilder();
+        if (item.getKeyEvents() != null) {
+            for (String event : item.getKeyEvents()) {
+                if (StringUtils.isNotBlank(event)) {
+                    sb.append(normalizeAdvance(stripForeshadowTemplate(event)));
+                }
+            }
+        }
+        return sb.toString();
+    }
+
+
+    private static String stripForeshadowTemplate(String event) {
+        if (event == null) {
+            return null;
+        }
+        String text = event.trim();
+        if (!text.startsWith("（伏笔埋设）") && !text.startsWith("（伏笔回收）")
+                && !text.startsWith("(伏笔埋设)") && !text.startsWith("(伏笔回收)")) {
+            return text;
+        }
+        // 模板形如「（伏笔埋设）埋设第N章计划中的《…》：实际内容」——取首个全角/半角冒号之后的部分；
+        // 无冒号（模型未按格式写）时退化为整条保留，不做过度剥离
+        int colon = text.indexOf('：');
+        if (colon < 0) {
+            colon = text.indexOf(':');
+        }
+        return colon >= 0 && colon + 1 < text.length() ? text.substring(colon + 1).trim() : text;
+    }
+
+    /**
+     * 推进指纹：悬念档位 + 章级主线推进（两者合看，任一被复述都算"同一件事被排给两章"）。
+     *
+     * <p><b>已命中的档位表原文先剥离</b>：prompt 侧要求"suspenseBeat 以档位表原文
+     * 开头，再附本章独有的推进子项"——两章落在同一档位时，共享的档位原文（50+ 字）远超判定线
+     * 10 字，会把"同档位+各自独有推进"这个 prompt 自己要求的正常形态误判成重合。剥离只对能
+     * **唯一定位**的章生效（{@code resolveIndex >= 0}）；<b>关键事件侧不豁免</b>——同档位下两章
+     * 排同一件关键事件是真重演，必须保留执法。
+     */
+    private static String advanceFingerprint(ChapterPlanItemEntity item, List<String> suspenseLadder) {
+        String beat = normalizeAdvance(item.getSuspenseBeat());
+        int ladderIndex = SuspenseLadderPolicy.resolveIndex(item.getSuspenseBeat(), suspenseLadder);
+        if (ladderIndex >= 0) {
+            String entry = normalizeAdvance(suspenseLadder.get(ladderIndex));
+            if (!entry.isEmpty() && beat.startsWith(entry)) {
+                beat = beat.substring(entry.length());
+            }
+        }
+        return beat + normalizeAdvance(item.getMainLineAdvance());
+    }
+
+    /** 共享连续片段达到判定线时返回该片段，否则 null */
+    private static String sharedSpan(String a, String b) {
+        if (a == null || b == null || a.isEmpty() || b.isEmpty()) {
+            return null;
+        }
+        String span = ForeshadowSpanPolicy.longestCommonSubstringText(a, b);
+        return span.length() >= SCENE_REPLAY_MIN_MATCH ? span : null;
+    }
+
+    public static String sceneReplayFeedback(String issue) {
+        return "\n\n【上一版计划的跨章场景重演被机械驳回】以下问题必须修正：\n- " + issue
+                + "\n\n修正要求（逐条执行，**不得只换措辞**）："
+                + "\n1. 同一场景或同一物理动作流程（拿取/处理/收存同一件东西这类连续步骤）只允许占用段内**一章**："
+                + "已在前章做过的动作，在后章不得再完整做一遍——要么合并到前章，要么让后章从"
+                + "「动作已经完成」的状态直接进戏；"
+                + "\n2. 同一件主线推进不得排给两章：两章的 mainLineAdvance/suspenseBeat 若指向同一件事，"
+                + "保留其中一章，另一章改为推进别的事；"
+                + "\n3. 在档位原文之后**追加一句话**并不能让两章变成不同的推进——"
+                + "共用的原文部分必须真正不同（谁知道了什么 / 谁做了什么决定 / 什么被公开）；"
+                + "\n4. 重新输出**完整**计划（章数不变）。";
     }
 }

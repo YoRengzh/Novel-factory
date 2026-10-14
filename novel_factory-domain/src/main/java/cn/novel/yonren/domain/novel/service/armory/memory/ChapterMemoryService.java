@@ -9,6 +9,7 @@ import cn.novel.yonren.domain.novel.model.entity.StageBlueprintEntity;
 import cn.novel.yonren.domain.novel.model.entity.VolumeBlueprintEntity;
 import cn.novel.yonren.domain.novel.model.valobj.LedgerEntry;
 import cn.novel.yonren.domain.novel.service.armory.prompt.PromptBudgetGuard;
+import cn.novel.yonren.domain.novel.service.armory.quality.ForeshadowIds;
 import cn.novel.yonren.domain.novel.service.armory.quality.ForeshadowSpanPolicy;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.lang3.StringUtils;
@@ -78,9 +79,19 @@ public class ChapterMemoryService {
 
     /**
      * 待回收伏笔条目：content=伏笔描述，excerpt=埋设处原文引用（摘要种子，可为 null），
-     * importance=埋设时评估的主线重要度 1-5（老数据为 null）
+     * importance=埋设时评估的主线重要度 1-5（老数据为 null），
+     * foreshadowId=机械层分配的稳定 ID（{@code F章号-序号}，老数据为 null）。
+     *
+     * <p>ID 供 prompt 注入与回收回抄——模型在 {@code foreshadowingResolved} 里回抄 ID 远比
+     * 复述措辞可靠，机械层据此做集合差集即可核销，不再依赖文本匹配（见 {@code SeedEntry#foreshadowId}）。
      */
-    public record PendingForeshadow(int chapterNo, String content, String excerpt, Integer importance) {
+    public record PendingForeshadow(int chapterNo, String content, String excerpt, Integer importance,
+                                    String foreshadowId) {
+
+        /** 兼容构造（无 ID）：老数据与测试用；下游按 ID 缺失回退文本匹配 */
+        public PendingForeshadow(int chapterNo, String content, String excerpt, Integer importance) {
+            this(chapterNo, content, excerpt, importance, null);
+        }
     }
 
     /** 空禁泄清单（无未揭伏笔带谜底关键词/全豁免时共用） */
@@ -105,7 +116,7 @@ public class ChapterMemoryService {
     private static final List<String> ADVANCE_MARKERS =
             List.of("摊牌", "对质", "败露", "揭穿", "拆穿", "翻脸", "闹翻", "上门", "对峙", "戳穿", "识破");
     /** 揭示章豁免的词面匹配下限：关键事件与伏笔描述的最长公共子串达到该长度即认定指向同一伏笔
-     * （计划层常只引用伏笔核心短语而非全文，如"回收第N章埋设的剑冢封印松动"） */
+     * （计划层常只引用伏笔核心短语而非全文，如"回收第N章埋设的某条伏笔"） */
     private static final int REVEAL_MATCH_MIN_CHARS = 6;
     /** 禁泄关键词总量封顶：防百章后清单线性膨胀 */
     private static final int SECRECY_KEYWORD_LIMIT = 12;
@@ -889,6 +900,49 @@ public class ChapterMemoryService {
     }
 
     /**
+     * 带 **ID 前缀**的待回收清单：供**摘要模型**消费，格式 {@code [F7-2] 伏笔描述}。
+     *
+     * <p>与 {@link #buildForeshadowContextList} 的区别：那个返回纯文本描述（供文本匹配与既有 prompt
+     * 路径使用，保持零改动），本方法额外附上机械层分配的稳定 ID，让模型能**回抄 ID** 而不是复述措辞。
+     *
+     * <p>排序口径与纯文本版一致（逾期项先占位、滞留最久靠前，再按最新填充），
+     * 保证两个口径的清单在"哪些条目可见"上完全对齐——否则模型看得到的 ID 与实际账本对不上。
+     * 无 ID 的老数据不带前缀，行为与纯文本版逐字相同。
+     */
+    public List<String> buildForeshadowContextListWithIds(List<ChapterSummaryEntity> summaries, int limit) {
+        List<PendingForeshadow> pending = buildPendingForeshadowDetailed(summaries);
+        if (pending.isEmpty() || limit <= 0) {
+            return List.of();
+        }
+        List<ChapterSummaryEntity> ordered = ordered(summaries);
+        int latestNo = ordered.get(ordered.size() - 1) == null
+                ? 0 : (ordered.get(ordered.size() - 1).getChapterNo() == null
+                ? 0 : (ordered.get(ordered.size() - 1).getChapterNo()));
+        Set<String> overdueContents = ForeshadowSpanPolicy.pending(summaries, latestNo, List.of()).stream()
+                .filter(p -> p.scheduledPayoffChapter() != null && latestNo > p.scheduledPayoffChapter())
+                .map(ForeshadowSpanPolicy.Pending::content)
+                .filter(StringUtils::isNotBlank)
+                .collect(Collectors.toSet());
+
+        LinkedHashSet<PendingForeshadow> merged = new LinkedHashSet<>();
+        pending.stream()
+                .filter(p -> overdueContents.contains(p.content()))
+                .sorted(Comparator.comparingInt(PendingForeshadow::chapterNo))
+                .forEach(merged::add);
+        pending.stream()
+                .sorted(Comparator.comparingInt(PendingForeshadow::chapterNo).reversed())
+                .forEach(merged::add);
+        return merged.stream().limit(limit).map(ChapterMemoryService::renderWithId).toList();
+    }
+
+    /** 渲染为 {@code [F7-2] 描述}；无 ID 时退化为纯描述（老数据） */
+    private static String renderWithId(PendingForeshadow pending) {
+        return StringUtils.isBlank(pending.foreshadowId())
+                ? pending.content()
+                : "[" + pending.foreshadowId() + "] " + pending.content();
+    }
+
+    /**
      * 审校比对清单：登记清单剔除未填后的版本——未填已冻结、不再构成审校的回收义务，
      * 避免熔断条目被审校反复标记"未回收"造成 severity 回潮
      */
@@ -995,17 +1049,63 @@ public class ChapterMemoryService {
                                 ChapterSummaryEntity.SeedEntry seed = matchSeed(seeds, content);
                                 pending.add(new PendingForeshadow(chapterNo, content,
                                         seed == null ? null : seed.getExcerpt(),
-                                        seed == null ? null : seed.getImportance()));
+                                        seed == null ? null : seed.getImportance(),
+                                        // ID 随种子带出：老数据为 null，下游回退文本匹配
+                                        seed == null ? null : seed.getForeshadowId()));
                             }
                         });
             }
             if (summary.getForeshadowingResolved() != null) {
                 summary.getForeshadowingResolved().stream()
                         .filter(StringUtils::isNotBlank)
-                        .forEach(resolved -> pending.removeIf(p -> p.content().contains(resolved.trim()) || resolved.trim().contains(p.content())));
+                        .map(String::trim)
+                        // **ID 优先**：模型回抄 ID（如 F7-2）时按 ID 精确核销——
+                        // 这是解决"措辞漂移导致账永远关不掉"的正解（某条线其实早已兑现，
+                        // 却因摘要措辞与账本原文对不上而在后续章仍被反复催收）。
+                        // 回退：非 ID 形态（老数据/模型仍复述文本）走既有双向 contains。
+                        .forEach(resolved -> pending.removeIf(p -> isResolved(p, resolved)));
             }
         }
         return pending;
+    }
+
+    /**
+     * 单条回收登记是否核销该待收条目：**ID 精确匹配优先，文本包含回退**。
+     *
+     * <p>ID 匹配取全等（{@code F7-2}），不做模糊——ID 是机械分配的结构化凭据，
+     * 拼错即视为未命中并回退文本路径，绝不"猜一个相近的 ID"（误关会永久丢掉一条真伏笔）。
+     * 模型可能带方括号回抄（{@code [F7-2]}），故先归一化 ID 形态再比对。
+     */
+    private static boolean isResolved(PendingForeshadow pending, String resolved) {
+        if (StringUtils.isNotBlank(pending.foreshadowId())) {
+            String registered = normalizeForeshadowIdForm(resolved);
+            if (registered != null && pending.foreshadowId().equalsIgnoreCase(registered)) {
+                return true;
+            }
+        }
+        return pending.content().contains(resolved) || resolved.contains(pending.content());
+    }
+
+    // ==================== 伏笔 ID 形态工具（委托唯一实现 {@link ForeshadowIds}） ====================
+    //
+    // 形态定义抽到 quality 包的 ForeshadowIds：消费端有三处——本类的账本核销、
+    // ChapterSummaryService 的失配检测、ForeshadowSpanPolicy 的寿命/在途配对——
+    // 三份实现稍有差异就会让"核销成功"与"仍在途"对同一条线给出相反结论。
+    // 这里保留同名静态方法仅为兼容既有调用点，逻辑一律委托。
+
+    /** 归一化 ID 形态：{@code [F7-2]} / {@code F7-2} / {@code （F7-2）} → {@code F7-2}；非 ID 返回 null */
+    static String normalizeForeshadowIdForm(String value) {
+        return ForeshadowIds.normalize(value);
+    }
+
+    /** 提取账本行的 ID 前缀（{@code [F7-2] 描述} → {@code F7-2}）；无前缀返回 null */
+    static String extractForeshadowIdPrefix(String pendingLine) {
+        return ForeshadowIds.extractPrefix(pendingLine);
+    }
+
+    /** 剥离账本行的 ID 前缀（{@code [F7-2] 描述} → {@code 描述}）；无前缀原样返回 */
+    static String stripForeshadowIdPrefix(String pendingLine) {
+        return ForeshadowIds.stripPrefix(pendingLine);
     }
 
     /**
@@ -1109,7 +1209,7 @@ public class ChapterMemoryService {
      * <p><b>写手视图无元信息（2026-10-04，新书 26-30 章实测）</b>：本节供**正文写手**消费，
      * 严禁携带"（第N章埋）""滞留N章""本章计划必须评估"等规划层语言——实测写手把
      * "（第15章埋）"逐字抄进正文（章节编号元信息泄露，读者立刻出戏），并把"必须评估回收"
-     * 当行动指令去回收弹珠线、违反物品账本的已埋状态。章号/滞留/评估指令只属于计划层视图。
+     * 当行动指令去回收石子线、违反物品账本的已埋状态。章号/滞留/评估指令只属于计划层视图。
      */
     private void renderForeshadowing(StringBuilder sb, List<ChapterSummaryEntity> ordered) {
         List<PendingForeshadow> pending = buildPendingForeshadowDetailed(ordered);
@@ -1304,7 +1404,7 @@ public class ChapterMemoryService {
         // 判定依据：合并时 lastChapterNo **每次提及都会刷新**（见 buildLedger），
         // 故"首现章 == 最近提及章" ⟺ 只出现过一次。
         // 动因：实测本书第 16 章物品账本活跃 26 条 1737 字中，有 14 条（888 字，占一半）只出现过一次，
-        // 且清一色是年代布景道具（英雄牌蓝黑墨水／绿豆汤／油纸包桃酥／洛阳轴承厂纸盒…）——
+        // 且清一色是年代布景道具（英雄牌蓝黑墨水／绿豆汤／油纸包点心／洛阳轴承厂纸盒…）——
         // 它们不会再被引用，保留状态没有连续性价值，却持续吃前缀预算并挤掉其他块。
         // 留名仍能提示"该名词在本书出现过"，避免后文生造出冲突的同名物。
         // 真正需要完整状态的恰是"被复用的东西状态变了"（集资合同×5、黑白电视×2），

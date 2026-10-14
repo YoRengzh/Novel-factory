@@ -186,6 +186,74 @@ public final class DialogueRatioPolicy {
     /** 括号包对话的判定行数门槛：单行可能是排版偶然，多行才是系统性写法 */
     private static final int BRACKET_DIALOGUE_MIN_LINES = 2;
 
+    /** 引号风格漂移的最小篇幅与最少台词数：样本太小不断言（与其它格式检测同款"宁漏勿滥"） */
+    private static final int QUOTE_STYLE_MIN_CHARS = 800;
+    private static final int QUOTE_STYLE_MIN_UTTERANCES = 6;
+
+    /** 直角引号（本书主流）与弯引号（排版漂移）的开引号计数口径 */
+    private static final char CORNER_OPEN = '「';
+    private static final char CURLY_OPEN = '\u201C';
+
+    /**
+     * 引号风格漂移检测（机械，MINOR）：本章台词几乎全用弯引号 {@code “”}
+     * 而本书主流是直角引号 {@code 「」}。
+     *
+     * <p><b>为什么单独判</b>：两种引号在中文小说里都合法，{@link #checkFormatCollapse}
+     * 与 {@link #utteranceCount} 也都认（正则同时覆盖），所以**任何现有检测都不会报**——
+     * 但同一本书里混用是读者一眼可见的排版不一致。实测某书一章整章重写稿：台词引号
+     * 几乎全用弯引号，而其余各章全部用直角引号（全书仅此一章例外）——换模型重写时写手带回了
+     * 自己的排版习惯，而那一章的前缀预算 99% 打满、文风指纹块被裁掉（风格锚不在场）。
+     *
+     * <p><b>口径从严（宁漏勿滥）</b>：非 transition 章、篇幅 ≥ {@value #QUOTE_STYLE_MIN_CHARS}、
+     * 台词数 ≥ {@value #QUOTE_STYLE_MIN_UTTERANCES}，且弯引号占比 ≥ 80% 才判——
+     * 单章里偶用弯引号作强调、或引文旁注不算漂移。MINOR 落债回灌（不触发修订：
+     * 为改引号重写整章不成比例；根因在 prompt 侧的风格锚缺失，已由文风指纹提档缓解）。
+     *
+     * @param mainstreamCurly 本书主流是否为弯引号（由调用方按历史统计给出；null/未知时跳过检测）
+     */
+    public static List<ChapterIssueEntity> checkQuoteStyleDrift(String content, String chapterTypeCode,
+                                                               Boolean mainstreamCurly) {
+        if (StringUtils.isBlank(content) || content.length() < QUOTE_STYLE_MIN_CHARS
+                || mainstreamCurly == null) {
+            return List.of();
+        }
+        if (chapterTypeCode != null && "transition".equalsIgnoreCase(chapterTypeCode.trim())) {
+            return List.of();
+        }
+        int corner = 0;
+        int curly = 0;
+        for (int i = 0; i < content.length(); i++) {
+            char c = content.charAt(i);
+            if (c == CORNER_OPEN) {
+                corner++;
+            } else if (c == CURLY_OPEN) {
+                curly++;
+            }
+        }
+        int total = corner + curly;
+        if (total < QUOTE_STYLE_MIN_UTTERANCES) {
+            return List.of();
+        }
+        // 主流已是弯引号时，直角引号占比高才算漂移（同一口径镜像使用）
+        int minority = mainstreamCurly ? corner : curly;
+        String minorityMark = mainstreamCurly ? "「」" : "“”";
+        String mainstreamMark = mainstreamCurly ? "“”" : "「」";
+        if (minority * 5 < total * 4) {
+            return List.of();
+        }
+        ChapterIssueEntity issue = new ChapterIssueEntity();
+        issue.setDimension("aesthetic");
+        issue.setSeverity("MINOR");
+        issue.setEvidence(String.format("全章台词引号 %d 组，其中 %s 占 %d 组（本书主流为 %s）",
+                total, minorityMark, minority, mainstreamMark));
+        issue.setDescription("引号风格漂移：本章台词改用 " + minorityMark + " 包裹，而本书既有章节主流用 "
+                + mainstreamMark + "。两种写法各自都合法，但同一本书内混用是读者一眼可见的排版不一致"
+                + "（典型成因：整章由另一模型重写时带回了自己的排版习惯）。");
+        issue.setSuggestion("把本章台词引号统一为本书主流的 " + mainstreamMark + "；只改引号本身，"
+                + "正文文字与段落结构不要改动。");
+        return List.of(issue);
+    }
+
     private static boolean containsAny(String text, String... keywords) {
         for (String keyword : keywords) {
             if (text.contains(keyword)) {

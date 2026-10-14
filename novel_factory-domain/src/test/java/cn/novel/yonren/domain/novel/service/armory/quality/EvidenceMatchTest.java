@@ -90,10 +90,10 @@ class EvidenceMatchTest {
         // 首句与末句被拼成一条状态，中间隔了整章内容。但两段都是正文逐字原文——
         // 「跨度大」只说明这是一条复合状态（位置 + 伤势/持有物），与证据真实性无关：
         // 离线重放实测该档 52 条全部为真，且「全库无据」条目分段必有段命中不到、与本档零交集
-        StringBuilder content = new StringBuilder("陆沉从阵法堂出来，沿着石径走向藏经阁。");
+        StringBuilder content = new StringBuilder("陆沉从讲堂出来，沿着石径走向藏经阁。");
         content.append("中间正文".repeat(1200));
         content.append("但手腕处的黑色锁链纹身烫得像烙铁。");
-        String evidence = "陆沉从阵法堂出来，沿着石径走向藏经阁……手腕处的黑色锁链纹身烫得像烙铁";
+        String evidence = "陆沉从讲堂出来，沿着石径走向藏经阁……手腕处的黑色锁链纹身烫得像烙铁";
         EvidenceMatch.Tier tier = EvidenceMatch.classify(evidence, content.toString());
         assertEquals(EvidenceMatch.Tier.SPREAD, tier);
         assertTrue(tier.isAccepted(), "SPREAD 已转为留痕放行档，不应再逐出");
@@ -142,7 +142,7 @@ class EvidenceMatchTest {
     @Test
     @DisplayName("编造引用（正文无据）→ NO_MATCH，反编造门不放弃")
     void noMatchTierForFabricatedEvidence() {
-        String content = "陆沉从阵法堂出来，沿着石径走向藏经阁。";
+        String content = "陆沉从讲堂出来，沿着石径走向藏经阁。";
         String evidence = "玉佩上浮现出第三道裂痕，青光暴涨三尺";
         assertEquals(EvidenceMatch.Tier.NO_MATCH, EvidenceMatch.classify(evidence, content));
     }

@@ -7,9 +7,12 @@ import cn.novel.yonren.domain.novel.model.entity.ChapterSummaryEntity;
 import cn.novel.yonren.domain.novel.model.valobj.LlmCall;
 import cn.novel.yonren.domain.novel.model.valobj.StoryVO;
 import cn.novel.yonren.domain.novel.model.valobj.properties.QualityReviewProperties;
+import cn.novel.yonren.domain.novel.service.armory.quality.DialogueRatioPolicy;
 import cn.novel.yonren.types.enums.ModelScene;
 import cn.novel.yonren.types.utils.JsonParseFallback;
 import com.alibaba.fastjson2.JSON;
+import com.alibaba.fastjson2.JSONArray;
+import com.alibaba.fastjson2.JSONObject;
 import lombok.Data;
 import lombok.RequiredArgsConstructor;
 import org.apache.commons.lang3.StringUtils;
@@ -20,6 +23,7 @@ import lombok.extern.slf4j.Slf4j;
 import java.nio.file.Path;
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -39,6 +43,9 @@ public class QualityReviewService {
     /** 维度键：顺序即落盘顺序，前端/分析脚本据此画趋势线 */
     public static final List<String> DIMENSIONS = List.of(
             "personaConsistency", "prose", "dialogue", "expectation", "payoff");
+
+    /** 背离判定的主观分下限：低于该分的主观评价本来就不算"给了好评"，不构成背离 */
+    private static final int DIVERGENCE_SUBJECTIVE_FLOOR = 8;
 
     private final LlmGateway llmGateway;
     private final IStoryRepository storyRepository;
@@ -68,7 +75,15 @@ public class QualityReviewService {
                 log.info("质量评分窗口 {}-{} 内无正文，跳过", windowStart, windowEnd);
                 return;
             }
-            List<Integer> sampled = sampleEvenly(existing, properties.getSampleSize());
+            Map<Integer, ChapterSummaryEntity> metricsByChapterNo = new java.util.HashMap<>();
+            if (summaries != null) {
+                for (ChapterSummaryEntity s : summaries) {
+                    if (s != null && s.getChapterNo() != null) {
+                        metricsByChapterNo.put(s.getChapterNo(), s);
+                    }
+                }
+            }
+            List<Integer> sampled = sampleChapters(existing, properties.getSampleSize(), metricsByChapterNo);
 
             List<ChapterReview> reviews = new ArrayList<>();
             for (Integer chapterNo : sampled) {
@@ -84,6 +99,7 @@ public class QualityReviewService {
 
             Map<String, Object> line = buildTrendLine(storyVO, summaries, windowStart, windowEnd, sampled, reviews);
             storyRepository.appendQualityTrend(storyDir, JSON.toJSONString(line));
+            warnOnDivergences(line);
             log.info("质量评分完成：第 {}-{} 章，抽样 {} 章，综合 {}/10（rubric {}）",
                     windowStart, windowEnd, reviews.size(), line.get("overall"), properties.getRubricVersion());
         } catch (Exception e) {
@@ -119,10 +135,19 @@ public class QualityReviewService {
     }
 
     /**
-     * 在窗口内**均匀**抽样：首尾必取、按等距索引取值并去重。
-     * 刻意不做"只取最近 N 章"——那会让窗口前段的退化完全不可见，而"前段变差"正是长篇最典型的衰退形态。
+     * 在窗口内抽样：首（最老）尾（最新）**必取**，**中间名额给机械最差章**
+     * （有效字最低者优先，指标缺失的章不参与竞选）。
+     *
+     * <p>为什么要这样抽：均匀等距三点是首/中/尾固定落点，会**系统性错过"内部坏章"**。
+     * 实测 101-110 窗：两个最差章（108 章 1055 字、109 章对白 5 句）恰落在采样点之间，
+     * 主观 7.7 与机械面背离，且因样本不差 {@code divergences} 恒空——两把尺子自检形同虚设。
+     * 首章保留是因为"前段变差"是最典型的衰退形态，不能不看；尾章是最新产出必须看。
+     *
+     * <p>章节清单以磁盘文件为准（{@code chapterNos}），机械指标只用于"最差"排序；
+     * 指标全缺失（老数据窗）时回退等距填充，不因缺指标拒绝抽样。
      */
-    static List<Integer> sampleEvenly(List<Integer> chapterNos, int sampleSize) {
+    static List<Integer> sampleChapters(List<Integer> chapterNos, int sampleSize,
+                                        Map<Integer, ChapterSummaryEntity> metricsByChapterNo) {
         if (chapterNos == null || chapterNos.isEmpty()) {
             return List.of();
         }
@@ -134,14 +159,104 @@ public class QualityReviewService {
             return List.of(chapterNos.get(0));
         }
         LinkedHashSet<Integer> picked = new LinkedHashSet<>();
-        for (int i = 0; i < k; i++) {
-            int index = Math.round(i * (chapterNos.size() - 1) / (float) (k - 1));
-            picked.add(chapterNos.get(index));
+        picked.add(chapterNos.get(0));
+        picked.add(chapterNos.get(chapterNos.size() - 1));
+        List<Integer> middleByWorst = chapterNos.subList(1, chapterNos.size() - 1).stream()
+                .filter(no -> metricsByChapterNo.containsKey(no)
+                        && metricsByChapterNo.get(no).getValidChars() != null)
+                .sorted(Comparator.comparingInt(no -> metricsByChapterNo.get(no).getValidChars()))
+                .toList();
+        for (Integer no : middleByWorst) {
+            if (picked.size() >= k) {
+                break;
+            }
+            picked.add(no);
         }
-        return List.copyOf(picked);
+        // 机械指标缺失的回退：剩余名额在未抽中的章里等距取（老数据窗，与旧均匀口径兼容）
+        int need = k - picked.size();
+        if (need > 0) {
+            List<Integer> unpicked = chapterNos.stream().filter(no -> !picked.contains(no)).toList();
+            for (int i = 0; i < need && !unpicked.isEmpty(); i++) {
+                int index = Math.round((i + 1) * (unpicked.size() - 1) / (float) (need + 1));
+                picked.add(unpicked.get(Math.min(index, unpicked.size() - 1)));
+            }
+        }
+        return picked.stream().sorted().toList();
     }
 
-    /** 趋势行：rubric 版本 + 抽样各章维度分 + 窗口均值 + 窗口机械指标 */
+    /**
+     * 背离留痕：主观分与机械指标对同一章给出相反结论时告警。
+     *
+     * <p>不改变任何分数、不触发任何动作——它只说清"这一条读数该信谁"。
+     * 反复出现同维度的背离，说明该维度的主观尺子在这本书/这个题材上没有分辨力。
+     */
+    @SuppressWarnings("unchecked")
+    private void warnOnDivergences(Map<String, Object> line) {
+        List<Map<String, Object>> divergences = (List<Map<String, Object>>) line.get("divergences");
+        if (divergences == null || divergences.isEmpty()) {
+            return;
+        }
+        for (Map<String, Object> row : divergences) {
+            log.warn("质量评分与机械指标背离：第 {} 章 {} 主观 {}/10 而机械 {}/千字（劣化线 {}）"
+                            + "——该维度以机械判据为准，主观分不可信",
+                    row.get("chapterNo"), row.get("dimension"), row.get("subjective"),
+                    row.get("mechanicalDensity"), row.get("degradedLine"));
+        }
+    }
+
+    /**
+     * 最新一窗的读数（从 {@code quality-trend.jsonl} 的行解析，**末行为最新**）。
+     *
+     * <p>静态方法 + 只吃字符串列表：读文件与解析分家，体检层可以直接消费而不必注入本服务。
+     * 解析失败或无行时返回 null——调用方据此**跳过该指标**，而不是造一个 0 分出来
+     * （0 分会被读成"质量极差"，那是最糟的误报）。
+     */
+    public static QualitySnapshot latestSnapshot(List<String> trendLines) {
+        if (trendLines == null || trendLines.isEmpty()) {
+            return null;
+        }
+        String last = trendLines.get(trendLines.size() - 1);
+        try {
+            JSONObject json = JSON.parseObject(last);
+            if (json == null) {
+                return null;
+            }
+            Map<String, Double> avg = new LinkedHashMap<>();
+            JSONObject avgObject = json.getJSONObject("avg");
+            if (avgObject != null) {
+                for (String dimension : DIMENSIONS) {
+                    avg.put(dimension, avgObject.getDouble(dimension));
+                }
+            }
+            List<String> divergences = new ArrayList<>();
+            JSONArray rows = json.getJSONArray("divergences");
+            if (rows != null) {
+                for (int i = 0; i < rows.size(); i++) {
+                    JSONObject row = rows.getJSONObject(i);
+                    if (row == null) {
+                        continue;
+                    }
+                    divergences.add("第" + row.get("chapterNo") + "章" + row.get("dimension")
+                            + "（主观" + row.get("subjective") + " vs 机械 " + row.get("mechanicalDensity") + " 次/千字）");
+                }
+            }
+            return new QualitySnapshot(json.getIntValue("windowStart"), json.getIntValue("windowEnd"),
+                    json.getDouble("overall"), avg, divergences);
+        } catch (Exception e) {
+            log.warn("质量趋势行无法解析，本轮跳过该指标：{}", e.getMessage());
+            return null;
+        }
+    }
+
+    /**
+     * 最新一窗的读数：{@code overall} 为综合分，{@code avg} 为各维度均值，
+     * {@code divergences} 为"主观分与机械指标背离"的可读描述（每项一章）。
+     */
+    public record QualitySnapshot(int windowStart, int windowEnd, Double overall,
+                                  Map<String, Double> avg, List<String> divergences) {
+    }
+
+    /** 单章评分：读正文 → 调用强模型 → 容错解析；任一步失败返回 null（由调用方跳过该样本） */
     private Map<String, Object> buildTrendLine(StoryVO storyVO, List<ChapterSummaryEntity> summaries,
                                                int windowStart, int windowEnd,
                                                List<Integer> sampled, List<ChapterReview> reviews) {
@@ -158,7 +273,54 @@ public class QualityReviewService {
         line.put("avg", averageScores(reviews));
         line.put("overall", overallScore(reviews));
         line.put("mechanical", mechanicalMetrics(summaries, windowStart, windowEnd));
+        line.put("divergences", detectDivergences(reviews, summaries));
         return line;
+    }
+
+    /**
+     * 主观分与机械指标**背离**的样本：同一章、同一维度，两把尺子给出相反结论。
+     *
+     * <p>目前只做对白维度——它是五个维度里唯一有干净机械对应物（轮次密度）的一个。
+     * 其余四维（人设/文风/期待/爽点）没有机械对照，背离无从机械判定，这是本自检的已知边界。
+     */
+    private List<Map<String, Object>> detectDivergences(List<ChapterReview> reviews,
+                                                        List<ChapterSummaryEntity> summaries) {
+        List<Map<String, Object>> divergences = new ArrayList<>();
+        if (reviews == null || reviews.isEmpty() || summaries == null || summaries.isEmpty()) {
+            return divergences;
+        }
+        String genre = summaries.stream()
+                .map(ChapterSummaryEntity::getStoryGenre)
+                .filter(java.util.Objects::nonNull)
+                .findFirst().orElse(null);
+        double degradedLine = DialogueRatioPolicy.densityDegraded(genre);
+        for (ChapterReview review : reviews) {
+            Integer dialogueScore = review.score("dialogue");
+            if (dialogueScore == null || dialogueScore < DIVERGENCE_SUBJECTIVE_FLOOR) {
+                continue;
+            }
+            ChapterSummaryEntity summary = summaries.stream()
+                    .filter(s -> s != null && s.getChapterNo() != null
+                            && s.getChapterNo().equals(review.getChapterNo()))
+                    .findFirst().orElse(null);
+            if (summary == null || summary.getDialogueUtterances() == null
+                    || summary.getValidChars() == null || summary.getValidChars() <= 0) {
+                continue;
+            }
+            double density = DialogueRatioPolicy.utteranceDensity(
+                    summary.getDialogueUtterances(), summary.getValidChars());
+            if (density >= degradedLine) {
+                continue;
+            }
+            Map<String, Object> row = new LinkedHashMap<>();
+            row.put("chapterNo", review.getChapterNo());
+            row.put("dimension", "dialogue");
+            row.put("subjective", dialogueScore);
+            row.put("mechanicalDensity", round1(density));
+            row.put("degradedLine", degradedLine);
+            divergences.add(row);
+        }
+        return divergences;
     }
 
     private String configuredModel(StoryVO storyVO) {

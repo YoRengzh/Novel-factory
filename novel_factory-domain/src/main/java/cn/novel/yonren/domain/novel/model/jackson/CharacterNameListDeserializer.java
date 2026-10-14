@@ -50,7 +50,7 @@ public class CharacterNameListDeserializer extends JsonDeserializer<List<String>
                     return;
                 }
             }
-            // 否则取键名：模型写 {"陆瑾瑜":"婴儿"}，角色名在键上
+            // 否则取键名：模型写 {"角色名":"婴儿"}，角色名在键上
             Iterator<Map.Entry<String, JsonNode>> it = node.fields();
             while (it.hasNext()) {
                 Map.Entry<String, JsonNode> e = it.next();

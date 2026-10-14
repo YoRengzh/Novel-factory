@@ -20,8 +20,8 @@ class StoryBibleParserTest {
             "叙述视角: 第三人称限知视角（主跟随男主）",
             "目标读者: 男频/传统玄幻/剑道无敌流",
             "语气基调: 苍凉悲壮，杀伐果断",
-            "主人公: 陈长安，22岁（穿越前），外表慵懒随性，实则心思缜密。",
-            "故事概述: 陈长安穿越至九州大陆，成为九渊剑匣唯一活着的守墓人。",
+            "主人公: 主角乙，22岁（穿越前），外表慵懒随性，实则心思缜密。",
+            "故事概述: 主角乙穿越至九州大陆，成为九渊剑匣唯一活着的守墓人。",
             "章节数量: 180",
             "章节目标: 1-30章 剑启篇：守与异变",
             "世界ID: novel-shared-01",
@@ -42,8 +42,8 @@ class StoryBibleParserTest {
         assertEquals("第三人称限知视角（主跟随男主）", bible.perspective());
         assertEquals("男频/传统玄幻/剑道无敌流", bible.targetAudience());
         assertEquals("苍凉悲壮，杀伐果断", bible.tone());
-        assertEquals("陈长安，22岁（穿越前），外表慵懒随性，实则心思缜密。", bible.protagonist());
-        assertEquals("陈长安穿越至九州大陆，成为九渊剑匣唯一活着的守墓人。", bible.outline());
+        assertEquals("主角乙，22岁（穿越前），外表慵懒随性，实则心思缜密。", bible.protagonist());
+        assertEquals("主角乙穿越至九州大陆，成为九渊剑匣唯一活着的守墓人。", bible.outline());
         assertEquals("1-30章 剑启篇：守与异变", bible.chapterGoal());
         assertEquals("novel-shared-01", bible.worldId());
         assertEquals(Boolean.TRUE, bible.hasCheatMechanism());
@@ -135,19 +135,19 @@ class StoryBibleParserTest {
     /**
      * 主要人物档案（代词与既定事实）必须能读回来（2026-10-10）。
      *
-     * <p>它是防"代词写错、志愿写错"的事实锚：正文曾把女主宋知渔写成「他」连写三章，
+     * <p>它是防"代词写错、志愿写错"的事实锚：正文曾把女主角色己写成「他」连写三章，
      * 而账本里没有任何可对照的事实。读取侧与写入侧共用 {@code LABEL_CHARACTERS} 常量，
      * 本用例守住"写进去能读出来"——值解析不出来不报错，只会表现为设定悄悄丢失。
      */
     @Test
     void parse_characterProfilesRoundTrip() {
-        String roster = "陆瑾瑜（男，用「他」）；宋知渔（女，用「她」）。既定事实（不得改写）：宋知渔报名志愿二班";
+        String roster = "角色丙（男，用「他」）；角色己（女，用「她」）。既定事实（不得改写）：角色己报名志愿二班";
 
         StoryBibleParser.Snapshot bible = StoryBibleParser.parse(
-                "小说名称: 甲\n主人公: 陆瑾瑜\n主要人物: " + roster + "\n故事概述: 乙\n");
+                "小说名称: 甲\n主人公: 角色丙\n主要人物: " + roster + "\n故事概述: 乙\n");
 
         assertEquals(roster, bible.characters());
-        assertEquals("陆瑾瑜", bible.protagonist());
+        assertEquals("角色丙", bible.protagonist());
         assertEquals("乙", bible.outline(), "人物档案是单行值，不能把后面的行吃掉");
     }
 

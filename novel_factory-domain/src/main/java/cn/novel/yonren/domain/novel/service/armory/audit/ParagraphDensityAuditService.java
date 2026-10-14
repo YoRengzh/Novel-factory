@@ -6,6 +6,7 @@ import cn.novel.yonren.domain.novel.model.valobj.LlmCall;
 import cn.novel.yonren.domain.novel.model.valobj.StoryVO;
 import cn.novel.yonren.domain.novel.model.valobj.properties.StoryProperties;
 import cn.novel.yonren.domain.novel.service.armory.revise.ChapterReviseService;
+import cn.novel.yonren.domain.novel.service.armory.quality.PatchIntegrityPolicy;
 import cn.novel.yonren.domain.novel.service.armory.quality.StyleViolationPolicy;
 import cn.novel.yonren.types.enums.ModelScene;
 import cn.novel.yonren.types.utils.JsonParseFallback;
@@ -18,6 +19,7 @@ import org.apache.commons.lang3.StringUtils;
 import org.springframework.ai.converter.BeanOutputConverter;
 import org.springframework.stereotype.Service;
 
+import java.util.ArrayList;
 import java.util.List;
 
 
@@ -77,6 +79,18 @@ public class ParagraphDensityAuditService {
             if (after > before) {
                 log.info("第 {} 章段落密度审校：改写使机械文风违规由 {} 条变为 {} 条，整批回退",
                         globalNo, before, after);
+                return null;
+            }
+            // 采纳闸门②（语义完整性，零容忍）：挤水只许删"无信息增量"的段落，不许把只出现一次的
+            // 实体名或数字删掉——这类损失不会在任何指标上现形。判据是"原稿有、补丁后全章再无"，
+            // 刻意不比较出现次数（挤水的正当目的就是删段落，比次数会把正确的改写也一起拒掉）。
+            List<String> anchors = new ArrayList<>(
+                    PatchIntegrityPolicy.characterAnchors(item == null ? null : item.getCharacters()));
+            anchors.addAll(PatchIntegrityPolicy.numberAnchors(content));
+            PatchIntegrityPolicy.Verdict integrity = PatchIntegrityPolicy.check(
+                    content, outcome.content(), item == null ? null : item.getKeyEvents(), anchors, 0, 0);
+            if (!integrity.acceptable()) {
+                log.info("第 {} 章段落密度审校：{}，整批回退保留原稿", globalNo, integrity.reason());
                 return null;
             }
             log.info("第 {} 章段落密度审校：套用 {} 条改写补丁（机械违规 {} → {}）",

@@ -103,8 +103,8 @@ class DynamicReferenceServiceTest {
                 .thenReturn(List.of("dialogue-writing"));
 
         service.selectAsRules(null, PromptScene.CHAPTER_CONTENT, contentCtx(ChapterTypeVO.NORMAL, null));
-        service.selectAsRules(null, PromptScene.CHAPTER_CONTENT, contentCtx(ChapterTypeVO.NORMAL, "揭开古镜来历"));
-        service.selectAsRules(null, PromptScene.CHAPTER_CONTENT, contentCtx(ChapterTypeVO.NORMAL, "揭开古镜来历"));
+        service.selectAsRules(null, PromptScene.CHAPTER_CONTENT, contentCtx(ChapterTypeVO.NORMAL, "揭开古物来历"));
+        service.selectAsRules(null, PromptScene.CHAPTER_CONTENT, contentCtx(ChapterTypeVO.NORMAL, "揭开古物来历"));
 
         // 章节要点参与缓存键：不同本章要点各选一次，同要点命中缓存
         verify(selector, times(2)).select(any(), any(), any(), anyList());

@@ -61,8 +61,8 @@ class ForeshadowScheduleServiceTest {
     @DisplayName("stamp：埋在排期章时回填 scheduledPayoffChapter")
     void stamp_fillsScheduledPayoffOnExactChapter() {
         ChapterSummaryEntity summary = chapter(12);
-        plant(summary, "顾老头是否收陆瑾瑜为徒");
-        List<ForeshadowScheduleEntity> schedules = scheduleWith(item("顾老头是否收陆瑾瑜为徒", 12, 30));
+        plant(summary, "顾老头是否收角色丙为徒");
+        List<ForeshadowScheduleEntity> schedules = scheduleWith(item("顾老头是否收角色丙为徒", 12, 30));
 
         ForeshadowScheduleService.StampResult r = service.stamp(summary, schedules);
 
@@ -83,8 +83,8 @@ class ForeshadowScheduleServiceTest {
     void stamp_matchesWithinWindow() {
         for (int offset : new int[]{-2, -1, 1, 2}) {
             ChapterSummaryEntity summary = chapter(12 + offset);
-            plant(summary, "顾老头是否收陆瑾瑜为徒");
-            List<ForeshadowScheduleEntity> schedules = scheduleWith(item("顾老头是否收陆瑾瑜为徒", 12, 30));
+            plant(summary, "顾老头是否收角色丙为徒");
+            List<ForeshadowScheduleEntity> schedules = scheduleWith(item("顾老头是否收角色丙为徒", 12, 30));
 
             assertEquals(1, service.stamp(summary, schedules).planted(),
                     "偏移 " + offset + " 章应仍能命中");
@@ -100,9 +100,9 @@ class ForeshadowScheduleServiceTest {
     @DisplayName("stamp：4 字锚点（老银镯子）在窗口内必须命中")
     void stamp_matchesShortAnchor() {
         ChapterSummaryEntity summary = chapter(28);
-        plant(summary, "陆周氏将借条与老银镯子塞入陆瑾瑜摇篮缝隙棉布下，称等他长大自己来看");
+        plant(summary, "陆周氏将借条与老银镯子塞入角色丙摇篮缝隙棉布下，称等他长大自己来看");
         List<ForeshadowScheduleEntity> schedules = scheduleWith(item(
-                "陆周氏拿出棺材本时，特意取出一对老银镯子说留给未来孙媳妇", 29, 52));
+                "陆周氏拿出养老钱时，特意取出一对老银镯子说留给未来孙媳妇", 29, 52));
 
         ForeshadowScheduleService.StampResult r = service.stamp(summary, schedules);
 
@@ -116,7 +116,7 @@ class ForeshadowScheduleServiceTest {
     void stamp_outsideWindowBecomesMissed() {
         ChapterSummaryEntity summary = chapter(20);
         plant(summary, "一条与排期意图完全无关的新伏笔描述");
-        List<ForeshadowScheduleEntity> schedules = scheduleWith(item("顾老头是否收陆瑾瑜为徒", 12, 30));
+        List<ForeshadowScheduleEntity> schedules = scheduleWith(item("顾老头是否收角色丙为徒", 12, 30));
 
         ForeshadowScheduleService.StampResult r = service.stamp(summary, schedules);
 
@@ -131,8 +131,8 @@ class ForeshadowScheduleServiceTest {
     @DisplayName("stamp：回收清单命中则判 PAID")
     void stamp_marksPaidWhenResolved() {
         ChapterSummaryEntity summary = chapter(30);
-        resolve(summary, "顾老头是否收陆瑾瑜为徒");
-        ForeshadowScheduleEntity.ScheduleItem planted = item("顾老头是否收陆瑾瑜为徒", 12, 30);
+        resolve(summary, "顾老头是否收角色丙为徒");
+        ForeshadowScheduleEntity.ScheduleItem planted = item("顾老头是否收角色丙为徒", 12, 30);
         planted.setStatus(ForeshadowScheduleEntity.STATUS_PLANTED);
         planted.setActualPlantChapter(12);
         List<ForeshadowScheduleEntity> schedules = scheduleWith(planted);
@@ -162,9 +162,9 @@ class ForeshadowScheduleServiceTest {
     @DisplayName("stamp：已打标的种子不重复认领")
     void stamp_doesNotReclaimStampedSeed() {
         ChapterSummaryEntity summary = chapter(12);
-        plant(summary, "顾老头是否收陆瑾瑜为徒");
+        plant(summary, "顾老头是否收角色丙为徒");
         summary.getForeshadowSeeds().get(0).setScheduledPayoffChapter(30);
-        List<ForeshadowScheduleEntity> schedules = scheduleWith(item("顾老头是否收陆瑾瑜为徒", 12, 30));
+        List<ForeshadowScheduleEntity> schedules = scheduleWith(item("顾老头是否收角色丙为徒", 12, 30));
 
         assertEquals(0, service.stamp(summary, schedules).planted(),
                 "已带 scheduledPayoffChapter 的种子不该被再次认领");
@@ -182,13 +182,13 @@ class ForeshadowScheduleServiceTest {
      * 阶段出口裁决判 DONE 的线必须回写 PAID——闭环的最后一段。
      *
      * <p>只把 DONE 写进结算文件而不回写排期表，它下一段仍会以「逾期补收」再被下一次令：
-     * 实测「2026」那条线（第 5 章埋、原计划第 45 章收）到第 100 章仍在被逐段下令补收，
-     * 而它其实已在第 93/95 章兑现，只是 {@code matchPayoff} 认不出来。
+     * 实测某条老线（第 5 章埋、原计划第 45 章收）在后续几十章仍被逐段下令补收，
+     * 而它其实已在在中段兑现，只是 {@code matchPayoff} 认不出来。
      */
     @Test
     @DisplayName("applySettlementOutcomes：判 DONE 的线回写 PAID，未判的不得被误关")
     void applySettlementOutcomes_marksPaidAndIgnoresMismatch() {
-        ForeshadowScheduleEntity.ScheduleItem done = item("主角无意识写出2026年的日期", 5, 45);
+        ForeshadowScheduleEntity.ScheduleItem done = item("主角无意识写出未来年份的日期", 5, 45);
         done.setStatus(ForeshadowScheduleEntity.STATUS_PLANTED);
         done.setActualPlantChapter(5);
         ForeshadowScheduleEntity.ScheduleItem untouched = item("另一条尚未兑现的线", 5, 45);
@@ -198,7 +198,7 @@ class ForeshadowScheduleServiceTest {
         int written = service.applySettlementOutcomes(schedules, List.of(
                 ForeshadowSettlementEntity.SettlementDecision.builder()
                         // 归一化后相等即可命中（去空白/引号是仓库统一口径）
-                        .content(" 主角无意识写出2026年的日期 ")
+                        .content(" 主角无意识写出未来年份的日期 ")
                         .decision(ForeshadowSettlementEntity.DECISION_DONE)
                         .actualPayoffChapter(95).build(),
                 ForeshadowSettlementEntity.SettlementDecision.builder()
@@ -217,12 +217,12 @@ class ForeshadowScheduleServiceTest {
     @Test
     @DisplayName("applySettlementOutcomes：缺章号的 DONE 不回写")
     void applySettlementOutcomes_ignoresDoneWithoutChapter() {
-        ForeshadowScheduleEntity.ScheduleItem item = item("主角无意识写出2026年的日期", 5, 45);
+        ForeshadowScheduleEntity.ScheduleItem item = item("主角无意识写出未来年份的日期", 5, 45);
         item.setStatus(ForeshadowScheduleEntity.STATUS_PLANTED);
 
         int written = service.applySettlementOutcomes(scheduleWith(item), List.of(
                 ForeshadowSettlementEntity.SettlementDecision.builder()
-                        .content("主角无意识写出2026年的日期")
+                        .content("主角无意识写出未来年份的日期")
                         .decision(ForeshadowSettlementEntity.DECISION_DONE)
                         .build()), 100);
 
@@ -237,12 +237,12 @@ class ForeshadowScheduleServiceTest {
     @Test
     @DisplayName("applySettlementOutcomes：判 PARKED 的线打上在养标记且保持 PLANTED")
     void applySettlementOutcomes_marksParkedWithoutChangingStatus() {
-        ForeshadowScheduleEntity.ScheduleItem parked = item("主角无意识写出2026年的日期", 5, 45);
+        ForeshadowScheduleEntity.ScheduleItem parked = item("主角无意识写出未来年份的日期", 5, 45);
         parked.setStatus(ForeshadowScheduleEntity.STATUS_PLANTED);
 
         int written = service.applySettlementOutcomes(scheduleWith(parked), List.of(
                 ForeshadowSettlementEntity.SettlementDecision.builder()
-                        .content("主角无意识写出2026年的日期")
+                        .content("主角无意识写出未来年份的日期")
                         .decision(ForeshadowSettlementEntity.DECISION_PARKED)
                         .reason("指向身份暴露危机，是贯穿全书的暗线").build()), 100);
 

@@ -55,8 +55,8 @@ class BuildStageBlueprintNodeTest {
      * `BuildStageBlueprintNode#repairForeshadowSchedule` 的 crossStagePossible）。
      */
     private static final String SCHEDULE_FIELD = "\"foreshadowSchedule\":["
-            + "{\"intent\":\"顾老头是否收陆瑾瑜为徒\",\"plantChapter\":12,\"payoffChapter\":30},"
-            + "{\"intent\":\"鸿运科技骗局的最终清算\",\"plantChapter\":20,\"payoffChapter\":45}]";
+            + "{\"intent\":\"顾老头是否收角色丙为徒\",\"plantChapter\":12,\"payoffChapter\":30},"
+            + "{\"intent\":\"远大科技骗局的最终清算\",\"plantChapter\":20,\"payoffChapter\":45}]";
 
     /**
      * 章级主线推进的 JSON 片段（第 11-25 章，15 条）。
@@ -315,9 +315,9 @@ class BuildStageBlueprintNodeTest {
             summaries.add(ChapterSummaryEntity.builder()
                     .chapterNo(no).title("第" + no + "章").summary("剧情推进。").build());
         }
-        summaries.get(0).setForeshadowingNew(List.of("古镜来历"));
+        summaries.get(0).setForeshadowingNew(List.of("古物来历"));
         summaries.get(0).setForeshadowSeeds(List.of(
-                new ChapterSummaryEntity.SeedEntry("古镜来历", null, 5)));
+                new ChapterSummaryEntity.SeedEntry("古物来历", null, 5)));
         StageBlueprintEntity previous = blueprint(1, 1, 10);
         previous.setTasks(List.of("上一版任务"));
         DefaultArmoryFactory.DynamicContext ctx = DefaultArmoryFactory.DynamicContext.builder()
@@ -337,7 +337,7 @@ class BuildStageBlueprintNodeTest {
         assertTrue(prompt.contains("主角身世之谜"));
         assertTrue(prompt.contains("- 上一版任务"));
         assertTrue(prompt.contains("第10章"));
-        assertTrue(prompt.contains("【硬】古镜来历（第1章埋）"));
+        assertTrue(prompt.contains("【硬】古物来历（第1章埋）"));
         // 第 11 章触发第 2 阶段：窗口不再写死，由模型自定终点（30-80 章钳制）
         assertTrue(prompt.contains("起点为第 11 章"));
         assertTrue(prompt.contains("窗长约束 30-80 章"));
@@ -353,7 +353,7 @@ class BuildStageBlueprintNodeTest {
                 .novel_title("镜中仙途")
                 .theme("仙侠")
                 .style("热血")
-                .protagonist("林尘")
+                .protagonist("小陈")
                 .outline("主角身世之谜")
                 .chapterCount(chapterCount)
                 .build();

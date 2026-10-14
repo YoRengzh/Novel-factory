@@ -16,28 +16,28 @@ class SecrecyViolationPolicyTest {
 
     @Test
     void keywordHit_producesBlockingForeshadowIssue() {
-        String content = "他握紧手中的血玉，忽然明白了：血玉实为封印钥匙。";
-        List<ChapterIssueEntity> issues = SecrecyViolationPolicy.check(content, List.of("血玉实为封印钥匙"));
+        String content = "他握紧手中的旧玉佩，忽然明白了：那枚玉佩实为关键凭证。";
+        List<ChapterIssueEntity> issues = SecrecyViolationPolicy.check(content, List.of("那枚玉佩实为关键凭证"));
 
         assertEquals(1, issues.size());
         assertEquals("foreshadow", issues.get(0).getDimension());
         assertEquals("BLOCKING", issues.get(0).getSeverity());
-        assertTrue(issues.get(0).getEvidence().contains("血玉实为封印钥匙×1"));
+        assertTrue(issues.get(0).getEvidence().contains("那枚玉佩实为关键凭证×1"));
     }
 
     @Test
     void multipleHits_countedPerKeyword() {
-        String content = "魔气源头是宗主。他反复确认，魔气源头是宗主这件事不能再让第三人知道。";
-        List<ChapterIssueEntity> issues = SecrecyViolationPolicy.check(content, List.of("魔气源头是宗主"));
+        String content = "事故背后另有主使。他反复确认，事故背后另有主使这件事不能再让第三人知道。";
+        List<ChapterIssueEntity> issues = SecrecyViolationPolicy.check(content, List.of("事故背后另有主使"));
 
         assertEquals(1, issues.size());
-        assertTrue(issues.get(0).getEvidence().contains("魔气源头是宗主×2"));
+        assertTrue(issues.get(0).getEvidence().contains("事故背后另有主使×2"));
     }
 
     @Test
     void noHit_returnsEmpty() {
         String content = "他推开门，看见桌上的信。信封没有落款，只有一枚烧焦的蜡印。";
-        assertTrue(SecrecyViolationPolicy.check(content, List.of("血玉实为封印钥匙")).isEmpty());
+        assertTrue(SecrecyViolationPolicy.check(content, List.of("那枚玉佩实为关键凭证")).isEmpty());
     }
 
     @Test

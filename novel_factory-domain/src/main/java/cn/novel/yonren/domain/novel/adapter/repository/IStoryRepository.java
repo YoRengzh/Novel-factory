@@ -211,6 +211,21 @@ public interface IStoryRepository {
     void appendQualityTrend(Path storyDir, String jsonlLine) throws Exception;
 
     /**
+     * 读回 {@code memory/quality-trend.jsonl} 的全部行（**最新一窗在末位**）。
+     *
+     * <p>补这个读入口的原因：此前该文件是**只写不读**的——每 10 章花一次
+     * 强模型抽 3 章打分，分数落盘后没有任何一处消费，等于信息买回来了直接扔掉。
+     * 文件缺失返回空表（新故事尚未触发评分）；单行损坏跳过（观测文件允许尾部半行）。
+     */
+    List<String> readQualityTrend(Path storyDir) throws Exception;
+
+    /**
+     * 追加一条机械校验事件到 memory/mechanical-events.jsonl（观测文件，追加语义）。
+     * 事件为单行 JSON（必带 type 字段）；调用方应 fail-soft：写失败不得反噬生成流程。
+     */
+    void appendMechanicalEvent(Path storyDir, String jsonlLine) throws Exception;
+
+    /**
      * 读候选选优样本的 **outcome 清单**（观测层统计触发率/采纳率用，不回传正文避免大对象）。
      * 文件缺失返回空表；单行损坏跳过（观测性文件，允许尾部半行）。
      */

@@ -34,20 +34,20 @@ import static org.mockito.Mockito.when;
 class SettingDraftServiceTest {
 
     /** 模型产出的完整草稿（含一个 schema 之外的多余键 notes，用来验证不会因此整份丢弃） */
-    private static final String FULL_DRAFT = "{\"novelTitle\":\"雾港拾骨\",\"style\":\"冷硬悬疑，节奏紧\","
+    private static final String FULL_DRAFT = "{\"novelTitle\":\"示例书\",\"style\":\"冷硬悬疑，节奏紧\","
             + "\"worldSetting\":\"模型给的世界观\",\"perspective\":\"第三人称限知视角\",\"targetAudience\":\"男频\","
             + "\"tone\":\"压抑里留一线希望\",\"protagonist\":\"模型给的主人公\","
             + "\"outline\":\"模型给的故事概述\",\"chapterGoal\":\"让读者体验层层解谜的快感\","
             + "\"totalChapters\":180,\"rationale\":\"以十七年前旧案牵引主线\",\"notes\":\"这是schema外的多余键\"}";
 
     /** 第 2 次尝试才可解析：第一次给个残缺 JSON */
-    private static final String TRUNCATED = "{\"novelTitle\":\"雾港拾骨\",\"style\":\"冷硬悬疑\"";
+    private static final String TRUNCATED = "{\"novelTitle\":\"示例书\",\"style\":\"冷硬悬疑\"";
 
     /** 完全不是 JSON（模型拒答/串到闲聊）：JsonRepair 也救不回来 */
     private static final String NOT_JSON = "抱歉，我无法按要求生成这份设定集。";
 
     /** 可解析但 outline 为空 —— 属于"缺失字段"，应触发重试而非直接采用 */
-    private static final String MISSING_OUTLINE = "{\"novelTitle\":\"雾港拾骨\",\"style\":\"冷硬悬疑，节奏紧\","
+    private static final String MISSING_OUTLINE = "{\"novelTitle\":\"示例书\",\"style\":\"冷硬悬疑，节奏紧\","
             + "\"worldSetting\":\"模型给的世界观\",\"perspective\":\"第三人称限知视角\",\"targetAudience\":\"男频\","
             + "\"tone\":\"压抑里留一线希望\",\"protagonist\":\"模型给的主人公\","
             + "\"outline\":\"   \",\"chapterGoal\":\"让读者体验层层解谜的快感\",\"totalChapters\":180}";
@@ -73,7 +73,7 @@ class SettingDraftServiceTest {
 
         SettingDraftService.Result result = settingDraftService.draft(STORY_VO, request(null, null));
 
-        assertEquals("雾港拾骨", result.fields().getNovelTitle());
+        assertEquals("示例书", result.fields().getNovelTitle());
         assertEquals("模型给的世界观", result.fields().getWorldSetting());
         assertEquals("模型给的故事概述", result.fields().getOutline());
         assertEquals(180, result.fields().getTotalChapters());
@@ -194,7 +194,7 @@ class SettingDraftServiceTest {
 
         SettingDraftService.Result result = settingDraftService.draft(STORY_VO, request(null, null));
 
-        assertEquals("雾港拾骨", result.fields().getNovelTitle());
+        assertEquals("示例书", result.fields().getNovelTitle());
         List<String> prompts = capturedPrompt(2);
         assertTrue(prompts.get(1).contains("JSON 格式不合法"),
                 "解析彻底失败时应告诉模型是格式问题，而不是罗列一堆'字段缺失'误导它");
@@ -245,7 +245,7 @@ class SettingDraftServiceTest {
         // FULL_DRAFT 里有一个 schema 之外的 notes 键：不应导致整份草稿被判为解析失败
         SettingDraftService.Result result = settingDraftService.draft(STORY_VO, request(null, null));
 
-        assertEquals("雾港拾骨", result.fields().getNovelTitle());
+        assertEquals("示例书", result.fields().getNovelTitle());
     }
 
     @Test

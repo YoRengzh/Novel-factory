@@ -182,17 +182,17 @@ class ChapterWorkerTest {
         when(styleStatService.empty()).thenReturn(StyleStatEntity.builder().build());
         when(styleStatService.renderWarning(any())).thenReturn("");
         when(llmInvokeService.invoke(any(), any(), any(), anyString(), anyMap())).thenReturn(RAW_CHAPTER);
-        when(chapterSummaryService.summarize(any(), any(), anyString(), anyInt(), anyString(), anyList()))
+        when(chapterSummaryService.summarize(any(), any(), anyString(), anyInt(), anyString(), anyList(), any()))
                 .thenReturn(summary(1));
         when(storyRepository.createStoryDirectory()).thenReturn(STORY_DIR);
         // 批末体检：只报不动作，测试里固定返回"健康"结论（其自身逻辑由 BatchHealthServiceTest 覆盖）。
         // 用 any() 而非 anyList()：ctx.getStageBlueprints() 可能为 null，anyList() 不匹配 null
-        // 注意：ChapterWorker 调的是 **5 参重载**（候选统计 + 结算台账），桩必须同为 5 参，
+        // 注意：ChapterWorker 调的是 **7 参重载**（候选统计 + 结算台账 + 章目标 + 质量趋势），桩必须同元数，
         // 否则静默不匹配返回 null → 调用点 NPE。**改 assess 的元数时必须同步改这里。**
         // 排期打标：默认无排期表 ⇒ 无状态变化（与未启用排期时行为一致）
         when(foreshadowScheduleService.stamp(any(), any()))
                 .thenReturn(ForeshadowScheduleService.StampResult.EMPTY);
-        when(batchHealthService.assess(any(), any(), any(), any(), any(), any()))
+        when(batchHealthService.assess(any(), any(), any(), any(), any(), any(), any()))
                 .thenReturn(new BatchHealthReport(0, List.of(), BatchHealthReport.Level.OK, List.of()));
         // 候选统计：默认无样本（stats.triggered=0 → 体检不产生候选指标）
         when(candidateSampleService.readStats(any()))
@@ -332,7 +332,7 @@ class ChapterWorkerTest {
     @Test
     void generateAll_cancelAfterFirstChapter_generatesExactlyOneChapter() throws Exception {
         GenerationJob job = new GenerationJob("job-2");
-        when(chapterSummaryService.summarize(any(), any(), anyString(), anyInt(), anyString(), anyList()))
+        when(chapterSummaryService.summarize(any(), any(), anyString(), anyInt(), anyString(), anyList(), any()))
                 .thenAnswer(invocation -> {
                     job.requestCancel();
                     return summary(1);
@@ -367,7 +367,7 @@ class ChapterWorkerTest {
     void generateAll_lazySegmentPlanning_plansNextSegmentAtBoundary() throws Exception {
         // 首段 1-2 章已预规划，批次 4 章：生成推进到第 3 章时用最新记忆惰性规划 3-4 段
         when(llmInvokeService.invoke(any(), any(), any(), anyString(), anyMap())).thenReturn(RAW_CHAPTER);
-        when(chapterSummaryService.summarize(any(), any(), anyString(), anyInt(), anyString(), anyList()))
+        when(chapterSummaryService.summarize(any(), any(), anyString(), anyInt(), anyString(), anyList(), any()))
                 .thenAnswer(invocation -> summary(invocation.getArgument(3, Integer.class)));
         when(planPromptService.buildPlanPrompt(any(), eq(3), eq(4), any(), eq(true), any(), any()))
                 .thenReturn("segment-2-plan-prompt");
@@ -477,7 +477,7 @@ class ChapterWorkerTest {
         chapterWorker.generateAll(command(), ctx);
 
         verify(storyRepository, times(2)).writeChapters(any(), any());
-        verify(chapterSummaryService, times(2)).summarize(any(), any(), anyString(), anyInt(), anyString(), anyList());
+        verify(chapterSummaryService, times(2)).summarize(any(), any(), anyString(), anyInt(), anyString(), anyList(), any());
     }
 
     @Test
@@ -485,7 +485,7 @@ class ChapterWorkerTest {
         // 密度信号机械入账：摘要携带 validChars/keyEventCount，供规划层判断供给是否太稀
         when(qualityGate.auditAndReviseIfEnabled(any(), any(), any(), anyList(), any(), anyInt(), any()))
                 .thenReturn(GateResult.of(List.of(), 0, 0));
-        when(chapterSummaryService.summarize(any(), any(), anyString(), anyInt(), anyString(), anyList()))
+        when(chapterSummaryService.summarize(any(), any(), anyString(), anyInt(), anyString(), anyList(), any()))
                 .thenAnswer(inv -> ChapterSummaryEntity.builder()
                         .chapterNo(inv.getArgument(3)).summary("摘要").build());
         DefaultArmoryFactory.DynamicContext ctx = context(null);

@@ -82,30 +82,107 @@ public final class ForeshadowSpanPolicy {
                 if (StringUtils.isBlank(raw)) {
                     continue;
                 }
-                int bestNo = -1;
-                int bestScore = 0;
-                String target = normalize(raw);
-                for (Seed seed : seeds) {
-                    if (seed.chapterNo() >= resolveNo) {
-                        continue;
-                    }
-                    String candidate = normalize(seed.content());
-                    if (candidate.isEmpty()) {
-                        continue;
-                    }
-                    int score = candidate.equals(target) ? Integer.MAX_VALUE
-                            : longestCommonSubstring(candidate, target);
-                    if (score > bestScore) {
-                        bestScore = score;
-                        bestNo = seed.chapterNo();
-                    }
-                }
-                if (bestNo > 0 && bestScore >= MATCH_MIN_CHARS) {
-                    result.add(new Span(bestNo, resolveNo, raw.trim()));
+                int matched = matchSeedIndex(seeds, resolveNo, raw);
+                if (matched >= 0) {
+                    result.add(new Span(seeds.get(matched).chapterNo(), resolveNo, raw.trim()));
                 }
             }
         }
         return result;
+    }
+
+    /**
+     * 为一条回收登记找最匹配的埋设种子：**ID 全等优先，其次归一化全等，最后最长公共子串**。
+     *
+     * <p><b>ID 优先是关键路径</b>：账本渲染带 {@code [F7-2]} 前缀、模型回抄 ID 销账
+     * （见 {@code ChapterMemoryService.buildForeshadowContextListWithIds}），而回抄的 ID 里
+     * **不含任何语义内容**——只做文本全等/子串匹配时，这类回收在体检口径里
+     * 配不上任何埋设，该线永远停在"在途"。实测第 143-149 章的 ID 回抄回收**全部漏配**，
+     * 在途数被单调虚高。账本侧早已 ID 感知（{@code ChapterMemoryService.isResolved}），
+     * 指标侧漏改是纯粹的口径分裂。
+     *
+     * <p>ID 形态但无对应埋设时**不回退文本**：一条纯 ID 的回收登记不含语义，
+     * 拿 {@code [F142-1]} 去做子串匹配只会撞出噪声（老数据无 ID 的线由文本路径覆盖）。
+     * 带前缀又带描述的形态（{@code [F7-2] 描述}）在 ID 未命中时用**剩余描述**回退文本匹配。
+     *
+     * @return 命中的种子下标（无命中返回 -1）；只有**严格早于回收章**的埋设参与匹配
+     */
+    private static int matchSeedIndex(List<Seed> seeds, int resolveNo, String raw) {
+        String id = ForeshadowIds.normalize(raw);
+        String textPart = raw;
+        if (id == null) {
+            String prefix = ForeshadowIds.extractPrefix(raw);
+            if (prefix != null) {
+                id = prefix;
+                textPart = ForeshadowIds.stripPrefix(raw);
+            }
+        }
+        if (id != null) {
+            for (int i = 0; i < seeds.size(); i++) {
+                Seed seed = seeds.get(i);
+                if (seed.chapterNo() < resolveNo && seed.foreshadowId() != null
+                        && seed.foreshadowId().equalsIgnoreCase(id)) {
+                    return i;
+                }
+            }
+            // 带描述的 ID 形态：剩余文本仍可作为回退（老数据埋设无 ID）
+            if (StringUtils.isBlank(textPart) || textPart.equals(raw)) {
+                return -1;
+            }
+        }
+        String target = normalize(textPart);
+        if (target.isEmpty()) {
+            return -1;
+        }
+        int bestIdx = -1;
+        int bestScore = 0;
+        for (int i = 0; i < seeds.size(); i++) {
+            Seed seed = seeds.get(i);
+            if (seed.chapterNo() >= resolveNo) {
+                continue;
+            }
+            String candidate = normalize(seed.content());
+            if (candidate.isEmpty()) {
+                continue;
+            }
+            int score = candidate.equals(target) ? Integer.MAX_VALUE
+                    : longestCommonSubstring(candidate, target);
+            if (score > bestScore) {
+                bestScore = score;
+                bestIdx = i;
+            }
+        }
+        return bestScore >= MATCH_MIN_CHARS ? bestIdx : -1;
+    }
+
+    /**
+     * 已被回收登记命中的埋设种子集合（按 record 值相等判定）。
+     *
+     * <p>与 {@link #spans} 共用 {@link #matchSeedIndex}——两处若各持一套配对逻辑，
+     * "寿命跨度算作已回收"与"在途统计算作未回收"会对同一条线给出相反结论。
+     */
+    private static Set<Seed> closedSeeds(List<ChapterSummaryEntity> summaries, List<Seed> seeds) {
+        Set<Seed> closed = new HashSet<>();
+        if (seeds.isEmpty()) {
+            return closed;
+        }
+        for (ChapterSummaryEntity summary : safeList(summaries)) {
+            if (summary == null || summary.getChapterNo() == null
+                    || summary.getForeshadowingResolved() == null) {
+                continue;
+            }
+            int resolveNo = summary.getChapterNo();
+            for (String raw : summary.getForeshadowingResolved()) {
+                if (StringUtils.isBlank(raw)) {
+                    continue;
+                }
+                int idx = matchSeedIndex(seeds, resolveNo, raw);
+                if (idx >= 0) {
+                    closed.add(seeds.get(idx));
+                }
+            }
+        }
+        return closed;
     }
 
     /** 平均跨度（章）；无样本返回 0（调用方据此跳过指标，而不是报 0） */
@@ -191,17 +268,30 @@ public final class ForeshadowSpanPolicy {
                 seeds.addAll(seedsOf(summary, true, voidedSet));
             }
         }
-        // 已被回收的埋设条目（按"回收文本能匹配上哪条埋设"标记）
-        List<Span> resolved = spans(summaries);
+        // 已回收判定与 spans 共用同一条匹配路径（ID 全等 → 归一化全等 → LCS）：
+        // 此前这里自持一套"埋设章 + 归一化全等"的判定，模型回抄 ID 或改写措辞的回收
+        // 全被判成"仍在途"——同一份数据里寿命指标认为已收、在途指标认为没收
+        Set<Seed> closed = closedSeeds(summaries, seeds);
         for (Seed seed : seeds) {
-            boolean closed = resolved.stream().anyMatch(s -> s.plantChapterNo() == seed.chapterNo()
-                    && normalize(s.content()).equals(normalize(seed.content())));
-            if (!closed && seed.chapterNo() < currentChapter) {
+            if (!closed.contains(seed) && seed.chapterNo() < currentChapter) {
                 result.add(new Pending(seed.chapterNo(), currentChapter - seed.chapterNo(), seed.content(),
                         seed.scheduledPayoffChapter()));
             }
         }
         return result;
+    }
+
+    /**
+     * 单章**严格口径**的埋设条数：声明了兑现义务（{@code resolvable=TRUE}）且未被弃置的种子数。
+     *
+     * <p>供"流量统计"（伏笔账压力块的最近净增）与"存量读数"（{@link #pending}）共用同一把尺——
+     * 两份实现稍有差异就会出现"净增为 0 却在途上涨"的自相矛盾。
+     */
+    public static int strictSeedCount(ChapterSummaryEntity summary, Collection<String> voided) {
+        if (summary == null) {
+            return 0;
+        }
+        return seedsOf(summary, true, normalizedVoided(voided)).size();
     }
 
     /** 在途伏笔滞留章数的中位数；无样本返回 0 */
@@ -256,7 +346,7 @@ public final class ForeshadowSpanPolicy {
 
     // ==================== 内部 ====================
 
-    private record Seed(int chapterNo, String content, Integer scheduledPayoffChapter) {
+    private record Seed(int chapterNo, String content, Integer scheduledPayoffChapter, String foreshadowId) {
     }
 
     private static List<Seed> seedsOf(ChapterSummaryEntity summary, boolean strict, Set<String> voided) {
@@ -276,7 +366,7 @@ public final class ForeshadowSpanPolicy {
                 continue;
             }
             list.add(new Seed(summary.getChapterNo(), entry.getContent().trim(),
-                    entry.getScheduledPayoffChapter()));
+                    entry.getScheduledPayoffChapter(), entry.getForeshadowId()));
         }
         return list;
     }
@@ -313,5 +403,10 @@ public final class ForeshadowSpanPolicy {
 
     public static int longestCommonSubstring(String a, String b) {
         return PlanAdherencePolicy.longestCommonSubstring(a, b);
+    }
+
+    /** 最长公共连续**片段文本**（委托实现）：供需要把重合片段回显给模型的判据使用 */
+    public static String longestCommonSubstringText(String a, String b) {
+        return PlanAdherencePolicy.longestCommonSubstringText(a, b);
     }
 }

@@ -26,42 +26,42 @@ class CharacterNameListDeserializerTest {
     @Test
     void plainStringArray_parses() throws Exception {
         ChapterBeatsEntity beats = parse("""
-                {"beats":[{"location":"老屋","characters":["陆瑾瑜","陆建国"],
+                {"beats":[{"location":"老屋","characters":["角色丙","角色戊"],
                 "conflict":"争执","infoGain":"得知真相","weight":"60%"}]}
                 """);
-        assertEquals(List.of("陆瑾瑜", "陆建国"), beats.getBeats().get(0).getCharacters());
+        assertEquals(List.of("角色丙", "角色戊"), beats.getBeats().get(0).getCharacters());
     }
 
     /** 回归：实测第 4 章的失败输入——对象数组，角色名在键上 */
     @Test
     void objectArray_takesKeysAsNames() throws Exception {
         ChapterBeatsEntity beats = parse("""
-                {"beats":[{"location":"弄堂老屋客厅",
-                "characters":[{"陆瑾瑜":"婴儿"},{"陆建国":"父亲"},{"王秀兰":"母亲"}],
+                {"beats":[{"location":"老宅客厅",
+                "characters":[{"角色丙":"婴儿"},{"角色戊":"父亲"},{"角色辰":"母亲"}],
                 "conflict":"啼哭迫使父亲中断阅读","infoGain":"看到原始股诈骗案新闻","weight":"30%"}]}
                 """);
         List<String> names = beats.getBeats().get(0).getCharacters();
-        assertEquals(List.of("陆瑾瑜", "陆建国", "王秀兰"), names);
+        assertEquals(List.of("角色丙", "角色戊", "角色辰"), names);
     }
 
     /** 混合形式：字符串 + 对象混排 */
     @Test
     void mixedArray_parses() throws Exception {
         ChapterBeatsEntity beats = parse("""
-                {"beats":[{"location":"小铺","characters":["陆瑾瑜",{"王秀兰":"母亲"}],
+                {"beats":[{"location":"小铺","characters":["角色丙",{"角色辰":"母亲"}],
                 "conflict":"盘点","infoGain":"生意上正轨","weight":"40%"}]}
                 """);
-        assertEquals(List.of("陆瑾瑜", "王秀兰"), beats.getBeats().get(0).getCharacters());
+        assertEquals(List.of("角色丙", "角色辰"), beats.getBeats().get(0).getCharacters());
     }
 
     /** 纯值对象：优先取 name 等常见键的值，而不是键名 */
     @Test
     void namedObject_prefersValueOverKey() throws Exception {
         ChapterBeatsEntity beats = parse("""
-                {"beats":[{"location":"书店","characters":[{"name":"陆瑾瑜"},{"name":"沈清欢"}],
+                {"beats":[{"location":"书店","characters":[{"name":"角色丙"},{"name":"角色庚"}],
                 "conflict":"挑书","infoGain":"开蒙","weight":"50%"}]}
                 """);
-        assertEquals(List.of("陆瑾瑜", "沈清欢"), beats.getBeats().get(0).getCharacters());
+        assertEquals(List.of("角色丙", "角色庚"), beats.getBeats().get(0).getCharacters());
     }
 
     /** null / 空数组不得抛异常 */
@@ -86,16 +86,16 @@ class CharacterNameListDeserializerTest {
     void fullBeatsPayload_noLongerFails() throws Exception {
         String json = """
                 {"beats":[
-                  {"location":"弄堂老屋客厅","characters":[{"陆瑾瑜":"婴儿"},{"陆建国":"父亲"}],
+                  {"location":"老宅客厅","characters":[{"角色丙":"婴儿"},{"角色戊":"父亲"}],
                    "conflict":"制造啼哭迫使父亲中断阅读","infoGain":"看到原始股诈骗案新闻","weight":"30%"},
-                  {"location":"弄堂老屋卧室摇篮旁","characters":[{"陆瑾瑜":"婴儿"}],
+                  {"location":"老宅卧室摇篮旁","characters":[{"角色丙":"婴儿"}],
                    "conflict":"观察父亲保留凭证","infoGain":"确立章末悬念","weight":"10%"}
                 ]}
                 """;
         ChapterBeatsEntity beats = parse(json);
         assertNotNull(beats.getBeats());
         assertEquals(2, beats.getBeats().size());
-        assertEquals(List.of("陆瑾瑜", "陆建国"), beats.getBeats().get(0).getCharacters());
-        assertEquals(List.of("陆瑾瑜"), beats.getBeats().get(1).getCharacters());
+        assertEquals(List.of("角色丙", "角色戊"), beats.getBeats().get(0).getCharacters());
+        assertEquals(List.of("角色丙"), beats.getBeats().get(1).getCharacters());
     }
 }

@@ -56,9 +56,9 @@ class ForeshadowSettlementPolicyTest {
         assertTrue(ForeshadowSettlementPolicy.looksSilentlyResolved(
                 decision("VOID", "第17章已明确第二批下岗名单落实，该悬念已闭合，无需再追踪。")));
         assertTrue(ForeshadowSettlementPolicy.looksSilentlyResolved(
-                decision("VOID", "买书承诺已在第24章新华书店挑书情节中兑现，伏笔已自然消解。")));
+                decision("VOID", "买书承诺已在第24章旧书铺挑书情节中兑现，伏笔已自然消解。")));
         assertTrue(ForeshadowSettlementPolicy.looksSilentlyResolved(
-                decision("VOID", "父母对陆瑾瑜异常的认知已在第16章顾老头测试中自然承接并深化，该伏笔已被消化。")));
+                decision("VOID", "父母对角色丙异常的认知已在第16章顾老头测试中自然承接并深化，该伏笔已被消化。")));
         assertTrue(ForeshadowSettlementPolicy.looksSilentlyResolved(
                 decision("VOID", "老顾见证异常已在第21章正式测试中升级为外部认证，该早期见证已被覆盖。")));
         assertTrue(ForeshadowSettlementPolicy.looksSilentlyResolved(
@@ -70,7 +70,7 @@ class ForeshadowSettlementPolicyTest {
     @DisplayName("looksSilentlyResolved：真弃置不算静默兑现")
     void genuineVoidIsNotSilentPayoff() {
         assertFalse(ForeshadowSettlementPolicy.looksSilentlyResolved(
-                decision("VOID", "修车行老板提及的国道事故刹车失灵疑点与当前弄堂教育主线无关，剧情已走远。")), 
+                decision("VOID", "修车行老板提及的国道事故刹车失灵疑点与当前巷子教育主线无关，剧情已走远。")), 
                 "「已走远」是真弃置，不能算静默兑现");
         assertFalse(ForeshadowSettlementPolicy.looksSilentlyResolved(
                 decision("VOID", "属远期闲笔，后续章节目标未安排对应节点。")));
@@ -111,7 +111,7 @@ class ForeshadowSettlementPolicyTest {
     /**
      * **精度回归**：无章号引用的否定用法不得算成静默兑现。
      *
-     * <p>真实假阳性（ch8）：「张阿婆说法在父母认真对待孩子异常后已融入日常，
+     * <p>真实假阳性（ch8）：「路人甲说法在父母认真对待孩子异常后已融入日常，
      * **无独立回收必要**」——句尾"回收"是否定用法，被宽松模式误判。
      * 加"必须写明第几章"约束后不再命中，且语义自洽：真已兑现的线理应说得出在哪一章兑现。
      */
@@ -119,9 +119,9 @@ class ForeshadowSettlementPolicyTest {
     @DisplayName("looksSilentlyResolved：无章号引用的否定用法不算")
     void negationWithoutChapterRefIsNotSilentPayoff() {
         assertFalse(ForeshadowSettlementPolicy.looksSilentlyResolved(
-                decision("VOID", "张阿婆说法在父母认真对待孩子异常后已融入日常，无独立回收必要。")));
+                decision("VOID", "路人甲说法在父母认真对待孩子异常后已融入日常，无独立回收必要。")));
         assertFalse(ForeshadowSettlementPolicy.looksSilentlyResolved(
-                decision("VOID", "银锁承诺属家庭温情闲笔，后续章节目标无对应兑现节点，弃置不影响主线。")));
+                decision("VOID", "旧锁承诺属家庭温情闲笔，后续章节目标无对应兑现节点，弃置不影响主线。")));
     }
 
     @Test

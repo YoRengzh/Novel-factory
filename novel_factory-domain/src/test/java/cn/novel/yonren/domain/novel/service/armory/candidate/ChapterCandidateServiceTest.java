@@ -77,7 +77,7 @@ class ChapterCandidateServiceTest {
                 .storyVO(new cn.novel.yonren.domain.novel.model.valobj.StoryVO())
                 .storyContextEntity(cn.novel.yonren.domain.novel.model.entity.StoryContextEntity.builder()
                         .theme("都市重生").style("年代成长")
-                        .worldSetting("二十世纪九十年代的弄堂生活").build())
+                        .worldSetting("二十世纪九十年代的巷子生活").build())
                 .build();
         item = ChapterPlanItemEntity.builder().chapterNo(1).title("第1章").goal("目标").build();
         chapterContent = ChapterContentEntity.builder().chapterNo(1).title("原稿").content("原稿正文。").build();
@@ -296,7 +296,7 @@ class ChapterCandidateServiceTest {
         assertTrue(prompt.contains("事实与认知一致性"), "评审维度须含事实一致性");
         assertTrue(prompt.contains("【题材与人物语域基准】"));
         assertTrue(prompt.contains("都市重生"));
-        assertTrue(prompt.contains("二十世纪九十年代的弄堂生活"));
+        assertTrue(prompt.contains("二十世纪九十年代的巷子生活"));
         assertTrue(prompt.contains("时代错位词"), "候选盲评必须能淘汰时代错位或人物失语稿");
         assertTrue(prompt.indexOf("事实与认知一致性") < prompt.indexOf("4) 文风与语域"),
                 "事实核对必须排在文风之前（原先文风是第一维度）");

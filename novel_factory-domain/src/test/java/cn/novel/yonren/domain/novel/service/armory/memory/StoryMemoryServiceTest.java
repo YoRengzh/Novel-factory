@@ -88,7 +88,7 @@ class StoryMemoryServiceTest { /*MARKER-CHECK-1*/
     void rebuildIndex_writesWholeStoryOnce_whenCollectionEmpty(@TempDir Path storyDir) throws Exception {
         Files.writeString(storyDir.resolve("story-bible.txt"), "小说名称：测试\n世界观：架空");
         when(chapterMemoryService.buildCharacterLedger(anyList()))
-                .thenReturn(List.of(new LedgerEntry("陆瑾瑜", "报名三班", 1, 3, null, null, false)));
+                .thenReturn(List.of(new LedgerEntry("角色丙", "报名丙班", 1, 3, null, null, false)));
         when(chapterMemoryService.buildLedger(anyList(), any())).thenReturn(List.of());
         List<ChapterSummaryEntity> summaries = threeChapters();
         // 先经末章写入建立索引签名；缺签名时回滚对账会走"整集合重建"分支（那是签名变更的专用路径）
@@ -116,7 +116,7 @@ class StoryMemoryServiceTest { /*MARKER-CHECK-1*/
     void rebuildIndex_rewritesOnlyChangedPoints_andDeletesVanished(@TempDir Path storyDir) throws Exception {
         Files.writeString(storyDir.resolve("story-bible.txt"), "小说名称：测试");
         when(chapterMemoryService.buildCharacterLedger(anyList()))
-                .thenReturn(List.of(new LedgerEntry("陆瑾瑜", "报名三班", 1, 3, null, null, false)));
+                .thenReturn(List.of(new LedgerEntry("角色丙", "报名丙班", 1, 3, null, null, false)));
         when(chapterMemoryService.buildLedger(anyList(), any())).thenReturn(List.of());
         List<ChapterSummaryEntity> summaries = threeChapters();
         service.indexAfterChapter(module(), storyDir, summaries, null);
@@ -560,7 +560,7 @@ class StoryMemoryServiceTest { /*MARKER-CHECK-1*/
                 .volumeNo(1).title("外门篇").themeShift("站稳外门")
                 .beats(List.of("承甲", "转乙"))
                 .volumeExitConditions(List.of("外门公开敌对"))
-                .seeds(List.of("古镜"))
+                .seeds(List.of("古物"))
                 .build();
 
         service.indexVolume(module(), storyDir, volume);
@@ -575,7 +575,7 @@ class StoryMemoryServiceTest { /*MARKER-CHECK-1*/
         assertEquals("1", point.getPayload().get("volumeNo"));
         assertTrue(point.getPayload().get("text").contains("第1卷《外门篇》"));
         assertTrue(point.getPayload().get("text").contains("承转合：承甲；转乙"));
-        assertTrue(point.getPayload().get("text").contains("卷级伏笔：古镜"));
+        assertTrue(point.getPayload().get("text").contains("卷级伏笔：古物"));
         assertTrue(point.getId() instanceof String);
     }
 

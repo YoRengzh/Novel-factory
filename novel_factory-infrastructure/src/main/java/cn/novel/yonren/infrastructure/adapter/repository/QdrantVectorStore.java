@@ -50,6 +50,13 @@ public class QdrantVectorStore implements VectorStore {
     /** 滚动分页页大小：对账要把整集合读回来（不含向量，单点很轻），256 足够少批次 */
     private static final int SCROLL_PAGE_SIZE = 256;
 
+    /**
+     * 单次 upsert 的点数上限：1024 维 float 单点约 4KB，取 100 点 ≈ 400KB/条消息，
+     * 远低于 gRPC 默认 4MB 上限。不分批时长故事重建集合时（188 章 ≈ 900 点 ≈ 3.7MB）
+     * 单条消息逼近上限，超限即整集合重建失败并降级"沿用旧集合"——恰在长故事最需要重建时失效。
+     */
+    private static final int UPSERT_BATCH_POINTS = 100;
+
     private final QdrantClient client;
 
     public QdrantVectorStore(@Value("${story.vector-store.host:localhost}") String host,
@@ -137,32 +144,46 @@ public class QdrantVectorStore implements VectorStore {
     @Override
     public void upsert(String collection, List<VectorPoint> points) {
         QdrantClient qdrant = requireClient();
-        List<PointStruct> structs = new ArrayList<>(points.size());
-        for (VectorPoint p : points) {
-            Map<String, JsonWithInt.Value> payload = new HashMap<>();
-            p.getPayload().forEach((k, v) -> payload.put(k,
-                    JsonWithInt.Value.newBuilder().setStringValue(v).build()));
-            structs.add(PointStruct.newBuilder()
-                    .setId(PointId.newBuilder().setUuid(p.getId()).build())
-                    .setVectors(Vectors.newBuilder()
-                            .setVector(Vector.newBuilder().addAllData(toFloatList(p.getVector())).build())
-                            .build())
-                    .putAllPayload(payload)
-                    .build());
+        if (points == null || points.isEmpty()) {
+            return;
         }
-        try {
-            qdrant.upsertAsync(UpsertPoints.newBuilder()
-                    .setCollectionName(collection)
-                    .addAllPoints(structs)
-                    .setWait(true)
-                    .build()).get(TIMEOUT_SECONDS, TimeUnit.SECONDS);
-            log.info("向量批量写入完成：{} 个点 → {}", points.size(), collection);
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
-            throw new IllegalStateException("向量写入被中断", e);
-        } catch (Exception e) {
-            throw new IllegalStateException("向量写入失败: " + e.getMessage(), e);
+        // 按批切分发送：此前一次发全部点，而 1024 维 float 的单点约 4KB——
+        // 长故事重建集合时（188 章 ≈ 900 点）单条 gRPC 消息逼近 4MB 默认上限，
+        // 超限会让整集合重建失败并降级为"沿用旧集合"，恰好在最需要重建时失效。
+        // 分批后单条消息远低于上限，语义（wait=true 逐批确认）不变。
+        int batchSize = UPSERT_BATCH_POINTS;
+        int written = 0;
+        for (int start = 0; start < points.size(); start += batchSize) {
+            List<VectorPoint> slice = points.subList(start, Math.min(start + batchSize, points.size()));
+            List<PointStruct> structs = new ArrayList<>(slice.size());
+            for (VectorPoint p : slice) {
+                Map<String, JsonWithInt.Value> payload = new HashMap<>();
+                p.getPayload().forEach((k, v) -> payload.put(k,
+                        JsonWithInt.Value.newBuilder().setStringValue(v).build()));
+                structs.add(PointStruct.newBuilder()
+                        .setId(PointId.newBuilder().setUuid(p.getId()).build())
+                        .setVectors(Vectors.newBuilder()
+                                .setVector(Vector.newBuilder().addAllData(toFloatList(p.getVector())).build())
+                                .build())
+                        .putAllPayload(payload)
+                        .build());
+            }
+            try {
+                qdrant.upsertAsync(UpsertPoints.newBuilder()
+                        .setCollectionName(collection)
+                        .addAllPoints(structs)
+                        .setWait(true)
+                        .build()).get(TIMEOUT_SECONDS, TimeUnit.SECONDS);
+                written += structs.size();
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                throw new IllegalStateException("向量写入被中断", e);
+            } catch (Exception e) {
+                throw new IllegalStateException("向量写入失败（已写入 " + written + "/" + points.size()
+                        + " 点）: " + e.getMessage(), e);
+            }
         }
+        log.info("向量批量写入完成：{} 个点 → {}", points.size(), collection);
     }
 
     @Override

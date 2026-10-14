@@ -14,6 +14,7 @@ import cn.novel.yonren.domain.novel.service.armory.prompt.PromptBudgetGuard;
 import cn.novel.yonren.domain.novel.service.armory.quality.ChapterLengthPolicy;
 import cn.novel.yonren.domain.novel.service.armory.quality.ChapterTitlePolicy;
 import cn.novel.yonren.domain.novel.service.armory.quality.DialogueRatioPolicy;
+import cn.novel.yonren.domain.novel.service.armory.quality.ForeshadowLedgerPressurePolicy;
 import cn.novel.yonren.domain.novel.service.armory.quality.ForeshadowSpanPolicy;
 import cn.novel.yonren.domain.novel.service.armory.quality.PlaceTrajectoryPolicy;
 import cn.novel.yonren.domain.novel.service.armory.quality.UsedPatternPolicy;
@@ -74,6 +75,8 @@ public class ChapterPlanPromptService {
     private static final int DENSITY_LOOKBACK = 5;
     /** 对白坍缩反馈回看窗口：与密度反馈同窗口，同样只看最近 N 章 */
     private static final int DIALOGUE_LOOKBACK = 5;
+    /** 伏笔账压力块的净增统计窗口：与密度/对白反馈同窗口 */
+    private static final int LEDGER_PRESSURE_LOOKBACK = 5;
 
     /**
      * 组装规划 prompt（整批单段、沿用上下文默认蓝图与起始章号；包级可见供单测）
@@ -254,6 +257,16 @@ public class ChapterPlanPromptService {
         // 伏笔长度反馈：伏笔"埋了就收"是长篇读起来浅的直接原因；
         // 埋多长由计划决定，所以必须在规划层治，写手无权改
         appendForeshadowSpanFeedback(sb, dynamicContext.getChapterSummaries());
+        // 伏笔账压力：把"账已经太满"摆到规划那一刻。规划层能看到的只有"欠着哪些线"与
+        // "收得太快"，没有一条说"账本身太满"——批末体检里的 DEGRADED 到不了规划层
+        //（那是给"要不要续批"用的），于是规划层在盲区里继续铺线（实测 146-150 章净增 +7）。
+        String ledgerPressure = ForeshadowLedgerPressurePolicy.render(
+                dynamicContext.getChapterSummaries(),
+                ForeshadowLedgerPressurePolicy.voidedOf(dynamicContext.getForeshadowSettlements()),
+                LEDGER_PRESSURE_LOOKBACK);
+        if (ledgerPressure != null) {
+            sb.append(ledgerPressure);
+        }
         // 地点轨迹：把"最近都在哪儿、哪些地点已建立"摆给规划层——观测不到就不会被修
         String placeBlock = PlaceTrajectoryPolicy.renderTrajectory(dynamicContext.getChapterSummaries());
         if (placeBlock != null) {
@@ -297,9 +310,9 @@ public class ChapterPlanPromptService {
                 // 计划供给（4 条事件、250 字）两轮逐字相同，差别只在"事件被写成一场戏还是被一句话交代"。
                 // 计划的写法直接决定正文的写法：一句话的事件，正文里只会被展开成一句过渡叙述。
                 .append("**每条 keyEvent 必须写到「场面」级**：在场人物 + 起因或分歧 + 落点或结果（如"
-                        + "「周秀兰在灶房把日历翻到背面补第五道杠，陆远山站在门口问'又记上了'，两人就"
-                        + "『孩子的事按孩子节奏来』达成一致」），**禁止**写成「谁做了什么」的一句话"
-                        + "（如「周秀兰记录了日历」）——后者在正文里只能被展开成一句过渡叙述。")
+                        + "「甲在人前当众质问乙某事，乙给出承诺但附带一个交换条件，两人不欢而散」），"
+                        + "**禁止**写成「谁做了什么」的一句话"
+                        + "（如「乙承诺处理某事」）——后者在正文里只能被展开成一句过渡叙述。")
                 .append("每章必须声明 timeAdvance（本章结束时的时间，相对上一章推进 3-7 天；每段至少 1 章跳月），")
                 .append("全段单调递增并与阶段末目标（stageEnd）一致——它是年龄/时间推进的唯一合法通道。");
         sb.append("\n\n").append(PLAN_SCHEMA_MARKER).append(":")
@@ -431,9 +444,9 @@ public class ChapterPlanPromptService {
      * "篇幅够、关键事件也在，但角色不开腔"的章节时注入指令。
      *
      * <p><b>为什么必须在规划层治</b>：对白塌了的根因往往不在写手——计划把关键事件写成
-     * "谁做了什么"的动作清单时，写手只能交付动作分解。实测第 96 章：4 条关键事件里有 2 条是
+     * "谁做了什么"的动作清单时，写手只能交付动作分解。实测某章：4 条关键事件里有 2 条是
      * 对话承载，**数量合规**，但篇幅最大的那条是纯独白推导，规则只管条数、不管篇幅占比，
-     * 于是全章有效对话 9 句、轮次密度 4.4/千字（劣化线 6.0，同批其它章 12-27）。
+     * 于是全章有效对话仅个位数、轮次密度远低于劣化线（同批其它章成倍高于它）。
      *
      * <p>与 {@link #appendDensityFeedback}（篇幅）、{@link #appendForeshadowSpanFeedback}（伏笔跨度）
      * 完全同构：机械观测 → 回灌规划 → 治本。过渡章不计入：过渡章本就允许留白，

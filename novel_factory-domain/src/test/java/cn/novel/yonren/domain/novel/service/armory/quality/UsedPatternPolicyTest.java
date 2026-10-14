@@ -36,7 +36,7 @@ class UsedPatternPolicyTest {
                 chapter(1, "老陆五金铺", "normal", "开张第一天"),
                 chapter(2, "老陆五金铺", "normal", "又来一批螺丝"),
                 chapter(3, "老陆五金铺", "normal", "父亲盘账"),
-                chapter(4, "陆家客厅", "transition", "吃饭"));
+                chapter(4, "某宅客厅", "transition", "吃饭"));
 
         String block = UsedPatternPolicy.render(summaries, 5, 10);
 
@@ -98,28 +98,28 @@ class UsedPatternPolicyTest {
     }
 
     @Test
-    @DisplayName("角色冲突发起频次：同一角色反复当麻烦制造者要点名（胖墩模式的机械指纹）")
+    @DisplayName("角色冲突发起频次：同一角色反复当麻烦制造者要点名（小胖模式的机械指纹）")
     void repeatedConflictRoleIsCalledOut() {
-        // 实测：胖墩在第 3/13/19 章反复"抢夺 → 被物证揭穿 → 长辈介入 → 逃离"。
+        // 实测：小胖在第 3/13/19 章反复"抢夺 → 被物证揭穿 → 长辈介入 → 逃离"。
         // ⚠️ 该套路用**文本相似度抓不到**——三次节拍文本两两 3-gram Jaccard ≤0.09（第3章 vs 第19章仅 0.02），
         // 因为重复的是抽象结构而非措辞。故本指标走"角色 + 冲突动词"的结构化标签，本用例守住这条路线。
         List<ChapterSummaryEntity> summaries = List.of(
-                withBeats(chapter(1, "弄堂口", "normal", "一"), beat("胖墩", "抢到沈清欢兜里的桃酥吃")),
+                withBeats(chapter(1, "巷口", "normal", "一"), beat("小胖", "抢到角色庚兜里的点心吃")),
                 withBeats(chapter(2, "水井旁", "normal", "二"), beat("王阿婆", "倒煤灰，查证谁偷了她晒的梅干菜")),
-                withBeats(chapter(3, "弄堂拐角", "climax", "三"), beat("胖墩", "报复陆瑾瑜，抢走红头绳泄愤")),
-                withBeats(chapter(4, "老陆五金铺", "normal", "四"), beat("陆建国", "核对本月账目")),
-                withBeats(chapter(5, "院门口", "normal", "五"), beat("胖墩", "抢走沈清欢的糖")));
+                withBeats(chapter(3, "巷拐", "climax", "三"), beat("小胖", "报复角色丙，抢走头绳泄愤")),
+                withBeats(chapter(4, "老陆五金铺", "normal", "四"), beat("角色戊", "核对本月账目")),
+                withBeats(chapter(5, "院门口", "normal", "五"), beat("小胖", "抢走角色庚的糖")));
 
         String block = UsedPatternPolicy.render(summaries, 6, 10);
 
         assertNotNull(block);
         assertTrue(block.contains("角色冲突发起频次"), "应给出角色冲突统计：" + block);
-        assertTrue(block.contains("胖墩 ×3"), block);
+        assertTrue(block.contains("小胖 ×3"), block);
         assertTrue(block.contains("第1/3/5章"), "要点名到具体章号：" + block);
-        assertTrue(block.contains("角色「胖墩」"), "达阈值应进重复点名：" + block);
+        assertTrue(block.contains("角色「小胖」"), "达阈值应进重复点名：" + block);
         assertTrue(block.contains("暂时退出冲突线"), "要给出可执行的处置方式：" + block);
         // 无冲突动词的角色不应被计数
-        assertFalse(block.contains("陆建国 ×"), "「核对账目」不含冲突动词，不该被计入：" + block);
+        assertFalse(block.contains("角色戊 ×"), "「核对账目」不含冲突动词，不该被计入：" + block);
     }
 
     private static ChapterSummaryEntity withBeats(ChapterSummaryEntity summary,
@@ -144,7 +144,7 @@ class UsedPatternPolicyTest {
         List<ChapterSummaryEntity> summaries = List.of(
                 showcase(6, "手指蘸水画圈引人注意"),
                 showcase(7, "旁人评价不像四岁"),
-                chapter(8, "陆家客厅", "normal", "日常吃饭，无展示"));
+                chapter(8, "某宅客厅", "normal", "日常吃饭，无展示"));
 
         String block = UsedPatternPolicy.render(summaries, 11, 5);
 
@@ -159,13 +159,13 @@ class UsedPatternPolicyTest {
     void noShowcaseAlertWithoutEnoughSamples() {
         List<ChapterSummaryEntity> oldData = List.of(
                 chapter(1, "老陆五金铺", "normal", "一"),
-                chapter(2, "陆家客厅", "normal", "二"));
+                chapter(2, "某宅客厅", "normal", "二"));
         String block = UsedPatternPolicy.render(oldData, 3, 5);
         assertFalse(block.contains("能力/早慧展示频次"), "老数据无标注不得渲染该节：" + block);
 
         List<ChapterSummaryEntity> single = List.of(
                 showcase(1, "对棋谱多看了一眼"),
-                chapter(2, "陆家客厅", "normal", "二"),
+                chapter(2, "某宅客厅", "normal", "二"),
                 chapter(3, "院门口", "normal", "三"));
         String singleBlock = UsedPatternPolicy.render(single, 4, 5);
         assertTrue(singleBlock.contains("能力/早慧展示频次"), "有标注就列事实：" + singleBlock);
@@ -175,7 +175,7 @@ class UsedPatternPolicyTest {
     private static ChapterSummaryEntity showcase(int no, String form) {
         return ChapterSummaryEntity.builder()
                 .chapterNo(no)
-                .placePoint("弄堂口")
+                .placePoint("巷口")
                 .chapterType("normal")
                 .summary("主角展示早慧。")
                 .abilityShowcased(Boolean.TRUE)
@@ -197,12 +197,12 @@ class UsedPatternPolicyTest {
         String longText = "冗".repeat(600);
         List<ChapterSummaryEntity> terse = List.of(
                 chapter(1, "老陆五金铺", "normal", "一句话。"),
-                chapter(2, "陆家客厅", "normal", "一句话。"),
+                chapter(2, "某宅客厅", "normal", "一句话。"),
                 chapter(3, "院门口", "normal", "一句话。"));
         List<ChapterSummaryEntity> verbose = List.of(
-                withBeats(chapter(1, "老陆五金铺", "normal", longText), beat("胖墩", longText)),
-                withBeats(chapter(2, "陆家客厅", "normal", longText), beat("胖墩", longText)),
-                withBeats(chapter(3, "院门口", "normal", longText), beat("胖墩", longText)));
+                withBeats(chapter(1, "老陆五金铺", "normal", longText), beat("小胖", longText)),
+                withBeats(chapter(2, "某宅客厅", "normal", longText), beat("小胖", longText)),
+                withBeats(chapter(3, "院门口", "normal", longText), beat("小胖", longText)));
 
         String terseBlock = UsedPatternPolicy.render(terse, 4, 5);
         String verboseBlock = UsedPatternPolicy.render(verbose, 4, 5);

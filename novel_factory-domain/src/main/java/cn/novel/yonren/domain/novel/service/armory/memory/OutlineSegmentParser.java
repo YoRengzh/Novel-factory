@@ -12,7 +12,7 @@ import java.util.regex.Pattern;
 
 public final class OutlineSegmentParser {
 
-    /** 卷头： 【卷一·弄堂烟火与早慧神童】(1-90章)： */
+    /** 卷头： 【卷一·巷子烟火与早慧神童】(1-90章)： */
     private static final Pattern VOLUME_PATTERN = Pattern.compile(
             "【卷([一二三四五六七八九十]{1,3})[·・]?([^】]*)】\\s*[(（]\\s*(\\d+)\\s*[-–—~]\\s*(\\d+)\\s*章\\s*[)）]");
     /** 段头： 41-50章 …（也匹配"41-50 章"宽容空格） */

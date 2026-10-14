@@ -175,7 +175,7 @@ class FinaleReviewServiceTest {
         return List.of(
                 ChapterSummaryEntity.builder()
                         .chapterNo(5).title("第5章")
-                        .summary("林尘夜探废矿，丹田气旋一涨，炼气九层的门槛被他一脚跨过。魔种群在巢穴被尽数焚灭。")
+                        .summary("小陈夜探废矿，丹田气旋一涨，炼气九层的门槛被他一脚跨过。魔种群在巢穴被尽数焚灭。")
                         .build(),
                 ChapterSummaryEntity.builder()
                         .chapterNo(9).title("第9章")

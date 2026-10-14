@@ -37,7 +37,7 @@ public final class UsedPatternPolicy {
             "抢", "夺", "报复", "揭穿", "打", "骂", "逼", "威胁", "骗", "偷", "拦", "堵",
             "施压", "催促", "栽赃", "恐吓", "争执", "刁难", "挤兑", "挑衅", "找茬"};
 
-    /** 同一角色在窗口内作为冲突发起方达到该章数即点名（3 次即"反复"，实测胖墩为 3 次） */
+    /** 同一角色在窗口内作为冲突发起方达到该章数即点名（3 次即"反复"，实测小胖为 3 次） */
     private static final int CONFLICT_ROLE_ALERT = 3;
 
     /** 能力展示频次的告警阈值：按窗口长度的约一半起算（5 章窗口 2 次即告警，10 章窗口 5 次），
@@ -50,14 +50,19 @@ public final class UsedPatternPolicy {
     }
 
     /**
-     * 渲染【已用情节模式】块；窗口内无任何已产出章节时返回 null（首发不注入）。
+     * 渲染【已用情节模式】块；窗口与全书清单**都为空**时返回 null（首发不注入）。
+     *
+     * <p>注意判据是"两者皆空"而非"窗口为空"：全书形态清单不受窗口约束，
+     * 若沿用旧判据，在"窗口空但历史有展示形态"的场合（新书早期、长跳段）会让最有价值的
+     * 跨段去重信息一起消失——而那恰恰是最需要它的时刻。
      *
      * @param beforeChapterNo 只统计章号 <b>小于</b> 该值的章节（本章/本段尚未发生的不能算"已用"）
      * @param lookback        回看章数；&le;0 时用 {@link #BODY_LOOKBACK}
      */
     public static String render(List<ChapterSummaryEntity> summaries, int beforeChapterNo, int lookback) {
         List<ChapterSummaryEntity> window = window(summaries, beforeChapterNo, lookback <= 0 ? BODY_LOOKBACK : lookback);
-        if (window.isEmpty()) {
+        List<String> showcaseForms = allShowcaseForms(summaries, beforeChapterNo);
+        if (window.isEmpty() && showcaseForms.isEmpty()) {
             return null;
         }
 
@@ -175,6 +180,22 @@ public final class UsedPatternPolicy {
             }
         }
 
+        // 四之二、**全书已用展示形态清单**：
+        // 第四节的窗口统计抓不到跨段重复——实测两次"主角式解题震惊在场权威"
+        // 的高光章相隔 9 章，超出正文层 5 章窗口，机制看不到，但读者能看出重复。故额外把**全书**的展示形态汇总点名，让模型知道哪些路数已经用过。
+        List<String> allForms = showcaseForms;
+        if (!allForms.isEmpty()) {
+            sb.append("\n四之二、全书已用过的能力展示形态（**本次不得复用其中任何一种路数**）：");
+            for (String form : allForms) {
+                sb.append("\n- ").append(excerpt(form));
+            }
+            sb.append("\n⚠️ 以上路数无论隔多少章都算「用过」。下一次展示必须换**路数**而非换载体：")
+                    .append("上面清一色是「主角解题/推导 → 权威震惊或质疑」的话，本次就要换成")
+                    .append("**主角故意藏拙**（明知答案而按错误方向演）、**让队友先出高光**（主角做补位与收尾）、")
+                    .append("或**主角栽个小跟头**（能力之外的领域出糗、被年龄与阅历卡住）——")
+                    .append("这几种都不需要「权威被震惊」，且能同时推进「隐藏实力」这条主线张力。");
+        }
+
         sb.append("\n本段要求：同类情节必须更换舞台、对手、困难类型、解决方式或视角之一；");
         sb.append("上面点名的舞台若再次使用，必须带来与前几次实质不同的冲突，不得只是换一批人重演同一件事。");
         if (!alerts.isEmpty()) {
@@ -184,9 +205,41 @@ public final class UsedPatternPolicy {
         return sb.toString();
     }
 
+    /**
+     * **全书**（本章之前）已用过的能力展示形态清单，去重后按章号升序。
+     *
+     * <p><b>为什么不能用窗口</b>：窗口统计答的是"最近有没有密集展示"，而跨段重复（两章同类高光相隔 9 章）需要的是"历史上用过哪些路数"——两者是不同的问法。
+     * 形态短语本身很短（8-16 字），全书累计也只有几十条，直接列给模型比让它自己回忆可靠。
+     *
+     * <p>去重按短语原文：同一形态在不同章重复标注（措辞完全相同）只列一次，
+     * 因为要点名的是"路数"而不是"次数"（次数由窗口统计负责）。
+     */
+    private static List<String> allShowcaseForms(List<ChapterSummaryEntity> summaries, int beforeChapterNo) {
+        List<String> forms = new ArrayList<>();
+        if (summaries == null) {
+            return forms;
+        }
+        for (ChapterSummaryEntity s : summaries) {
+            if (s == null || s.getChapterNo() == null || s.getChapterNo() >= beforeChapterNo) {
+                continue;
+            }
+            if (!Boolean.TRUE.equals(s.getAbilityShowcased())) {
+                continue;
+            }
+            String form = s.getAbilityDisplayForm();
+            if (StringUtils.isBlank(form)) {
+                continue;
+            }
+            String trimmed = form.trim();
+            if (!forms.contains(trimmed)) {
+                forms.add(trimmed);
+            }
+        }
+        return forms;
+    }
+
     /** 节拍文本是否含冲突动词（结构化标签，不依赖语义理解） */
-    private static boolean containsConflictMarker(String text) {
-        if (StringUtils.isBlank(text)) {
+    private static boolean containsConflictMarker(String text) {        if (StringUtils.isBlank(text)) {
             return false;
         }
         for (String marker : CONFLICT_MARKERS) {

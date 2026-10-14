@@ -59,17 +59,17 @@ class ChapterReviseServiceTest {
 
     @Test
     void revise_acceptsWhenAllGatesPass() {
-        String revisedJson = "{\"chapterNo\":1,\"title\":\"测试章\",\"content\":\"林尘拔剑，事件A发生，事件B也发生，结尾呼应钩子。\"}";
+        String revisedJson = "{\"chapterNo\":1,\"title\":\"测试章\",\"content\":\"小陈拔剑，事件A发生，事件B也发生，结尾呼应钩子。\"}";
         when(llmGateway.complete(any(), any(LlmCall.class))).thenReturn(revisedJson);
 
         ChapterReviseService.ReviseResult result = service.revise(
-                storyVO(), planItem(), "原稿正文，林尘拔剑。",
+                storyVO(), planItem(), "原稿正文，小陈拔剑。",
                 List.of(blockingIssue()), null, null, emptyStyleStat(), 1, null);
 
         assertTrue(result.decision().isAttempted());
         assertTrue(result.decision().isAccepted());
         assertNotNull(result.revisedContent());
-        assertEquals("林尘拔剑，事件A发生，事件B也发生，结尾呼应钩子。", result.revisedContent().getContent());
+        assertEquals("小陈拔剑，事件A发生，事件B也发生，结尾呼应钩子。", result.revisedContent().getContent());
     }
 
     @Test
@@ -89,12 +89,12 @@ class ChapterReviseServiceTest {
     @Test
     void revise_toleratesSingleKeyEventLoss_forBlockingFix() {
         // 允许以 ≤1 条关键事件损失换取 BLOCKING 修复——违规现场常与事件场景重叠
-        //（"4岁写出2026"本身就是排期项），修复必然改写该场景，一字不差的要求只会造成不可修复的拒绝循环
-        String revisedJson = "{\"chapterNo\":1,\"title\":\"测试章\",\"content\":\"林尘拔剑，事件A发生，随后他收剑环顾，把余下段落补足长度，使修订稿不至于因字数闸被拒，结尾落在事件C上。\"}";
+        //（"幼年写下未来年份"本身就是排期项），修复必然改写该场景，一字不差的要求只会造成不可修复的拒绝循环
+        String revisedJson = "{\"chapterNo\":1,\"title\":\"测试章\",\"content\":\"小陈拔剑，事件A发生，随后他收剑环顾，把余下段落补足长度，使修订稿不至于因字数闸被拒，结尾落在事件C上。\"}";
         when(llmGateway.complete(any(), any(LlmCall.class))).thenReturn(revisedJson);
 
         ChapterReviseService.ReviseResult result = service.revise(
-                storyVO(), planItem(), "原稿正文，林尘拔剑，事件A发生，事件B发生。",
+                storyVO(), planItem(), "原稿正文，小陈拔剑，事件A发生，事件B发生。",
                 List.of(blockingIssue()), null, null, emptyStyleStat(), 1, null);
 
         assertTrue(result.decision().isAttempted());
@@ -103,11 +103,11 @@ class ChapterReviseServiceTest {
 
     @Test
     void revise_rejectsWhenMultipleKeyEventsMissing() {
-        String revisedJson = "{\"chapterNo\":1,\"title\":\"测试章\",\"content\":\"林尘收剑入鞘，独自走向山门，夜里无话，梦里全是白天的影子，醒来时天已大亮，但事件C被删除了。\"}";
+        String revisedJson = "{\"chapterNo\":1,\"title\":\"测试章\",\"content\":\"小陈收剑入鞘，独自走向山门，夜里无话，梦里全是白天的影子，醒来时天已大亮，但事件C被删除了。\"}";
         when(llmGateway.complete(any(), any(LlmCall.class))).thenReturn(revisedJson);
 
         ChapterReviseService.ReviseResult result = service.revise(
-                storyVO(), planItem(), "原稿正文，林尘拔剑，事件A发生，事件B发生，结尾他望向远方。",
+                storyVO(), planItem(), "原稿正文，小陈拔剑，事件A发生，事件B发生，结尾他望向远方。",
                 List.of(blockingIssue()), null, null, emptyStyleStat(), 1, null);
 
         assertTrue(result.decision().isAttempted());
@@ -118,34 +118,34 @@ class ChapterReviseServiceTest {
     @Test
     void revise_ignoresEventsOriginalNeverCovered() {
         // 原稿本就未覆盖的事件不再强求：生成期已放行的既成事实，修订无从"恢复"从未存在的内容
-        String keyEvent = "陈长安分析结晶，发现它并非天然矿石，而是某种阵法的核心组件，且内部封存着一缕残魂";
-        String revisedJson = "{\"chapterNo\":1,\"title\":\"测试章\",\"content\":\"林尘拔剑，事件A发生，事件B发生，他还检查了洞府的禁制并记下了三处松动，结尾呼应钩子。\"}";
+        String keyEvent = "主角乙分析结晶，发现它并非天然矿石，而是某种阵法的核心组件，且内部封存着一缕残魂";
+        String revisedJson = "{\"chapterNo\":1,\"title\":\"测试章\",\"content\":\"小陈拔剑，事件A发生，事件B发生，他还检查了洞府的禁制并记下了三处松动，结尾呼应钩子。\"}";
         when(llmGateway.complete(any(), any(LlmCall.class))).thenReturn(revisedJson);
 
         ChapterPlanItemEntity item = planItem();
         item.setKeyEvents(List.of("事件A", keyEvent));
 
         ChapterReviseService.ReviseResult result = service.revise(
-                storyVO(), item, "原稿正文，林尘拔剑，事件A发生，事件B发生，结尾他望向远方。",
+                storyVO(), item, "原稿正文，小陈拔剑，事件A发生，事件B发生，结尾他望向远方。",
                 List.of(blockingIssue()), null, null, emptyStyleStat(), 1, null);
 
         assertTrue(result.decision().isAttempted());
         assertTrue(result.decision().isAccepted(),
-                "原稿未覆盖 keyEvent（陈长安结晶）不得成为拒绝理由——修订不需要恢复从未存在的内容");
+                "原稿未覆盖 keyEvent（主角乙结晶）不得成为拒绝理由——修订不需要恢复从未存在的内容");
     }
 
     @Test
     void revise_acceptsWhenLongKeyEventCoveredByParaphrase() {
         // 长关键事件：正文用转化后的措辞覆盖核心要素（"天然矿石""一缕残魂"等专有短语），而非一字不差照抄
-        String keyEvent = "陈长安分析结晶，发现它并非天然矿石，而是某种阵法的核心组件，且内部封存着一缕残魂";
-        String revisedJson = "{\"chapterNo\":1,\"title\":\"测试章\",\"content\":\"陈长安拿起那枚结晶核心，用灵力探查，发现它根本不是天然矿石，而是阵法核心，其中还封着一缕残魂。\"}";
+        String keyEvent = "主角乙分析结晶，发现它并非天然矿石，而是某种阵法的核心组件，且内部封存着一缕残魂";
+        String revisedJson = "{\"chapterNo\":1,\"title\":\"测试章\",\"content\":\"主角乙拿起那枚结晶核心，用灵力探查，发现它根本不是天然矿石，而是阵法核心，其中还封着一缕残魂。\"}";
         when(llmGateway.complete(any(), any(LlmCall.class))).thenReturn(revisedJson);
 
         ChapterPlanItemEntity item = planItem();
         item.setKeyEvents(List.of(keyEvent));
 
         ChapterReviseService.ReviseResult result = service.revise(
-                storyVO(), item, "原稿正文比较长，陈长安分析结晶，发现它并非天然矿石，内部还封存着一缕残魂，用于满足字数闸。",
+                storyVO(), item, "原稿正文比较长，主角乙分析结晶，发现它并非天然矿石，内部还封存着一缕残魂，用于满足字数闸。",
                 List.of(blockingIssue()), null, null, emptyStyleStat(), 1, null);
 
         assertTrue(result.decision().isAttempted());
@@ -154,8 +154,8 @@ class ChapterReviseServiceTest {
 
     @Test
     void revise_rejectsWhenLongKeyEventTrulyMissing() {
-        String keyEvent = "陈长安分析结晶，发现它并非天然矿石，而是某种阵法的核心组件，且内部封存着一缕残魂";
-        String secondEvent = "陈长安在剑冢外围布下三道警戒符，确认无人跟踪后才落锁闭门";
+        String keyEvent = "主角乙分析结晶，发现它并非天然矿石，而是某种阵法的核心组件，且内部封存着一缕残魂";
+        String secondEvent = "主角乙在封存处外围布下三道警戒符，确认无人跟踪后才落锁闭门";
         // 修订稿与两条事件不得共享 ≥4 字连续子串（否则按"转化覆盖"放行），且长度须过 0.8 字数闸
         String revisedJson = "{\"chapterNo\":1,\"title\":\"测试章\",\"content\":\"洞府里的烛火晃了晃，什么异常都没有发生，天色渐暗，他把卷宗收回匣中，吹熄了灯，转身回了小屋休息，一路无话，梦里只有风声掠过屋檐的声音，醒来时天已大亮，昨夜的事像没有发生过一样。\"}";
         when(llmGateway.complete(any(), any(LlmCall.class))).thenReturn(revisedJson);
@@ -164,7 +164,7 @@ class ChapterReviseServiceTest {
         item.setKeyEvents(List.of(keyEvent, secondEvent));
 
         ChapterReviseService.ReviseResult result = service.revise(
-                storyVO(), item, "原稿正文比较长，陈长安分析结晶，发现它并非天然矿石，内部还封存着一缕残魂，随后又在剑冢外围布下三道警戒符，确认无人跟踪后才落锁闭门。",
+                storyVO(), item, "原稿正文比较长，主角乙分析结晶，发现它并非天然矿石，内部还封存着一缕残魂，随后又在封存处外围布下三道警戒符，确认无人跟踪后才落锁闭门。",
                 List.of(blockingIssue()), null, null, emptyStyleStat(), 1, null);
 
         assertTrue(result.decision().isAttempted());
@@ -176,13 +176,13 @@ class ChapterReviseServiceTest {
     void revise_acceptsWhenStyleWorsens_styleGateIsAdvisory() {
         // 风格账闸降级为告知——"新增跨章重复句/疲劳词跨线"是 MINOR 级问题，
         // 不得否决 BLOCKING 修复（原实现直接拒稿，导致多章两轮修订全灭、硬伤带病落盘）
-        String revisedJson = "{\"chapterNo\":1,\"title\":\"测试章\",\"content\":\"林尘拔剑，事件A发生，事件B发生，结尾呼应钩子。这也是一句很长的话用来凑字数。\"}";
+        String revisedJson = "{\"chapterNo\":1,\"title\":\"测试章\",\"content\":\"小陈拔剑，事件A发生，事件B发生，结尾呼应钩子。这也是一句很长的话用来凑字数。\"}";
         when(llmGateway.complete(any(), any(LlmCall.class))).thenReturn(revisedJson);
 
         StyleStatEntity stat = styleStatWithRepeatedSentence();
 
         ChapterReviseService.ReviseResult result = service.revise(
-                storyVO(), planItem(), "原稿正文，林尘拔剑，事件A发生，事件B发生，结尾呼应钩子。",
+                storyVO(), planItem(), "原稿正文，小陈拔剑，事件A发生，事件B发生，结尾呼应钩子。",
                 List.of(blockingIssue()), null, null, stat, 1, null);
 
         assertTrue(result.decision().isAttempted());
@@ -196,11 +196,11 @@ class ChapterReviseServiceTest {
         StyleStatEntity stat = emptyStyleStat();
         // 全书已累计 4 次（阈值 5）——修订稿把"微微"推过线
         styleStatService.merge(stat, "微微点头，微微抬眸，微微弯起嘴角，微微退后半步。");
-        String revisedJson = "{\"chapterNo\":1,\"title\":\"测试章\",\"content\":\"林尘拔剑，微微侧目，事件A发生，尾音微微上扬，事件B也发生，结尾呼应钩子。\"}";
+        String revisedJson = "{\"chapterNo\":1,\"title\":\"测试章\",\"content\":\"小陈拔剑，微微侧目，事件A发生，尾音微微上扬，事件B也发生，结尾呼应钩子。\"}";
         when(llmGateway.complete(any(), any(LlmCall.class))).thenReturn(revisedJson);
 
         ChapterReviseService.ReviseResult result = service.revise(
-                storyVO(), planItem(), "原稿正文，林尘拔剑。",
+                storyVO(), planItem(), "原稿正文，小陈拔剑。",
                 List.of(blockingIssue()), null, null, stat, 1, null);
 
         assertTrue(result.decision().isAttempted());
@@ -210,7 +210,7 @@ class ChapterReviseServiceTest {
 
     @Test
     void revise_promptCarriesMicroActionBlacklistWithCounts() {
-        String revisedJson = "{\"chapterNo\":1,\"title\":\"测试章\",\"content\":\"林尘拔剑，事件A发生，事件B也发生，结尾呼应钩子。\"}";
+        String revisedJson = "{\"chapterNo\":1,\"title\":\"测试章\",\"content\":\"小陈拔剑，事件A发生，事件B也发生，结尾呼应钩子。\"}";
         when(llmGateway.complete(any(), any(LlmCall.class))).thenReturn(revisedJson);
 
         String original = "他喉结滚动了一下。她又喉结滚动，再次喉结滚动。他呼吸一滞，随即呼吸一滞。";
@@ -230,14 +230,14 @@ class ChapterReviseServiceTest {
 
     @Test
     void revise_promptCarriesFatigueBlacklistWithNearLimitWords() {
-        String revisedJson = "{\"chapterNo\":1,\"title\":\"测试章\",\"content\":\"林尘拔剑，事件A发生，事件B也发生，结尾呼应钩子。\"}";
+        String revisedJson = "{\"chapterNo\":1,\"title\":\"测试章\",\"content\":\"小陈拔剑，事件A发生，事件B也发生，结尾呼应钩子。\"}";
         when(llmGateway.complete(any(), any(LlmCall.class))).thenReturn(revisedJson);
 
         StyleStatEntity stat = emptyStyleStat();
         // 模拟全书已累计 4 次（阈值 5），逼近超频红线
         styleStatService.merge(stat, "微微点头，微微抬眸，微微弯起嘴角，微微退后半步。");
 
-        service.revise(storyVO(), planItem(), "原稿正文，林尘拔剑。",
+        service.revise(storyVO(), planItem(), "原稿正文，小陈拔剑。",
                 List.of(blockingIssue()), null, null, stat, 1, null);
 
         ArgumentCaptor<LlmCall> captor = ArgumentCaptor.forClass(LlmCall.class);
@@ -252,10 +252,10 @@ class ChapterReviseServiceTest {
 
     @Test
     void revise_promptCarriesPreviousRejectionReason() {
-        String revisedJson = "{\"chapterNo\":1,\"title\":\"测试章\",\"content\":\"林尘拔剑，事件A发生，事件B也发生，结尾呼应钩子。\"}";
+        String revisedJson = "{\"chapterNo\":1,\"title\":\"测试章\",\"content\":\"小陈拔剑，事件A发生，事件B也发生，结尾呼应钩子。\"}";
         when(llmGateway.complete(any(), any(LlmCall.class))).thenReturn(revisedJson);
 
-        service.revise(storyVO(), planItem(), "原稿正文，林尘拔剑。",
+        service.revise(storyVO(), planItem(), "原稿正文，小陈拔剑。",
                 List.of(blockingIssue()), null, null, emptyStyleStat(), 1,
                 "修订稿使疲劳词 '轻轻' 达到超频阈值");
 
@@ -269,10 +269,10 @@ class ChapterReviseServiceTest {
 
     @Test
     void revise_promptCarriesKeyEventRedline() {
-        String revisedJson = "{\"chapterNo\":1,\"title\":\"测试章\",\"content\":\"林尘拔剑，事件A发生，事件B也发生，结尾呼应钩子。\"}";
+        String revisedJson = "{\"chapterNo\":1,\"title\":\"测试章\",\"content\":\"小陈拔剑，事件A发生，事件B也发生，结尾呼应钩子。\"}";
         when(llmGateway.complete(any(), any(LlmCall.class))).thenReturn(revisedJson);
 
-        service.revise(storyVO(), planItem(), "原稿正文，林尘拔剑。",
+        service.revise(storyVO(), planItem(), "原稿正文，小陈拔剑。",
                 List.of(blockingIssue()), null, null, emptyStyleStat(), 1, null);
 
         ArgumentCaptor<LlmCall> captor = ArgumentCaptor.forClass(LlmCall.class);
@@ -302,7 +302,7 @@ class ChapterReviseServiceTest {
 
     @Test
     void revise_promptCarriesMechanicalEvidenceSection_forAestheticIssues() {
-        String revisedJson = "{\"chapterNo\":1,\"title\":\"测试章\",\"content\":\"林尘拔剑，事件A发生，事件B也发生，结尾呼应钩子。\"}";
+        String revisedJson = "{\"chapterNo\":1,\"title\":\"测试章\",\"content\":\"小陈拔剑，事件A发生，事件B也发生，结尾呼应钩子。\"}";
         when(llmGateway.complete(any(), any(LlmCall.class))).thenReturn(revisedJson);
 
         ChapterIssueEntity mechanical = ChapterIssueEntity.builder()
@@ -312,7 +312,7 @@ class ChapterReviseServiceTest {
                 .description("身体反应套话复读")
                 .suggestion("替换为微动作")
                 .build();
-        service.revise(storyVO(), planItem(), "原稿正文，林尘拔剑。",
+        service.revise(storyVO(), planItem(), "原稿正文，小陈拔剑。",
                 List.of(mechanical), null, null, emptyStyleStat(), 1, null);
 
         ArgumentCaptor<LlmCall> captor = ArgumentCaptor.forClass(LlmCall.class);
@@ -326,10 +326,10 @@ class ChapterReviseServiceTest {
 
     @Test
     void revise_promptOmitsMechanicalSection_forNonAestheticIssues() {
-        String revisedJson = "{\"chapterNo\":1,\"title\":\"测试章\",\"content\":\"林尘拔剑，事件A发生，事件B也发生，结尾呼应钩子。\"}";
+        String revisedJson = "{\"chapterNo\":1,\"title\":\"测试章\",\"content\":\"小陈拔剑，事件A发生，事件B也发生，结尾呼应钩子。\"}";
         when(llmGateway.complete(any(), any(LlmCall.class))).thenReturn(revisedJson);
 
-        service.revise(storyVO(), planItem(), "原稿正文，林尘拔剑。",
+        service.revise(storyVO(), planItem(), "原稿正文，小陈拔剑。",
                 List.of(blockingIssue()), null, null, emptyStyleStat(), 1, null);
 
         ArgumentCaptor<LlmCall> captor = ArgumentCaptor.forClass(LlmCall.class);
@@ -340,16 +340,16 @@ class ChapterReviseServiceTest {
     // ==================== 定向补丁 ====================
 
     /** 含计划里两个关键事件的原稿（补丁只动其中一句，事件不受影响） */
-    private static final String PATCH_ORIGINAL = "林尘拔剑，事件A发生，事件B随后发生。他坐下了。";
+    private static final String PATCH_ORIGINAL = "小陈拔剑，事件A发生，事件B随后发生。他坐下了。";
 
     private static final String PATCH_ONLY_JSON =
             "{\"patches\":[{\"anchor\":\"他坐下了。\",\"replacement\":\"他坐下了——剑是他刚从石缝里拔出来的。\"}]}";
 
     /** 补丁被采纳时应得到的正文（原稿其余部分逐字保留） */
-    private static final String PATCHED_CONTENT = "林尘拔剑，事件A发生，事件B随后发生。他坐下了——剑是他刚从石缝里拔出来的。";
+    private static final String PATCHED_CONTENT = "小陈拔剑，事件A发生，事件B随后发生。他坐下了——剑是他刚从石缝里拔出来的。";
 
     private static final String REWRITE_JSON =
-            "{\"chapterNo\":1,\"title\":\"测试章\",\"content\":\"林尘拔剑，事件A发生，事件B也发生，结尾呼应钩子。\"}";
+            "{\"chapterNo\":1,\"title\":\"测试章\",\"content\":\"小陈拔剑，事件A发生，事件B也发生，结尾呼应钩子。\"}";
 
     @Test
     void patch_acceptedWhenAnchorAppliesAndGatesPass() {
@@ -399,7 +399,7 @@ class ChapterReviseServiceTest {
                 List.of(blockingIssue()), null, null, emptyStyleStat(), 1, null);
 
         assertTrue(result.decision().isAccepted());
-        assertEquals("林尘拔剑，事件A发生，事件B也发生，结尾呼应钩子。", result.revisedContent().getContent());
+        assertEquals("小陈拔剑，事件A发生，事件B也发生，结尾呼应钩子。", result.revisedContent().getContent());
         assertTrue(result.decision().getReason().contains("采纳闸门"));
     }
 
@@ -413,7 +413,7 @@ class ChapterReviseServiceTest {
                 storyVO(), planItem(), PATCH_ORIGINAL,
                 List.of(blockingIssue()), null, null, emptyStyleStat(), 1, null);
 
-        assertEquals("林尘拔剑，事件A发生，事件B也发生，结尾呼应钩子。", result.revisedContent().getContent());
+        assertEquals("小陈拔剑，事件A发生，事件B也发生，结尾呼应钩子。", result.revisedContent().getContent());
     }
 
     @Test
@@ -427,7 +427,7 @@ class ChapterReviseServiceTest {
                 storyVO(), planItem(), original,
                 List.of(blockingIssue()), null, null, emptyStyleStat(), 1, null);
 
-        assertEquals("林尘拔剑，事件A发生，事件B也发生，结尾呼应钩子。", result.revisedContent().getContent());
+        assertEquals("小陈拔剑，事件A发生，事件B也发生，结尾呼应钩子。", result.revisedContent().getContent());
     }
 
     @Test
@@ -443,7 +443,7 @@ class ChapterReviseServiceTest {
                 storyVO(), planItem(), original,
                 List.of(blockingIssue()), null, null, emptyStyleStat(), 1, null);
 
-        assertEquals("林尘拔剑，事件A发生，事件B也发生，结尾呼应钩子。", result.revisedContent().getContent());
+        assertEquals("小陈拔剑，事件A发生，事件B也发生，结尾呼应钩子。", result.revisedContent().getContent());
     }
 
     @Test
@@ -456,20 +456,20 @@ class ChapterReviseServiceTest {
                 storyVO(), planItem(), PATCH_ORIGINAL,
                 List.of(blockingIssue()), null, null, emptyStyleStat(), 1, null);
 
-        assertEquals("林尘拔剑，事件A发生，事件B也发生，结尾呼应钩子。", result.revisedContent().getContent());
+        assertEquals("小陈拔剑，事件A发生，事件B也发生，结尾呼应钩子。", result.revisedContent().getContent());
     }
 
     @Test
     void patch_fallsBackToRewrite_whenPatchedTextFailsGate() {
         // 补丁把大段正文删掉 → 字数闸挡住。补丁与整章重写走的是同一套闸门，没有豁免
-        String json = "{\"patches\":[{\"anchor\":\"林尘拔剑，事件A发生，事件B随后发生。\",\"replacement\":\"\"}]}";
+        String json = "{\"patches\":[{\"anchor\":\"小陈拔剑，事件A发生，事件B随后发生。\",\"replacement\":\"\"}]}";
         when(llmGateway.complete(any(), any(LlmCall.class))).thenReturn(json, REWRITE_JSON);
 
         ChapterReviseService.ReviseResult result = patchService().revise(
                 storyVO(), planItem(), PATCH_ORIGINAL,
                 List.of(blockingIssue()), null, null, emptyStyleStat(), 1, null);
 
-        assertEquals("林尘拔剑，事件A发生，事件B也发生，结尾呼应钩子。", result.revisedContent().getContent());
+        assertEquals("小陈拔剑，事件A发生，事件B也发生，结尾呼应钩子。", result.revisedContent().getContent());
     }
 
     @Test
@@ -513,7 +513,7 @@ class ChapterReviseServiceTest {
         return ChapterIssueEntity.builder()
                 .dimension("consistency")
                 .severity("BLOCKING")
-                .evidence("林尘已死又出场")
+                .evidence("小陈已死又出场")
                 .description("事实矛盾")
                 .suggestion("修复")
                 .build();

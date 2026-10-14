@@ -215,7 +215,7 @@ public class BookExportService {
         return sb.toString();
     }
 
-    /** 卷子文件夹名：「第一卷 初入雾港」；卷名缺失时只剩卷号部分（分章文件夹与 Word 大纲共用） */
+    /** 卷子文件夹名：「第一卷 初入旧港」；卷名缺失时只剩卷号部分（分章文件夹与 Word 大纲共用） */
     static String volumeHeading(VolumeBlueprintEntity volume) {
         int no = volume.getVolumeNo() == null ? 0 : volume.getVolumeNo();
         String title = StringUtils.isBlank(volume.getTitle()) ? "" : " " + volume.getTitle().trim();
@@ -239,14 +239,14 @@ public class BookExportService {
         return null;
     }
 
-    /** 章标题行：「第1章 雾夜来客」；标题缺失时只剩章号部分（分章文件与 Word 大纲共用） */
+    /** 章标题行：「第1章 雨夜来客」；标题缺失时只剩章号部分（分章文件与 Word 大纲共用） */
     static String chapterHeading(ChapterContentEntity chapter) {
         String no = chapter.getChapterNo() == null ? "" : String.valueOf(chapter.getChapterNo());
         String title = StringUtils.isBlank(chapter.getTitle()) ? "" : " " + chapter.getTitle().trim();
         return "第" + no + "章" + title;
     }
 
-    /** 分章文件名：「第0001章 雾夜来客」——章号补零保证排序；标题缺失时只剩章号部分 */
+    /** 分章文件名：「第0001章 雨夜来客」——章号补零保证排序；标题缺失时只剩章号部分 */
     private String chapterFileName(ChapterContentEntity chapter) {
         int no = chapter.getChapterNo() == null ? 0 : chapter.getChapterNo();
         String title = StringUtils.isBlank(chapter.getTitle())

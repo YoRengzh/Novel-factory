@@ -79,6 +79,10 @@ public class ChapterPlanSegmentPlanner {
         String ladderIssue = ChapterPlanChecks.validateSuspenseAdvance(parsed.plan().getChapters(), suspenseLadder);
         String mainLineIssue = ChapterPlanChecks.validateMainLineAdvance(parsed.plan().getChapters(), mainLine);
         String timeAdvanceIssue = ChapterPlanChecks.validateTimeAdvance(parsed.plan().getChapters());
+        // 跨章场景重演：与前两项正交——那两项管"推进说得对不对"，本项管"同一件事是不是被说了两遍"。
+        // 实测逃逸：相隔两章的同一场景（第96/99章）、以及在共用原文后追加一句子项（第98/99章，
+        // 而"档位原文之后附本章独有子项"恰是本项目 prompt 自己建议的写法）
+        String sceneReplayIssue = ChapterPlanChecks.validateSceneReplay(parsed.plan().getChapters(), suspenseLadder);
         Integer pacingBudgetYear = blueprint == null ? null : blueprint.getPacingBudgetStartYear();
         boolean jumpRequired = pacingBudgetYear != null
                 && blueprint.getPacingLagYears() != null && blueprint.getPacingLagYears() >= 1;
@@ -93,7 +97,7 @@ public class ChapterPlanSegmentPlanner {
                 rosterNames == null ? 0 : rosterNames.size());
         String dialogueIssue = ChapterPlanChecks.validateDialogueCarriage(parsed.plan().getChapters(), rosterNames);
         if (ladderIssue == null && mainLineIssue == null && timeAdvanceIssue == null
-                && pacingIssue == null && dialogueIssue == null) {
+                && sceneReplayIssue == null && pacingIssue == null && dialogueIssue == null) {
             log.info("{}主线/章级推进闸门通过（档位表{}；章级推进 {} 条{}）", label,
                     ChapterPlanChecks.hasUsableLadder(blueprint) ? " " + suspenseLadder.size() + " 档" : "不可用",
                     mainLine == null ? 0 : mainLine.size(),
@@ -114,13 +118,17 @@ public class ChapterPlanSegmentPlanner {
         if (pacingIssue != null) {
             feedback.append(ChapterPlanChecks.timeAdvancePacingFeedback(pacingBudgetYear));
         }
+        if (sceneReplayIssue != null) {
+            feedback.append(ChapterPlanChecks.sceneReplayFeedback(sceneReplayIssue));
+        }
         if (dialogueIssue != null) {
             feedback.append(ChapterPlanChecks.dialogueCarriageFeedback(dialogueIssue));
         }
-        log.warn("{}推进校验未通过，带违规信息重新规划一次：{}｜{}｜{}｜{}", label,
+        log.warn("{}推进校验未通过，带违规信息重新规划一次：{}｜{}｜{}｜{}｜{}", label,
                 ladderIssue == null ? "-" : ladderIssue,
                 mainLineIssue == null ? "-" : mainLineIssue,
                 timeAdvanceIssue == null ? "-" : timeAdvanceIssue,
+                sceneReplayIssue == null ? "-" : sceneReplayIssue,
                 dialogueIssue == null ? "-" : dialogueIssue);
         PlannedSegment retry = invokeWithFallback(storyVO, ctx,
                 prompt + feedback, label, expected, usedPromptMap, false);
@@ -129,6 +137,7 @@ public class ChapterPlanSegmentPlanner {
         String stillBadLadder = ChapterPlanChecks.validateSuspenseAdvance(retry.plan().getChapters(), suspenseLadder);
         String stillBadMainLine = ChapterPlanChecks.validateMainLineAdvance(retry.plan().getChapters(), mainLine);
         String stillBadTimeAdvance = ChapterPlanChecks.validateTimeAdvance(retry.plan().getChapters());
+        String stillBadSceneReplay = ChapterPlanChecks.validateSceneReplay(retry.plan().getChapters(), suspenseLadder);
         String stillBadPacing = jumpRequired
                 ? ChapterPlanChecks.validateTimeAdvancePacing(retry.plan().getChapters(), pacingBudgetYear) : null;
         String stillBadDialogue = ChapterPlanChecks.validateDialogueCarriage(retry.plan().getChapters(), rosterNames);
@@ -142,14 +151,15 @@ public class ChapterPlanSegmentPlanner {
                             + "或调整大纲段时间标记后重试");
         }
         if (stillBadLadder != null || stillBadMainLine != null || stillBadTimeAdvance != null
-                || stillBadDialogue != null) {
+                || stillBadSceneReplay != null || stillBadDialogue != null) {
             // 二次仍不通过 → 告警放行：宁可这一段推进弱一点，也不要因规划僵持让整批失败。
             // 该情形会被体检的 suspenseAdvanceRate / suspenseHold 暴露（观测层看得见），不属静默吞掉
             // （跳接段例外：上面已 fail-closed，走不到这里）
-            log.warn("{}推进校验二次未通过，放行本次计划（已重规划一次）：{}｜{}｜{}｜{}", label,
+            log.warn("{}推进校验二次未通过，放行本次计划（已重规划一次）：{}｜{}｜{}｜{}｜{}", label,
                     stillBadLadder == null ? "-" : stillBadLadder,
                     stillBadMainLine == null ? "-" : stillBadMainLine,
                     stillBadTimeAdvance == null ? "-" : stillBadTimeAdvance,
+                    stillBadSceneReplay == null ? "-" : stillBadSceneReplay,
                     stillBadDialogue == null ? "-" : stillBadDialogue);
         } else {
             log.info("{}推进校验：重规划后通过", label);

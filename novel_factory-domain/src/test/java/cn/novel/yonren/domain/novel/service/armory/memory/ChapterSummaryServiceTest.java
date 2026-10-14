@@ -39,28 +39,28 @@ class ChapterSummaryServiceTest {
 
     @Test
     void summarize_parsesStructuredOutputAndBackfills() {
-        String json = "{\"summary\":\"林尘被废去丹田后，古镜吞噬灵气为他重塑经脉。\","
-                + "\"characterStates\":[{\"name\":\"林尘\",\"status\":\"炼气一层，藏身石缝\",\"evidence\":\"正文\"},"
-                + "{\"name\":\"赵阔\",\"status\":\"派人监视林尘\",\"evidence\":\"正文\"}],"
-                + "\"itemStates\":[{\"name\":\"古镜\",\"status\":\"吞灵显威\",\"evidence\":\"正文\"}],"
+        String json = "{\"summary\":\"小陈被废去丹田后，古物吞噬灵气为他重塑经脉。\","
+                + "\"characterStates\":[{\"name\":\"小陈\",\"status\":\"炼气一层，藏身石缝\",\"evidence\":\"正文\"},"
+                + "{\"name\":\"赵阔\",\"status\":\"派人监视小陈\",\"evidence\":\"正文\"}],"
+                + "\"itemStates\":[{\"name\":\"古物\",\"status\":\"异动显威\",\"evidence\":\"正文\"}],"
                 + "\"factionStates\":[],"
                 + "\"foreshadowingNew\":[\"体内雷纹的来历\"],"
                 + "\"foreshadowingResolved\":[],"
                 + "\"timePoint\":\"被废当夜，外门石缝角落\","
-                + "\"continuityConflicts\":[\"正文写林尘后腰被踹，账本无此情节\"]}";
+                + "\"continuityConflicts\":[\"正文写小陈后腰被踹，账本无此情节\"]}";
         stubModel(json);
 
-        ChapterSummaryEntity summary = service.summarize(storyVO(), planItem(2), "第2章正文……", 7, "【角色账本】\n- 林尘：重伤");
+        ChapterSummaryEntity summary = service.summarize(storyVO(), planItem(2), "第2章正文……", 7, "【角色账本】\n- 小陈：重伤");
 
         assertNotNull(summary);
         assertEquals(7, summary.getChapterNo());
-        assertEquals("古镜吞灵", summary.getTitle());
+        assertEquals("古物奇谈", summary.getTitle());
         assertEquals(2, summary.getCharacterStates().size());
         assertEquals("炼气一层，藏身石缝", summary.getCharacterStates().get(0).getStatus());
         assertEquals(1, summary.getItemStates().size());
         assertEquals(List.of("体内雷纹的来历"), summary.getForeshadowingNew());
         assertEquals("被废当夜，外门石缝角落", summary.getTimePoint());
-        assertEquals(List.of("正文写林尘后腰被踹，账本无此情节"), summary.getContinuityConflicts());
+        assertEquals(List.of("正文写小陈后腰被踹，账本无此情节"), summary.getContinuityConflicts());
     }
 
     @Test
@@ -103,7 +103,7 @@ class ChapterSummaryServiceTest {
     @Test
     void summarize_repairsDanglingCommaWithoutRetry() {
         // 第 5 章实测故障：对象内悬空逗号 ",}"
-        String bad = "{\"summary\":\"林尘夜探废矿。\",\"characterStates\":[{\"name\":\"林尘\",\"status\":\"重伤，藏身石缝\",\"evidence\":\"正文\",}],\"timePoint\":\"当夜废矿\"}";
+        String bad = "{\"summary\":\"小陈夜探废矿。\",\"characterStates\":[{\"name\":\"小陈\",\"status\":\"重伤，藏身石缝\",\"evidence\":\"正文\",}],\"timePoint\":\"当夜废矿\"}";
         stubModel(bad);
 
         ChapterSummaryEntity summary = service.summarize(storyVO(), planItem(2), "正文", 2, null);
@@ -119,10 +119,10 @@ class ChapterSummaryServiceTest {
     @Test
     void summarize_salvagesSummaryFromMalformedOutput() {
         // 第 9 章实测故障：数组未闭合，timePoint/continuityConflicts 以 {name,status} 对象错位塞进数组
-        String bad = "{\"summary\":\"林尘深入废矿，遭遇巡山弟子搜捕。\","
-                + "\"characterStates\":[{\"name\":\"林尘\",\"status\":\"重伤\"}],"
+        String bad = "{\"summary\":\"小陈深入废矿，遭遇巡山弟子搜捕。\","
+                + "\"characterStates\":[{\"name\":\"小陈\",\"status\":\"重伤\"}],"
                 + "\"foreshadowingNew\":[\"矿洞深处雷鸣\"],"
-                + "\"foreshadowingResolved\":[\"古镜可稳伤\"],"
+                + "\"foreshadowingResolved\":[\"古物可稳伤\"],"
                 + "{\"name\":\"timePoint\",\"status\":\"当夜废矿\"},{\"name\":\"continuityConflicts\",\"status\":\"[]\"}]}";
         stubModel(bad);
 
@@ -131,8 +131,8 @@ class ChapterSummaryServiceTest {
         // 结构错乱无法修复 → 两次尝试后降级抢救 summary，剧情事实至少入账，且带 partial 残缺标记
         assertNotNull(summary);
         assertEquals(9, summary.getChapterNo());
-        assertEquals("大比前夜", summary.getTitle());
-        assertEquals("林尘深入废矿，遭遇巡山弟子搜捕。", summary.getSummary());
+        assertEquals("比试前夜", summary.getTitle());
+        assertEquals("小陈深入废矿，遭遇巡山弟子搜捕。", summary.getSummary());
         assertNull(summary.getCharacterStates());
         assertTrue(summary.isPartial());
         verify(llmGateway, times(2)).complete(any(), any(LlmCall.class));
@@ -141,7 +141,7 @@ class ChapterSummaryServiceTest {
     @Test
     void summarize_retriesAndRecoversOnSecondCall() {
         // 第一次为修复也救不回的结构错乱（对象混入字符串数组且数组未闭合），重试后恢复正常
-        String bad = "{\"summary\":\"第一次输出错乱。\",\"characterStates\":[{\"name\":\"林尘\",\"status\":\"重伤\"}],"
+        String bad = "{\"summary\":\"第一次输出错乱。\",\"characterStates\":[{\"name\":\"小陈\",\"status\":\"重伤\"}],"
                 + "\"foreshadowingResolved\":[\"伏笔A\"],{\"name\":\"timePoint\",\"status\":\"当夜\"}]}";
         String good = "{\"summary\":\"剧情完整版。\",\"characterStates\":[],\"timePoint\":\"当夜\"}";
         stubModelSequence(bad, good);
@@ -176,7 +176,7 @@ class ChapterSummaryServiceTest {
         stubModel(json);
 
         ChapterSummaryEntity summary = service.summarize(storyVO(), planItem(2),
-                "林尘跌坐石缝，怀中古镜发烫，雷纹在他丹田碎裂时烫了一下。", 2, null);
+                "小陈跌坐石缝，怀中古物发烫，雷纹在他丹田碎裂时烫了一下。", 2, null);
 
         assertNotNull(summary);
         assertEquals(2, summary.getForeshadowSeeds().size());
@@ -191,15 +191,15 @@ class ChapterSummaryServiceTest {
     void summarize_verifiedEvidenceKeepsEntryInLedger() {
         // evidence 是当章正文连续子串：状态留在账本，pendingFacts 为空
         String json = "{\"summary\":\"剧情。\","
-                + "\"characterStates\":[{\"name\":\"林尘\",\"status\":\"重伤\","
-                + "\"evidence\":\"林尘咬破舌尖，强行催动古镜\"}],"
-                + "\"itemStates\":[{\"name\":\"古镜\",\"status\":\"镜面裂开细纹\","
+                + "\"characterStates\":[{\"name\":\"小陈\",\"status\":\"重伤\","
+                + "\"evidence\":\"小陈咬破舌尖，强行催动古物\"}],"
+                + "\"itemStates\":[{\"name\":\"古物\",\"status\":\"镜面裂开细纹\","
                 + "\"evidence\":\"镜面裂开一道细纹\"}],"
                 + "\"timePoint\":\"当夜\"}";
         stubModel(json);
 
         ChapterSummaryEntity summary = service.summarize(storyVO(), planItem(2),
-                "林尘咬破舌尖，强行催动古镜。镜面裂开一道细纹。", 2, null);
+                "小陈咬破舌尖，强行催动古物。镜面裂开一道细纹。", 2, null);
 
         assertEquals(1, summary.getCharacterStates().size());
         assertEquals(1, summary.getItemStates().size());
@@ -211,23 +211,23 @@ class ChapterSummaryServiceTest {
         // evidence 非当章正文子串（编造/漂移）：该条移出三账本，隔离至待人工确认
         String json = "{\"summary\":\"剧情。\","
                 + "\"characterStates\":["
-                + "{\"name\":\"林尘\",\"status\":\"重伤\",\"evidence\":\"林尘咬破舌尖，强行催动古镜\"},"
+                + "{\"name\":\"小陈\",\"status\":\"重伤\",\"evidence\":\"小陈咬破舌尖，强行催动古物\"},"
                 + "{\"name\":\"赵阔\",\"status\":\"已飞升\",\"evidence\":\"正文里根本没有这句话\"}],"
-                + "\"itemStates\":[{\"name\":\"古镜\",\"status\":\"碎裂\",\"evidence\":\"碎成了八瓣\"}],"
+                + "\"itemStates\":[{\"name\":\"古物\",\"status\":\"碎裂\",\"evidence\":\"碎成了八瓣\"}],"
                 + "\"timePoint\":\"当夜\"}";
         stubModel(json);
 
         ChapterSummaryEntity summary = service.summarize(storyVO(), planItem(2),
-                "林尘咬破舌尖，强行催动古镜。镜面裂开一道细纹。", 2, null);
+                "小陈咬破舌尖，强行催动古物。镜面裂开一道细纹。", 2, null);
 
         // 可验证的入账本，编造的隔离待人工确认（不入账本前缀）
         assertEquals(1, summary.getCharacterStates().size());
-        assertEquals("林尘", summary.getCharacterStates().get(0).getName());
+        assertEquals("小陈", summary.getCharacterStates().get(0).getName());
         assertEquals(0, summary.getItemStates().size());
         assertNotNull(summary.getPendingFacts());
         assertEquals(2, summary.getPendingFacts().size());
         assertEquals("赵阔", summary.getPendingFacts().get(0).getName());
-        assertEquals("古镜", summary.getPendingFacts().get(1).getName());
+        assertEquals("古物", summary.getPendingFacts().get(1).getName());
     }
 
     @Test
@@ -238,7 +238,7 @@ class ChapterSummaryServiceTest {
         //  · 必须带 sourceAccount（否则裁决回写按 CHARACTER 兜底，物品/势力会被写错账）
         //  · evidenceTier 留空（adjudicable 对空档位放行 → 走 L1 裁决拟稿并经 EvidenceMatch 复核）
         String json = "{\"summary\":\"剧情。\","
-                + "\"characterStates\":[{\"name\":\"林尘\",\"status\":\"重伤\"}],"
+                + "\"characterStates\":[{\"name\":\"小陈\",\"status\":\"重伤\"}],"
                 + "\"timePoint\":\"当夜\"}";
         stubModel(json);
 
@@ -249,7 +249,7 @@ class ChapterSummaryServiceTest {
         assertNotNull(summary.getPendingFacts());
         assertEquals(1, summary.getPendingFacts().size());
         ChapterSummaryEntity.StateEntry pending = summary.getPendingFacts().get(0);
-        assertEquals("林尘", pending.getName());
+        assertEquals("小陈", pending.getName());
         assertEquals(ChapterSummaryEntity.AccountKind.CHARACTER.getCode(), pending.getSourceAccount(),
                 "挂起条目必须记录来源账本，裁决回写才不会错账");
         assertTrue(pending.getEvidenceTier() == null || pending.getEvidenceTier().isBlank(),
@@ -302,8 +302,9 @@ class ChapterSummaryServiceTest {
         assertTrue(prompt.contains("该线永远关不掉账"), "要写清漏记的后果：" + prompt);
         // 判断口径必须写出来，否则模型仍会按"物件是否出现"误判
         assertTrue(prompt.contains("看**状态是否变化**，不是看物件是否出现"), prompt);
-        // 正反例子齐备（✅/❌），否则等于只给了约束没给做法
-        assertTrue(prompt.contains("✅ 正确："), prompt);
+        // 正反例子齐备（✅/❌），否则等于只给了约束没给做法。ID 回抄为首选路径
+        assertTrue(prompt.contains("✅ 正确一（首选）"), prompt);
+        assertTrue(prompt.contains("✅ 正确二（账中无 ID 时）"), prompt);
         assertTrue(prompt.contains("❌ 错误一："), prompt);
         assertTrue(prompt.contains("❌ 错误二："), prompt);
         assertTrue(prompt.contains("老账恰恰最需要登记"), "要点名「老线可以留空」这个误判：" + prompt);
@@ -346,7 +347,7 @@ class ChapterSummaryServiceTest {
     private ChapterPlanItemEntity planItem(int chapterNo) {
         ChapterPlanItemEntity item = new ChapterPlanItemEntity();
         item.setChapterNo(chapterNo);
-        item.setTitle(chapterNo == 2 ? "古镜吞灵" : "大比前夜");
+        item.setTitle(chapterNo == 2 ? "古物奇谈" : "比试前夜");
         return item;
     }
 

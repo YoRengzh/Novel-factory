@@ -238,8 +238,8 @@ class StoryRepositoryTest {
                         .perspective("第三人称限知视角")
                         .targetAudience("男频")
                         .tone("苍凉悲壮")
-                        .protagonist("陈长安，22岁")
-                        .outline("陈长安穿越至九州大陆")
+                        .protagonist("顾青山，22岁")
+                        .outline("顾青山穿越至九州大陆")
                         .chapterCount(180)
                         .chapterGoal("1-30章 剑启篇")
                         .worldId("novel-shared-01")
@@ -258,8 +258,8 @@ class StoryRepositoryTest {
         assertEquals("第三人称限知视角", bible.perspective());
         assertEquals("男频", bible.targetAudience());
         assertEquals("苍凉悲壮", bible.tone());
-        assertEquals("陈长安，22岁", bible.protagonist());
-        assertEquals("陈长安穿越至九州大陆", bible.outline());
+        assertEquals("顾青山，22岁", bible.protagonist());
+        assertEquals("顾青山穿越至九州大陆", bible.outline());
         assertEquals("1-30章 剑启篇", bible.chapterGoal());
         // 世界 ID 必须续上：它是共享向量集合 novel-world-{worldId} 的键，丢了会切断系列共享
         assertEquals("novel-shared-01", bible.worldId());

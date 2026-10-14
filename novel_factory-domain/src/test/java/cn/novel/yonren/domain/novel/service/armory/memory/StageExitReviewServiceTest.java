@@ -372,7 +372,7 @@ class StageExitReviewServiceTest {
                 + "\"evidence\":\"炼气九层的门槛被他一脚跨过\"},"
                 + "{\"condition\":\"幽冥谷与外门公开敌对\",\"met\":false,\"note\":\"正文也没有\"}]}");
         Map<Integer, String> chapterText = Map.of(
-                5, "林尘夜探废矿，丹田气旋一涨，炼气九层的门槛被他一脚跨过。");
+                5, "小陈夜探废矿，丹田气旋一涨，炼气九层的门槛被他一脚跨过。");
 
         List<StageBlueprintEntity.ExitConditionResult> out = service.recheckAgainstChapterText(
                 module(), stage, firstPass, chapterText, null);
@@ -399,7 +399,7 @@ class StageExitReviewServiceTest {
                 + "{\"condition\":\"幽冥谷与外门公开敌对\",\"met\":false,\"note\":\"x\"}]}");
 
         List<StageBlueprintEntity.ExitConditionResult> out = service.recheckAgainstChapterText(
-                module(), stage, firstPass, Map.of(5, "林尘夜探废矿。"), null);
+                module(), stage, firstPass, Map.of(5, "小陈夜探废矿。"), null);
 
         assertFalse(out.get(0).getMet(), "引文不在正文里 → 不得改判");
     }
@@ -455,7 +455,7 @@ class StageExitReviewServiceTest {
         return List.of(
                 ChapterSummaryEntity.builder()
                         .chapterNo(5).title("第5章")
-                        .summary("林尘夜探废矿，丹田气旋一涨，炼气九层的门槛被他一脚跨过。")
+                        .summary("小陈夜探废矿，丹田气旋一涨，炼气九层的门槛被他一脚跨过。")
                         .build(),
                 ChapterSummaryEntity.builder()
                         .chapterNo(9).title("第9章")

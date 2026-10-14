@@ -187,12 +187,24 @@ public class QualityGate {
                     bracketIssues.stream().map(ChapterIssueEntity::getEvidence).toList());
         }
         mechanicalIssues.addAll(bracketIssues);
+        // 引号风格漂移检测（机械，MINOR）：本章台词几乎全用弯引号而本书主流是直角引号
+        // （或反之）。两种写法都合法、现有检测都不报，但同书混用是读者一眼可见的排版不一致——
+        // 实测某章整章重写稿的台词引号几乎全用弯引号，其余各章全是直角引号。MINOR 落债回灌，不触发修订。
+        List<ChapterIssueEntity> quoteStyleIssues = chapterContent == null ? List.of()
+                : DialogueRatioPolicy.checkQuoteStyleDrift(chapterContent.getContent(),
+                        item.getChapterType() == null ? null : item.getChapterType().getCode(),
+                        mainstreamCurlyQuotes(styleStat));
+        if (!quoteStyleIssues.isEmpty()) {
+            log.warn("第 {} 章引号风格漂移：{}", globalNo,
+                    quoteStyleIssues.stream().map(ChapterIssueEntity::getEvidence).toList());
+        }
+        mechanicalIssues.addAll(quoteStyleIssues);
         // 对白轮次坍缩检测（机械，P1，2026-10-09）：篇幅够、关键事件也落地了，但轮次密度低于劣化线——
-        // 典型形态是通篇动作分解与内心推演（实测第 96 章 4.4 次/千字，劣化线 6.0，同批其它章 12-27）。
+        // 典型形态是通篇动作分解与内心推演（实测坍缩章远低于劣化线，同批其它章成倍于它）。
         // 与上面两条的分工：那两条判**格式**（引号有没有、是不是括号），这条判**有没有戏**。
         // 为什么必须落债：已有的 ContentDensityPolicy 预警（<25 句）只进审校 prompt，而审校规则里
         // BLOCKING 仅限四类硬伤、MINOR 明写"只记录不触发修订"——它在设计上就不会产生任何动作，
-        // 实测第 96 章报了预警后原稿照样放行。落成质量债才会随记忆回灌到规划层与下一章 prompt。
+        // 实测有章报了预警后原稿照样放行。落成质量债才会随记忆回灌到规划层与下一章 prompt。
         List<ChapterIssueEntity> densityCollapse = dialogueDensityCollapse(item, chapterContent, summaries);
         if (!densityCollapse.isEmpty()) {
             log.warn("第 {} 章对白轮次坍缩：{}", globalNo,
@@ -200,8 +212,8 @@ public class QualityGate {
         }
         mechanicalIssues.addAll(densityCollapse);
         // 跨章对白逐字重复（机械，2026-10-10）：同一句台词与早期章节一字不差 → BLOCKING，走定向修订。
-        // 此前这类重复只进「风格警示」（下一章的软提示）与 MINOR 记账，于是第 100 章与第 102 章
-        // 一字不差地问了同一句「三班还等得到吗？」——两句都留在了成稿里。对白重复是读者最容易
+        // 此前这类重复只进「风格警示」（下一章的软提示）与 MINOR 记账，于是相隔两章的正文
+        // 一字不差地重复了同一句台词——两句都留在了成稿里。对白重复是读者最容易
         // 察觉的硬伤（人物像在复读），修法又机械（改掉这一句），所以放进 BLOCKING 让它真的被改。
         List<ChapterIssueEntity> dialogueRepeat = dialogueRepeatIssues(chapterContent, styleStat);
         if (!dialogueRepeat.isEmpty()) {
@@ -281,6 +293,8 @@ public class QualityGate {
         int maxAttempts = Math.max(1, storyProperties.getRevise().getMaxAttempts());
         // 上一轮采纳闸门拒绝原因（方案2回传）：让次轮修订知道为何被拒，定向避免而非盲改
         String previousRejectionReason = null;
+        // 无进展检测：上一轮未修复 BLOCKING 清单的内容指纹（见 blockingFingerprint）
+        String previousBlockingFingerprint = null;
         for (int attempt = 1; attempt <= maxAttempts; attempt++) {
             reviseRounds = attempt;
             ChapterReviseService.ReviseResult reviseResult;
@@ -348,6 +362,16 @@ public class QualityGate {
                     return GateResult.of(List.of(), minorCount, mechanicalMinor, attempt, semanticMinors, auditVerifyDegraded);
                 }
                 currentBlocking = newBlocking;
+                // 无进展检测：本轮未修复清单与上一轮完全相同（指纹一致）说明修订没推进——
+                // 继续重试只是烧 token 与时间，提前结束循环（BLOCKING 照旧记债，不掩盖问题）
+                String fingerprint = blockingFingerprint(currentBlocking);
+                if (attempt < maxAttempts && fingerprint.equals(previousBlockingFingerprint)) {
+                    log.warn("第 {} 章修订第 {}/{} 轮未修复清单与上一轮相同（无进展），"
+                                    + "提前结束修订循环省掉无效轮次——BLOCKING 问题照旧记债",
+                            globalNo, attempt, maxAttempts);
+                    break;
+                }
+                previousBlockingFingerprint = fingerprint;
                 log.warn("第 {} 章第 {}/{} 轮复审仍发现 BLOCKING 问题 {} 条，继续修订",
                         globalNo, attempt, maxAttempts, currentBlocking.size());
                 previousRejectionReason = "修订稿已通过采纳闸门，但复审仍发现 BLOCKING 问题："
@@ -427,9 +451,9 @@ public class QualityGate {
     /**
      * 人物档案锚（代词与既定事实），注入审校 guard。
      *
-     * <p><b>为什么必须给审校</b>（2026-10-10）：正文把女主宋知渔写成「他」连写了三章，而审校
+     * <p><b>为什么必须给审校</b>（2026-10-10）：正文曾把女性角色的代词连写错三章，而审校
      * 只有 MINOR 叙事问题、一条 BLOCKING 都没报——不是它没看见，而是**没有可对照的锚**：
-     * 账本里既没有"宋知渔是女"也没有"她报二班"，判"事实矛盾"无从下嘴。
+     * 账本里既没有"该角色是女"也没有"她报哪个班"，判"事实矛盾"无从下嘴。
      * 给了锚之后，代词写错、班级/亲属写错就落在审校规则既有的「事实矛盾」类里，可判 BLOCKING。
      */
     private static String characterProfileHint(ArmoryCommandEntity requestParameter) {
@@ -597,5 +621,63 @@ public class QualityGate {
         return issues.stream()
                 .filter(issue -> issue != null && !"BLOCKING".equalsIgnoreCase(issue.getSeverity()))
                 .toList();
+    }
+
+    /**
+     * 本书台词引号的主流风格是否为弯引号（供 {@link DialogueRatioPolicy#checkQuoteStyleDrift}）。
+     *
+     * <p>数据源是 {@link StyleStatEntity#getUsedDialogueLines()}——历史章节的对白句（含引号）。
+     * 取不到足够样本时返回 {@code null}，检测整体跳过：新书前几章还没有历史，
+     * 此时"主流"尚未形成，报漂移只会误伤。
+     */
+    private static Boolean mainstreamCurlyQuotes(StyleStatEntity styleStat) {
+        if (styleStat == null || styleStat.getUsedDialogueLines() == null
+                || styleStat.getUsedDialogueLines().size() < 10) {
+            return null;
+        }
+        int corner = 0;
+        int curly = 0;
+        for (String line : styleStat.getUsedDialogueLines()) {
+            if (line == null) {
+                continue;
+            }
+            if (line.indexOf('「') >= 0) {
+                corner++;
+            }
+            if (line.indexOf('\u201C') >= 0) {
+                curly++;
+            }
+        }
+        int total = corner + curly;
+        if (total < 10) {
+            return null;
+        }
+        return curly * 2 > total;
+    }
+
+    /**
+     * 未修复 BLOCKING 清单的**内容指纹**：供修订循环做"无进展检测"。
+     *
+     * <p>取描述文本（trim + 去空白）排序后拼接——多重集语义：
+     * 条数相同但换了问题（说明修订有推进）不会被误判为无进展；
+     * 而同一条问题在措辞上仅差空白时仍算同一问题。
+     * 描述为空时退用 dimension+evidence 兜底（机械类问题可能只有 evidence）。
+     */
+    private static String blockingFingerprint(List<ChapterIssueEntity> blocking) {
+        if (blocking == null || blocking.isEmpty()) {
+            return "";
+        }
+        return blocking.stream()
+                .filter(java.util.Objects::nonNull)
+                .map(issue -> {
+                    String text = issue.getDescription();
+                    if (StringUtils.isBlank(text)) {
+                        text = StringUtils.defaultString(issue.getDimension())
+                                + "|" + StringUtils.defaultString(issue.getEvidence());
+                    }
+                    return text.replaceAll("\\s+", "");
+                })
+                .sorted()
+                .collect(java.util.stream.Collectors.joining("\u0001"));
     }
 }

@@ -18,7 +18,7 @@ class OutlineSegmentParserTest {
 
     /** 真实片段：覆盖卷头 + 全部时间标记变体 */
     private static final String REAL_CHAPTER_GOAL = """
-            【卷一·弄堂烟火与早慧神童】(1-90章)：1-10章 2002年（4岁） 宿醉醒来回到2002年，变成了4岁的幼童。借着孩童的身份撒泼打滚，拔掉钢笔巧妙阻止了父母签下导致前世破产的亲戚担保合同；11-20章 2003年（5岁） 充分利用幼年大脑发育的黄金时期汲取数理基础；31-40章 2005-2006年（7-8岁） 小学中年级，自学高中数学与算法基础；41-50章 2007年（9岁） 参加小学华罗庚金杯赛，凭降维打击的思维夺冠，'弄堂神童'名号打响；81-90章 2010年秋（12岁） 升入省重点初中，第一卷在初中蝉鸣中收尾。|| 【卷二·隐秘猎手与国集争锋】(91-180章)：141-150章 2015年（17岁） 出征国际奥林匹克（IMO/IOI）斩获双料满分金牌；201-210章 2017年春 鸿蒙量化在国内外期货与A股市场逆势暴赚；231-240章 2017年上半年 关键节点：以独立研究员身份参与到谷歌机器翻译团队的早期交流中。""";
+            【卷一·巷子烟火与早慧神童】(1-90章)：1-10章 2002年（4岁） 宿醉醒来回到2002年，变成了4岁的幼童。借着孩童的身份撒泼打滚，拔掉钢笔巧妙阻止了父母签下导致前世破产的亲戚担保合同；11-20章 2003年（5岁） 充分利用幼年大脑发育的黄金时期汲取数理基础；31-40章 2005-2006年（7-8岁） 小学中年级，自学高中数学与算法基础；41-50章 2007年（9岁） 参加小学某数学竞赛，凭降维打击的思维夺冠，'巷子神童'名号打响；81-90章 2010年秋（12岁） 升入省重点初中，第一卷在初中蝉鸣中收尾。|| 【卷二·隐秘猎手与集训争锋】(91-180章)：141-150章 2015年（17岁） 出征国际奥林匹克（国际学科竞赛）斩获双料满分金牌；201-210章 2017年春 某量化基金在国内外证券与市场逆势暴赚；231-240章 2017年上半年 关键节点：以独立研究员身份参与到某研究机构的早期交流中。""";
 
     @Test
     @DisplayName("真实大纲：卷骨架 2 个、段全解析、时间标记逐项正确")
@@ -70,7 +70,7 @@ class OutlineSegmentParserTest {
         OutlineSegmentParser.OutlineSegment halfYear = outline.segmentFor(235);
         assertEquals(2017, halfYear.yearStart());
         assertTrue(halfYear.timeLabel().contains("2017年"), halfYear.timeLabel());
-        assertTrue(halfYear.milestone().contains("谷歌机器翻译"), halfYear.milestone());
+        assertTrue(halfYear.milestone().contains("早期交流"), halfYear.milestone());
     }
 
     @Test
@@ -86,7 +86,7 @@ class OutlineSegmentParserTest {
     @Test
     @DisplayName("无结构自由大纲：解析为空，消费端 fail-soft 豁免")
     void parse_freeFormOutline_returnsEmpty() {
-        assertTrue(OutlineSegmentParser.parse("主角在弄堂里慢慢长大，经历了许多温情的日常，最终成长为顶天立地的人。").isEmpty());
+        assertTrue(OutlineSegmentParser.parse("主角在巷子里慢慢长大，经历了许多温情的日常，最终成长为顶天立地的人。").isEmpty());
         assertTrue(OutlineSegmentParser.parse("").isEmpty());
         assertTrue(OutlineSegmentParser.parse(null).isEmpty());
     }

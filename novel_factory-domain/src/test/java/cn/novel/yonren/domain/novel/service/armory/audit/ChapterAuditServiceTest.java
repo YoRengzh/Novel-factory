@@ -79,7 +79,7 @@ class ChapterAuditServiceTest {
                 .keyEvents(List.of("事件")).build();
 
         String with = service.buildPrompt(item, "正文", null, null, null, 26,
-                "【时序锚】陆瑾瑜年龄：十一个月（第16章摘要记录）。");
+                "【时序锚】角色丙年龄：十一个月（第16章摘要记录）。");
         assertTrue(with.contains("能力与阶段边界"), "有时序锚时必须要求审校查阶段越界");
         assertTrue(with.contains("认知超前"), "必须写明认知超前不算越界（是否允许由设定决定）");
         // 二轮收紧：重跑版把"直接写字"绕道成"涂鸦=答案/摆物=警告/观察者附会"，
@@ -96,12 +96,12 @@ class ChapterAuditServiceTest {
     @Test
     void audit_parsesValidJson() {
         String json = "{\"issues\":[{\"dimension\":\"consistency\",\"severity\":\"BLOCKING\"," +
-                "\"evidence\":\"林尘已死，后文又出现\",\"description\":\"角色死亡后再次出场\"," +
+                "\"evidence\":\"小陈已死，后文又出现\",\"description\":\"角色死亡后再次出场\"," +
                 "\"suggestion\":\"删除该出场或改为回忆\"}]}";
         when(llmGateway.complete(any(), any(LlmCall.class))).thenReturn(json);
 
         AuditResultEntity result = service.audit(storyVO(), planItem(),
-                "前文交代林尘已死，后文又出现林尘的身影。", null, null, null, 1);
+                "前文交代小陈已死，后文又出现小陈的身影。", null, null, null, 1);
 
         assertNotNull(result);
         assertEquals(1, result.getIssues().size());
@@ -109,7 +109,7 @@ class ChapterAuditServiceTest {
         assertEquals("consistency", issue.getDimension());
         // 证据能在正文中命中，保持 BLOCKING
         assertEquals("BLOCKING", issue.getSeverity());
-        assertEquals("林尘已死，后文又出现", issue.getEvidence());
+        assertEquals("小陈已死，后文又出现", issue.getEvidence());
     }
 
     @Test

@@ -83,12 +83,30 @@ public class ChapterSummaryService {
      */
     public ChapterSummaryEntity summarize(StoryVO storyVO, ChapterPlanItemEntity item, String content,
                                           int globalNo, String ledgerPrompt, List<String> pendingForeshadowing) {
+        return summarize(storyVO, item, content, globalNo, ledgerPrompt, pendingForeshadowing, null);
+    }
+
+    /**
+     * 带时间锚的重载：timePoint 要求写出年份后，模型必须知道**当前故事年份**。
+     *
+     * <p><b>为什么必须给锚</b>：实测有章节正文只写"某月某日"（年份在前章），
+     * 摘要模型据此自行猜年份且猜错——该摘要一旦入库即成为下一章的
+     * 时序锚，年份错位会自我固化（并且污染"进度对齐"体检的口径）。
+     * 锚由调用方用历史摘要渲染（{@code ConsistencyIndexService.renderTimeAnchor}），
+     * 与规划/正文/审校用的是同一根锚，三处同源。
+     *
+     * @param historyForAnchor 历史摘要（不含本章），用于渲染时序锚；可为 null（老调用/新书首章）
+     */
+    public ChapterSummaryEntity summarize(StoryVO storyVO, ChapterPlanItemEntity item, String content,
+                                          int globalNo, String ledgerPrompt, List<String> pendingForeshadowing,
+                                          List<ChapterSummaryEntity> historyForAnchor) {
         String lastRaw = null;
         for (int attempt = 1; attempt <= 2; attempt++) {
             try {
                 // maxTokens/temperature 不再硬编码，由 scene-models 的 summary 场景配置驱动
                 String raw = llmGateway.complete(storyVO.getModule(), LlmCall.builder()
-                        .userPrompt(buildPrompt(item, content, globalNo, ledgerPrompt, pendingForeshadowing))
+                        .userPrompt(buildPrompt(item, content, globalNo, ledgerPrompt,
+                                pendingForeshadowing, historyForAnchor))
                         .label("summary-第" + globalNo + "章")
                         .scene(ModelScene.CHAPTER_SUMMARY)
                         .build());
@@ -113,6 +131,11 @@ public class ChapterSummaryService {
                     summary.setTitle(item.getTitle());
                     validateForeshadowSeeds(summary, content);
                     filterRestatedForeshadows(summary, pendingForeshadowing);
+                    // 顺序有讲究：补齐必须在重述过滤**之后**——过滤会把被判重述的条目
+                    // 从 new 与 seeds 双向剔除，补齐若在前，会把刚剔掉的种子又补回 new。
+                    // 补齐自身也要过一遍重述闸（模型可能把账本旧线只填进 seeds 没填 new），
+                    // 否则重述条目借补齐通道绕过过滤重新入账。只补 resolvable=TRUE 且 new 缺失的种子
+                    syncSeedsIntoNew(summary, pendingForeshadowing);
                     summary.setForeshadowingResolved(
                             sanitizeResolved(summary.getForeshadowingResolved(), pendingForeshadowing));
                     validateStateEvidence(summary, content);
@@ -215,7 +238,8 @@ public class ChapterSummaryService {
     }
 
     private String buildPrompt(ChapterPlanItemEntity item, String content, int globalNo,
-                               String ledgerPrompt, List<String> pendingForeshadowing) {
+                               String ledgerPrompt, List<String> pendingForeshadowing,
+                               List<ChapterSummaryEntity> historyForAnchor) {
         StringBuilder sb = new StringBuilder();
         sb.append("你是小说流水线的记忆管理员。阅读以下章节正文，产出供后续章节生成使用的结构化记忆。")
                 .append("\n要求：")
@@ -256,7 +280,7 @@ public class ChapterSummaryService {
                 .append("无法给出原文证据的状态不要输出该条；")
                 .append("\n6. foreshadowingNew：本章新埋下、尚未兑现的伏笔，写明角色与具体内容；")
                 .append("【格式强制】foreshadowingNew 必须是字符串数组，每项只是一句伏笔的纯文本描述，")
-                .append("如 [\"陈长安发现剑冢封印松动\", \"苏挽体内魔气即将暴走\"]；")
+                .append("如 [\"角色甲发现旧宅封存处有异动\", \"角色乙随身物件的来历无人能解释\"]；")
                 .append("严禁在 foreshadowingNew 里输出对象结构；含 content/excerpt/importance 的对象只能出现在 foreshadowSeeds。")
                 .append("伏笔必须是读者可感知的明确悬念或承诺——纯氛围渲染、场景点缀、无悬念指向的描写不得登记为伏笔；")
                 .append("与【此前埋设、尚未回收的伏笔账】实质重复的内容（同一悬念或同一人物势头的换句重述）严禁再次登记；")
@@ -268,39 +292,48 @@ public class ChapterSummaryService {
                 .append("大多数伏笔应为 2-4 分，评分影响回收调度优先级，必须克制客观，每章评 5 分的伏笔至多 1 条；")
                 .append("同时必须为 seed 登记 resolvable（布尔值），判断**这条内容是否承担「兑现义务」**")
                 .append("（系统据此区分「要养要收的伏笔」与「人物状态/氛围点缀」）：")
-                .append("resolvable=true —— 有人**承诺/约定**了什么（「答应打银锁」「约定开春来验证」），")
-                .append("或出现了**未解释的物件/信息**（「夹层里一张来源未明的纸」「那家公司没再被提起」）；")
-                .append("resolvable=false —— 只是**人物的状态判断**（「父母觉得孩子邪性」）、")
-                .append("**氛围描写**（「张阿婆说小孩子眼睛干净」）或**当时的事实陈述**（「存折加棺材本刚够八千」）；")
+                .append("resolvable=true —— 有人**承诺/约定**了什么（「答应替对方保管某物」「约定来日再验证」），")
+                .append("或出现了**未解释的物件/信息**（「夹层里一张来源未明的纸」「那件事再没人提起」）；")
+                .append("resolvable=false —— 只是**人物的状态判断**（「长辈觉得这孩子举止反常」）、")
+                .append("**氛围描写**（「邻人说孩子眼神清亮」）或**当时的事实陈述**（「手里的钱刚好只够周转」）；")
                 .append("拿不准时填 true（宁可多算，不要漏掉真伏笔）。")
                 .append("⚠️ resolvable=false 的条目**不应出现在 foreshadowingNew 里**（那里只登记真伏笔），")
                 .append("本字段主要用于纠正历史数据与边界情况；")
                 .append("同时为有明确谜底的伏笔（importance≥2）在 seed 中登记 payoffHints（3-8 条，每条 ≤20 字）：")
                 .append("该伏笔的谜底/答案关键词——揭示时才会出现的人名、真相短语或关键道具名，")
-                .append("如 [\"魔气源头是宗主\",\"血玉实为封印钥匙\"]；")
+                .append("如 [\"事故背后另有主使\", \"那件信物其实是关键凭证\"]；")
                 .append("系统会在揭示前的所有章节机械拦截这些词，防止谜底提前泄露，因此只登记揭示后才该出现的词，")
                 .append("严禁把伏笔本身的前题词（埋设章已在用的词）登记进来；纯氛围伏笔可省略；")
-                .append("正确示例：\"foreshadowingNew\":[\"剑冢封印松动\"],\"foreshadowSeeds\":[{\"content\":\"剑冢封印松动\",\"excerpt\":\"…\",\"importance\":4}]；")
-                .append("错误示例：\"foreshadowingNew\":[{\"content\":\"剑冢封印松动\"}]（对象不能放进 foreshadowingNew）。")
-                .append("\n7. foreshadowingResolved：本章兑现的伏笔，只能从【此前埋设、尚未回收的伏笔账】中选取，")
-                .append("条目必须逐字沿用账中描述，严禁改写——账本按文本核对销账。")
+                .append("正确示例：\"foreshadowingNew\":[\"旧宅封存处出现异动\"],\"foreshadowSeeds\":[{\"content\":\"旧宅封存处出现异动\",\"excerpt\":\"…\",\"importance\":4}]；")
+                .append("错误示例：\"foreshadowingNew\":[{\"content\":\"旧宅封存处出现异动\"}]（对象不能放进 foreshadowingNew）。")
+                .append("\n7. foreshadowingResolved：本章兑现的伏笔，只能从【此前埋设、尚未回收的伏笔账】中选取。")
+                .append("**账中每条都带 [F章号-序号] 形式的 ID——登记时回抄该 ID（如 \"[F7-2]\"），")
+                .append("ID 是最可靠的销账凭据（机械层按 ID 精确核销，不会因措辞差异漏账）。**")
+                .append("账中没有 ID 的旧条目才逐字沿用账中描述——账本按文本核对销账。")
                 .append("\n   ⚠️ **这是一项义务，不是可选项**：凡账中某条线在本章产生了它要的那个结果——")
                 .append("谁因此知道了什么、谁做了那个决定、什么被确认或被公开、什么东西被交出或被销毁——")
                 .append("**必须逐条登记**。漏记的后果不是「少记一笔」：该线永远关不掉账，")
                 .append("会在后续每一段被反复要求回收，把同一件事重写很多遍。")
                 .append("\n   判断口径：看**状态是否变化**，不是看物件是否出现。"
-                        + "「格子纸又出现在桌上」不算兑现；「父亲说出我不问了、等他自己开口」算关系/认知变化。")
-                .append("\n   ✅ 正确：[\"陆远山与周秀兰就2026达成不再追问的默契\"]（这是账中那条线的原话，逐字沿用）")
-                .append("\n   ❌ 错误一：用自己的话复述事件经过（如「父亲把纸放进铁盒」）——账本按文本匹配，对不上就等于没登记；")
+                        + "「那件东西又摆回了原处」不算兑现；「对方当面说出不再追问、等他自己开口」算关系/认知变化。")
+                .append("\n   ✅ 正确一（首选）：[\"[F7-2]\"]——回抄账中的 ID，最可靠；")
+                .append("\n   ✅ 正确二（账中无 ID 时）：[\"甲与乙就那件事达成不再追问的默契\"]（账中原话，逐字沿用）")
+                .append("\n   ❌ 错误一：用自己的话复述事件经过（如「长辈把纸收进了盒子」）——无 ID 时账本按文本匹配，对不上就等于没登记；")
                 .append("\n   ❌ 错误二：因为「这条线埋得太久了、像是老账」就留空——老账恰恰最需要登记，")
                 .append("它正是被反复催收的那一批；")
                 .append("\n   ❌ 错误三：把本章**新埋**的线写进这里（新埋的归 foreshadowingNew）；")
                 .append("\n   确实一条都没兑现时，才输出空数组；")
-                .append("\n8. timePoint：本章结束时的**时间**（只写时间不写地点），如\"外门大比当日深夜\"；")
+                .append("\n8. timePoint：本章结束时的**时间**（只写时间不写地点），如\"决战结束当日的深夜\"；")
+                .append("⚠️ **现实年代题材（故事时间锚定在真实年份）必须写出年份**，格式\"YYYY年X月X日\"，")
+                .append("如\"2003年5月12日上午\"；只写\"五月十二\"会让后续所有章节的年份锚失效——")
+                .append("实测某批 10 章摘要全部只写月份，时序锚取不到年份，规划层据此臆造出错误年份")
+                .append("（正文实际年代与之错位），年份链整段错位。")
+                .append("若本章未推进日期，写\"YYYY年X月X日（承接上章同日）\"；")
+                .append("境界纪年等非现实题材不受此限，沿用原口径。")
                 .append("\n9. placePoint：本章结束时主角所在的**地点**（只写地点不写时间），")
-                .append("用 2-12 字的稳定地名，如\"林尘小院\"\"后山北坡第三号防御节点\"；")
-                .append("**同一地点在不同章必须用完全一致的写法**（严禁\"阵法堂\"与\"阵法堂内\"、")
-                .append("\"天机阁地下密室\"与\"天机阁密室\"混用）——该字段用于统计地点轨迹，")
+                .append("用 2-12 字的稳定地名，如\"主角居所\"\"营地北坡哨卡\"；")
+                .append("**同一地点在不同章必须用完全一致的写法**（严禁\"讲堂\"与\"讲堂内\"、")
+                .append("\"藏书阁密室\"与\"藏书阁地下密室\"混用）——该字段用于统计地点轨迹，")
                 .append("写法漂移会使同一地点被计成多个；场景确实迁移时才换新地名。")
                 .append("\n10. continuityConflicts：对照下方当前账本，找出本章正文中与账本矛盾之处")
                 .append("（位置瞬移、伤势凭空消失、修为倒退、死者复活等），逐条描述；无冲突则为空数组；")
@@ -331,8 +364,17 @@ public class ChapterSummaryService {
                 .append("\n标题：").append(nullToBlank(item.getTitle()))
                 .append("\n目标：").append(nullToBlank(item.getGoal()))
                 .append("\n关键事件：").append(item.getKeyEvents() == null ? "" : String.join("、", item.getKeyEvents()))
-                .append("\n结尾悬念：").append(nullToBlank(item.getEndingHook()))
-                .append("\n\n【本章正文】")
+                .append("\n结尾悬念：").append(nullToBlank(item.getEndingHook()));
+        // 时间锚：timePoint 强制带年份后，模型必须知道**当前故事年份**才能写对。
+        // 不给锚时它会从正文里的零散线索猜——实测有章正文只写"某月某日"（年份在前章），
+        // 摘要便据此猜错年份；该值入库即成为下一章的时序锚，错位会自我固化。
+        if (historyForAnchor != null && !historyForAnchor.isEmpty()) {
+            String anchor = ConsistencyIndexService.renderTimeAnchor(historyForAnchor);
+            if (StringUtils.isNotBlank(anchor)) {
+                sb.append("\n\n").append(anchor);
+            }
+        }
+        sb.append("\n\n【本章正文】")
                 .append("\n").append(nullToBlank(content))
                 .append("\n\n请严格按照以下 JSON 格式输出：\n").append(CONVERTER.getFormat());
         return sb.toString();
@@ -365,7 +407,7 @@ public class ChapterSummaryService {
                 excerpt = EvidenceMatch.truncate(excerpt, SEED_EXCERPT_MAX_LENGTH);
                 // 引用非当章正文（编造/漂移）则置空，content 保留用于账本匹配。
                 // 收编：此前是裸 content.indexOf——模型换了引号形态
-                // （本故事 ch3/ch4 正文通篇半角引号）就会把真实引用误清空；
+                // （如某故事正文通篇半角引号）就会把真实引用误清空；
                 // 现走 EvidenceMatch，只放宽标点/空白差异，编造引用仍拒收。
                 seed.setExcerpt(StringUtils.isNotBlank(excerpt)
                         && EvidenceMatch.contained(excerpt, normalizedContent) ? excerpt : null);
@@ -375,6 +417,35 @@ public class ChapterSummaryService {
         summary.setForeshadowSeeds(summary.getForeshadowSeeds().stream()
                 .filter(seed -> seed != null && StringUtils.isNotBlank(seed.getContent()))
                 .toList());
+        assignForeshadowIds(summary);
+    }
+
+    /**
+     * 为本章伏笔种子分配**稳定 ID**：格式 {@code F{埋设章号}-{序号}}。
+     *
+     * <p><b>为什么在机械层分配</b>：ID 是记账凭据，模型的职责是语义判断（这是不是伏笔、
+     * 算不算已兑现），记账归机械层——与 excerpt 子串校验、账本核销同一分工。
+     * 模型只需在回收时回抄 ID，机械层做集合差集，不再依赖措辞匹配。
+     *
+     * <p><b>为什么格式取"章号-序号"而非全局自增</b>：它同时编码了埋设章（账本排序与滞留计算的依据）
+     * 与本章内顺序，且**天然幂等**——同一章重跑摘要会得到同样的 ID，不会因重试而产生 ID 漂移。
+     *
+     * <p>已带 ID 的条目不重编（续写/重试场景保持稳定）；老数据无 ID 时下游全部回退文本匹配。
+     */
+    private void assignForeshadowIds(ChapterSummaryEntity summary) {
+        if (summary.getChapterNo() == null || summary.getForeshadowSeeds() == null) {
+            return;
+        }
+        int seq = 0;
+        for (ChapterSummaryEntity.SeedEntry seed : summary.getForeshadowSeeds()) {
+            if (seed == null) {
+                continue;
+            }
+            seq++;
+            if (StringUtils.isBlank(seed.getForeshadowId())) {
+                seed.setForeshadowId("F" + summary.getChapterNo() + "-" + seq);
+            }
+        }
     }
 
     /** 谜底关键词清洗：长度 3-20 字、去重封顶 8 条、剔除与伏笔描述互为包含的条目（前题词） */
@@ -420,23 +491,72 @@ public class ChapterSummaryService {
             if (matched == 0) {
                 log.warn("本章回收清单 {} 条在待收账本里一条都没匹配上（措辞漂移？）——账本按文本核销，"
                         + "对不上就不会关账，该线会被反复要求回收：{}", cleaned.size(), cleaned);
+                // 结构化留痕：这是"账本按文本核销"这条设计的漏损计量点，
+                // 只写日志无法聚合统计——伏笔结构化 ID 改造的效果验证依赖这个数字
+                lastLedgerMismatch = new LedgerMismatch(cleaned.size(),
+                        pendingForeshadowing.size(), List.copyOf(cleaned));
+            } else {
+                lastLedgerMismatch = null;
             }
+        } else {
+            lastLedgerMismatch = null;
         }
         return cleaned;
     }
 
-    /** 与账本核销同口径：互相包含即视为同一条线 */
+    /**
+     * 最近一次 {@code sanitizeResolved} 的失配事实（null = 未发生失配）。
+     *
+     * <p>用字段而非返回值传递：{@code sanitizeResolved} 在 {@code summarize} 内部被调用，
+     * 改动其签名会波及既有调用点；本字段只由调用方在 {@code summarize} 返回后读取一次，
+     * 语义是"本次摘要是否发生了账本失配"，单线程逐章生成下无竞争。
+     */
+    private volatile LedgerMismatch lastLedgerMismatch;
+
+    /** 账本失配事实：登记回收条数 + 当时账本待收条数 + 登记的原文清单 */
+    public record LedgerMismatch(int resolvedCount, int pendingCount, List<String> resolved) {
+    }
+
+    /** 取出并清空最近一次失配事实（供调用方落盘后即忘） */
+    public LedgerMismatch consumeLedgerMismatch() {
+        LedgerMismatch mismatch = lastLedgerMismatch;
+        lastLedgerMismatch = null;
+        return mismatch;
+    }
+
+    /**
+     * 与账本核销同口径：**ID 命中优先，文本互相包含回退**。
+     *
+     * <p>账本清单带 {@code [F7-2] } 前缀（见
+     * {@code ChapterMemoryService.buildForeshadowContextListWithIds}），故：
+     * <ul>
+     *   <li>登记值是 ID 形态（{@code [F7-2]} / {@code F7-2}）时——与账本条目的 ID 前缀精确比对；</li>
+     *   <li>否则剥掉账本行的 ID 前缀后走既有双向 contains。</li>
+     * </ul>
+     * 不剥离前缀直接比对会让**所有**文本回退路径都失配（账本行现在以 "[" 开头），
+     * 把失配告警刷成噪声、并掩盖真实的措辞漂移。
+     */
     private static boolean matchesLedger(String resolved, List<String> pendingForeshadowing) {
         String r = resolved == null ? "" : resolved.trim();
         if (r.isEmpty()) {
             return false;
         }
+        String normalizedId = ChapterMemoryService.normalizeForeshadowIdForm(r);
         for (String pending : pendingForeshadowing) {
             if (StringUtils.isBlank(pending)) {
                 continue;
             }
             String p = pending.trim();
-            if (p.contains(r) || r.contains(p)) {
+            String pendingId = ChapterMemoryService.extractForeshadowIdPrefix(p);
+            // ID 形态登记：与账本条目的 ID 精确比对（大小写不敏感）
+            if (normalizedId != null) {
+                if (pendingId != null && pendingId.equalsIgnoreCase(normalizedId)) {
+                    return true;
+                }
+                continue;
+            }
+            String pBody = ChapterMemoryService.stripForeshadowIdPrefix(p);
+            if (pBody.contains(r) || r.contains(pBody)) {
                 return true;
             }
         }
@@ -455,9 +575,13 @@ public class ChapterSummaryService {
         }
         List<String> kept = new ArrayList<>();
         List<String> dropped = new ArrayList<>();
+        // 账本行可能带 [F7-2] ID 前缀：比对前剥离，否则包含匹配恒不成立，
+        // 重述过滤会静默失效（换句重述的伏笔将反复入账、未填池虚胖）
         List<String> pendingTrimmed = pendingForeshadowing.stream()
                 .filter(StringUtils::isNotBlank)
                 .map(String::trim)
+                .map(ChapterMemoryService::stripForeshadowIdPrefix)
+                .filter(StringUtils::isNotBlank)
                 .toList();
         for (String item : summary.getForeshadowingNew()) {
             if (StringUtils.isBlank(item)) {
@@ -486,6 +610,112 @@ public class ChapterSummaryService {
         }
         log.info("章节摘要剔除重述伏笔 {} 条（与待回收账实质重复），chapterNo: {}",
                 dropped.size(), summary.getChapterNo());
+    }
+
+    /**
+     * **种子 → 新埋清单的无条件补齐**：把种子里声明了兑现义务
+     * （{@code resolvable=TRUE}）而 {@code foreshadowingNew} 里缺失的条目补进 new。
+     * 补齐前先过重述闸：与待回收账（剥离 ID 前缀后）实质重复的种子不补——
+     * 那是模型换句重述的账本旧线，{@code filterRestatedForeshadows} 只挡 new 侧，
+     * 不挡的话重述会借补齐通道绕过过滤重新入账。
+     *
+     * <p><b>为什么必须补</b>：下游账本（{@code ChapterMemoryService.buildPendingForeshadowDetailed}）
+     * **只读 {@code foreshadowingNew}**，种子读得再多也只服务于原文引用/重要度/ID。
+     * 实测第 1-140 章有 133 条种子在 new 里找不到对应条目——其中大部分是 VOID 出账的正常残留，
+     * 但仍有真伏笔因此**对账本完全不可见**：不待回收、不注入规划、拿不到 ID、永远不会被安排回收。
+     * 模型偶尔只填 seeds 忘填 new（两个字段分别输出），此前无任何校验兜住。
+     *
+     * <p><b>为什么不反向做</b>（把 new 里缺失的条目补进 seeds）：seed 携带 excerpt/importance/
+     * resolvable 等**埋设现场事实**，机械层凭空造不出来；补出的种子只有 content，
+     * 反而会污染后续校验。缺 new 是"登记遗漏"，缺 seed 是"证据不足"，两者不对称。
+     *
+     * <p><b>为什么只补 resolvable=TRUE</b>：prompt 明确要求 {@code resolvable=false} 的条目
+     * **不应出现在 new 里**（那是氛围/状态，不承担兑现义务）；补进去会直接违反不变式。
+     * {@code resolvable=null}（老数据/模型漏标）同样不补——"宁可漏判不要误判"，
+     * 且未标注占比已有专门指标盯着（{@code ForeshadowSpanPolicy.unlabeledRate}）。
+     *
+     * <p><b>为什么不去重种子与 new 的数量差</b>：VOID 出账只清 new、不清 seeds
+     * （见 {@code stripVoidedForeshadows} 的契约——种子保留埋设痕迹供复盘）。
+     * 故"seeds 多于 new"是**设计内的常态**，本方法只按内容做集合补齐，不推断缺口来源。
+     */
+    private void syncSeedsIntoNew(ChapterSummaryEntity summary, List<String> pendingForeshadowing) {
+        // 每次调用先清空：未发生补齐时必须显式置 null，否则上一章的补齐事实会被
+        // 本章的 consume 读走（字段传递的前提是"每次都有明确赋值"）
+        lastSeedNewSync = null;
+        if (summary.getForeshadowSeeds() == null || summary.getForeshadowSeeds().isEmpty()) {
+            return;
+        }
+        List<String> newList = summary.getForeshadowingNew() == null
+                ? new ArrayList<>() : new ArrayList<>(summary.getForeshadowingNew());
+        Set<String> present = newList.stream()
+                .filter(StringUtils::isNotBlank)
+                .map(String::trim)
+                .collect(Collectors.toSet());
+        // 与 filterRestatedForeshadows 同款预处理：账本行可能带 [F7-2] ID 前缀，
+        // 不剥离的话包含匹配恒不成立，重述种子会借补齐通道入账
+        List<String> pendingTrimmed = pendingForeshadowing == null ? List.of()
+                : pendingForeshadowing.stream()
+                        .filter(StringUtils::isNotBlank)
+                        .map(String::trim)
+                        .map(ChapterMemoryService::stripForeshadowIdPrefix)
+                        .filter(StringUtils::isNotBlank)
+                        .toList();
+        List<String> added = new ArrayList<>();
+        for (ChapterSummaryEntity.SeedEntry seed : summary.getForeshadowSeeds()) {
+            if (seed == null || StringUtils.isBlank(seed.getContent())
+                    || !Boolean.TRUE.equals(seed.getResolvable())) {
+                continue;
+            }
+            String content = seed.getContent().trim();
+            // 与待回收账实质重复 = 重述，直接丢弃（不补、也不留痕——重述不该有兑现义务）
+            boolean restated = pendingTrimmed.stream().anyMatch(pending ->
+                    Math.min(pending.length(), content.length()) >= RESTATED_MIN_CHARS
+                            && (pending.contains(content) || content.contains(pending)));
+            if (restated) {
+                continue;
+            }
+            // 双向包含判重（与账本口径一致）：同一悬念的措辞微差不应被当成两条登记。
+            // 包含只在较短一侧 ≥ RESTATED_MIN_CHARS 时生效——纯精确相等恒判重；
+            // 否则账本里一个四五字的短条目会把含它的完整种子线误判为"已存在"而整条丢掉
+            boolean exists = present.stream().anyMatch(p -> p.equals(content)
+                    || (Math.min(p.length(), content.length()) >= RESTATED_MIN_CHARS
+                            && (p.contains(content) || content.contains(p))));
+            if (exists) {
+                continue;
+            }
+            present.add(content);
+            added.add(content);
+        }
+        if (added.isEmpty()) {
+            return;
+        }
+        newList.addAll(added);
+        summary.setForeshadowingNew(newList);
+        log.info("章节摘要补齐种子到新埋清单 {} 条（模型只填了 foreshadowSeeds），chapterNo: {}，新增：{}",
+                added.size(), summary.getChapterNo(), added);
+        // 结构化留痕：这是"摘要模型两个字段输出不对称"的量化点——
+        // 只写日志无法聚合，无法回答"补进来的条目后来有没有被回收"（ID 改造效果验证依赖它）
+        lastSeedNewSync = new SeedNewSync(summary.getChapterNo() == null ? 0 : summary.getChapterNo(),
+                added.size(), List.copyOf(added));
+    }
+
+    /**
+     * 最近一次 {@link #syncSeedsIntoNew} 的补齐事实（null = 未发生补齐）。
+     *
+     * <p>与 {@link #lastLedgerMismatch} 同款约定：字段传递、调用方在 summarize 返回后读取一次，
+     * 单线程逐章生成下无竞争。
+     */
+    private volatile SeedNewSync lastSeedNewSync;
+
+    /** 种子补 new 的补齐事实：章号 + 补齐条数 + 补齐内容 */
+    public record SeedNewSync(int chapterNo, int addedCount, List<String> added) {
+    }
+
+    /** 取出并清空最近一次补齐事实（供调用方落盘后即忘） */
+    public SeedNewSync consumeSeedNewSync() {
+        SeedNewSync sync = lastSeedNewSync;
+        lastSeedNewSync = null;
+        return sync;
     }
 
     /**

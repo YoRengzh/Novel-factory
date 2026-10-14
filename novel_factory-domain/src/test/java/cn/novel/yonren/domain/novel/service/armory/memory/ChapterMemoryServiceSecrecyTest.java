@@ -33,21 +33,21 @@ class ChapterMemoryServiceSecrecyTest {
 
     @Test
     void plantedForeshadowWithHints_inGuard() {
-        ChapterSummaryEntity s = summary(3, "陈长安发现剑冢封印松动", "封印之下是上古剑灵");
+        ChapterSummaryEntity s = summary(3, "主角乙发现封存处出现异动", "封印之下是上古剑灵");
 
         ChapterMemoryService.SecrecyGuard guard = service.buildSecrecyGuard(List.of(s), new ChapterPlanItemEntity());
 
         assertFalse(guard.isEmpty());
         assertTrue(guard.keywords().contains("封印之下是上古剑灵"));
         assertTrue(guard.promptBlock().contains("【本章禁泄清单】"));
-        assertTrue(guard.promptBlock().contains("陈长安发现剑冢封印松动"));
+        assertTrue(guard.promptBlock().contains("主角乙发现封存处出现异动"));
     }
 
     @Test
     void revealChapter_exempted() {
-        ChapterSummaryEntity s = summary(3, "陈长安发现剑冢封印松动", "封印之下是上古剑灵");
+        ChapterSummaryEntity s = summary(3, "主角乙发现封存处出现异动", "封印之下是上古剑灵");
         ChapterPlanItemEntity revealPlan = ChapterPlanItemEntity.builder()
-                .keyEvents(List.of("揭示剑冢封印松动的真相（回收第3章埋设的剑冢封印松动）"))
+                .keyEvents(List.of("揭示封存处出现异动的真相（回收第3章埋设的封存处出现异动）"))
                 .build();
 
         assertTrue(service.buildSecrecyGuard(List.of(s), revealPlan).isEmpty(), "揭示章必须豁免");
@@ -56,9 +56,9 @@ class ChapterMemoryServiceSecrecyTest {
     @Test
     void advancingWithoutReveal_notExempted() {
         // 计划只推进伏笔（调查）而未到揭示，禁泄清单仍生效
-        ChapterSummaryEntity s = summary(3, "陈长安发现剑冢封印松动", "封印之下是上古剑灵");
+        ChapterSummaryEntity s = summary(3, "主角乙发现封存处出现异动", "封印之下是上古剑灵");
         ChapterPlanItemEntity advancePlan = ChapterPlanItemEntity.builder()
-                .keyEvents(List.of("陈长安继续调查剑冢封印松动的缘由"))
+                .keyEvents(List.of("主角乙继续调查封存处出现异动的缘由"))
                 .build();
 
         assertFalse(service.buildSecrecyGuard(List.of(s), advancePlan).isEmpty());
@@ -66,10 +66,10 @@ class ChapterMemoryServiceSecrecyTest {
 
     @Test
     void resolvedForeshadow_outOfGuard() {
-        ChapterSummaryEntity planted = summary(3, "陈长安发现剑冢封印松动", "封印之下是上古剑灵");
+        ChapterSummaryEntity planted = summary(3, "主角乙发现封存处出现异动", "封印之下是上古剑灵");
         ChapterSummaryEntity resolved = ChapterSummaryEntity.builder()
                 .chapterNo(5)
-                .foreshadowingResolved(List.of("陈长安发现剑冢封印松动"))
+                .foreshadowingResolved(List.of("主角乙发现封存处出现异动"))
                 .build();
 
         assertTrue(service.buildSecrecyGuard(List.of(planted, resolved), new ChapterPlanItemEntity()).isEmpty(),
@@ -81,7 +81,7 @@ class ChapterMemoryServiceSecrecyTest {
         // 存量数据（无 payoffHints）不误伤：不进清单，仅靠审校兜底
         ChapterSummaryEntity legacy = ChapterSummaryEntity.builder()
                 .chapterNo(3)
-                .foreshadowingNew(List.of("陈长安发现剑冢封印松动"))
+                .foreshadowingNew(List.of("主角乙发现封存处出现异动"))
                 .build();
 
         assertTrue(service.buildSecrecyGuard(List.of(legacy), new ChapterPlanItemEntity()).isEmpty());

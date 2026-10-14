@@ -47,9 +47,9 @@ class StageReportServiceTest {
         List<ChapterContentEntity> contents = List.of(
                 content(1, 2000), content(2, 2000), content(3, 2000));
         List<ChapterSummaryEntity> summaries = new ArrayList<>();
-        summaries.add(summary(1, "阵法堂", null));
-        summaries.add(summary(2, "阵法堂", ChapterTypeVO.TRANSITION.getCode()));
-        summaries.add(summary(3, "阵法堂", ChapterTypeVO.NORMAL.getCode()));
+        summaries.add(summary(1, "讲堂", null));
+        summaries.add(summary(2, "讲堂", ChapterTypeVO.TRANSITION.getCode()));
+        summaries.add(summary(3, "讲堂", ChapterTypeVO.NORMAL.getCode()));
 
         String report = service.buildStageReport(stage(1, 3), summaries, contents);
 
@@ -79,9 +79,9 @@ class StageReportServiceTest {
         List<ChapterContentEntity> contents = List.of(
                 content(1, 2000), content(2, 2000), content(3, 2000));
         List<ChapterSummaryEntity> summaries = List.of(
-                summary(1, "阵法堂", ChapterTypeVO.TRANSITION.getCode()),
-                summary(2, "阵法堂", ChapterTypeVO.TRANSITION.getCode()),
-                summary(3, "阵法堂", null));
+                summary(1, "讲堂", ChapterTypeVO.TRANSITION.getCode()),
+                summary(2, "讲堂", ChapterTypeVO.TRANSITION.getCode()),
+                summary(3, "讲堂", null));
 
         String report = service.buildStageReport(stage(1, 3), summaries, contents);
 
@@ -94,8 +94,8 @@ class StageReportServiceTest {
         // 老数据无 placePoint：由 timePoint 最后一段回退，保证存量故事同样受统计覆盖
         List<ChapterContentEntity> contents = List.of(content(1, 2000), content(2, 2000));
         List<ChapterSummaryEntity> summaries = List.of(
-                ChapterSummaryEntity.builder().chapterNo(1).timePoint("当日深夜，阵法堂密室").build(),
-                ChapterSummaryEntity.builder().chapterNo(2).timePoint("次日黎明，阵法堂密室").build());
+                ChapterSummaryEntity.builder().chapterNo(1).timePoint("当日深夜，讲堂密室").build(),
+                ChapterSummaryEntity.builder().chapterNo(2).timePoint("次日黎明，讲堂密室").build());
 
         String report = service.buildStageReport(stage(1, 2), summaries, contents);
 

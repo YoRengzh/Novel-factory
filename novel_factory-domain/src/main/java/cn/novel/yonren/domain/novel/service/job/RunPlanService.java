@@ -19,6 +19,15 @@ public class RunPlanService {
 
     private final StoryProperties storyProperties;
 
+    /** 启动即告警：无界配置最坏是"无人值守烧到天荒地老"，必须在日志里显式点名而非静默放行 */
+    @jakarta.annotation.PostConstruct
+    void warnIfUnbounded() {
+        String unbounded = validateBounded();
+        if (unbounded != null) {
+            log.error("【自动续批配置告警】{}", unbounded);
+        }
+    }
+
     /**
      * 续批决策。
      *
@@ -35,6 +44,36 @@ public class RunPlanService {
     }
 
     /**
+     * 续批配置的**有限性校验**：开启自动续批时，至少要有一样东西能让它停下来。
+     *
+     * <p><b>为什么必须校验</b>：三个独立配置的默认值叠加后形成"无人值守 + 无目标 + 无上限"——
+     * {@code targetChapters} 默认 null（且 constraints 未开时 {@link #targetChapters()} 也返回 null，
+     * "达标"判停消失）、{@code maxBatches} 默认 0（不限）、budget 两阈值默认 null（不熔断）。
+     * 此时唯一的停线是批末体检 CRITICAL，而体检本身是 fail-soft 的（读取失败即跳过判停）。
+     * 与项目在其它处的做法一致（无法识别的配置取最保守值，见 {@link #parseStopLevel}）。
+     *
+     * @return null = 配置可用；非 null = 人类可读的拒绝理由（调用方应拒绝启用并告警）
+     */
+    public String validateBounded() {
+        if (!enabled()) {
+            return null;
+        }
+        StoryProperties.RunPlanProperties plan = plan();
+        boolean hasTarget = targetChapters() != null;
+        boolean hasBatchLimit = plan != null && plan.getMaxBatches() > 0;
+        StoryProperties.BudgetProperties budget = storyProperties.getBudget();
+        boolean hasBudgetFuse = budget != null
+                && (budget.getHardTotalTokens() != null || budget.getWarnTotalTokens() != null);
+        if (hasTarget || hasBatchLimit || hasBudgetFuse) {
+            return null;
+        }
+        return "自动续批已开启（story.run-plan.enabled=true），但三个停机条件同时缺失："
+                + "未配置 target-chapters、max-batches 为 0（不限）、budget 未配任何阈值——"
+                + "此时只有批末体检能停（且体检读取失败会跳过判停），作业可能无界连续烧 token。"
+                + "请至少配置其中一项（推荐 budget.hard-total-tokens）。";
+    }
+
+    /**
      * 续批决策。批次进度与体检结论都由调用方给出（作业层已持有），本方法保持纯函数。
      *
      * @param chaptersDone 当前已完成章数（含本批）
@@ -44,6 +83,11 @@ public class RunPlanService {
     public Decision decide(int chaptersDone, int batchesDone, BatchHealthReport health) {
         if (!enabled()) {
             return new Decision(false, "未开启自动续批（story.run-plan.enabled=false）");
+        }
+        // 无界配置在续批入口也拦一道：启动校验之外的运行时兜底（配置可在前端热改）
+        String unbounded = validateBounded();
+        if (unbounded != null) {
+            return new Decision(false, "自动续批配置无界，已停止：" + unbounded);
         }
         Integer target = targetChapters();
         if (target != null && chaptersDone >= target) {

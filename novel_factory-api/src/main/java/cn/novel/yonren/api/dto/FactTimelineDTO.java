@@ -16,7 +16,7 @@ public class FactTimelineDTO {
     /** 事实来源章节号 */
     private int chapterNo;
 
-    /** 实体名称（模糊匹配回退时可与查询名不同，如查询"镜"命中"古镜"） */
+    /** 实体名称（模糊匹配回退时可与查询名不同，如查询短名命中更长的实体全名） */
     private String name;
 
     /** 账本类型：角色 / 物品 / 势力 */

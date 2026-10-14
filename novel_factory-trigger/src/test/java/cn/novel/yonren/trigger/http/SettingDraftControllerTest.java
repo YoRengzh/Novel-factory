@@ -59,7 +59,7 @@ class SettingDraftControllerTest {
         SettingDraftResponseDTO response = controller.draft(request);
 
         assertEquals("都市异能", response.getTheme());
-        assertEquals("雾港拾骨", response.getNovelTitle());
+        assertEquals("示例书", response.getNovelTitle());
         assertEquals("冷硬悬疑", response.getStyle());
         assertEquals("世界观", response.getWorldSetting());
         assertEquals("第三人称", response.getPerspective());
@@ -138,7 +138,7 @@ class SettingDraftControllerTest {
 
     private static SettingDraftService.Result result() {
         SettingDraftService.DraftOutput fields = new SettingDraftService.DraftOutput();
-        fields.setNovelTitle("雾港拾骨");
+        fields.setNovelTitle("示例书");
         fields.setStyle("冷硬悬疑");
         fields.setWorldSetting("世界观");
         fields.setPerspective("第三人称");

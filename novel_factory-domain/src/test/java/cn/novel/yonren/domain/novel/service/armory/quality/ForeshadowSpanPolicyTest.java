@@ -69,9 +69,9 @@ class ForeshadowSpanPolicyTest {
     @DisplayName("spans：改写措辞仍可配对")
     void spans_matchesRewrittenContent() {
         List<ChapterSummaryEntity> summaries = List.of(
-                chapter(1, List.of("王秀兰私攒两百块买书钱已取出，新华书店购书结果未定"), null),
+                chapter(1, List.of("角色辰私攒两百块买书钱已取出，旧书铺购书结果未定"), null),
                 chapter(2, List.of(),
-                        List.of("王秀兰私攒两百块买书钱已取出，但新华书店的购书结果仍然没有确定")));
+                        List.of("角色辰私攒两百块买书钱已取出，但旧书铺的购书结果仍然没有确定")));
 
         List<ForeshadowSpanPolicy.Span> spans = ForeshadowSpanPolicy.spans(summaries);
 
@@ -158,7 +158,7 @@ class ForeshadowSpanPolicyTest {
     /**
      * `resolvable=false` 的条目（人物状态/氛围点缀）不计入寿命统计。
      *
-     * <p>动机：实测 41 条埋设里大量是"陆建国评价儿子邪性""张阿婆说小孩子眼睛干净"这类
+     * <p>动机：实测 41 条埋设里大量是"角色戊评价儿子反常""路人甲说小孩子眼睛干净"这类
      * 状态/氛围描写，它们永远"在途"，把分母注水、让指标惩罚正确的修复。
      */
     @Test
@@ -166,10 +166,10 @@ class ForeshadowSpanPolicyTest {
     void falseResolvable_excludedFromSpan() {
         List<ChapterSummaryEntity> summaries = List.of(
                 // 状态型：不计入
-                chapter(1, List.of("父母觉得这个孩子有点邪性"), null, Boolean.FALSE),
+                chapter(1, List.of("父母觉得这个孩子有点反常"), null, Boolean.FALSE),
                 // 真伏笔：计入
-                chapter(1, List.of("陆周氏承诺改日给孙子打一把银锁"), null, Boolean.TRUE),
-                chapter(3, List.of(), List.of("陆周氏承诺改日给孙子打一把银锁"), Boolean.TRUE));
+                chapter(1, List.of("陆周氏承诺改日给孙子打一把旧锁"), null, Boolean.TRUE),
+                chapter(3, List.of(), List.of("陆周氏承诺改日给孙子打一把旧锁"), Boolean.TRUE));
 
         List<ForeshadowSpanPolicy.Span> spans = ForeshadowSpanPolicy.spans(summaries);
 
@@ -183,7 +183,7 @@ class ForeshadowSpanPolicyTest {
     void nullResolvable_excludedAndObservable() {
         List<ChapterSummaryEntity> summaries = List.of(
                 chapter(1, List.of("一条没标注的旧数据伏笔"), null, null),
-                chapter(1, List.of("父母觉得孩子邪性"), null, Boolean.FALSE),
+                chapter(1, List.of("父母觉得孩子反常"), null, Boolean.FALSE),
                 chapter(2, List.of(), List.of("一条没标注的旧数据伏笔")));
 
         assertTrue(ForeshadowSpanPolicy.spans(summaries).isEmpty(),
@@ -242,8 +242,8 @@ class ForeshadowSpanPolicyTest {
     @DisplayName("pending：不承担兑现义务的条目不进在途数")
     void pending_excludesNonResolvable() {
         List<ChapterSummaryEntity> summaries = List.of(
-                chapter(1, List.of("父母觉得这个孩子有点邪性"), null, Boolean.FALSE),
-                chapter(2, List.of("有人答应改日送来一把银锁"), null, Boolean.TRUE));
+                chapter(1, List.of("父母觉得这个孩子有点反常"), null, Boolean.FALSE),
+                chapter(2, List.of("有人答应改日送来一把旧锁"), null, Boolean.TRUE));
 
         List<ForeshadowSpanPolicy.Pending> pending = ForeshadowSpanPolicy.pending(summaries, 10);
 

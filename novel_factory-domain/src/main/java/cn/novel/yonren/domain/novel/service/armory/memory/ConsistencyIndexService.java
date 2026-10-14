@@ -21,7 +21,7 @@ public class ConsistencyIndexService {
 
     private static final int MAX_RENDER_ENTRIES = 20;
 
-    /** 年龄类关键数字的识别词：subject 命中即视为年龄事实（如"陆瑾瑜月龄""主角年龄"） */
+    /** 年龄类关键数字的识别词：subject 命中即视为年龄事实（如"某角色月龄""主角年龄"） */
     private static final String[] AGE_SUBJECT_KEYWORDS = {"月龄", "年龄", "岁数"};
     public ConsistencyIndexEntity rebuild(List<ChapterSummaryEntity> summaries, StoryVO storyVO) {
         ConsistencyIndexEntity index = ConsistencyIndexEntity.builder().build();
@@ -337,7 +337,7 @@ public class ConsistencyIndexService {
         return index < 0 ? null : index;
     }
 
-    /** 主人公字段的头部人名（"陆瑾瑜，灵魂是……"→"陆瑾瑜"）；解析不出返回 null（锚里回退"主角"） */
+    /** 主人公字段的头部人名（"某角色，灵魂是……"→"某角色"）；解析不出返回 null（锚里回退"主角"） */
     private static String leadingName(String protagonist) {
         if (blank(protagonist)) {
             return null;
@@ -346,7 +346,7 @@ public class ConsistencyIndexService {
         return first.length() >= 2 && first.length() <= 6 ? first : null;
     }
 
-    /** 去掉 subject 里的年龄后缀，得到人物名（"陆瑾瑜月龄"→"陆瑾瑜"）；scope 缺失时的兜底 */
+    /** 去掉 subject 里的年龄后缀，得到人物名（"某角色月龄"→"某角色"）；scope 缺失时的兜底 */
     private static String stripAgeSuffix(String subject) {
         String stripped = subject;
         for (String keyword : AGE_SUBJECT_KEYWORDS) {

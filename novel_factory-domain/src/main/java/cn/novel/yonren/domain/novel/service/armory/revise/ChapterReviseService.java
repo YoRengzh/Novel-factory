@@ -11,6 +11,7 @@ import cn.novel.yonren.domain.novel.model.valobj.StoryVO;
 import cn.novel.yonren.domain.novel.model.valobj.properties.StoryProperties;
 import cn.novel.yonren.types.enums.ModelScene;
 import cn.novel.yonren.domain.novel.service.armory.memory.StyleStatService;
+import cn.novel.yonren.domain.novel.service.armory.quality.PatchIntegrityPolicy;
 import cn.novel.yonren.domain.novel.service.armory.quality.PlanAdherencePolicy;
 import cn.novel.yonren.types.utils.JsonParseFallback;
 import com.alibaba.fastjson2.JSON;
@@ -58,7 +59,7 @@ public class ChapterReviseService {
 
     /**
      * 修订轮允许丢失的关键事件条数上限（2026-10-04）：BLOCKING 违规现场常与关键事件场景重叠
-     * （时序锚类违规尤其如此——"4岁写出2026"本身就是排期项），修复必然改写该场景。
+     * （时序锚类违规尤其如此——"幼年写下未来年份"本身就是排期项），修复必然改写该场景。
      * 允许丢 1 条换取硬伤修复；丢 ≥2 条说明修订在跑偏，仍然拒绝。
      */
     private static final int REVISE_ALLOWED_EVENT_LOSS = 1;
@@ -469,20 +470,9 @@ public class ChapterReviseService {
         }
         List<String> keyEvents = item.getKeyEvents();
         if (keyEvents != null && !keyEvents.isEmpty()) {
-            String normalizedRevised = revised.getContent().replaceAll("\\s+", "");
-            String normalizedOriginal = originalContent == null ? "" : originalContent.replaceAll("\\s+", "");
-            List<String> missing = new ArrayList<>();
-            for (String keyEvent : keyEvents) {
-                if (StringUtils.isBlank(keyEvent)) {
-                    continue;
-                }
-                if (!keyEventCovered(normalizedOriginal, keyEvent)) {
-                    continue;
-                }
-                if (!keyEventCovered(normalizedRevised, keyEvent)) {
-                    missing.add(keyEvent);
-                }
-            }
+            // 逐条判定（含"原稿未覆盖的不强求"这条放行规则）统一走 PatchIntegrityPolicy，
+            // 与段落密度挤水路径共用同一份实现——两处各写一份正是漂移的来源
+            List<String> missing = PatchIntegrityPolicy.lostEvents(originalContent, revised.getContent(), keyEvents);
             if (missing.size() > REVISE_ALLOWED_EVENT_LOSS) {
                 return "修订稿缺失关键事件：" + String.join("；", missing);
             }
@@ -493,11 +483,6 @@ public class ChapterReviseService {
         }
 
         return null;
-    }
-
-    /** 关键事件覆盖判定统一走 PlanAdherencePolicy（与大纲偏离检测同口径：LCS ≥ 4 字） */
-    private boolean keyEventCovered(String normalizedContent, String keyEvent) {
-        return PlanAdherencePolicy.covered(normalizedContent, keyEvent);
     }
 
     /**

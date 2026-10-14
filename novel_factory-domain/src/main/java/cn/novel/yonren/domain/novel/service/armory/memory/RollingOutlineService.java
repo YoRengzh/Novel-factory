@@ -591,7 +591,7 @@ public class RollingOutlineService {
         }
 
         // 进度对齐块：本阶段窗口覆盖的大纲段与里程碑——蓝图任务必须服务大纲路标。
-        // 此前 chapterGoal（作者的分章预算）从不进蓝图 prompt，规划层在 4 岁弄堂上写"9 岁华杯赛"路标而无人对表。
+        // 此前 chapterGoal（作者的分章预算）从不进蓝图 prompt，规划层在 4 岁巷子上写"9 岁华杯赛"路标而无人对表。
         // chapterGoal 无结构（散文大纲/解析失败）时豁免——与体检的进度对齐指标同源同容错。
         if (storyContext != null && StringUtils.isNotBlank(storyContext.getChapterGoal())) {
             OutlineSegmentParser.Outline outline = OutlineSegmentParser.parse(storyContext.getChapterGoal());
@@ -735,7 +735,7 @@ public class RollingOutlineService {
         }
         sb.append("\n【要求】\n")
                 .append("1. stageGoal：1-2 句，描述本阶段结束时故事应到达的状态，必须服务于故事大纲的方向。\n")
-                .append("2. tasks：3-6 条里程碑，必须是状态型目标（如\"主角突破至筑基期\"\"揭开古镜来历的一半\"\"与沈家关系转为敌对\"），")
+                .append("2. tasks：3-6 条里程碑，必须是状态型目标（如\"主角突破至筑基期\"\"揭开某关键物来历的一半\"\"与某世家关系转为敌对\"），")
                 .append("严禁写成活动配额（如\"安排3场战斗\"\"回收5个伏笔\"）。\n")
                 .append("3. carriedTasks：对【上一版阶段蓝图】中每条未完成任务逐条结转——已完成标\"完成\"，")
                 .append("部分推进标\"进行中\"并在 note 注明进展，决定不再推进标\"放弃\"并在 note 注明理由；")

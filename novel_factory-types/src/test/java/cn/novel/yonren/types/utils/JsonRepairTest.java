@@ -41,8 +41,8 @@ class JsonRepairTest {
 
     @Test
     void extractStringField_plainValue() {
-        String raw = "{\"summary\":\"林尘深入废矿。\",\"other\":1}";
-        assertEquals("林尘深入废矿。", JsonRepair.extractStringField(raw, "summary"));
+        String raw = "{\"summary\":\"小陈深入废矿。\",\"other\":1}";
+        assertEquals("小陈深入废矿。", JsonRepair.extractStringField(raw, "summary"));
     }
 
     @Test
