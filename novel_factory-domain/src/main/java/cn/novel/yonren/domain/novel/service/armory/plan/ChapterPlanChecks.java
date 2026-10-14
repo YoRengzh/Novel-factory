@@ -487,23 +487,7 @@ public final class ChapterPlanChecks {
      */
     static final int SCENE_REPLAY_MIN_MATCH = 10;
 
-    /**
-     * **跨章场景重演校验**：段内任意两章（**不限于相邻**）的关键事件若共享一段较长的连续文本，
-     * 判为同一场景/同一动作被安排了两遍；悬念档位与章级推进字段之间同样比对。
-     *
-     * <p><b>为什么必须新增</b>：现有去重只看**相邻**两章且要求**逐字相同**，两种逃逸同时存在：
-     * ①相隔两章的同一场景；②在共用原文后**追加一句**本章子项——后者恰是 prompt 自己建议的
-     * 写法（"档位原文之后附本章独有的推进子项"），等于给出了绕过检查的标准姿势。
-     *
-     * <p><b>为什么用归一化 LCS 而不是相似度</b>：{@code UsedPatternPolicy} 记着这条教训——
-     * 同一套路的 3-gram Jaccard 只有 0.02-0.09，抓不到；结构化标签或归一化 LCS 才行。
-     *
-     * <p>软闸门：与其它推进校验同款——带反馈重规划一次，二次仍不过则告警放行。
-     *
-     * @param suspenseLadder 档位表，用于把已命中的档位原文从推进指纹中剥离（见
-     *                       {@link #advanceFingerprint}）；无蓝图/老数据传 null——届时档位部分
-     *                       不剥离，行为与旧版一致
-     */
+
     public static String validateSceneReplay(List<ChapterPlanItemEntity> chapters) {
         return validateSceneReplay(chapters, null);
     }
