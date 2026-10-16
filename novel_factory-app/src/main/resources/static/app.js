@@ -1382,6 +1382,8 @@
                     + '<button type="button" class="btn-export" data-format="txt"' + exportDisabled + ' title="每章一个文件打包下载，解压即文件夹">导出TXT</button>'
                     + '<button type="button" class="btn-export" data-format="md"' + exportDisabled + ' title="每章一个 Markdown 文件打包下载，解压即文件夹">导出MD</button>'
                     + '<button type="button" class="btn-export" data-format="docx"' + exportDisabled + ' title="每章一个 Word 文件打包下载，解压即文件夹">导出Word</button>'
+                    + '<button type="button" class="btn-export btn-danger" data-delete="1" data-title="' + esc(s.novelTitle)
+                    + '" title="删除这本小说（正文、记忆、向量索引一并删除，不可恢复）">删除</button>'
                     + '</div></div>'
                     + badge + '</div>';
             }).join('');
@@ -1395,12 +1397,45 @@
             storiesDiv.querySelectorAll('.btn-export').forEach(function (btn) {
                 btn.addEventListener('click', function (e) {
                     e.stopPropagation();
+                    if (btn.dataset.delete) {
+                        deleteStory(btn.closest('.story-card').dataset.dir, btn.dataset.title, btn);
+                        return;
+                    }
                     downloadBookExport(btn.closest('.story-card').dataset.dir, btn.dataset.format, btn);
                 });
             });
         })
         .catch(function (err) {
             storiesDiv.innerHTML = '<p class="empty-hint">加载失败：' + esc(err.message) + '</p>';
+        });
+    }
+
+    // 删除故事：二次确认（不可恢复）→ 后端删目录 + 清该故事的记忆向量集合 → 刷新列表。
+    // 若当前正打开这本的章节视图，删完回到故事库（否则会停在一个已不存在的故事上）
+    function deleteStory(dir, title, btn) {
+        var name = title || dir;
+        if (!confirm('确认删除《' + name + '》？\n\n'
+                + '将删除这本小说的全部正文、章节记忆、蓝图账本与向量索引——'
+                + '操作不可恢复，无法撤销。\n\n'
+                + '如需留档，请先点「导出TXT/MD/Word」备份。')) {
+            return;
+        }
+        if (btn) { btn.disabled = true; }
+        fetchJson('/api/stories/' + encodeURIComponent(dir) + '/delete', { method: 'POST' })
+        .then(function () {
+            showToast('已删除：' + name);
+            // 当前浏览的正是被删的故事：退回故事库，避免章节区停留在已删数据上
+            if (currentStoryDir === dir) {
+                currentStoryDir = null;
+                chapterListDiv.classList.add('hidden');
+                workbenchOverview.classList.add('hidden');
+                libraryList.classList.remove('hidden');
+            }
+            loadStories();
+        })
+        .catch(function (err) {
+            showToast('删除失败：' + err.message);
+            if (btn) { btn.disabled = false; }
         });
     }
 

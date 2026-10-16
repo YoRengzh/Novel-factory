@@ -604,6 +604,17 @@ textarea { resize: vertical; line-height: 1.7; }
     cursor: not-allowed;
 }
 
+/* 删除按钮：与导出按钮同尺寸，用错误色标示不可恢复操作 */
+.btn-danger {
+    border-color: rgba(248, 113, 113, 0.4);
+    color: var(--error);
+}
+
+.btn-danger:hover:not(:disabled) {
+    border-color: var(--error);
+    background: rgba(248, 113, 113, 0.08);
+}
+
 .active-badge {
     font-family: var(--mono);
     font-size: 10px;

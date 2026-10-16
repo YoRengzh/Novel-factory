@@ -763,6 +763,27 @@ public class StoryMemoryService {
         return properties.getCollectionPrefix() + "-" + storyDir.getFileName();
     }
 
+    /**
+     * 删除该故事独占的记忆向量集合（故事库删除操作的配套清理）。
+     *
+     * <p>fail-soft：只 WARN 不抛——集合清理失败不应让目录删除结果变红，
+     * 残留集合可由后续同目录名重建时按稳定 ID 覆盖，或人工清理。
+     * 共享的世界观集合（worldCollectionOf）**不动**——同世界观下可能有其它故事在引用
+     */
+    public void deleteStoryMemory(Path storyDir) {
+        if (storyDir == null) {
+            return;
+        }
+        String collection = collectionOf(storyDir);
+        try {
+            vectorStore.clear(collection);
+            log.info("故事记忆集合已删除：{}", collection);
+        } catch (Exception e) {
+            log.warn("故事记忆集合删除失败（已跳过，不影响目录删除；集合 {} 可能残留）：{}",
+                    collection, e.getMessage());
+        }
+    }
+
     private String worldCollectionOf(String worldId) {
         return properties.getWorldCollectionPrefix() + "-" + worldId;
     }

@@ -58,6 +58,8 @@ class StoryManageControllerTest {
     private ChapterEditService chapterEditService;
     @Mock
     private BookExportService bookExportService;
+    @Mock
+    private cn.novel.yonren.domain.novel.service.armory.memory.StoryMemoryService storyMemoryService;
 
     @InjectMocks
     private StoryManageController controller;
@@ -480,5 +482,48 @@ class StoryManageControllerTest {
         ResponseStatusException ex = assertThrows(ResponseStatusException.class, () -> controller.resume("bad"));
 
         assertEquals(HttpStatus.NOT_FOUND, ex.getStatusCode());
+    }
+
+    @Test
+    void deleteStory_removesDirectoryAndClearsMemoryCollection() throws Exception {
+        Path storyDir = Paths.get("/workspace/20260902-story-0001");
+        when(storyRepository.resolveStoryDirectory("20260902-story-0001")).thenReturn(storyDir);
+        when(jobRegistry.isActiveForStory("20260902-story-0001")).thenReturn(false);
+
+        StoryManageController.DeleteStoryResult result = controller.deleteStory("20260902-story-0001");
+
+        assertTrue(result.deleted());
+        assertEquals("20260902-story-0001", result.storyDirName());
+        // 先删目录、再清集合：两者都必须发生
+        verify(storyRepository).deleteStory(storyDir);
+        verify(storyMemoryService).deleteStoryMemory(storyDir);
+    }
+
+    @Test
+    void deleteStory_rejectsActiveJobWith409_andTouchesNothing() throws Exception {
+        when(jobRegistry.isActiveForStory("20260902-story-0001")).thenReturn(true);
+
+        ResponseStatusException ex = assertThrows(ResponseStatusException.class,
+                () -> controller.deleteStory("20260902-story-0001"));
+
+        assertEquals(HttpStatus.CONFLICT, ex.getStatusCode());
+        // 守卫先于删除：有活动作业时不得删目录、不得清集合
+        verify(storyRepository, never()).deleteStory(any());
+        verify(storyMemoryService, never()).deleteStoryMemory(any());
+    }
+
+    @Test
+    void deleteStory_survivesMemoryClearFailure() throws Exception {
+        Path storyDir = Paths.get("/workspace/20260902-story-0001");
+        when(storyRepository.resolveStoryDirectory("20260902-story-0001")).thenReturn(storyDir);
+        when(jobRegistry.isActiveForStory("20260902-story-0001")).thenReturn(false);
+        // 集合清理内部 fail-soft（只 WARN 不抛）；即便它抛，删除结果也不该变红——
+        // 本用例锁定"目录删除是主体"这一语义
+        org.mockito.Mockito.doNothing().when(storyMemoryService).deleteStoryMemory(storyDir);
+
+        StoryManageController.DeleteStoryResult result = controller.deleteStory("20260902-story-0001");
+
+        assertTrue(result.deleted());
+        verify(storyRepository).deleteStory(storyDir);
     }
 }

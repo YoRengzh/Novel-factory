@@ -1203,4 +1203,11 @@ public class StoryRepository implements IStoryRepository {
             }
         }
     }
+
+    @Override
+    public void deleteStory(Path storyDir) throws IOException {
+        // 持每故事锁：删除与逐章落盘是互斥的，不持锁会删到一半时写操作又建出新文件
+        withStoryLock(storyDir, () -> deleteRecursively(storyDir));
+        log.info("故事目录已删除：{}", storyDir.getFileName());
+    }
 }

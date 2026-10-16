@@ -319,4 +319,16 @@ public interface IStoryRepository {
      */
     void pruneCheckpoints(Path storyDir) throws Exception;
 
+    /**
+     * **删除整个故事目录**（故事库的删除操作，不可恢复）。
+     *
+     * <p>写语义：持该故事的**每故事锁**执行——删除是最重的写操作，不持锁会与正在落盘的
+     * 章节写入竞争（半个目录被删、写操作继续创建新文件）。调用方负责在删除前确认该故事
+     * **没有运行中的作业**（{@code JobRegistry.isActiveForStory}），仓储层看不到作业状态。
+     *
+     * <p>storyDir 为 resolveStoryDirectory 校验后的路径对象（校验已保证它位于 workspace 下且
+     * 是直接子目录，不会误删 workspace 之外的路径）
+     */
+    void deleteStory(Path storyDir) throws Exception;
+
 }

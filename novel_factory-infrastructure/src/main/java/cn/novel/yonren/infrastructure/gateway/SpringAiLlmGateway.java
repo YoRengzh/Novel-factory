@@ -147,6 +147,41 @@ public class SpringAiLlmGateway implements LlmGateway {
             try {
                 ChatResponse response = callOnce(effective, selected, call);
                 String content = response.getResult().getOutput().getText();
+                // 空回复/思考吃穿预算视为失败，换链上备选重试：思考型模型的思考 token 从输出预算中
+                // 扣除，思考失控时会把预算全烧在思维链上，content 只剩空串或极短残片，却以
+                // HTTP 200 记账成功——调用方拿残片按"解析失败"静默降级，备选链因"无异常"从未触发。
+                // 判据以 usage 为主、不依赖 finish_reason：预算烧穿时 finish_reason 可能仍报正常结束。
+                // 双条件同时成立才判失败：completionTokens ≥ 90% 上限 且 正文 < 500 字符——
+                // 前者单独成立只是长输出正常撞上限（属截断，走调用方既有解析失败路径）。
+                //
+                // ⚠️ 失败账须带真实 usage：烧掉的 token 是真实消耗，必须进预算熔断的账，
+                // 否则反复烧穿对熔断不可见。此处记失败账后直接换下一站，不走 catch 的 null usage 路径。
+                //
+                // ⚠️ 仅当链上还有备选时才换：无备选时保持旧行为（返回空串交调用方 fail-soft），
+                // 否则会给各调用点引入一类它们从未处理过的异常。
+                Usage usage = response.getMetadata().getUsage();
+                long completionTokens = usage == null || usage.getCompletionTokens() == null
+                        ? 0L : usage.getCompletionTokens();
+                Long effectiveMaxTokens = call.getMaxTokens() != null
+                        ? call.getMaxTokens().longValue() : selected.getMaxTokens();
+                boolean burnedBudget = effectiveMaxTokens != null && effectiveMaxTokens > 0
+                        && completionTokens * 10 >= effectiveMaxTokens * 9
+                        && StringUtils.length(content) < 500;
+                if ((StringUtils.isBlank(content) || burnedBudget) && i + 1 < chain.size()) {
+                    recordUsage(effective, selected, call, null, System.currentTimeMillis() - start,
+                            usage, new IllegalStateException("模型返回空内容或思考吃穿输出预算：scene="
+                                    + call.getScene() + ", model=" + selected.getModel()
+                                    + ", completionTokens=" + completionTokens + "/" + effectiveMaxTokens
+                                    + ", contentChars=" + StringUtils.length(content)));
+                    log.warn("场景 {} 主模型 {} 思考吃穿输出预算（completionTokens={}/{}，contentChars={}，"
+                                    + "finishReason={}），已记失败账，降级到备选模型 {}",
+                            call.getScene(), selected.getModel(), completionTokens, effectiveMaxTokens,
+                            StringUtils.length(content),
+                            response.getResult().getMetadata() == null ? "-"
+                                    : String.valueOf(response.getResult().getMetadata().getFinishReason()),
+                            chain.get(i + 1).getModel());
+                    continue;
+                }
                 recordUsage(effective, selected, call, content, System.currentTimeMillis() - start,
                         response.getMetadata().getUsage(), null);
                 return content;

@@ -75,6 +75,10 @@ public class StoryManageController {
     @Resource
     private ChapterMemoryService chapterMemoryService;
 
+    /** 删除故事时清该故事独占的记忆向量集合（共享世界观集合不动） */
+    @Resource
+    private cn.novel.yonren.domain.novel.service.armory.memory.StoryMemoryService storyMemoryService;
+
     @Resource
     private cn.novel.yonren.domain.novel.service.armory.quality.BatchHealthService batchHealthService;
 
@@ -563,6 +567,43 @@ public class StoryManageController {
             log.error("事实时间线查询失败：{} 实体 {}", storyDirName, name, e);
             throw new ResponseStatusException(HttpStatus.INTERNAL_SERVER_ERROR,
                     "事实时间线查询失败：" + e.getMessage());
+        }
+    }
+
+    /** 删除故事的结果：必须带 JSON 体（前端 fetchJson 按 Content-Type 判别，void 空体会被误报为服务不可用） */
+    public record DeleteStoryResult(boolean deleted, String storyDirName) {
+    }
+
+    /**
+     * **删除故事**（故事库的删除操作，不可恢复）：删故事目录 + 清该故事独占的记忆向量集合。
+     *
+     * <p><b>为什么先守卫作业</b>：运行中/审批挂起的作业持有该故事的路径与上下文，
+     * 删目录后它会继续往不存在的目录写（甚至重建出半个目录）。有活动作业时直接 409，
+     * 让用户先等完成或取消——这与回滚端点的守卫同款。
+     *
+     * <p>删除顺序：**先删目录、再清集合**。目录是用户可见的主体，先做；
+     * 集合清理是 fail-soft（{@code deleteStoryMemory} 内部只 WARN），失败不影响删除结果。
+     *
+     * <p>共享的世界观集合 {@code novel-world-<worldId>} **不动**——同世界观下可能有其它故事在引用。
+     */
+    @PostMapping("/{storyDirName}/delete")
+    public DeleteStoryResult deleteStory(@PathVariable("storyDirName") String storyDirName) {
+        if (jobRegistry.isActiveForStory(storyDirName)) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT,
+                    "该故事有运行中的作业，请等待完成或取消后再删除");
+        }
+        Path storyDir = resolveStoryDir(storyDirName);
+        try {
+            storyRepository.deleteStory(storyDir);
+            storyMemoryService.deleteStoryMemory(storyDir);
+            log.info("故事已删除：{}", storyDirName);
+            return new DeleteStoryResult(true, storyDirName);
+        } catch (ResponseStatusException e) {
+            throw e;
+        } catch (Exception e) {
+            log.error("删除故事失败：{}", storyDirName, e);
+            throw new ResponseStatusException(HttpStatus.INTERNAL_SERVER_ERROR,
+                    "删除故事失败：" + e.getMessage());
         }
     }
 
