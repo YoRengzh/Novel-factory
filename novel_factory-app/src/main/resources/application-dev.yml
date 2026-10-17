@@ -15,12 +15,18 @@ thread:
 # 配置来源；application-local.yml 为开发者本地覆盖（已被 .gitignore 排除，可放密钥），
 # 缺失时 optional 前缀保证不报错。它排在默认值之后，因此能覆盖 novel-generation.yml。
 spring:
+  web:
+    resources:
+      cache:
+        cachecontrol:
+          no-cache: true
   config:
     import:
       - classpath:novel-generation.yml
       - optional:classpath:application-local.yml
+      - optional:file:./config/application-local.yml
 
-# 日志
+      # 日志
 logging:
   level:
     root: info

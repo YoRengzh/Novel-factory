@@ -49,7 +49,8 @@ public class QdrantVectorStore implements VectorStore {
     private static final long TIMEOUT_SECONDS = 30;
     /** 滚动分页页大小：对账要把整集合读回来（不含向量，单点很轻），256 足够少批次 */
     private static final int SCROLL_PAGE_SIZE = 256;
-
+    //熔断到哪个时刻
+    private volatile long circuitOpenUntilMs = 0;
     /**
      * 单次 upsert 的点数上限：1024 维 float 单点约 4KB，取 100 点 ≈ 400KB/条消息，
      * 远低于 gRPC 默认 4MB 上限。不分批时长故事重建集合时（188 章 ≈ 900 点 ≈ 3.7MB）
@@ -75,8 +76,14 @@ public class QdrantVectorStore implements VectorStore {
 
     /** Qdrant 初始化失败后 client 为 null，各操作抛出可被降级链捕获的异常 */
     private QdrantClient requireClient() {
+        long now = System.currentTimeMillis();
         if (client == null) {
             throw new IllegalStateException("Qdrant 客户端不可用（初始化时连接失败）");
+        }
+        if (now < circuitOpenUntilMs) {
+            // 熔断期内：不再尝试连接，直接抛——调用方（StoryMemoryService）按既有降级链处理
+            throw new IllegalStateException("Qdrant 熔断中(连接失败后的冷静期，"
+                    + ((circuitOpenUntilMs - now) / 1000) + " 秒后重试)");
         }
         return client;
     }
@@ -117,6 +124,7 @@ public class QdrantVectorStore implements VectorStore {
             Thread.currentThread().interrupt();
             throw new IllegalStateException("向量集合创建被中断", e);
         } catch (Exception e) {
+            tripCircuitOnConnectionFailure(e);
             // 已存在属预期（并发竞态）；真实故障由随后的 upsert 暴露
             log.info("向量集合 {} 创建跳过（已存在或异常）：{}", collection, e.getMessage());
         }
@@ -179,6 +187,7 @@ public class QdrantVectorStore implements VectorStore {
                 Thread.currentThread().interrupt();
                 throw new IllegalStateException("向量写入被中断", e);
             } catch (Exception e) {
+                tripCircuitOnConnectionFailure(e);
                 throw new IllegalStateException("向量写入失败（已写入 " + written + "/" + points.size()
                         + " 点）: " + e.getMessage(), e);
             }
@@ -198,6 +207,7 @@ public class QdrantVectorStore implements VectorStore {
             Thread.currentThread().interrupt();
             throw new IllegalStateException("向量集合清空被中断", e);
         } catch (Exception e) {
+            tripCircuitOnConnectionFailure(e);
             throw new IllegalStateException("向量集合清空失败: " + e.getMessage(), e);
         }
     }
@@ -225,6 +235,7 @@ public class QdrantVectorStore implements VectorStore {
             Thread.currentThread().interrupt();
             throw new IllegalStateException("向量检索被中断", e);
         } catch (Exception e) {
+            tripCircuitOnConnectionFailure(e);
             throw new IllegalStateException("向量检索失败: " + e.getMessage(), e);
         }
     }
@@ -266,6 +277,7 @@ public class QdrantVectorStore implements VectorStore {
             Thread.currentThread().interrupt();
             throw new IllegalStateException("向量列举被中断", e);
         } catch (Exception e) {
+            tripCircuitOnConnectionFailure(e);
             throw new IllegalStateException("向量列举失败: " + e.getMessage(), e);
         }
     }
@@ -290,6 +302,7 @@ public class QdrantVectorStore implements VectorStore {
             Thread.currentThread().interrupt();
             throw new IllegalStateException("向量删除被中断", e);
         } catch (Exception e) {
+            tripCircuitOnConnectionFailure(e);
             throw new IllegalStateException("向量删除失败: " + e.getMessage(), e);
         }
     }
@@ -306,6 +319,7 @@ public class QdrantVectorStore implements VectorStore {
             Thread.currentThread().interrupt();
             throw new IllegalStateException("向量计数被中断", e);
         } catch (Exception e) {
+            tripCircuitOnConnectionFailure(e);
             throw new IllegalStateException("向量计数失败: " + e.getMessage(), e);
         }
     }
@@ -331,6 +345,15 @@ public class QdrantVectorStore implements VectorStore {
             }
         });
         return result;
+    }
+
+    /** 连接级失败（UNAVAILABLE/ConnectException）→ 打开熔断 3 分钟；其他异常不熔断（可能是欠费/鉴权，重试有意义） */
+    private void tripCircuitOnConnectionFailure(Exception e) {
+        String msg = String.valueOf(e.getCause() != null ? e.getCause() : e);
+        if (msg.contains("UNAVAILABLE") || msg.contains("Connect") || msg.contains("Connection refused")) {
+            circuitOpenUntilMs = System.currentTimeMillis() + TimeUnit.MINUTES.toMillis(3);
+            log.warn("Qdrant 连接失败，进入 10 分钟熔断期（期间向量链路直接降级，不再尝试连接）：{}", msg);
+        }
     }
 
 }

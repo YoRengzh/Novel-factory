@@ -156,7 +156,7 @@ story:
     # 局限：跨阶段批次的计划是惰性分段生成的，本门只拦得到【首段】计划。
     enabled: false
     # 挂起等待裁决的时长（秒）。因不占线程可放宽到小时级，用户不必守在屏幕前
-    timeout-seconds: 600
+    timeout-seconds: 120
     # 超时处置：AUTO_APPROVE = 按 AI 原版计划继续（等同退化成黑盒模式）/ ABORT = 中止本批。
     # 刻意只有两种：超时必须是"已有状态之一"，否则会引入第三种终局语义
     timeout-action: AUTO_APPROVE
