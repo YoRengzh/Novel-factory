@@ -30,6 +30,7 @@ import io.qdrant.client.grpc.Points.WithVectorsSelector;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Component;
 
 import java.util.ArrayList;
@@ -41,8 +42,10 @@ import java.util.concurrent.TimeUnit;
 /**
  * VectorStore 的 Qdrant 适配实现（gRPC，6334）：领域层 curl 三动作的 Java 翻译。
  * 集合维度/距离度量首次创建定死，已存在则跳过创建（冲突维度会在 upsert 时由 Qdrant 报错暴露）。
+ * v0.2 起为进阶选项：默认走内置 {@link EmbeddedVectorStore}，本实现经 story.vector-store.mode=qdrant 启用。
  */
 @Component
+@ConditionalOnProperty(name = "story.vector-store.mode", havingValue = "qdrant", matchIfMissing = true)
 public class QdrantVectorStore implements VectorStore {
 
     private static final Logger log = LoggerFactory.getLogger(QdrantVectorStore.class);
