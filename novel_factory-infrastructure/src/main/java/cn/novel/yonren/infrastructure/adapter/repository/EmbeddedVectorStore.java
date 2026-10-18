@@ -56,7 +56,7 @@ import java.util.concurrent.ConcurrentHashMap;
  * 由根目录配置驱动（默认 data/vector-store），不耦合 StoryRepository 的目录结构细节。
  */
 @Component
-@ConditionalOnProperty(name = "story.vector-store.mode", havingValue = "embedded")
+@ConditionalOnProperty(name = "story.vector-store.mode", havingValue = "embedded", matchIfMissing = true)
 public class EmbeddedVectorStore implements VectorStore {
 
     private static final Logger log = LoggerFactory.getLogger(EmbeddedVectorStore.class);

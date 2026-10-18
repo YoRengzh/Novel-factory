@@ -45,7 +45,7 @@ import java.util.concurrent.TimeUnit;
  * v0.2 起为进阶选项：默认走内置 {@link EmbeddedVectorStore}，本实现经 story.vector-store.mode=qdrant 启用。
  */
 @Component
-@ConditionalOnProperty(name = "story.vector-store.mode", havingValue = "qdrant", matchIfMissing = true)
+@ConditionalOnProperty(name = "story.vector-store.mode", havingValue = "qdrant")
 public class QdrantVectorStore implements VectorStore {
 
     private static final Logger log = LoggerFactory.getLogger(QdrantVectorStore.class);
