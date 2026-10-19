@@ -3,7 +3,7 @@
 <head data-page-node-id="sawhLKoxbEcXVNkeWqEEIr">
     <meta charset="UTF-8" data-page-node-id="QYXBahDQlfcAP2827FKLDo">
     <meta name="viewport" content="width=device-width, initial-scale=1.0" data-page-node-id="8sLYgkHO9NSfcylfa8tyUO">
-    <title>Novel Factory · 小说装配线</title>
+    <title>StartDrafts</title>
     <link rel="stylesheet" href="style.css" data-page-node-id="njce1GWWRJakUhAUukzdHE">
 </head>
 <body data-page-node-id="HR1gysp1ogdC9U0cmacZqK">
@@ -15,12 +15,12 @@
 
             <div class="login-card" data-page-node-id="VteLaiJWUChKOu6GJTxMqV">
                 <div class="logo" data-page-node-id="PUx2kgguSsC0i7B8nn58hE">
-                    <span class="neon-text" data-page-node-id="2vo1bMLsuM2wDLa5leBgV8">NOVEL</span>
-                    <span class="neon-text" data-page-node-id="9NORpx8M3f9QKG39UkMmXd">FACTORY</span>
+                    <span class="neon-text" data-page-node-id="2vo1bMLsuM2wDLa5leBgV8">Start</span>
+                    <span class="neon-text" data-page-node-id="9NORpx8M3f9QKG39UkMmXd">Drafts</span>
                 </div>
 
                 <h1 data-page-node-id="ii1AJuDTBRZRMTIEOYeqcq">欢迎回来</h1>
-                <p class="subtitle" data-page-node-id="t5XuyM6g6j4MmM6984n0LP">登录你的小说装配线</p>
+                <p class="subtitle" data-page-node-id="t5XuyM6g6j4MmM6984n0LP">登录你的引星</p>
 
                 <form id="login-form" data-page-node-id="9SABeh662jItKy7xS8ladz">
                     <div class="input-group" data-page-node-id="UH7OgU8aQLAeKguk4qUnms">
@@ -55,8 +55,8 @@
             <div class="header-content" data-page-node-id="G6TRtfKlvH3bYWtWMpA3ee">
                 <div class="wordmark" data-page-node-id="NgX300WOTNdOTAG0N9kXGk">
                     <span class="mark-dot" data-page-node-id="dtVwudsDISh7drHD5wJcJ9"></span>
-                    <span class="mark-zh" data-page-node-id="BkFSdbamTGkQc1O1VPhPCD">小说装配线</span>
-                    <span class="mark-en" data-page-node-id="sriEuepWJDJOoCQfW9W8fS">NOVEL·ASSEMBLY·LINE</span>
+                    <span class="mark-zh" data-page-node-id="BkFSdbamTGkQc1O1VPhPCD">引星</span>
+                    <span class="mark-en" data-page-node-id="sriEuepWJDJOoCQfW9W8fS">StartDrafts</span>
                 </div>
                 <nav class="app-nav" data-page-node-id="aDBdGMnUnvGsWRomhhVEQJ">
                     <button class="nav-tab active" data-tab="generate" data-page-node-id="r5psi54G5YmkSyxSlmKxia">
@@ -406,6 +406,32 @@
                         <div class="form-actions">
                             <button type="submit" id="btn-save-embed" class="btn-primary">保 存 嵌 入 覆 盖</button>
                             <button type="button" id="btn-reset-embed" class="btn-secondary">清 除 嵌 入 覆 盖</button>
+                        </div>
+                    </form>
+                </div>
+
+                <div class="content-card">
+                    <div class="section-label">REFERENCE MODE</div>
+                    <h2 class="section-title">资料检索方式</h2>
+                    <p class="settings-hint">
+                        动态参考资料（写作技法/情节结构等）的挑选方式：
+                        <b>向量语义检索</b>按语义相似召回，更贴合当前章节意图（需在上方配置嵌入 Key）；
+                        <b>LLM 索引选择</b>让聊天模型读资料目录来挑，不需要向量设施。
+                        保存即生效、跨重启保留；切换后资料选择缓存自动按新模式重算。
+                    </p>
+                    <form id="reference-mode-form">
+                        <div class="form-grid">
+                            <div class="form-group full-width">
+                                <label for="reference_mode">检索方式</label>
+                                <select id="reference_mode">
+                                    <option value="vector">向量语义检索（推荐：需嵌入 Key）</option>
+                                    <option value="llm">LLM 索引选择（无向量设施时用）</option>
+                                </select>
+                            </div>
+                        </div>
+                        <div id="reference-mode-status" class="config-status hidden"></div>
+                        <div class="form-actions">
+                            <button type="submit" id="btn-save-reference-mode" class="btn-primary">保 存 检 索 方 式</button>
                         </div>
                     </form>
                 </div>

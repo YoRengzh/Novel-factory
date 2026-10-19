@@ -31,10 +31,13 @@ public class LlmConfigController {
     @Resource
     private StoryProperties storyProperties;
 
+    @Resource
+    private cn.novel.yonren.domain.novel.model.valobj.properties.ReferenceSelectorProperties referenceSelectorProperties;
+
     @GetMapping
     public LlmConfigDTO get() {
         try {
-            return llmRuntimeConfig.view(storyProperties);
+            return llmRuntimeConfig.view(storyProperties, referenceSelectorProperties.getMode());
         } catch (Exception e) {
             log.error("LLM 运行时配置读取失败", e);
             throw new ResponseStatusException(HttpStatus.INTERNAL_SERVER_ERROR, "配置读取失败：" + e.getMessage());
@@ -46,7 +49,7 @@ public class LlmConfigController {
         try {
             llmRuntimeConfig.save(request);
             // 保存后回全量视图（含场景矩阵），前端整页刷新当前生效状态
-            return llmRuntimeConfig.view(storyProperties);
+            return llmRuntimeConfig.view(storyProperties, referenceSelectorProperties.getMode());
         } catch (Exception e) {
             log.error("LLM 运行时配置保存失败", e);
             throw new ResponseStatusException(HttpStatus.INTERNAL_SERVER_ERROR, "配置保存失败：" + e.getMessage());

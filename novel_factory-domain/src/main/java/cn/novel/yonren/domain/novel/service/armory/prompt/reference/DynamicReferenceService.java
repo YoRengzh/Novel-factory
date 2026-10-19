@@ -28,6 +28,7 @@ public class DynamicReferenceService {
     private final VectorReferenceRetriever vectorReferenceRetriever;
     private final PromptRuleFileLoader fileLoader;
     private final ReferenceSelectorProperties selectorProperties;
+    private final cn.novel.yonren.domain.novel.service.armory.LlmRuntimeConfig llmRuntimeConfig;
 
     /** 选择结果缓存：LRU（accessOrder）+ 容量封顶；key 含索引哈希，资料更新即失效 */
     private final Map<String, List<PromptRule>> selectionCache = Collections.synchronizedMap(
@@ -81,12 +82,15 @@ public class DynamicReferenceService {
             selectionCache.put(cacheKey, rules);
         }
         log.info("动态资料装配完成，key: {}, 模式: {}, 选中 {} 份，注入 {} 条规则",
-                cacheKey, config.getMode(), selected.size(), rules.size());
+                cacheKey, llmRuntimeConfig.effectiveReferenceMode(config.getMode()), selected.size(), rules.size());
         return rules;
     }
 
     private boolean isVectorMode(ReferenceSelectorProperties config) {
-        return "vector".equalsIgnoreCase(config.getMode());
+        // 模式裁决：运行时覆盖（设置页「资料检索方式」开关）优先，未设置回退 yml 静态值。
+        // 只在这里判一次——检索/缓存键两处都经此方法与 effectiveMode()，改模式不散落
+        String mode = llmRuntimeConfig.effectiveReferenceMode(config.getMode());
+        return "vector".equalsIgnoreCase(mode);
     }
 
     /**
@@ -110,7 +114,7 @@ public class DynamicReferenceService {
                 + (ctx.getChapterNo() == null ? "-" : ctx.getChapterNo()) + "|"
                 + java.util.Objects.toString(ctx.getChapterBrief(), "") + "|"
                 + String.valueOf(baseUrl) + "|" + String.valueOf(model) + "|"
-                + selectorProperties.getMode() + "|"
+                + llmRuntimeConfig.effectiveReferenceMode(selectorProperties.getMode()) + "|"
                 + index.hashCode();
     }
 

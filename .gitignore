@@ -17,6 +17,9 @@ docs/workspace/
 # 发布构建产物（zip 与组装目录——由 tools/build-release.sh 与 package-release.sh 生成）
 dist/
 
+# Node/Electron 依赖（465MB，由 package-lock.json 锁定、npm install 重建——绝不可入库）
+node_modules/
+
 # 密钥与本地配置（含 API key，严禁入库）
 application-local.yml
 *.local.yml

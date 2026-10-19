@@ -2,6 +2,7 @@ package cn.novel.yonren.domain.novel.service.armory.prompt.reference;
 
 import cn.novel.yonren.domain.novel.model.valobj.StoryVO;
 import cn.novel.yonren.domain.novel.model.valobj.properties.ReferenceSelectorProperties;
+import cn.novel.yonren.domain.novel.service.armory.LlmRuntimeConfig;
 import cn.novel.yonren.domain.novel.service.armory.prompt.PromptRuleFileLoader;
 import cn.novel.yonren.domain.novel.service.armory.prompt.valobj.PromptContext;
 import cn.novel.yonren.domain.novel.service.armory.prompt.valobj.PromptRule;
@@ -36,6 +37,7 @@ class DynamicReferenceServiceTest {
     private VectorReferenceRetriever retriever;
     private PromptRuleFileLoader fileLoader;
     private ReferenceSelectorProperties properties;
+    private LlmRuntimeConfig llmRuntimeConfig;
     private DynamicReferenceService service;
 
     @BeforeEach
@@ -45,10 +47,28 @@ class DynamicReferenceServiceTest {
         retriever = mock(VectorReferenceRetriever.class);
         fileLoader = mock(PromptRuleFileLoader.class);
         properties = new ReferenceSelectorProperties();
-        service = new DynamicReferenceService(referenceIndexLoader, selector, retriever, fileLoader, properties);
+        llmRuntimeConfig = mock(LlmRuntimeConfig.class);
+        when(llmRuntimeConfig.effectiveReferenceMode(anyString()))
+                .thenAnswer(inv -> inv.getArgument(0));   // 默认透传 yml 模式（无覆盖）
+        service = new DynamicReferenceService(referenceIndexLoader, selector, retriever, fileLoader,
+                properties, llmRuntimeConfig);
 
         when(referenceIndexLoader.getIndex()).thenReturn(List.of());
         when(fileLoader.load(anyString())).thenReturn("资料内容");
+    }
+
+    @Test
+    void runtimeOverrideDecidesMode() {
+        // 运行时覆盖 = llm：即使 yml 是 vector，也走 LLM 选择器（不触发向量检索）
+        properties.setMode("vector");
+        when(llmRuntimeConfig.effectiveReferenceMode("vector")).thenReturn("llm");
+        when(selector.select(any(), any(), any(), anyList())).thenReturn(List.of("a"));
+
+        List<PromptRule> rules = service.selectAsRules(null, PromptScene.CHAPTER_PLAN, planCtx());
+
+        verify(retriever, never()).retrieve(any(), any(), any());
+        verify(selector, times(1)).select(any(), any(), any(), anyList());
+        assertEquals(1, rules.size());
     }
 
     @Test

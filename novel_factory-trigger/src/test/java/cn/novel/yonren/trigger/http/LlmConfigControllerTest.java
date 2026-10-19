@@ -16,6 +16,7 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.same;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -32,12 +33,17 @@ class LlmConfigControllerTest {
     @Mock
     private StoryProperties storyProperties;
 
+    @Mock
+    private cn.novel.yonren.domain.novel.model.valobj.properties.ReferenceSelectorProperties referenceSelectorProperties;
+
     @InjectMocks
     private LlmConfigController controller;
 
     @BeforeEach
     void setUp() {
         MockitoAnnotations.openMocks(this);
+        // controller 的两个 view 调用点都会读 selector 静态模式——默认 stub 掉，个别用例再覆盖
+        when(referenceSelectorProperties.getMode()).thenReturn("vector");
     }
 
     @Test
@@ -48,7 +54,8 @@ class LlmConfigControllerTest {
         dto.setModel("runtime-model");
         dto.setHasKey(true);
         dto.setApiKeyMasked("sk-***key1");
-        when(llmRuntimeConfig.view(same(storyProperties))).thenReturn(dto);
+        when(referenceSelectorProperties.getMode()).thenReturn("vector");
+        when(llmRuntimeConfig.view(same(storyProperties), eq("vector"))).thenReturn(dto);
 
         LlmConfigDTO result = controller.get();
 
@@ -56,7 +63,7 @@ class LlmConfigControllerTest {
         assertTrue(result.isConfigured());
         assertEquals("https://runtime.example.com", result.getBaseUrl());
         assertEquals("sk-***key1", result.getApiKeyMasked());
-        verify(llmRuntimeConfig).view(same(storyProperties));
+        verify(llmRuntimeConfig).view(same(storyProperties), same("vector"));
     }
 
     @Test
@@ -71,7 +78,7 @@ class LlmConfigControllerTest {
         fullView.setBaseUrl("https://new.example.com");
         fullView.setModel("new-model");
         when(llmRuntimeConfig.save(any(LlmConfigSaveRequestDTO.class))).thenReturn(new LlmConfigDTO());
-        when(llmRuntimeConfig.view(same(storyProperties))).thenReturn(fullView);
+        when(llmRuntimeConfig.view(same(storyProperties), eq("vector"))).thenReturn(fullView);
 
         LlmConfigDTO result = controller.save(request);
 
@@ -79,7 +86,7 @@ class LlmConfigControllerTest {
         assertEquals("new-model", result.getModel());
         verify(llmRuntimeConfig).save(request);
         // 保存后回全量视图（含场景矩阵），前端整页刷新当前生效状态
-        verify(llmRuntimeConfig).view(same(storyProperties));
+        verify(llmRuntimeConfig).view(same(storyProperties), same("vector"));
     }
 
     @Test
@@ -91,7 +98,7 @@ class LlmConfigControllerTest {
         when(llmRuntimeConfig.save(any(LlmConfigSaveRequestDTO.class))).thenReturn(cleared);
         LlmConfigDTO fullView = new LlmConfigDTO();
         fullView.setConfigured(false);
-        when(llmRuntimeConfig.view(same(storyProperties))).thenReturn(fullView);
+        when(llmRuntimeConfig.view(same(storyProperties), eq("vector"))).thenReturn(fullView);
 
         LlmConfigDTO result = controller.save(reset);
 
@@ -102,7 +109,7 @@ class LlmConfigControllerTest {
     @Test
     void get_storyPropertiesPassedThroughUnchanged() {
         LlmConfigDTO dto = new LlmConfigDTO();
-        when(llmRuntimeConfig.view(same(storyProperties))).thenReturn(dto);
+        when(llmRuntimeConfig.view(same(storyProperties), eq("vector"))).thenReturn(dto);
 
         assertSame(dto, controller.get());
     }

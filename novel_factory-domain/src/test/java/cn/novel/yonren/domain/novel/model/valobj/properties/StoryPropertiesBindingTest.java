@@ -35,8 +35,10 @@ class StoryPropertiesBindingTest {
                         "story.prompt.reference-selector", ReferenceSelectorProperties.class)
                 .orElseThrow(() -> new AssertionError("story.prompt.reference-selector 绑定失败"));
 
-        assertEquals("llm", selector.getMode(),
-                "默认配置必须允许仅使用 ChatGPT 登录；配置独立 Embedding Key 后可显式切换为 vector");
+        // v0.2 起默认 vector：内置向量库成为标配，语义检索全量可用（仅 ChatGPT 订阅授权等
+        // 无 embedding 场景才需要用户在设置页把检索方式切到 llm——运行时覆盖开关承接）
+        assertEquals("vector", selector.getMode(),
+                "默认应为向量语义检索（内置向量库 v0.2 起成为标配）；无嵌入设施的用户经设置页切 llm");
     }
 
     @Test

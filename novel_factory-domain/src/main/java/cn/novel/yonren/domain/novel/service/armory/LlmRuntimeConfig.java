@@ -56,6 +56,12 @@ public class LlmRuntimeConfig {
         private String embedApiKey;
         private String embedModel;
         private Integer embedDimensions;
+        /**
+         * 动态资料选择器模式覆盖：llm = LLM 索引选择；vector = 向量语义检索。
+         * null=未设置（回退 yml 静态 story.prompt.reference-selector.mode）。
+         * 前端设置页开关读写它——安装包用户改不了 jar 内 yml，运行时覆盖是唯一路径。
+         */
+        private String referenceMode;
 
         public boolean isEmpty() {
             return !AUTH_CHATGPT.equals(authMode)
@@ -63,7 +69,8 @@ public class LlmRuntimeConfig {
                     && StringUtils.isBlank(model) && maxTokens == null
                     && (scenes == null || scenes.isEmpty())
                     && sceneApiEnabled == null
-                    && !hasEmbeddingOverride();
+                    && !hasEmbeddingOverride()
+                    && StringUtils.isBlank(referenceMode);
         }
 
         /** 场景级 API 开关是否打开（null 视为未设置，按 true 处理=保持旧行为） */
@@ -76,6 +83,19 @@ public class LlmRuntimeConfig {
             return StringUtils.isNotBlank(embedBaseUrl) || StringUtils.isNotBlank(embedApiKey)
                     || StringUtils.isNotBlank(embedModel) || embedDimensions != null;
         }
+    }
+
+    /**
+     * 资料选择器模式的生效值：运行时覆盖优先，未设置回退 yml 静态值。
+     * 调用方：DynamicReferenceService 的模式裁决与缓存键——切换模式后缓存键变化，
+     * 旧模式的选择结果自然失效，无需手动清缓存。
+     */
+    public String effectiveReferenceMode(String ymlMode) {
+        Overlay o = overlay;
+        if (o != null && StringUtils.isNotBlank(o.getReferenceMode())) {
+            return o.getReferenceMode();
+        }
+        return ymlMode;
     }
 
     /** 单场景覆盖条目：空字段表示该字段不覆盖（回退全局覆盖/静态配置） */
@@ -155,13 +175,35 @@ public class LlmRuntimeConfig {
                 ? request.getSceneApiEnabled() : current.getSceneApiEnabled());
         next.setScenes(mergeScenes(current, request));
         mergeEmbedding(current, next, request);
+        mergeReferenceMode(current, next, request);
         overlay = next;
         persist(next);
-        log.info("LLM 运行时覆盖已保存：{}（场景覆盖 {} 项，场景级 API 开关={}，嵌入覆盖 {}）", next,
+        log.info("LLM 运行时覆盖已保存：{}（场景覆盖 {} 项，场景级 API 开关={}，嵌入覆盖 {}，资料选择模式 {}）", next,
                 next.getScenes() == null ? 0 : next.getScenes().size(),
                 next.sceneApiOn() ? "开" : "关（全部走全局地址密钥）",
-                next.hasEmbeddingOverride() ? "生效" : "无");
+                next.hasEmbeddingOverride() ? "生效" : "无",
+                next.getReferenceMode() == null ? "回退 yml" : next.getReferenceMode());
         return view();
+    }
+
+    /**
+     * 资料选择器模式合并：request.referenceMode=null → 保持现状（其他保存请求不误伤）；
+     * 空串 → 显式清除覆盖（回退 yml）；llm/vector → 写入。
+     */
+    private static void mergeReferenceMode(Overlay current, Overlay next, LlmConfigSaveRequestDTO request) {
+        String in = request.getReferenceMode();
+        if (in == null) {
+            next.setReferenceMode(current.getReferenceMode());
+            return;
+        }
+        String trimmed = StringUtils.trimToNull(in);
+        if (trimmed == null) {
+            next.setReferenceMode(null);                 // 空串=清除覆盖
+        } else if ("llm".equalsIgnoreCase(trimmed) || "vector".equalsIgnoreCase(trimmed)) {
+            next.setReferenceMode(trimmed.toLowerCase());
+        } else {
+            throw new IllegalArgumentException("不支持的资料选择模式：" + in + "（仅 llm / vector）");
+        }
     }
 
     /**
@@ -380,6 +422,8 @@ public class LlmRuntimeConfig {
         dto.setAuthMode(usesChatGptAuth() ? AUTH_CHATGPT : AUTH_API_KEY);
         // 场景级 API 开关：覆盖里没设过则回 null（前端按"未设置=场景可自带 API"展示）
         dto.setSceneApiEnabled(o == null ? null : o.getSceneApiEnabled());
+        // 资料选择器模式覆盖：覆盖里没设过也回 null（前端展示"未设置=按 yml 静态值"）
+        dto.setReferenceMode(o == null ? null : o.getReferenceMode());
         if (o == null || o.isEmpty()) {
             dto.setConfigured(false);
             return dto;
@@ -407,7 +451,17 @@ public class LlmRuntimeConfig {
      * "全部走统一模型"的提示，但行内静态值仍按 scene-models 回落逻辑给出（供切换开关后参考）
      */
     public LlmConfigDTO view(StoryProperties statics) {
+        return view(statics, null);
+    }
+
+    /**
+     * 全量视图（含资料选择器静态值）：referenceSelectorStatics 供前端下拉直接显示
+     * 当前生效值（覆盖优先，未覆盖显示 yml 静态值）——用户视角只面对 vector/llm 二选一。
+     */
+    public LlmConfigDTO view(StoryProperties statics, String referenceSelectorStatics) {
         LlmConfigDTO dto = view();
+        // 生效值：运行时覆盖 > yml 静态（前端下拉据此回显，不再暴露"未覆盖"概念）
+        dto.setEffectiveReferenceMode(effectiveReferenceMode(referenceSelectorStatics));
         StoryVO.Module module = statics == null ? null : statics.getModule();
         if (module == null) {
             return dto;

@@ -40,6 +40,11 @@ public class LlmConfigSaveRequestDTO {
     private EmbeddingOverride embedding;
     /** true=仅清空嵌入覆盖（不动全局/场景覆盖），回退 yml 静态嵌入配置 */
     private boolean resetEmbedding;
+    /**
+     * 动态资料选择器模式（null=本次不改动）：llm = LLM 索引选择；vector = 向量语义检索；
+     * 空串=清除覆盖回退 yml 静态值。设置页「资料检索方式」开关读写它。
+     */
+    private String referenceMode;
 
     /** 嵌入分区覆盖条目：与全局字段不同，显式空串=清除该字段覆盖（嵌入分区按字段精细控制） */
     @Data

@@ -1734,6 +1734,46 @@
         }
         renderSceneMatrix(data);
         renderEmbedding(data.embedding);
+        renderReferenceMode(data);
+    }
+
+    // ===== 资料检索方式开关（运行时覆盖 llm|vector）=====
+    const referenceModeForm = document.getElementById('reference-mode-form');
+    const inputReferenceMode = document.getElementById('reference_mode');
+    const referenceModeStatus = document.getElementById('reference-mode-status');
+    const btnSaveReferenceMode = document.getElementById('btn-save-reference-mode');
+
+    function renderReferenceMode(data) {
+        if (!referenceModeForm) return;
+        // 直接回显生效值（覆盖优先，未覆盖= yml 静态值）——用户只面对 vector/llm 二选一
+        inputReferenceMode.value = data.effectiveReferenceMode || 'vector';
+        referenceModeStatus.className = 'config-status';
+        referenceModeStatus.classList.remove('hidden');
+        referenceModeStatus.textContent = data.referenceMode
+            ? '运行时覆盖生效中（保存前可改回另一方式）'
+            : '当前按默认配置运行，改动后保存即生效';
+    }
+
+    if (referenceModeForm) {
+        referenceModeForm.addEventListener('submit', function (e) {
+            e.preventDefault();
+            btnSaveReferenceMode.disabled = true;
+            fetchJson('/api/config/llm', {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ referenceMode: inputReferenceMode.value })  // 空串=清除覆盖回退 yml
+            })
+            .then(function (data) {
+                renderLlmConfig(data);
+                showToast('资料检索方式已保存并生效');
+            })
+            .catch(function (err) {
+                referenceModeStatus.className = 'config-status';
+                referenceModeStatus.textContent = '保存失败：' + err.message;
+                showToast('保存失败：' + err.message);
+            })
+            .finally(function () { btnSaveReferenceMode.disabled = false; });
+        });
     }
 
     function renderAuthMode() {

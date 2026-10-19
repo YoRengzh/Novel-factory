@@ -42,6 +42,15 @@ public class LlmConfigDTO {
     /** Embedding 向量分区（只读展示：嵌入模型不走运行时覆盖，改 yml 需重启生效） */
     private EmbeddingView embedding;
 
+    /**
+     * 动态资料选择器模式（运行时覆盖）：llm = LLM 索引选择；vector = 向量语义检索；
+     * null=未设置（当前生效值 = yml story.prompt.reference-selector.mode，前端展示该事实）
+     */
+    private String referenceMode;
+
+    /** 资料检索方式当前生效值（覆盖优先，未覆盖= yml 静态值）：前端下拉直接回显它 */
+    private String effectiveReferenceMode;
+
     /** 单个模型的只读视图（统一 chat-model 用） */
     @Data
     public static class ModelView {
