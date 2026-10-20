@@ -15,6 +15,23 @@ if (!fs.existsSync(path.join(sidecarSrc, 'novel-factory.exe'))) {
   process.exit(1)
 }
 
+// 打包前自检：sidecar 里严禁夹带本机运行数据（防泄露，零容忍）。
+// 开发模式（NF_DEV/npm start）下 sidecar 以 dist/jpackage/novel-factory 为工作目录，
+// 跑过任务后会留下 data/（API Key 明文的 llm-config-override.json + 全部调用账本与日志）
+// 和 config/（zip 版配置）。extraResources 是整目录复制（filter: **/*），残留即打进 exe
+// 分发给用户——密钥泄露，且不可撤回。发现即拒绝打包，先清场再重来
+const forbiddenEntries = ['data', 'config']
+for (const entry of forbiddenEntries) {
+  const p = path.join(sidecarSrc, entry)
+  if (fs.existsSync(p)) {
+    console.error('❌ sidecar 内检测到本机运行数据：' + p)
+    console.error('   开发模式跑任务会在 app-image 里留下 data/（含 API Key 明文）与 config/。')
+    console.error('   清理后重试：rm -rf dist/jpackage/novel-factory/' + entry)
+    console.error('   （或整体重建：bash tools/package-native.sh——它已含清场逻辑）')
+    process.exit(1)
+  }
+}
+
 module.exports = {
   appId: 'com.startdrafts.app',
   productName: 'StartDrafts',
