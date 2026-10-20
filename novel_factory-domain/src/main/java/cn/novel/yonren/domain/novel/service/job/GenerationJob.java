@@ -6,9 +6,12 @@ import lombok.Setter;
 import cn.novel.yonren.domain.novel.model.aggregate.ChapterPlanAggregate;
 import cn.novel.yonren.domain.novel.service.armory.quality.BatchHealthReport;
 import cn.novel.yonren.types.enums.JobStatus;
+import org.apache.commons.lang3.StringUtils;
 
 import java.util.HashMap;
 import java.util.Map;
+import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * 一次异步生成作业的可变记录：registry / DynamicContext / worker 三方共享同一实例。
@@ -54,6 +57,16 @@ public class GenerationJob {
 
     /** 本作业累计 token 用量（网关逐调用累加，观测用，随 job-status.json 落盘） */
     private volatile long tokensUsed;
+
+    /**
+     * 本作业内已「思考烧穿输出预算」的模型名黑名单（key = 场景 configKey + "|" + 模型名）。
+     * 强制思考模型烧穿是确定性故障：思考失控与采样无关，同一模型在同一场景下重试只会再烧一次
+     * （实测 glm-5.3 在 chapter-plan 连烧 3 次、每次 11~15 分钟 32k token，44 分钟零产出）。
+     * 网关降级换站前查询本表，命中即跳过该站；作业结束随实例一起被 GC，不跨作业持久化——
+     * 下个作业仍给模型一次机会（供应商侧可能已修复/限流态已变）。
+     * transient：不进 job-status.json——该文件是观测快照，崩溃恢复不回填执行态（黑名单同理）
+     */
+    private final transient Set<String> burnedModels = ConcurrentHashMap.newKeySet();
 
     /**
      * 最近一次批末体检报告（每批结束在 worker 覆盖，随作业状态轮询透出给前端）。
@@ -218,5 +231,18 @@ public class GenerationJob {
 
     public boolean isBudgetExceeded() {
         return budgetExceeded;
+    }
+
+    /** 记一次模型烧穿（网关在换站降级前调用）；sceneKey/model 任一为空不记 */
+    public void recordBurnedModel(String sceneKey, String model) {
+        if (StringUtils.isNotBlank(sceneKey) && StringUtils.isNotBlank(model)) {
+            burnedModels.add(sceneKey + "|" + model);
+        }
+    }
+
+    /** 该模型在该场景下本作业内是否已烧穿过（网关选站时查询） */
+    public boolean isModelBurned(String sceneKey, String model) {
+        return StringUtils.isNotBlank(sceneKey) && StringUtils.isNotBlank(model)
+                && burnedModels.contains(sceneKey + "|" + model);
     }
 }

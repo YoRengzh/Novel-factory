@@ -112,9 +112,10 @@ public class LlmInvokeService {
             case CHAPTER_CONTENT -> ModelScene.CHAPTER_CONTENT;
             case CHAPTER_AUDIT -> ModelScene.CHAPTER_AUDIT;
             case CHAPTER_REVISE -> ModelScene.CHAPTER_REVISE;
-            // 设定集草稿：低频、单次、输出量小，走统一 chat-model 即可（不单列 scene-models 条目，
-            // 免得为一个"点一下就出结果"的辅助功能去动 yml 与场景白名单）
-            case SETTING_DRAFT -> null;
+            // 设定集草稿：千字级结构化长文本（世界观/主人公/故事概述各数百字），
+            // 走独立场景才能配到 pro 档；此前映射为 null（统一 chat-model 的 flash 档），
+            // 是"一键生成的设定集质量低下"的直接原因
+            case SETTING_DRAFT -> ModelScene.SETTING_DRAFT;
         };
     }
 

@@ -261,7 +261,7 @@ public class LlmRuntimeConfig {
             SceneOverlay so = new SceneOverlay();
             so.setModel(StringUtils.trimToNull(in.getModel()));
             so.setMaxTokens(in.getMaxTokens());
-            so.setTemperature(in.getTemperature());
+            so.setTemperature(validTemperature(entry.getKey(), in.getTemperature()));
             so.setBaseUrl(StringUtils.trimToNull(in.getBaseUrl()));
             so.setApiKey(in.getApiKey() == null
                     ? currentApiKeyOf(current, entry.getKey())
@@ -278,6 +278,28 @@ public class LlmRuntimeConfig {
         }
         SceneOverlay prev = current.getScenes().get(sceneKey);
         return prev == null ? null : prev.getApiKey();
+    }
+
+    /**
+     * 采样温度合法区间 [0, 1]：本项目全部供应商（DashScope 兼容模式、DeepSeek、智谱、
+     * OpenAI 兼容代理）与 scene-models 静态配置都在此区间内；Anthropic 官方 API 同样以 1.0
+     * 为上限。>1 虽被部分供应商（OpenAI 原生 0-2）接受，但会显著放大采样噪声，对长篇生成
+     * 只有害处——前端曾允许填 2，会让用户误以为这是可用档位，故在服务端唯一入口统一拦截
+     * （前端 max 只是提示，可被绕过，校验必须在保存路径）
+     */
+    private static final double MIN_TEMPERATURE = 0.0;
+    private static final double MAX_TEMPERATURE = 1.0;
+
+    private static Double validTemperature(String sceneKey, Double temperature) {
+        if (temperature == null) {
+            return null;
+        }
+        if (temperature.isNaN() || temperature < MIN_TEMPERATURE || temperature > MAX_TEMPERATURE) {
+            throw new IllegalArgumentException("场景 " + sceneKey + " 的温度超出允许范围 ["
+                    + MIN_TEMPERATURE + ", " + MAX_TEMPERATURE + "]：" + temperature
+                    + "（>1 会放大采样噪声，长篇生成不适用）");
+        }
+        return temperature;
     }
 
     /** apiKey 覆盖落到 module（baseUrl + apiKey）；无覆盖原样返回 */

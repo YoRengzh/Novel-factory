@@ -25,7 +25,8 @@ class ReferenceIndexLoaderTest {
                 .map(ReferenceIndexEntry::getFileName)
                 .collect(Collectors.toList());
         // references 根下的写作资料入索引；ainovel-cli/Go 工程设计文档不属于 Java 运行时资料
-        assertEquals(54, fileNames.size());
+        // 54 → 58：吸纳 chinese-webnovel-skills 四份合卷（人味节奏/情绪台词/开篇金手指/语域纪律）
+        assertEquals(58, fileNames.size());
         assertTrue(fileNames.containsAll(List.of(
                 "chapter-guide", "chapter-template", "character-building",
                 "character-template", "consistency", "content-expansion", "dialogue-writing",
@@ -39,6 +40,8 @@ class ReferenceIndexLoaderTest {
                 "villain-design", "worldbuilding",
                 "seed-architecture", "seed-atoms-fantasy", "seed-atoms-romance",
                 "exemplar-battle", "exemplar-dialogue", "exemplar-breakthrough", "exemplar-emotion",
+                "human-texture-rhythm", "emotion-display-dialogue", "opening-hooks-goldfinger",
+                "register-discipline",
                 "plot-structure-three-act", "plot-structure-heros-journey", "plot-structure-mystery",
                 "plot-structure-romance", "plot-structure-thriller", "plot-structure-twist",
                 "plot-structure-multiline", "plot-structure-short", "plot-structure-five-act",

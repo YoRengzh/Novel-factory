@@ -11,7 +11,15 @@ if [ ! -f "$JAR" ]; then
     exit 1
 fi
 
+# ---- 版本号：与 electron/package.json 的 version 单一来源，发版只改那里 ----
+VERSION=$(node -p "require('./electron/package.json').version")
+echo "📦 app-image 版本：$VERSION（取自 electron/package.json）"
+
+# jpackage 拒绝覆盖已存在的同名 app-image 目录：先清场，保证脚本可重复执行
+rm -rf dist/jpackage/novel-factory
+
 # 中转目录只放这一个 jar（--input 会整个复制进产物，不能混入 target 的构建中间物）
+rm -rf dist/jar-stage
 mkdir -p dist/jar-stage
 cp "$JAR" dist/jar-stage/
 
@@ -20,8 +28,10 @@ cp "$JAR" dist/jar-stage/
   --input dist/jar-stage \
   --main-jar novel_factory-app.jar \
   --name novel-factory \
-  --app-version 0.2.0 \
+  --app-version "$VERSION" \
   --icon electron/icon.ico \
   --dest dist/jpackage
 
-echo "✅ app-image 已产出：dist/jpackage/novel-factory/novel-factory.exe"
+rm -rf dist/jar-stage
+
+echo "✅ app-image 已产出：dist/jpackage/novel-factory/novel-factory.exe（版本 $VERSION）"

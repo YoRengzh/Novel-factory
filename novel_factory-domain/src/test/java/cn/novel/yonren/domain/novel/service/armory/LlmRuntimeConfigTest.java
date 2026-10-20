@@ -17,6 +17,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
@@ -466,5 +467,36 @@ class LlmRuntimeConfigTest {
         config.save(reset);
         assertFalse(config.usesChatGptAuth());
         assertEquals("api-key", config.view().getAuthMode());
+    }
+
+    /** 场景温度上限 1.0：前端 max 只是提示可被绕过，服务端保存入口必须拦 */
+    @Test
+    void save_sceneTemperatureAboveOneIsRejected() {
+        LlmRuntimeConfig config = new LlmRuntimeConfig(tmp.resolve("override.json"));
+        for (double bad : new double[]{1.1, 1.5, 2.0, -0.1}) {
+            LlmConfigSaveRequestDTO.SceneOverride so = new LlmConfigSaveRequestDTO.SceneOverride();
+            so.setTemperature(bad);
+            Map<String, LlmConfigSaveRequestDTO.SceneOverride> scenes = new LinkedHashMap<>();
+            scenes.put("chapter-plan", so);
+            LlmConfigSaveRequestDTO request = new LlmConfigSaveRequestDTO();
+            request.setScenes(scenes);
+            IllegalArgumentException e = assertThrows(
+                    IllegalArgumentException.class, () -> config.save(request),
+                    "温度 " + bad + " 必须被拒绝");
+            assertTrue(e.getMessage().contains("chapter-plan"), "报错必须指明场景");
+        }
+
+        // 边界值 0 与 1 合法，且能正常落盘生效
+        for (double ok : new double[]{0.0, 1.0}) {
+            LlmConfigSaveRequestDTO.SceneOverride so = new LlmConfigSaveRequestDTO.SceneOverride();
+            so.setTemperature(ok);
+            Map<String, LlmConfigSaveRequestDTO.SceneOverride> scenes = new LinkedHashMap<>();
+            scenes.put("chapter-plan", so);
+            LlmConfigSaveRequestDTO request = new LlmConfigSaveRequestDTO();
+            request.setScenes(scenes);
+            config.save(request);
+            assertEquals(Double.valueOf(ok), config.applyModel(ModelScene.CHAPTER_PLAN,
+                    staticModule().getChatModel()).getTemperature());
+        }
     }
 }

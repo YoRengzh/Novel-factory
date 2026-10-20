@@ -54,6 +54,13 @@ public enum ModelScene {
     /** 动态资料选择器 */
     REFERENCE_SELECT("ref-select", "动态资料选择"),
 
+    /**
+     * 设定集草稿（一键生成设定集）：单次千字级结构化长文本，含世界观/主人公/故事概述三块
+     * 各数百字的自由文本——用最便宜的 flash 档产出会明显塌陷（信息密度低、模板化）。
+     * 独立场景的意义是让它能配到 pro 档，而不必为了它把全书正文也一起抬价
+     */
+    SETTING_DRAFT("setting-draft", "设定集草稿"),
+
     QUALITY_REVIEW("quality-review", "全书质量评分");
 
     private final String configKey;

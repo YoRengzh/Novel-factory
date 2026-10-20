@@ -12,3 +12,10 @@ novel:
   llm:
     connect-timeout-seconds: 20
     read-timeout-seconds: 1800
+    # 思考型模型烧穿输出预算（思考 token 吃满 max-tokens、正文为空或只剩残 JSON）的处置：
+    #   skip = 记失败账后沿降级链换备选模型；链尾烧穿返回空串走既有 fail-soft（旧行为）。
+    #   fail = 烧穿即抛异常终止本批。烧穿一次 10-30 分钟、同作业内重试必然复发（确定性故障，
+    #          实测 glm-5.3 在 chapter-plan 连烧 3 次 96k token 零产出），快速失败让人改配置
+    #          比挂机半小时划算；已生成章节均落盘，失败后可 resume。默认 skip 保持兼容。
+    # 无论取值：烧穿过一次的模型会被记入本作业黑名单，同作业同场景不再重试它。
+    on-budget-burn: skip

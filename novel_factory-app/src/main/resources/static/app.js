@@ -1839,7 +1839,10 @@
             + '<span>覆盖 · API Key</span><span></span>'
             + '</div>';
         const rows = data.scenes.map(function (s) {
-            const staticText = s.staticModel || '未配置';
+            // 静态模型统一小写展示：yml 里混有 DeepSeek-V4-Pro / qwen3.8-flash 两种写法，
+            // 同一张表里大小写不一致会被误读成"两个不同的模型"；供应商侧模型名不区分大小写，
+            // 覆盖输入框同样不收窄写（用户填什么存什么）
+            const staticText = s.staticModel ? String(s.staticModel).toLowerCase() : '未配置';
             const staticMeta = [];
             if (s.staticMaxTokens != null) staticMeta.push(String(s.staticMaxTokens) + 'tk');
             if (s.staticTemperature != null) staticMeta.push('t=' + s.staticTemperature);
@@ -1854,7 +1857,7 @@
                 + '<span class="scene-static-meta">' + esc(staticMeta.join(' · ')) + '</span></div>'
                 + '<input type="text" class="scene-input" data-field="model" placeholder="留空回退" autocomplete="off">'
                 + '<input type="number" class="scene-input" data-field="maxTokens" min="1" placeholder="留空回退" autocomplete="off">'
-                + '<input type="number" class="scene-input" data-field="temperature" min="0" max="2" step="0.1" placeholder="留空回退" autocomplete="off">'
+                + '<input type="number" class="scene-input" data-field="temperature" min="0" max="1" step="0.1" placeholder="留空回退" autocomplete="off">'
                 + '<input type="text" class="scene-input" data-field="baseUrl" placeholder="留空回退" autocomplete="off"' + disabledAttr + '>'
                 + '<input type="password" class="scene-input" data-field="apiKey" placeholder="留空保留" autocomplete="new-password"' + disabledAttr + '>'
                 + '<button type="button" class="btn-secondary scene-clear" title="清空本行覆盖输入">恢复</button>'

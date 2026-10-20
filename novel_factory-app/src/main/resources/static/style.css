@@ -105,8 +105,9 @@ body {
     background: var(--bg);
     color: var(--text);
     font-family: -apple-system, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
-    font-size: 14px;
-    line-height: 1.6;
+    /* 基准字号 14→15：设定集/大纲等长文本在 14px 下读起来偏挤 */
+    font-size: 15px;
+    line-height: 1.65;
     /* 极淡的点阵网格：科幻感的地基，不喧宾夺主 */
     background-image: radial-gradient(rgba(148, 163, 184, 0.055) 1px, transparent 1px);
     background-size: 26px 26px;
@@ -132,7 +133,8 @@ body {
 }
 
 .header-content {
-    max-width: 1080px;
+    /* 与 .app-main 同宽：两侧留白收紧，中间内容区从 1080 扩到 1600（窄屏用 95vw 自适应） */
+    max-width: min(1600px, 95vw);
     margin: 0 auto;
     height: 100%;
     display: flex;
@@ -208,9 +210,11 @@ body {
 .btn-logout:hover { color: var(--text); border-color: var(--line); }
 
 .app-main {
-    max-width: 1080px;
+    /* 两侧大面积留白挤占内容区是此前的直接观感问题：1080 → min(1600, 95vw)，
+       常见 1920 屏几乎用满，超宽屏仍有对称留边；小屏回落视口宽（padding 兜安全边距） */
+    max-width: min(1600px, 95vw);
     margin: 0 auto;
-    padding: 28px 24px 64px;
+    padding: 30px 24px 72px;
 }
 
 .tab-content { display: none; }
@@ -221,7 +225,7 @@ body {
     background: var(--panel);
     border: 1px solid var(--line);
     border-radius: 6px;
-    padding: 26px 28px;
+    padding: 30px 34px;
     margin-bottom: 22px;
 }
 
@@ -277,10 +281,10 @@ textarea {
     border: 1px solid var(--line);
     border-radius: 4px;
     color: var(--text);
-    /* 14px→15px 并加半档字重：字段里塞的是几百字的设定，13px 读起来很费眼 */
-    font-size: 15px;
+    /* 15px→16px：字段里塞的是几百字的设定，加宽后行宽变大，字号需同步跟上 */
+    font-size: 16px;
     font-weight: 500;
-    padding: 10px 12px;
+    padding: 11px 13px;
     outline: none;
     transition: border-color 0.18s, box-shadow 0.18s;
     font-family: inherit;

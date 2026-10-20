@@ -57,8 +57,8 @@ class StoryPropertiesBindingTest {
         // scene-models 应绑定成功
         Map<String, StoryVO.Module.ChatModel> sceneModels = module.getSceneModels();
         assertNotNull(sceneModels, "scene-models 不应为 null");
-        assertEquals(16, sceneModels.size(),
-                "应有 16 个场景配置（15 个既有 + 新增 paragraph-audit 段落密度审校）");
+        assertEquals(17, sceneModels.size(),
+                "应有 17 个场景配置（16 个既有 + 新增 setting-draft 设定集草稿）");
 
         // 结构校验：每个场景模型名必须落在"本账号实弹验证可调用"集合内——
         // 拼错调用名（如把 deepseek-v4-flash 写成 deepseek-flash）会在运行期 404，这里提前拦截。
@@ -85,7 +85,10 @@ class StoryPropertiesBindingTest {
                 // paragraph-audit/ledger-adjudicate 全部 0 失败；qwen-3.7-plus 在 31-35 批
                 //（job-45730329780035584）rewrite/audit/patch 共 13 次调用成功（但其 rewrite
                 // 输出 3 次解析失败属质量问题，chapter-rewrite 已改配 qwen3.8-max）。
-                "DeepSeek-V4-Pro", "DeepSeek-V4-Flash", "qwen-3.7-plus",
+                // 大小写两种写法都保留：yml 现已统一小写，但运行时覆盖/历史配置里仍可能出现
+                // 供应商规范大写名（同一模型，供应商侧不区分大小写）
+                "DeepSeek-V4-Pro", "DeepSeek-V4-Flash",
+                "qwen-3.7-plus",
                 "qwen3.8-flash", "qwen3.8-max", "kimi-k3", "glm-5.2",
                 // chapter-plan / chapter-rewrite 现行用档，已实测可调用
                 //（此前白名单未同步 → 测试长期红，进而把 infrastructure 的测试整段 SKIPPED 掉）
