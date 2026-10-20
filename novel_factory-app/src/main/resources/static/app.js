@@ -2272,21 +2272,58 @@
 
     var appMeta = null;
     var updateChecked = false;
+    /** 元信息读取结果：ok=正常 / legacy=后端没有该接口（装的是旧版） / unreachable=后端不可达 */
+    var appMetaState = 'unreachable';
+
+    /** 后端不可用时的兜底（旧版没有 /api/app/version，拿不到这些字段） */
+    var FALLBACK_REPO = 'YoRengzh/Novel-factory';
+    var FALLBACK_RELEASES_URL = 'https://github.com/YoRengzh/Novel-factory/releases/latest';
 
     function showUpdatePanel(show) {
         updatePanel.classList.toggle('hidden', !show);
     }
 
+    /**
+     * 读取本机后端版本。三种结果必须区分开，否则用户只会看到"请稍后重试"这种无意义提示：
+     * 404 = 装的是旧版程序（没有这个接口）→ 应引导去更新，而不是重试；
+     * 网络/解析失败 = 后端没起来或正在重启 → 重试有意义；
+     * 其他 4xx/5xx = 后端内部错误 → 如实报状态码。
+     */
     function loadAppMeta() {
-        return fetchJson('/api/app/version').then(function (meta) {
-            appMeta = meta;
-            updateCurrentVersion.textContent = 'v' + meta.version;
-            updateDownloadLink.href = meta.releasesUrl;
-            return meta;
-        }).catch(function () {
-            updateCurrentVersion.textContent = '未知';
-            return null;
-        });
+        return fetch(API_BASE + '/api/app/version', { headers: { 'Accept': 'application/json' } })
+            .then(function (r) {
+                if (r.status === 404) {
+                    appMetaState = 'legacy';
+                    return null;
+                }
+                if (!r.ok) {
+                    throw new Error('后端返回 HTTP ' + r.status);
+                }
+                return r.json();
+            })
+            .then(function (meta) {
+                if (!meta) {
+                    // 旧版后端：接口不存在。下载页兜底指向公开仓库
+                    updateCurrentVersion.textContent = '旧版本';
+                    updateDownloadLink.href = FALLBACK_RELEASES_URL;
+                    return null;
+                }
+                appMeta = meta;
+                appMetaState = 'ok';
+                updateCurrentVersion.textContent = 'v' + meta.version;
+                updateDownloadLink.href = meta.releasesUrl || FALLBACK_RELEASES_URL;
+                return meta;
+            })
+            .catch(function (err) {
+                appMetaState = 'unreachable';
+                updateCurrentVersion.textContent = '读取失败';
+                updateDownloadLink.href = FALLBACK_RELEASES_URL;
+                if (updateStatus && !updateChecked) {
+                    updateStatus.textContent = '无法连接本机后端：' + (err && err.message ? err.message : '连接失败')
+                        + '。请确认应用仍在运行，或稍后重试。';
+                }
+                return null;
+            });
     }
 
     /** 版本比较：1.10.0 > 1.9.0（按数字段比较，不能直接字符串比） */
@@ -2327,10 +2364,21 @@
         var metaPromise = appMeta ? Promise.resolve(appMeta) : loadAppMeta();
         metaPromise.then(function (meta) {
             if (!meta) {
-                updateStatus.textContent = '无法读取当前版本（后端不可达），请稍后重试。';
+                if (appMetaState === 'legacy') {
+                    // 旧版后端：接口不存在。这不是"网络问题"，重试一万次也没用——
+                    // 必须明确告诉用户：你装的是旧版，去下载新版
+                    updateStatus.textContent = '当前安装的版本较旧（后端没有版本接口），无法自动比对。'
+                        + '请点击「打开下载页」获取最新版本。';
+                    updateDownloadLink.classList.remove('hidden');
+                    updateDownloadLink.href = FALLBACK_RELEASES_URL;
+                } else {
+                    updateStatus.textContent = '无法连接本机后端，请确认应用仍在运行后重试。';
+                    updateDownloadLink.classList.remove('hidden');
+                    updateDownloadLink.href = FALLBACK_RELEASES_URL;
+                }
                 return;
             }
-            return fetch('https://api.github.com/repos/' + meta.repo + '/releases/latest', {
+            return fetch('https://api.github.com/repos/' + (meta.repo || FALLBACK_REPO) + '/releases/latest', {
                 headers: { 'Accept': 'application/vnd.github+json' }
             }).then(function (r) {
                 if (!r.ok) {
@@ -2383,5 +2431,14 @@
     applyTheme(savedTheme, false);
     restoreJob();
     autoGrowAll();
-    loadAppMeta();
+    // 启动即探测后端版本：旧版后端（无 /api/app/version）会在这里被识别出来，
+    // 用户点开通知面板就能直接看到"当前安装的版本较旧"，而不是等到点检查才报错
+    loadAppMeta().then(function (meta) {
+        if (!meta && appMetaState === 'legacy' && updateStatus) {
+            updateStatus.textContent = '当前安装的版本较旧（后端没有版本接口），无法自动比对。'
+                + '请点击「打开下载页」获取最新版本。';
+            updateDownloadLink.classList.remove('hidden');
+            updateDownloadLink.href = FALLBACK_RELEASES_URL;
+        }
+    });
 })();
