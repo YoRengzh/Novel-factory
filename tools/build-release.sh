@@ -13,6 +13,18 @@ if [ -f novel_factory-app/src/main/resources/application-local.yml ]; then
     exit 1
 fi
 
+# ---- 前置自检：版本号三处必须一致 ----
+# electron/package.json 决定安装包与 app-image 版本；application.yml 的 app.version
+# 决定前端「通知」面板显示的当前版本。两者漂移会让用户看到"已是最新"却其实装了新版
+PKG_VERSION=$(node -p "require('./electron/package.json').version")
+YML_VERSION=$(grep -A2 "^app:" novel_factory-app/src/main/resources/application.yml \
+    | grep "version:" | head -1 | sed 's/.*version:[[:space:]]*//' | tr -d '\r')
+if [ "$PKG_VERSION" != "$YML_VERSION" ]; then
+    echo " 版本号不一致：electron/package.json=$PKG_VERSION，application.yml=$YML_VERSION"
+    echo " 请同步这两处（前端通知面板按 application.yml 显示当前版本）"
+    exit 1
+fi
+
 # ---- 构建 ----
 mvn -DskipTests clean package -pl novel_factory-app -am
 

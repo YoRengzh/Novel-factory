@@ -44,26 +44,11 @@
     let approvalTimer = null;
 
     // ===== DOM 元素 =====
-    const loginPage = document.getElementById('login-page');
-    const appPage = document.getElementById('app-page');
-    const loginForm = document.getElementById('login-form');
-    const loginError = document.getElementById('login-error');
     const btnLogout = document.getElementById('btn-logout');
 
-    function checkAuth() {
-        // 当前部署范围是 localhost 单体，服务端也未启用认证；不使用伪造的前端密码门槛。
-        showApp();
-    }
-
-    function showLogin() {
-        loginPage.classList.add('active');
-        appPage.classList.remove('active');
-    }
-
-    function showApp() {
-        loginPage.classList.remove('active');
-        appPage.classList.add('active');
-    }
+    // 单体本地应用无登录态：直接进入工作台
+    const appPage = document.getElementById('app-page');
+    appPage.classList.add('active');
 
     function logout() {
         currentJobId = null;
@@ -74,111 +59,7 @@
         window.location.reload();
     }
 
-    // 旧登录页仅保留为静态原型，不作为本地工作台入口。
-    loginForm.addEventListener('submit', function (e) {
-        e.preventDefault();
-        showApp();
-    });
-
     btnLogout.addEventListener('click', logout);
-
-    function showLoginError(msg) {
-        loginError.textContent = msg;
-        loginError.classList.remove('hidden');
-    }
-
-    // ===== 登录页宇宙星野（Canvas） =====
-    const cosmosCanvas = document.getElementById('cosmos-canvas');
-
-    function initCosmos() {
-        if (!cosmosCanvas || !cosmosCanvas.getContext) return;
-        const ctx = cosmosCanvas.getContext('2d');
-        let stars = [];
-        let meteor = null;
-        let nextMeteorAt = 0;
-
-        function resize() {
-            const parent = cosmosCanvas.parentElement;
-            const dpr = window.devicePixelRatio || 1;
-            cosmosCanvas.width = parent.clientWidth * dpr;
-            cosmosCanvas.height = parent.clientHeight * dpr;
-            ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-            seed();
-        }
-
-        function seed() {
-            stars = [];
-            const w = cosmosCanvas.width / (window.devicePixelRatio || 1);
-            const h = cosmosCanvas.height / (window.devicePixelRatio || 1);
-            const count = Math.floor(w * h / 5200);
-            const palette = ['255,255,255', '125,211,252', '232,213,163'];
-            for (let i = 0; i < count; i++) {
-                stars.push({
-                    x: Math.random() * w,
-                    y: Math.random() * h,
-                    r: Math.random() < 0.85 ? Math.random() * 0.9 + 0.3 : Math.random() * 1.5 + 0.8,
-                    base: Math.random() * 0.45 + 0.25,
-                    amp: Math.random() * 0.3,
-                    speed: Math.random() * 0.0012 + 0.0004,
-                    phase: Math.random() * Math.PI * 2,
-                    color: palette[Math.floor(Math.random() * (Math.random() < 0.72 ? 1 : palette.length))]
-                });
-            }
-        }
-
-        function frame(now) {
-            const w = cosmosCanvas.width / (window.devicePixelRatio || 1);
-            const h = cosmosCanvas.height / (window.devicePixelRatio || 1);
-            ctx.clearRect(0, 0, w, h);
-
-            for (const s of stars) {
-                const alpha = Math.max(0.05, s.base + Math.sin(now * s.speed + s.phase) * s.amp);
-                ctx.beginPath();
-                ctx.arc(s.x, s.y, s.r, 0, Math.PI * 2);
-                ctx.fillStyle = 'rgba(' + s.color + ',' + alpha.toFixed(3) + ')';
-                ctx.fill();
-            }
-
-            // 流星：低频出现，短促划过
-            if (!meteor && now > nextMeteorAt) {
-                meteor = {
-                    x: w * (0.25 + Math.random() * 0.6),
-                    y: h * Math.random() * 0.3,
-                    vx: -(3.2 + Math.random() * 2),
-                    vy: 1.8 + Math.random() * 1.2,
-                    life: 1
-                };
-                nextMeteorAt = now + 8000 + Math.random() * 9000;
-            }
-            if (meteor) {
-                meteor.x += meteor.vx;
-                meteor.y += meteor.vy;
-                meteor.life -= 0.016;
-                if (meteor.life <= 0 || meteor.x < -60 || meteor.y > h + 40) {
-                    meteor = null;
-                } else {
-                    const grad = ctx.createLinearGradient(
-                        meteor.x, meteor.y,
-                        meteor.x - meteor.vx * 12, meteor.y - meteor.vy * 12);
-                    grad.addColorStop(0, 'rgba(255,255,255,' + (0.8 * meteor.life).toFixed(3) + ')');
-                    grad.addColorStop(1, 'rgba(255,255,255,0)');
-                    ctx.strokeStyle = grad;
-                    ctx.lineWidth = 1.2;
-                    ctx.beginPath();
-                    ctx.moveTo(meteor.x, meteor.y);
-                    ctx.lineTo(meteor.x - meteor.vx * 12, meteor.y - meteor.vy * 12);
-                    ctx.stroke();
-                }
-            }
-
-            requestAnimationFrame(frame);
-        }
-
-        window.addEventListener('resize', resize);
-        resize();
-        nextMeteorAt = performance.now() + 5000;
-        requestAnimationFrame(frame);
-    }
 
     // ===== Tab 切换 =====
     document.querySelectorAll('.nav-tab').forEach(function (btn) {
@@ -188,7 +69,8 @@
             btn.classList.add('active');
             document.getElementById('tab-' + btn.dataset.tab).classList.add('active');
             if (btn.dataset.tab === 'library') { loadStories(); }
-            if (btn.dataset.tab === 'settings') { loadLlmConfig(); }
+            // 03 项目模型配置与 04 设置共用同一份配置视图（GET /api/config/llm）：一次拉取，两页同时刷新
+            if (btn.dataset.tab === 'models' || btn.dataset.tab === 'settings') { loadLlmConfig(); }
             // 回到生成页时刷新故事列表：刚写完的故事应能立刻被续写
             if (btn.dataset.tab === 'generate') { loadStoryOptions(); loadMetrics(); }
         });
@@ -1733,8 +1615,84 @@
                 + ' · 模型=' + (data.model || '沿用静态') + ' · ' + keyText;
         }
         renderSceneMatrix(data);
+        renderFeatureToggles(data.toggles);
         renderEmbedding(data.embedding);
         renderReferenceMode(data);
+    }
+
+    // ===== 功能开关（质量/速度档：运行时覆盖 yml 的 enabled 开关）=====
+    // 思考模型建议：这些场景每批/每章必调、对延迟敏感，强制思考模型（glm-5.3/kimi-k3 一类无法关思考）
+    // 会因思考失控烧穿输出预算（实测 glm-5.3 在 chapter-plan 连烧 32k token 零产出）
+    const THINKING_SENSITIVE_SCENES = {
+        'chapter-plan': '⚑ 建议非思考模型（思考失控会烧穿 32k 预算）',
+        'chapter-beats': '⚑ 高频小输出，建议非思考模型',
+        'chapter-content': '⚑ 长篇输出，建议非思考模型',
+        'chapter-rewrite': '⚑ 整章重写，思考模型单次可达 20 分钟',
+        'summary': '⚑ 压缩任务，建议非思考模型',
+        'ref-select': '⚑ 小输出选择任务，建议非思考模型'
+    };
+
+    const featureTogglesDiv = document.getElementById('feature-toggles');
+    const toggleStatus = document.getElementById('toggle-status');
+    const btnSaveToggles = document.getElementById('btn-save-toggles');
+    const btnResetToggles = document.getElementById('btn-reset-toggles');
+
+    function renderFeatureToggles(toggles) {
+        if (!featureTogglesDiv) return;
+        if (!toggles || toggles.length === 0) {
+            featureTogglesDiv.innerHTML = '<p class="empty-hint">后端未返回开关定义</p>';
+            return;
+        }
+        featureTogglesDiv.innerHTML = toggles.map(function (t) {
+            const overridden = t.overrideValue !== null && t.overrideValue !== undefined;
+            const badge = overridden
+                ? '<span class="scene-badge scene-badge-on">已覆盖</span>' : '';
+            return '<label class="toggle-row' + (t.effectiveValue ? '' : ' toggle-off') + '" data-toggle-key="' + esc(t.key) + '">'
+                + '<input type="checkbox" class="toggle-input"' + (t.effectiveValue ? ' checked' : '') + '>'
+                + '<span class="toggle-main">'
+                + '<span class="toggle-title">' + esc(t.label) + badge + '</span>'
+                + '<span class="toggle-desc">' + esc(t.description) + '</span>'
+                + '</span>'
+                + '<span class="toggle-cost">' + esc(t.costHint || '') + '</span>'
+                + '</label>';
+        }).join('');
+    }
+
+    function collectToggles() {
+        const out = {};
+        featureTogglesDiv.querySelectorAll('[data-toggle-key]').forEach(function (row) {
+            out[row.getAttribute('data-toggle-key')] = row.querySelector('.toggle-input').checked;
+        });
+        return out;
+    }
+
+    function saveToggles(toggles) {
+        btnSaveToggles.disabled = true;
+        fetchJson('/api/config/llm', {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ toggles: toggles })
+        })
+        .then(function (data) {
+            renderLlmConfig(data);
+            toggleStatus.className = 'config-status has-config';
+            toggleStatus.classList.remove('hidden');
+            toggleStatus.textContent = '开关已保存并立即生效（下一章开始按新设置执行）';
+        })
+        .catch(function (err) {
+            toggleStatus.className = 'config-status';
+            toggleStatus.classList.remove('hidden');
+            toggleStatus.textContent = '保存失败：' + err.message;
+        })
+        .finally(function () { btnSaveToggles.disabled = false; });
+    }
+
+    if (btnSaveToggles) {
+        btnSaveToggles.addEventListener('click', function () { saveToggles(collectToggles()); });
+    }
+    if (btnResetToggles) {
+        // 空表 = 清空全部开关覆盖 → 回退 yml（程序内置）静态值
+        btnResetToggles.addEventListener('click', function () { saveToggles({}); });
     }
 
     // ===== 资料检索方式开关（运行时覆盖 llm|vector）=====
@@ -1834,9 +1792,9 @@
             sceneUnifiedNote.classList.add('hidden');
         }
         const header = '<div class="scene-row scene-head">'
-            + '<span>场景</span><span>静态生效（yml）</span><span>覆盖 · 模型</span>'
-            + '<span>覆盖 · Tokens</span><span>覆盖 · 温度</span><span>覆盖 · Base URL</span>'
-            + '<span>覆盖 · API Key</span><span></span>'
+            + '<span>场景</span><span>当前生效</span><span>覆盖 · 模型</span>'
+            + '<span>Tokens</span><span>温度</span><span>Base URL</span>'
+            + '<span>API Key</span><span></span>'
             + '</div>';
         const rows = data.scenes.map(function (s) {
             // 静态模型统一小写展示：yml 里混有 DeepSeek-V4-Pro / qwen3.8-flash 两种写法，
@@ -1850,12 +1808,16 @@
                 + (s.sceneConfigured ? '' : '<span class="scene-badge">回落统一</span>')
                 + (s.overridden ? '<span class="scene-badge scene-badge-on">已覆盖</span>' : '');
             const disabledAttr = apiOn ? '' : ' disabled';
+            const thinkingHint = THINKING_SENSITIVE_SCENES[s.key] || '';
             return '<div class="scene-row" data-scene-key="' + esc(s.key) + '">'
                 + '<div class="scene-name"><b>' + esc(s.label || s.key) + '</b>'
-                + '<span class="scene-key">' + esc(s.key) + '</span>' + badges + '</div>'
+                + '<span class="scene-key">' + esc(s.key) + '</span>' + badges
+                + (thinkingHint ? '<span class="scene-hint">' + esc(thinkingHint) + '</span>' : '')
+                + '</div>'
                 + '<div class="scene-static"><span class="mono">' + esc(staticText) + '</span>'
                 + '<span class="scene-static-meta">' + esc(staticMeta.join(' · ')) + '</span></div>'
-                + '<input type="text" class="scene-input" data-field="model" placeholder="留空回退" autocomplete="off">'
+                + '<input type="text" class="scene-input" data-field="model" placeholder="留空回退" autocomplete="off"'
+                + (thinkingHint ? ' title="' + esc(thinkingHint) + '"' : '') + '>'
                 + '<input type="number" class="scene-input" data-field="maxTokens" min="1" placeholder="留空回退" autocomplete="off">'
                 + '<input type="number" class="scene-input" data-field="temperature" min="0" max="1" step="0.1" placeholder="留空回退" autocomplete="off">'
                 + '<input type="text" class="scene-input" data-field="baseUrl" placeholder="留空回退" autocomplete="off"' + disabledAttr + '>'
@@ -2294,12 +2256,132 @@
         });
     }
 
+    // ===== 版本通知（左下角）=====
+    // 逻辑：当前版本由本地后端 /api/app/version 提供；最新版本直接查 GitHub Releases API
+    // （公开仓库 + 支持 CORS，无需后端中转）。检查失败不打扰用户，只在面板里如实显示原因。
+    const btnUpdate = document.getElementById('btn-update');
+    const updatePanel = document.getElementById('update-panel');
+    const btnUpdateClose = document.getElementById('btn-update-close');
+    const btnCheckUpdate = document.getElementById('btn-check-update');
+    const updateCurrentVersion = document.getElementById('update-current-version');
+    const updateLatestBadge = document.getElementById('update-latest-badge');
+    const updateStatus = document.getElementById('update-status');
+    const updateBody = document.getElementById('update-body');
+    const updateDownloadLink = document.getElementById('update-download-link');
+    const updateFabDot = document.getElementById('update-fab-dot');
+
+    var appMeta = null;
+    var updateChecked = false;
+
+    function showUpdatePanel(show) {
+        updatePanel.classList.toggle('hidden', !show);
+    }
+
+    function loadAppMeta() {
+        return fetchJson('/api/app/version').then(function (meta) {
+            appMeta = meta;
+            updateCurrentVersion.textContent = 'v' + meta.version;
+            updateDownloadLink.href = meta.releasesUrl;
+            return meta;
+        }).catch(function () {
+            updateCurrentVersion.textContent = '未知';
+            return null;
+        });
+    }
+
+    /** 版本比较：1.10.0 > 1.9.0（按数字段比较，不能直接字符串比） */
+    function isNewer(latest, current) {
+        var a = String(latest || '').replace(/^v/i, '').split('.').map(Number);
+        var b = String(current || '').replace(/^v/i, '').split('.').map(Number);
+        for (var i = 0; i < Math.max(a.length, b.length); i++) {
+            var x = a[i] || 0, y = b[i] || 0;
+            if (x > y) return true;
+            if (x < y) return false;
+        }
+        return false;
+    }
+
+    /** GitHub Releases 正文是 Markdown：只做最小安全渲染（标题/列表/粗体），其余按纯文本 */
+    function renderReleaseNotes(md) {
+        if (!md) return '<p class="empty-hint">该版本未填写更新说明。</p>';
+        return md.split('\n').map(function (line) {
+            var t = line.trim();
+            if (!t) return '';
+            if (/^#{1,6}\s/.test(t)) {
+                return '<div class="release-h">' + esc(t.replace(/^#{1,6}\s+/, '')) + '</div>';
+            }
+            if (/^[-*]\s/.test(t)) {
+                return '<div class="release-li">· ' + esc(t.replace(/^[-*]\s+/, '')) + '</div>';
+            }
+            return '<div class="release-p">' + esc(t) + '</div>';
+        }).join('');
+    }
+
+    function checkUpdate() {
+        btnCheckUpdate.disabled = true;
+        updateStatus.textContent = '正在检查…';
+        updateBody.innerHTML = '';
+        updateLatestBadge.classList.add('hidden');
+        updateDownloadLink.classList.add('hidden');
+
+        var metaPromise = appMeta ? Promise.resolve(appMeta) : loadAppMeta();
+        metaPromise.then(function (meta) {
+            if (!meta) {
+                updateStatus.textContent = '无法读取当前版本（后端不可达），请稍后重试。';
+                return;
+            }
+            return fetch('https://api.github.com/repos/' + meta.repo + '/releases/latest', {
+                headers: { 'Accept': 'application/vnd.github+json' }
+            }).then(function (r) {
+                if (!r.ok) {
+                    throw new Error(r.status === 404
+                        ? '仓库尚未发布任何 Release'
+                        : 'GitHub 返回 ' + r.status);
+                }
+                return r.json();
+            }).then(function (release) {
+                var latest = String(release.tag_name || '').replace(/^v/i, '');
+                updateChecked = true;
+                if (isNewer(latest, meta.version)) {
+                    updateStatus.textContent = '发现新版本：v' + latest + '（当前 v' + meta.version + '）';
+                    updateLatestBadge.classList.remove('hidden');
+                    updateDownloadLink.classList.remove('hidden');
+                    updateDownloadLink.href = release.html_url || meta.releasesUrl;
+                    updateBody.innerHTML = renderReleaseNotes(release.body);
+                    updateFabDot.classList.add('has-update');
+                } else {
+                    updateStatus.textContent = '已是最新版本（v' + meta.version + '）。';
+                    updateBody.innerHTML = '<p class="empty-hint">当前无需更新。</p>';
+                }
+            });
+        }).catch(function (err) {
+            updateStatus.textContent = '检查失败：' + (err && err.message ? err.message : '网络不可达')
+                + '。可点击「打开下载页」手动查看。';
+            updateDownloadLink.classList.remove('hidden');
+        }).finally(function () {
+            btnCheckUpdate.disabled = false;
+        });
+    }
+
+    if (btnUpdate) {
+        btnUpdate.addEventListener('click', function () {
+            var willShow = updatePanel.classList.contains('hidden');
+            showUpdatePanel(willShow);
+            if (willShow && !updateChecked) { checkUpdate(); }
+        });
+    }
+    if (btnUpdateClose) {
+        btnUpdateClose.addEventListener('click', function () { showUpdatePanel(false); });
+    }
+    if (btnCheckUpdate) {
+        btnCheckUpdate.addEventListener('click', checkUpdate);
+    }
+
     // ===== 初始化 =====
     var savedTheme = 'dark';
     try { savedTheme = localStorage.getItem(THEME_KEY) || 'dark'; } catch (e) {}
     applyTheme(savedTheme, false);
-    initCosmos();
-    checkAuth();
     restoreJob();
     autoGrowAll();
+    loadAppMeta();
 })();

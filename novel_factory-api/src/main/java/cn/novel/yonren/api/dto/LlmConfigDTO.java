@@ -51,6 +51,31 @@ public class LlmConfigDTO {
     /** 资料检索方式当前生效值（覆盖优先，未覆盖= yml 静态值）：前端下拉直接回显它 */
     private String effectiveReferenceMode;
 
+    /**
+     * 功能开关（质量/速度档）：每条的静态值（yml）、运行时覆盖（null=未覆盖）与生效值。
+     * 这些开关决定每章额外跑几次模型调用，是单章耗时的主要变量
+     */
+    private List<ToggleView> toggles;
+
+    /** 单个功能开关的视图 */
+    @Data
+    public static class ToggleView {
+        /** 开关键（FeatureToggles 常量名，前端提交时原样回传） */
+        private String key;
+        /** 中文显示名 */
+        private String label;
+        /** 说明：关掉能省什么、什么时候该关 */
+        private String description;
+        /** 每章额外模型调用量提示（用于前端显示"关掉能省 N 次调用"） */
+        private String costHint;
+        /** yml 静态值 */
+        private boolean staticValue;
+        /** 运行时覆盖值；null=未覆盖（生效值 = 静态值） */
+        private Boolean overrideValue;
+        /** 实际生效值 */
+        private boolean effectiveValue;
+    }
+
     /** 单个模型的只读视图（统一 chat-model 用） */
     @Data
     public static class ModelView {

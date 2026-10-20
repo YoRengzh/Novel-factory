@@ -7,54 +7,12 @@
     <link rel="stylesheet" href="style.css" data-page-node-id="njce1GWWRJakUhAUukzdHE">
 </head>
 <body data-page-node-id="HR1gysp1ogdC9U0cmacZqK">
-    <!-- ==================== 登录页：粒子星野 + 霓虹卡片 ==================== -->
-    <div id="login-page" class="page active" data-page-node-id="mC6vNihZz4vpw1szLeCfGz">
-        <div class="login-scene" data-page-node-id="58JCmdNdrHtpJ8oxXXYJao">
-            <canvas id="particles" data-page-node-id="sdxLfTmlLNGqmPC7GFQm14"></canvas>
-            <button id="btn-theme-login" class="theme-float theme-toggle" type="button" data-page-node-id="jr7qvod8leQT0MNcz36ITE">浅色</button>
-
-            <div class="login-card" data-page-node-id="VteLaiJWUChKOu6GJTxMqV">
-                <div class="logo" data-page-node-id="PUx2kgguSsC0i7B8nn58hE">
-                    <span class="neon-text" data-page-node-id="2vo1bMLsuM2wDLa5leBgV8">Start</span>
-                    <span class="neon-text" data-page-node-id="9NORpx8M3f9QKG39UkMmXd">Drafts</span>
-                </div>
-
-                <h1 data-page-node-id="ii1AJuDTBRZRMTIEOYeqcq">欢迎回来</h1>
-                <p class="subtitle" data-page-node-id="t5XuyM6g6j4MmM6984n0LP">登录你的引星</p>
-
-                <form id="login-form" data-page-node-id="9SABeh662jItKy7xS8ladz">
-                    <div class="input-group" data-page-node-id="UH7OgU8aQLAeKguk4qUnms">
-                        <label data-page-node-id="G3OEXuFQQAhQjR37iLWZVA">账号</label>
-                        <input type="text" id="username" placeholder="请输入用户名" required autocomplete="username" data-page-node-id="fGkVKnqM04T4MflqV2an8b">
-                    </div>
-                    <div class="input-group" data-page-node-id="DBielnywxaSrdxWcAXdliw">
-                        <label data-page-node-id="7jbmj4rtnPFPkgokCZDH5R">密码</label>
-                        <input type="password" id="password" placeholder="••••••••" required autocomplete="current-password" data-page-node-id="bTh194UFEFVhjy0jyi0uBa">
-                    </div>
-                    <div id="login-error" class="error-message hidden" data-page-node-id="i9USxNafkv6PnEphar04T6"></div>
-                    <button type="submit" class="login-btn" data-page-node-id="eYOBSMS3iPyGQP7rxUDBfq">登录</button>
-                </form>
-
-                <div class="links" data-page-node-id="NxOPIxVCAkCnVQhqOhto9q">
-                    <a href="#" onclick="showRegister(); return false;" data-page-node-id="GkJrdaxuK8RlvwcVXEwPvq">注册新账号</a>
-                    <a href="#" onclick="showForgotPassword(); return false;" data-page-node-id="tVFrN4XSJzDn1MKzOPSsdF">忘记密码？</a>
-                </div>
-
-                <div class="social" data-page-node-id="z7wuR59kX1M1K04MHyYjMJ">
-                    <button onclick="socialLogin('google')" data-page-node-id="YXM1FGe8XzY0uszQvY04VR">Google</button>
-                    <button onclick="socialLogin('github')" data-page-node-id="NTQHigaSOiyZOzPmpVy6XW">GitHub</button>
-                    <button onclick="socialLogin('wechat')" data-page-node-id="QENOw868qcBOzbPzD4pUq1">微信</button>
-                </div>
-            </div>
-        </div>
-    </div>
-
     <!-- ==================== 主应用 ==================== -->
-    <div id="app-page" class="page" data-page-node-id="rKOaQO847OK3L1albNbevB">
+    <div id="app-page" data-page-node-id="rKOaQO847OK3L1albNbevB">
         <header class="app-header" data-page-node-id="VGLTbXtShOco3nrjyC6OSt">
             <div class="header-content" data-page-node-id="G6TRtfKlvH3bYWtWMpA3ee">
                 <div class="wordmark" data-page-node-id="NgX300WOTNdOTAG0N9kXGk">
-                    <span class="mark-dot" data-page-node-id="dtVwudsDISh7drHD5wJcJ9"></span>
+                    <img class="mark-icon" src="icon-256x256.png" alt="引星">
                     <span class="mark-zh" data-page-node-id="BkFSdbamTGkQc1O1VPhPCD">引星</span>
                     <span class="mark-en" data-page-node-id="sriEuepWJDJOoCQfW9W8fS">StartDrafts</span>
                 </div>
@@ -67,9 +25,13 @@
                         <span class="tab-no" data-page-node-id="nH5Km9Lz496smh8RHCDlZU">02</span>
                         <span data-page-node-id="2p1Otw5yGX9zbA7xzZM4Ku">小说库</span>
                     </button>
-                    <button class="nav-tab" data-tab="settings" data-page-node-id="GYzdLsq8uHIw5QJOZkfYCy">
+                    <button class="nav-tab" data-tab="models" data-page-node-id="GYzdLsq8uHIw5QJOZkfYCy">
                         <span class="tab-no" data-page-node-id="1rS3kA1RSg2IVFm8dQjTZY">03</span>
-                        <span data-page-node-id="dlByrlRiW95MEuUKxjAaoE">设置</span>
+                        <span data-page-node-id="dlByrlRiW95MEuUKxjAaoE">项目模型配置</span>
+                    </button>
+                    <button class="nav-tab" data-tab="settings" data-page-node-id="SetTabNo04Box">
+                        <span class="tab-no" data-page-node-id="SetTabNo04">04</span>
+                        <span data-page-node-id="SetTabLabel04">设置</span>
                     </button>
                 </nav>
                 <button id="btn-theme" class="btn-logout theme-toggle" type="button" data-page-node-id="hPgE0oRWe8r2vLahsLcAFl">浅色</button>
@@ -323,13 +285,64 @@
                 </div>
             </section>
 
-            <!-- 设置 -->
-            <section id="tab-settings" class="tab-content" data-page-node-id="LajWFvBJ527FOJ2wY0TNHu">
-                <div class="content-card" data-page-node-id="5Av8rDPYjFthtcITvetBGG">
+            <!-- 03 项目模型配置：功能开关 + 场景模型 -->
+            <section id="tab-models" class="tab-content">
+                <div class="content-card" id="feature-toggle-card">
+                    <div class="section-label">QUALITY / SPEED</div>
+                    <h2 class="section-title">功能开关</h2>
+                    <p class="settings-hint">
+                        每个开关控制一个质量环节，也决定每章要多跑几次模型调用——
+                        <b>全开是质量优先档，但单章耗时可能是全关时的数倍</b>。
+                        关掉的环节不会报错，只是少一层检查；预算紧或想快点看到成稿时，先关「候选选优」，收益最大。
+                        保存即生效、跨重启保留；点「恢复默认」回退到程序内置配置。
+                    </p>
+                    <div id="feature-toggles" class="feature-toggles">
+                        <p class="empty-hint">加载中...</p>
+                    </div>
+                    <div id="toggle-status" class="config-status hidden"></div>
+                    <div class="form-actions">
+                        <button type="button" id="btn-save-toggles" class="btn-primary">保 存 开 关</button>
+                        <button type="button" id="btn-reset-toggles" class="btn-secondary">恢复默认</button>
+                    </div>
+                </div>
+
+<div class="content-card" data-page-node-id="QVqcnZIEYXg6Vxgd7yPWud">
+                    <div class="section-label" data-page-node-id="sSR1Tmu4uw419PZ0mJdSw5">SCENE MODELS</div>
+                    <h2 class="section-title" data-page-node-id="m1nbxq44CG3VtAfwuNTpcf">场景模型</h2>
+                    <p class="settings-hint" data-page-node-id="bZref5VnUGT8zfPHK2oAmJ">
+                        <b>说明</b>：每个生成场景可独立指定模型 / 输出上限 / 采样温度。优先级：场景覆盖 &gt; 全局覆盖（04 设置里的接入配置）&gt; 程序内置配置（场景条目缺项回落统一模型）。覆盖输入留空 = 清除该字段覆盖、回退下一层。保存即生效、跨重启保留。
+                    </p>
+                    <div class="scene-api-switch" data-page-node-id="ScApiSwitchRow1">
+                        <label class="switch-label" for="scene_api_enabled">
+                            <input type="checkbox" id="scene_api_enabled" data-page-node-id="ScApiSwitchBox1">
+                            <span>启用场景级 API（每个场景可独立配置 Base URL 与 API Key）</span>
+                        </label>
+                        <span class="settings-hint scene-api-hint" id="scene-api-hint">
+                            关闭时：所有场景强制走 04 设置里「模型接入」的全局地址与密钥，场景自带地址密钥一律不生效；
+                            打开时：每个场景可自配地址密钥，并在下方各行编辑（留空 = 沿用全局 / yml 静态）。
+                        </span>
+                    </div>
+                    <div id="scene-unified-note" class="scene-unified-note hidden" data-page-node-id="R8r8J8KJS0zgnDVcNVYCyZ"></div>
+                    <div id="scene-matrix" class="scene-matrix" data-page-node-id="yaWg65yFuJRXZn1MBhvqYF">
+                        <p class="empty-hint" data-page-node-id="IW9WpfqJFdm848fjhRHDLj">加载中...</p>
+                    </div>
+                    <div id="scene-config-status" class="config-status hidden" data-page-node-id="bqoGkfgwgHVtfeTkQ00EvS"></div>
+                    <div class="form-actions" data-page-node-id="Xai7jBk4wpdQMR1DjCQxtC">
+                        <button type="button" id="btn-save-scene-config" class="btn-primary" data-page-node-id="oWQEa7oqB7EEGdTFLwSew0">保 存 场 景 覆 盖</button>
+                        <button type="button" id="btn-reset-scene-config" class="btn-secondary" data-page-node-id="ev62vZsbh625KunV4opFP3">清 除 场 景 覆 盖</button>
+                    </div>
+                </div>
+
+            </section>
+            </section>
+
+            <!-- 04 设置：模型接入 / 嵌入 / 资料检索方式 -->
+            <section id="tab-settings" class="tab-content">
+<div class="content-card" data-page-node-id="5Av8rDPYjFthtcITvetBGG">
                     <div class="section-label" data-page-node-id="JfIEFhnRZGoL2mJbUImJKU">SETTINGS</div>
-                    <h2 class="section-title" data-page-node-id="sfCcfegkh2hdiOBSBjTe39">模型接入设置</h2>
+                    <h2 class="section-title" data-page-node-id="sfCcfegkh2hdiOBSBjTe39">模型接入</h2>
                     <p class="settings-hint" data-page-node-id="rrPQmPdb0b7IvAC2nZDzCt">
-                        配置映射到后端运行时覆盖（data/llm-config-override.json），保存即生效、跨重启保留；
+                        这里配置全局的接口地址与密钥（映射到本机 data/llm-config-override.json），保存即生效、跨重启保留；
                         可使用 API Key，或通过 Continue with ChatGPT 使用符合条件的 ChatGPT 套餐；登录令牌只保存在本机且不回传页面。
                     </p>
                     <form id="llm-config-form" data-page-node-id="ZY2cNi8MuRs5rq4b3UNhpA">
@@ -436,35 +449,7 @@
                     </form>
                 </div>
 
-                <div class="content-card" data-page-node-id="QVqcnZIEYXg6Vxgd7yPWud">
-                    <div class="section-label" data-page-node-id="sSR1Tmu4uw419PZ0mJdSw5">SCENE MODELS</div>
-                    <h2 class="section-title" data-page-node-id="m1nbxq44CG3VtAfwuNTpcf">场景模型矩阵</h2>
-                    <p class="settings-hint" data-page-node-id="bZref5VnUGT8zfPHK2oAmJ">
-                        每个生成场景可独立指定模型 / 输出上限 / 采样温度。优先级：场景覆盖 &gt; 全局覆盖（上方表单）&gt; yml 静态配置
-                        （场景条目缺项回落统一 chat-model）。覆盖输入留空 = 清除该字段覆盖、回退下一层。保存即生效、跨重启保留。
-                    </p>
-                    <div class="scene-api-switch" data-page-node-id="ScApiSwitchRow1">
-                        <label class="switch-label" for="scene_api_enabled">
-                            <input type="checkbox" id="scene_api_enabled" data-page-node-id="ScApiSwitchBox1">
-                            <span>启用场景级 API（每个场景可独立配置 Base URL 与 API Key）</span>
-                        </label>
-                        <span class="settings-hint scene-api-hint" id="scene-api-hint">
-                            关闭时：所有场景强制走上方「模型接入设置」的全局地址与密钥，场景自带地址密钥一律不生效；
-                            打开时：每个场景可自配地址密钥，并在下方各行编辑（留空 = 沿用全局 / yml 静态）。
-                        </span>
-                    </div>
-                    <div id="scene-unified-note" class="scene-unified-note hidden" data-page-node-id="R8r8J8KJS0zgnDVcNVYCyZ"></div>
-                    <div id="scene-matrix" class="scene-matrix" data-page-node-id="yaWg65yFuJRXZn1MBhvqYF">
-                        <p class="empty-hint" data-page-node-id="IW9WpfqJFdm848fjhRHDLj">加载中...</p>
-                    </div>
-                    <div id="scene-config-status" class="config-status hidden" data-page-node-id="bqoGkfgwgHVtfeTkQ00EvS"></div>
-                    <div class="form-actions" data-page-node-id="Xai7jBk4wpdQMR1DjCQxtC">
-                        <button type="button" id="btn-save-scene-config" class="btn-primary" data-page-node-id="oWQEa7oqB7EEGdTFLwSew0">保 存 场 景 覆 盖</button>
-                        <button type="button" id="btn-reset-scene-config" class="btn-secondary" data-page-node-id="ev62vZsbh625KunV4opFP3">清 除 场 景 覆 盖</button>
-                    </div>
-                </div>
-
-            </section>
+                            </section>
         </main>
     </div>
 
@@ -476,89 +461,36 @@
 
     <div id="toast" class="toast hidden" data-page-node-id="JLwZtxLpWafkz4wtVD3Pre"></div>
 
-    <script>
-        // ===== 登录页粒子动画 =====
-        const canvas = document.getElementById('particles');
-        const ctx = canvas.getContext('2d');
-        let particles = [];
+    <!-- 左下角：版本通知入口 -->
+    <button id="btn-update" class="update-fab" type="button" title="检查更新">
+        <span class="update-fab-dot" id="update-fab-dot"></span>
+        <span>通知</span>
+    </button>
 
-        function particleRgb() {
-            return (getComputedStyle(document.body).getPropertyValue('--particle-rgb') || '0, 240, 255').trim();
-        }
+    <!-- 版本通知面板 -->
+    <div id="update-panel" class="update-panel hidden" role="dialog" aria-label="版本通知">
+        <div class="update-panel-head">
+            <div>
+                <div class="section-label">UPDATES</div>
+                <h3 class="update-panel-title">版本通知</h3>
+            </div>
+            <button id="btn-update-close" class="update-close" type="button" aria-label="关闭">×</button>
+        </div>
+        <div class="update-panel-body">
+            <div class="update-current">
+                当前版本 <span id="update-current-version" class="mono">—</span>
+                <span id="update-latest-badge" class="update-badge hidden">有新版本</span>
+            </div>
+            <div id="update-status" class="update-status">点击下方按钮检查更新。</div>
+            <div id="update-body" class="update-body"></div>
+        </div>
+        <div class="update-panel-foot">
+            <button id="btn-check-update" class="btn-primary" type="button">检 查 更 新</button>
+            <a id="update-download-link" class="btn-secondary hidden" target="_blank" rel="noopener">打 开 下 载 页</a>
+        </div>
+        <div class="update-author">作者：庸谨辞</div>
+    </div>
 
-        class Particle {
-            constructor() {
-                this.x = Math.random() * canvas.width;
-                this.y = Math.random() * canvas.height;
-                this.size = Math.random() * 2 + 1;
-                this.speedX = Math.random() * 0.5 - 0.25;
-                this.speedY = Math.random() * 0.5 - 0.25;
-                this.alpha = Math.random() * 0.5 + 0.2;
-                this.color = 'rgba(' + particleRgb() + ', ' + this.alpha.toFixed(3) + ')';
-            }
-            update() {
-                this.x += this.speedX;
-                this.y += this.speedY;
-                if (this.x < 0 || this.x > canvas.width) this.speedX *= -1;
-                if (this.y < 0 || this.y > canvas.height) this.speedY *= -1;
-            }
-            draw() {
-                ctx.fillStyle = this.color;
-                ctx.beginPath();
-                ctx.arc(this.x, this.y, this.size, 0, Math.PI * 2);
-                ctx.fill();
-            }
-        }
-
-        // 主题切换后重染粒子（供 app.js 调用）
-        window.recolorParticles = function () {
-            const rgb = particleRgb();
-            particles.forEach(function (p) {
-                p.color = 'rgba(' + rgb + ', ' + p.alpha.toFixed(3) + ')';
-            });
-        };
-
-        function initParticles() {
-            particles = [];
-            for (let i = 0; i < 120; i++) {
-                particles.push(new Particle());
-            }
-        }
-
-        function animate() {
-            ctx.clearRect(0, 0, canvas.width, canvas.height);
-            particles.forEach(p => {
-                p.update();
-                p.draw();
-            });
-            requestAnimationFrame(animate);
-        }
-
-        function resizeCanvas() {
-            canvas.width = window.innerWidth;
-            canvas.height = window.innerHeight;
-        }
-
-        window.addEventListener('load', () => {
-            resizeCanvas();
-            initParticles();
-            animate();
-            window.addEventListener('resize', resizeCanvas);
-        });
-
-        // 未接入后端的入口：明确告知，不伪装成功
-        function showRegister() {
-            alert('注册功能未接入后端');
-        }
-
-        function showForgotPassword() {
-            alert('请联系管理员重置密码');
-        }
-
-        function socialLogin(provider) {
-            alert('第三方登录未接入后端');
-        }
-    </script>
     <script src="app.js"></script>
 </body>
 </html>

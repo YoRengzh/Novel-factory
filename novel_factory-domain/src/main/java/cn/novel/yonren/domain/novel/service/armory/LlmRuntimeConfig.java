@@ -10,6 +10,7 @@ import jakarta.annotation.PostConstruct;
 import lombok.Data;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.lang3.StringUtils;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 
 import java.io.IOException;
@@ -63,6 +64,17 @@ public class LlmRuntimeConfig {
          */
         private String referenceMode;
 
+        /**
+         * 功能开关覆盖：key = FeatureToggles 里的开关名（audit / paragraphAudit / revise /
+         * candidate / ledgerAdjudicate / qualityReview / referenceSelector / storyMemory），
+         * value = 是否开启。null 或未出现的 key 一律回退 yml 静态值。
+         *
+         * <p>为什么要覆盖：安装包用户改不了 jar 内的 novel-generation.yml，而这些开关决定
+         * 每章要额外跑几次模型调用（审校/段落审校/修订/候选重写/账本裁决…）。默认全开是
+         * 质量优先档，但单章耗时会翻数倍——必须让用户自己能在"质量/速度"之间选。
+         */
+        private Map<String, Boolean> toggles;
+
         public boolean isEmpty() {
             return !AUTH_CHATGPT.equals(authMode)
                     && StringUtils.isBlank(baseUrl) && StringUtils.isBlank(apiKey)
@@ -70,7 +82,8 @@ public class LlmRuntimeConfig {
                     && (scenes == null || scenes.isEmpty())
                     && sceneApiEnabled == null
                     && !hasEmbeddingOverride()
-                    && StringUtils.isBlank(referenceMode);
+                    && StringUtils.isBlank(referenceMode)
+                    && (toggles == null || toggles.isEmpty());
         }
 
         /** 场景级 API 开关是否打开（null 视为未设置，按 true 处理=保持旧行为） */
@@ -118,6 +131,12 @@ public class LlmRuntimeConfig {
     private final Path file;
     private volatile Overlay overlay;
 
+    /**
+     * 功能开关注册表（可选注入）：负责把覆盖值写回各配置 bean。
+     * 为 null 时（单测/离线工具直接 new）跳过——那些场景本就不涉及运行时开关。
+     */
+    private FeatureToggles featureToggles;
+
     public LlmRuntimeConfig() {
         this(DEFAULT_FILE);
     }
@@ -125,6 +144,14 @@ public class LlmRuntimeConfig {
     public LlmRuntimeConfig(Path file) {
         this.file = file;
         this.overlay = loadFromDisk();
+    }
+
+    /** Spring 注入：开关覆盖需要落到各配置 bean，故在构造后注入并回放一次已落盘的覆盖 */
+    @Autowired(required = false)
+    public void setFeatureToggles(FeatureToggles featureToggles) {
+        this.featureToggles = featureToggles;
+        // 重启后恢复上次保存的开关覆盖（bean 刚由 yml 绑定 = 静态值，此处叠加覆盖）
+        this.featureToggles.apply(this.overlay.getToggles());
     }
 
     @PostConstruct
@@ -176,8 +203,13 @@ public class LlmRuntimeConfig {
         next.setScenes(mergeScenes(current, request));
         mergeEmbedding(current, next, request);
         mergeReferenceMode(current, next, request);
+        mergeToggles(current, next, request);
         overlay = next;
         persist(next);
+        // 开关覆盖要落到各配置 bean 上：服务层直接读 bean，这是唯一能让改动生效的路径
+        if (featureToggles != null) {
+            featureToggles.apply(next.getToggles());
+        }
         log.info("LLM 运行时覆盖已保存：{}（场景覆盖 {} 项，场景级 API 开关={}，嵌入覆盖 {}，资料选择模式 {}）", next,
                 next.getScenes() == null ? 0 : next.getScenes().size(),
                 next.sceneApiOn() ? "开" : "关（全部走全局地址密钥）",
@@ -204,6 +236,40 @@ public class LlmRuntimeConfig {
         } else {
             throw new IllegalArgumentException("不支持的资料选择模式：" + in + "（仅 llm / vector）");
         }
+    }
+
+    /**
+     * 功能开关覆盖合并：request.toggles=null → 保持现状（其他保存请求不误伤）；
+     * 空表 → 清空全部开关覆盖（回退 yml 静态）；否则全量替换（前端整表提交）。
+     * 未知 key 丢弃并告警——存进去也不会被任何服务读取。
+     */
+    private static void mergeToggles(Overlay current, Overlay next, LlmConfigSaveRequestDTO request) {
+        Map<String, Boolean> incoming = request.getToggles();
+        if (incoming == null) {
+            next.setToggles(current.getToggles());
+            return;
+        }
+        Map<String, Boolean> merged = new LinkedHashMap<>();
+        for (Map.Entry<String, Boolean> e : incoming.entrySet()) {
+            if (e.getKey() == null || e.getValue() == null) {
+                continue;
+            }
+            if (FeatureToggles.Def.values().length > 0 && !isKnownToggle(e.getKey())) {
+                log.warn("开关覆盖含未知 key: {}，已丢弃", e.getKey());
+                continue;
+            }
+            merged.put(e.getKey(), e.getValue());
+        }
+        next.setToggles(merged.isEmpty() ? null : merged);
+    }
+
+    private static boolean isKnownToggle(String key) {
+        for (FeatureToggles.Def def : FeatureToggles.Def.values()) {
+            if (def.getKey().equals(key)) {
+                return true;
+            }
+        }
+        return false;
     }
 
     /**
@@ -484,6 +550,8 @@ public class LlmRuntimeConfig {
         LlmConfigDTO dto = view();
         // 生效值：运行时覆盖 > yml 静态（前端下拉据此回显，不再暴露"未覆盖"概念）
         dto.setEffectiveReferenceMode(effectiveReferenceMode(referenceSelectorStatics));
+        // 功能开关：静态值 + 覆盖值 + 生效值（开关 bean 未注入时返回空表，前端不渲染该区）
+        dto.setToggles(featureToggles == null ? List.of() : featureToggles.view());
         StoryVO.Module module = statics == null ? null : statics.getModule();
         if (module == null) {
             return dto;

@@ -81,8 +81,13 @@ public class StoryProperties {
         /** MINOR_RESIDUE 触发候选所需的 MINOR 问题条数下限，与 triggerOnMinorResidue 联用 */
         private int minorResidueThreshold = 6;
 
-        /** 修订过 N 轮后才闭环是否触发候选（**当前唯一有效的触发信号**，采纳率 66.7%） */
-        private boolean triggerOnRevisedPass = true;
+        /**
+         * 修订过 N 轮后才闭环是否触发候选（**当前唯一有效的触发信号**，采纳率 66.7%）。
+         * 默认收紧为 false：整章重写 + 盲评单次是 20 分钟量级，而采纳率仅约三分之二——
+         * 对"想快点看到成稿"的用户这是最贵的一环。要最高质量时在 03 项目模型配置里打开
+         * （candidate 开关，运行时覆盖生效）。
+         */
+        private boolean triggerOnRevisedPass = false;
 
 
         /** 审校门结论为 DEBT（修订耗尽仍不收敛）时是否触发候选挑战；默认关闭 */

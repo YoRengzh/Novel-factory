@@ -141,7 +141,7 @@ story:
       # 换 embedding 模型**必须重嵌**：维度相同**不代表**向量空间兼容——旧模型
       batch-size: 10
 
-  # 无人值守续写（阶段六 RunPlan）：一次提交按计划反复自续批，直到达标或触发停机条件。
+  # 无人值守续写：一次提交按计划反复自续批，直到达标或触发停机条件。
   # **默认关闭**——开启后作业会自动连续花 token，请先确认 budget 熔断已配置。
   run-plan:
     enabled: false
@@ -209,7 +209,9 @@ story:
     max-candidates: 1
     trigger-on-minor-residue: false
     minor-residue-threshold: 6
-    trigger-on-revised-pass: true
+    # 默认关闭（原为 true）：整章重写+盲评单次 20 分钟量级、采纳率约 2/3——
+    # 默认开着会让单章耗时翻十倍。要最高质量时在 03 项目模型配置里打开 candidate 开关
+    trigger-on-revised-pass: false
     trigger-on-debt: false
     rewrite-max-tokens: 16384
 

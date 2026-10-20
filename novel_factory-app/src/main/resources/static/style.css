@@ -29,7 +29,6 @@
     --serif: "Noto Serif SC", "Source Han Serif SC", "Songti SC", SimSun, serif;
     /* 登录页霓虹色 */
     --neon-cyan: #00f0ff;
-    --login-card: rgba(15, 23, 42, 0.85);
     /* 登录页粒子颜色（RGB 分量，canvas 读取） */
     --particle-rgb: 0, 240, 255;
 }
@@ -56,7 +55,6 @@ body.light {
     --ok: #059669;
     --warn: #d97706;
     --error: #dc2626;
-    --login-card: rgba(255, 255, 255, 0.92);
     --neon-cyan: #0284c7;
     --particle-rgb: 2, 132, 199;
     background-image: radial-gradient(rgba(15, 23, 42, 0.07) 1px, transparent 1px);
@@ -72,24 +70,9 @@ body.light textarea { background: #ffffff; }
 
 body.light .chapter-text { color: #333a4d; }
 
-body.light .login-scene {
-    background: linear-gradient(135deg, #eef2f8 0%, #d8e2f0 100%);
-}
 
-body.light .login-card {
-    border-color: rgba(2, 132, 199, 0.25);
-    box-shadow: 0 20px 60px rgba(30, 58, 95, 0.18);
-}
 
-body.light .login-card h1 { color: #1c2333; }
-body.light .login-card .subtitle { color: #5a6478; }
-body.light .login-card .input-group label { color: #5a6478; }
 
-body.light .login-card .input-group input {
-    background: rgba(15, 23, 42, 0.04);
-    border-color: rgba(15, 23, 42, 0.15);
-    color: #1c2333;
-}
 
 body.light .social button {
     background: rgba(15, 23, 42, 0.06);
@@ -148,6 +131,16 @@ body {
     align-items: baseline;
     gap: 10px;
     white-space: nowrap;
+}
+
+.wordmark .mark-icon {
+    width: 26px;
+    height: 26px;
+    align-self: center;
+    border-radius: 6px;
+    object-fit: contain;
+    /* 图标本身带底色，浅色主题下加一圈细边避免糊在背景里 */
+    box-shadow: 0 0 0 1px var(--line);
 }
 
 .wordmark .mark-dot {
@@ -837,8 +830,8 @@ textarea { resize: vertical; line-height: 1.7; }
     display: flex;
     flex-direction: column;
     gap: 2px;
-    max-height: 620px;
-    overflow: auto;
+    /* 不再在卡片内部滚动：16 个场景一次性铺开，整页滚动查看（内滚会让用户找不到下方内容） */
+    overflow: visible;
     padding-right: 4px;
 }
 
@@ -904,6 +897,14 @@ textarea { resize: vertical; line-height: 1.7; }
 
 .scene-name { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
 .scene-name b { font-size: 13px; color: var(--text); }
+
+/* 场景提示（"建议非思考模型"一类）：灰色小字，不抢主信息 */
+.scene-hint {
+    font-size: 10px;
+    line-height: 1.3;
+    color: var(--text-faint);
+    opacity: 0.85;
+}
 .scene-key {
     font-family: var(--mono);
     font-size: 10px;
@@ -959,181 +960,6 @@ textarea { resize: vertical; line-height: 1.7; }
 @media (max-width: 900px) {
     .scene-row { grid-template-columns: 1fr 1fr; grid-auto-rows: auto; row-gap: 8px; }
     .scene-row.scene-head { display: none; }
-}
-
-/* ============================================================
-   登录页：粒子星野 + 霓虹卡片（覆盖应用区默认样式）
-   ============================================================ */
-
-.login-scene {
-    position: relative;
-    width: 100%;
-    height: 100vh;
-    overflow: hidden;
-    background: linear-gradient(135deg, #0a0a0f 0%, #1a1a2e 100%);
-}
-
-/* 登录页右上角主题切换 */
-.theme-float {
-    position: absolute;
-    top: 18px;
-    right: 22px;
-    z-index: 5;
-    background: rgba(255, 255, 255, 0.08);
-    border: 1px solid rgba(255, 255, 255, 0.25);
-    border-radius: 9999px;
-    color: #e0e0ff;
-    font-size: 12px;
-    letter-spacing: 1px;
-    padding: 7px 16px;
-    cursor: pointer;
-    transition: all 0.25s;
-}
-
-.theme-float:hover {
-    background: rgba(255, 255, 255, 0.16);
-    transform: translateY(-1px);
-}
-
-body.light .theme-float {
-    background: rgba(15, 23, 42, 0.06);
-    border-color: rgba(15, 23, 42, 0.25);
-    color: #1c2333;
-}
-
-#particles {
-    position: absolute;
-    inset: 0;
-    width: 100%;
-    height: 100%;
-}
-
-.login-card {
-    position: absolute;
-    top: 50%;
-    left: 50%;
-    transform: translate(-50%, -50%);
-    width: 420px;
-    max-width: calc(100vw - 40px);
-    background: var(--login-card);
-    border-radius: 24px;
-    padding: 2.5rem 2rem;
-    backdrop-filter: blur(20px);
-    border: 1px solid rgba(0, 240, 255, 0.2);
-    box-shadow: 0 20px 60px rgba(0, 0, 0, 0.6);
-    text-align: center;
-}
-
-.login-card .logo {
-    font-family: 'Space Grotesk', sans-serif;
-    font-size: 2.4rem;
-    font-weight: 600;
-    line-height: 1.15;
-    margin-bottom: 0.5rem;
-    background: linear-gradient(90deg, #00f0ff, #ff00aa);
-    -webkit-background-clip: text;
-    background-clip: text;
-    -webkit-text-fill-color: transparent;
-}
-
-.login-card .neon-text { display: block; }
-
-.login-card h1 {
-    margin-top: 1.6rem;
-    font-size: 22px;
-    font-weight: 600;
-    letter-spacing: 2px;
-    color: #e0e0ff;
-}
-
-.login-card .subtitle {
-    color: #888;
-    margin: 0.5rem 0 2rem;
-    font-size: 0.95rem;
-}
-
-.login-card .input-group {
-    margin-bottom: 1.5rem;
-    text-align: left;
-}
-
-.login-card .input-group label {
-    display: block;
-    margin-bottom: 0.5rem;
-    font-size: 0.85rem;
-    color: #aaa;
-}
-
-.login-card .input-group input {
-    width: 100%;
-    padding: 13px 16px;
-    background: rgba(255, 255, 255, 0.05);
-    border: 1px solid rgba(255, 255, 255, 0.15);
-    border-radius: 12px;
-    color: white;
-    font-size: 1rem;
-    transition: all 0.3s;
-}
-
-.login-card .input-group input:focus {
-    outline: none;
-    border-color: var(--neon-cyan);
-    box-shadow: 0 0 0 4px rgba(0, 240, 255, 0.2);
-}
-
-.login-btn {
-    width: 100%;
-    padding: 14px;
-    background: linear-gradient(90deg, #00f0ff, #00ccff);
-    color: #000;
-    border: none;
-    border-radius: 9999px;
-    font-size: 1.05rem;
-    font-weight: 600;
-    cursor: pointer;
-    transition: all 0.3s;
-    box-shadow: 0 0 30px rgba(0, 240, 255, 0.4);
-}
-
-.login-btn:hover {
-    transform: translateY(-2px);
-    box-shadow: 0 0 50px rgba(0, 240, 255, 0.6);
-}
-
-.login-btn:disabled { opacity: 0.6; cursor: not-allowed; transform: none; }
-
-.links {
-    margin: 1.5rem 0;
-    font-size: 0.9rem;
-}
-
-.links a {
-    color: var(--neon-cyan);
-    text-decoration: none;
-    margin: 0 1rem;
-}
-
-.social {
-    display: flex;
-    gap: 1rem;
-    justify-content: center;
-    margin-top: 1rem;
-}
-
-.social button {
-    padding: 9px 18px;
-    background: rgba(255, 255, 255, 0.08);
-    border: 1px solid rgba(255, 255, 255, 0.2);
-    border-radius: 9999px;
-    color: white;
-    font-size: 0.85rem;
-    cursor: pointer;
-    transition: all 0.3s;
-}
-
-.social button:hover {
-    background: rgba(255, 255, 255, 0.15);
-    transform: scale(1.05);
 }
 
 /* 登录错误提示（复用应用区 .error-message 风格） */
@@ -1427,4 +1253,217 @@ body:not(.light) select {
     border: 1px solid var(--line);
     border-radius: 8px;
     font-size: 13px;
+}
+
+/* ============================================================
+   功能开关（03 项目模型配置）
+   ============================================================ */
+.feature-toggles {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+
+.toggle-row {
+    display: grid;
+    grid-template-columns: 22px 1fr auto;
+    gap: 12px;
+    align-items: start;
+    padding: 11px 12px;
+    border-bottom: 1px solid var(--line);
+    border-radius: 4px;
+    cursor: pointer;
+    transition: background 0.15s ease;
+}
+
+.toggle-row:hover { background: var(--panel-2); }
+.toggle-row:last-child { border-bottom: none; }
+
+.toggle-input {
+    width: 16px;
+    height: 16px;
+    margin-top: 3px;
+    accent-color: var(--accent);
+    cursor: pointer;
+}
+
+.toggle-main { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+
+.toggle-title {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--text);
+}
+
+.toggle-desc { font-size: 12px; line-height: 1.55; color: var(--text-secondary); }
+
+.toggle-cost {
+    font-family: var(--mono);
+    font-size: 11px;
+    color: var(--text-faint);
+    white-space: nowrap;
+    padding-top: 2px;
+}
+
+/* 关闭态整体压暗，一眼看出哪些环节没在跑 */
+.toggle-off .toggle-title { color: var(--text-secondary); }
+.toggle-off .toggle-desc { opacity: 0.75; }
+
+/* ============================================================
+   版本通知（左下角悬浮）
+   ============================================================ */
+/* 贴左边缘的竖向窄标签：只占 26px 宽，不再侵入内容区（此前 90px 宽的横向按钮会压住卡片） */
+.update-fab {
+    position: fixed;
+    left: 0;
+    bottom: 96px;
+    z-index: 40;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 8px;
+    padding: 12px 6px;
+    width: 26px;
+    background: var(--panel);
+    border: 1px solid var(--line-strong);
+    border-left: none;
+    border-radius: 0 8px 8px 0;
+    color: var(--text-secondary);
+    font-family: var(--mono);
+    font-size: 11px;
+    letter-spacing: 1.5px;
+    cursor: pointer;
+    transition: all 0.18s;
+    box-shadow: 2px 2px 12px rgba(0, 0, 0, 0.24);
+}
+
+/* 竖排只作用于文字本身：writing-mode 若加在 flex 容器上会翻转主轴，导致圆点跑到侧面 */
+.update-fab > span:last-child {
+    writing-mode: vertical-rl;
+    text-orientation: upright;
+    letter-spacing: 3px;
+}
+
+.update-fab:hover {
+    color: var(--text);
+    border-color: var(--accent);
+    background: var(--panel-2);
+    box-shadow: 2px 2px 16px var(--accent-glow);
+}
+
+.update-fab-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: var(--line-strong);
+    transition: background 0.2s, box-shadow 0.2s;
+}
+
+/* 检测到新版本时点亮 */
+.update-fab-dot.has-update {
+    background: var(--accent);
+    box-shadow: 0 0 10px var(--accent);
+}
+
+.update-panel {
+    position: fixed;
+    /* 面板从左边缘弹出：避开竖向标签本身（标签占 0~26px，面板从 34px 起） */
+    left: 34px;
+    bottom: 96px;
+    z-index: 41;
+    width: min(460px, calc(100vw - 50px));
+    max-height: min(70vh, 620px);
+    display: flex;
+    flex-direction: column;
+    background: var(--panel);
+    border: 1px solid var(--line-strong);
+    border-radius: 8px;
+    box-shadow: 0 12px 40px rgba(0, 0, 0, 0.45);
+    overflow: hidden;
+}
+
+.update-panel-head {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 16px 18px 10px;
+    border-bottom: 1px solid var(--line);
+}
+
+.update-panel-title { margin: 0; font-size: 15px; font-weight: 600; letter-spacing: 1px; }
+
+.update-close {
+    background: none;
+    border: none;
+    color: var(--text-faint);
+    font-size: 22px;
+    line-height: 1;
+    cursor: pointer;
+    padding: 0 4px;
+}
+
+.update-close:hover { color: var(--text); }
+
+.update-panel-body {
+    padding: 14px 18px;
+    overflow-y: auto;
+    flex: 1;
+    min-height: 0;
+}
+
+.update-current {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    font-size: 13px;
+    color: var(--text-secondary);
+    margin-bottom: 8px;
+}
+
+.update-badge {
+    padding: 1px 8px;
+    border: 1px solid var(--accent);
+    border-radius: 10px;
+    color: var(--accent);
+    font-family: var(--mono);
+    font-size: 10px;
+    letter-spacing: 1px;
+}
+
+.update-status { font-size: 13px; line-height: 1.6; color: var(--text); margin-bottom: 10px; }
+
+.update-body { font-size: 13px; line-height: 1.7; color: var(--text-secondary); }
+.update-body .release-h { margin: 10px 0 4px; color: var(--text); font-weight: 600; }
+.update-body .release-li { padding-left: 6px; }
+.update-body .release-p { margin: 4px 0; }
+
+.update-panel-foot {
+    display: flex;
+    gap: 10px;
+    align-items: center;
+    padding: 12px 18px;
+    border-top: 1px solid var(--line);
+}
+
+.update-panel-foot .btn-primary,
+.update-panel-foot .btn-secondary { text-decoration: none; display: inline-flex; align-items: center; }
+
+.update-author {
+    padding: 9px 18px 12px;
+    font-family: var(--mono);
+    font-size: 11px;
+    letter-spacing: 1.5px;
+    color: var(--text-faint);
+    border-top: 1px solid var(--line);
+    text-align: right;
+}
+
+@media (max-width: 760px) {
+    /* 窄屏仍贴左边缘，但把标签抬高一点避免和底部按钮区重叠 */
+    .update-fab { bottom: 72px; }
+    .update-panel { left: 34px; bottom: 72px; width: calc(100vw - 46px); }
 }

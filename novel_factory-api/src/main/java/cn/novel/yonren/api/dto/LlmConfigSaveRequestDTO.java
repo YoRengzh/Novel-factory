@@ -46,6 +46,12 @@ public class LlmConfigSaveRequestDTO {
      */
     private String referenceMode;
 
+    /**
+     * 功能开关覆盖（key = FeatureToggles 常量名，value = 是否开启）。
+     * null = 本次不改动开关覆盖（区别于空表 = 清空全部开关覆盖、全部回退 yml 静态值）。
+     */
+    private Map<String, Boolean> toggles;
+
     /** 嵌入分区覆盖条目：与全局字段不同，显式空串=清除该字段覆盖（嵌入分区按字段精细控制） */
     @Data
     public static class EmbeddingOverride {

@@ -8,6 +8,11 @@ spring:
       # 传输层不重试（重试收权到业务层，避免 5xx 时 token 白烧 10 次）
       max-attempts: 3
 
+# 应用元信息：前端「通知」面板显示当前版本并与 GitHub Releases 比对。
+# 发版时与 electron/package.json 的 version 同步修改（tools/build-release.sh 会校验）
+app:
+  version: 1.1.0
+
 novel:
   llm:
     connect-timeout-seconds: 20
