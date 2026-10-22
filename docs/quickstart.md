@@ -20,22 +20,16 @@
 | 档位 | 需要准备 | 能得到什么 |
 |---|---|---|
 | **必需** | JDK 17+ / Maven 3.9+，以及**一个 OpenAI 兼容端点的 API Key**或符合条件的 ChatGPT 套餐授权 | 全流程可跑通，文件侧记忆（三账本/摘要/伏笔排期/一致性索引/批末体检）一个不少 |
-| **推荐** | 上面那个 Key + **embedding 模型 API Key** + **Qdrant** | 向量增强：跨章记忆的语义唤醒 + 动态参考资料按需注入 |
+| **推荐** | 上面那个 Key + **embedding 模型 API Key** | 向量增强：跨章记忆的语义唤醒 + 动态参考资料按需注入（向量库已内置，无需另装） |
 
 用 DashScope 的话，对话与嵌入可以是同一把 Key（默认配置里 `embedding-api.api-key` 就回落到 `LLM_API_KEY`）。主聊天模型也可在启动后进入「设置 → 认证方式 → Continue with ChatGPT」完成浏览器授权；该授权不覆盖 Embedding。要分开配置见 [§3](#3-配置密钥)。
 
-Qdrant 一条命令起（没装 Docker 可以先跳过，不影响启动）：
-
-```bash
-docker run -d --name qdrant -p 6333:6333 -p 6334:6334 qdrant/qdrant
-```
-
-> 6334 是 gRPC 端口（应用用这个），6333 是 REST/dashboard（浏览器看这个）。
+向量库**已内置**（v0.2 起）：向量随故事目录落盘，零外部依赖，这一档什么都不用装。进阶用户如需切换外部 Qdrant，见 [§8](#8-启用向量增强可选推荐)。
 
 ## 2. 启动
 
 ```bash
-git clone https://github.com/YonRen-code/Novel-factory.git
+git clone https://github.com/YoRengzh/Novel-factory.git
 cd Novel-factory
 
 # 打包（首次约 20 秒，不需要预先安装任何模块）
@@ -150,7 +144,7 @@ DEGRADED 进度对齐        7段（目标 ≤1 段） ｜ 第 65 章按大纲�
 
 | 指标 | 什么时候该警惕 |
 |---|---|
-| 无检索唤醒章数占比 | >0 说明那几章是在**没有跨章记忆**的情况下生成的（向量链路在抖，或没配 Qdrant） |
+| 无检索唤醒章数占比 | >0 说明那几章是在**没有跨章记忆**的情况下生成的（向量链路在抖，或没配 embedding Key） |
 | 修订验证未跑成占比 | >0 说明有 BLOCKING 结案是**未经验证**的 |
 | 候选选优触发率 | 长期 >30% 说明初稿质量不稳定，值得先查提示词而不是加候选 |
 | 伏笔未标注占比 | 偏高时**跨度类指标不可信**——样本已被掏空 |
@@ -171,10 +165,10 @@ DEGRADED 进度对齐        7段（目标 ≤1 段） ｜ 第 65 章按大纲�
 | 场景 | 默认模型 | 温度 |
 |---|---|---|
 | 阶段蓝图 `stage-blueprint` | DeepSeek-V4-Pro | 0.7 |
-| 章节计划 `chapter-plan` | qwen3.7-max | 1.0 |
+| 章节计划 `chapter-plan` | qwen3.8-max | 1.0 |
 | 章节节拍 `chapter-beats` | deepseek-v4.1-flash | 0.3 |
 | 章节正文 `chapter-content` | glm-5.2 | 0.5 |
-| 章节审校 `audit` | qwen3.7-max | 0.1 |
+| 章节审校 `audit` | qwen3.7-plus | 0.1 |
 | 段落密度审校 `paragraph-audit` | deepseek-v4-flash | 0.1 |
 | 章节修订 `revise` | qwen3.7-plus | 0.4 |
 | 章节重写 `chapter-rewrite` / 评审 `chapter-judge` | qwen3.8-max / deepseek-v4.1-flash | — |
@@ -183,20 +177,24 @@ DEGRADED 进度对齐        7段（目标 ≤1 段） ｜ 第 65 章按大纲�
 
 ## 8. 启用向量增强（可选，推荐）
 
-1. 起 Qdrant（见 [§1](#1-你需要准备什么)）
-2. 填好 embedding 的 base-url / api-key（见 [§3](#3-配置密钥)）
-3. 重启应用
+向量库已内置（随故事目录落盘，零外部依赖），开启增强只需补齐"变向量"的一侧——embedding：
 
-连接参数在 `novel-generation.yml`（如需改动，请用本地覆盖文件）：
+1. 填好 embedding 的 base-url / api-key（见 [§3](#3-配置密钥)，或在 **03 设置 → 向量检索分区** 里直接填，保存即生效、无需重启）
+2. 用本地覆盖文件改的，重启应用生效
+
+**没配 embedding Key 也完全能跑**：系统以"无向量增强"模式运行，文件侧记忆承载全部功能。区别会在批末体检的「无检索唤醒章数占比」上显形——它明确告诉你哪几章是裸跑的，不会静默降级。
+
+### 进阶：切换外部 Qdrant
+
+内置库覆盖单机场景；要多端共享向量或已有 Qdrant 实例时，用本地覆盖文件切换：
 
 ```yaml
 story:
   vector-store:
+    mode: qdrant
     host: localhost
     port: 6334        # gRPC；6333 是 REST/dashboard
 ```
-
-**没配 Qdrant 也完全能跑**：系统以"无向量增强"模式运行，文件侧记忆承载全部功能。区别会在批末体检的「无检索唤醒章数占比」上显形——它明确告诉你哪几章是裸跑的，不会静默降级。
 
 关于版本：Qdrant 客户端版本与服务端差得较多时启动会打兼容性告警（例如客户端 1.14 对服务端 1.19）。这个告警不影响启动，但**如果检索行为异常，请把服务端换成与客户端同大版本、小版本差 ≤1 的版本**（或相应升级客户端依赖 `io.qdrant:client`），再重新索引。
 
@@ -230,7 +228,7 @@ bash docs/dev-ops/app/stop.sh
 | `Unable to find a suitable main class` | 用了 `mvn -pl novel_factory-app -am spring-boot:run`。见 [§2](#2-启动) 的说明，换命令 |
 | `http://localhost:8080` 打不开 / 404 | 端口被占用，或前端资源缺失。正常启动日志里应有 `Adding welcome page: class path resource [static/index.html]` |
 | 生成作业失败：缺少密钥 / 401 | `LLM_API_KEY` 没传到运行进程（环境变量是会话级的），或本地覆盖文件里 `api-key` 留了空 |
-| 批末体检「无检索唤醒章数占比」很高 | Qdrant 没起或 embedding 配置不对。看日志里 `RECALL_DEGRADED` 的归因 |
+| 批末体检「无检索唤醒章数占比」很高 | embedding 没配对；若切换了外部 Qdrant，检查服务是否在跑。看日志里 `RECALL_DEGRADED` 的归因 |
 | 候选盲评每章都失败 | 只配了一个模型族。把 `candidate.enabled` 置为 `false` |
 | 换过 embedding 模型后检索质量异常 | 换模型必须**重嵌**——维度相同不代表向量空间兼容 |
 | 想确认知识库/账本落在哪 | `docs/workspace/stories/<yyyyMMdd>-story-XXXX/`，全是可读 JSON，可以直接 git diff |

@@ -229,6 +229,7 @@ public class EmbeddedVectorStore implements VectorStore {
         CollectionState state = load(collection);
         Map<String, Stored> next = new LinkedHashMap<>(state.points);
         boolean removed = false;
+        //即使前面已经删掉一个，后面的 id 仍然逐个尝试
         for (String id : ids) {
             removed |= next.remove(id) != null; // id 不存在静默忽略（幂等删除）
         }
