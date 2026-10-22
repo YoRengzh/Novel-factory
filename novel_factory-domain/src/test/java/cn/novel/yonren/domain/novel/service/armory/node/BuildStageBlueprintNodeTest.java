@@ -55,8 +55,8 @@ class BuildStageBlueprintNodeTest {
      * `BuildStageBlueprintNode#repairForeshadowSchedule` 的 crossStagePossible）。
      */
     private static final String SCHEDULE_FIELD = "\"foreshadowSchedule\":["
-            + "{\"intent\":\"顾老头是否收角色丙为徒\",\"plantChapter\":12,\"payoffChapter\":30},"
-            + "{\"intent\":\"远大科技骗局的最终清算\",\"plantChapter\":20,\"payoffChapter\":45}]";
+            + "{\"intent\":\"角色戊是否收角色丙为徒\",\"plantChapter\":12,\"payoffChapter\":30},"
+            + "{\"intent\":\"某科技公司骗局的最终清算\",\"plantChapter\":20,\"payoffChapter\":45}]";
 
     /**
      * 章级主线推进的 JSON 片段（第 11-25 章，15 条）。
@@ -66,21 +66,21 @@ class BuildStageBlueprintNodeTest {
      * （半张表比没有更危险：校验会因"缺章"不断驳回，而模型每次补采都只给前几条）。
      */
     private static final String MAINLINE_FIELD = "\"mainLineByChapter\":["
-            + "{\"chapterNo\":11,\"advance\":\"首次察觉体内异样\"},"
-            + "{\"chapterNo\":12,\"advance\":\"向师姐试探口风\"},"
-            + "{\"chapterNo\":13,\"advance\":\"确认识海被侵\"},"
-            + "{\"chapterNo\":14,\"advance\":\"暗中翻阅宗门典籍\"},"
-            + "{\"chapterNo\":15,\"advance\":\"找到前任受害者的记录\"},"
-            + "{\"chapterNo\":16,\"advance\":\"锁定嫌疑人范围\"},"
-            + "{\"chapterNo\":17,\"advance\":\"设局试探长老\"},"
-            + "{\"chapterNo\":18,\"advance\":\"取得长老的把柄\"},"
-            + "{\"chapterNo\":19,\"advance\":\"把柄被对方察觉\"},"
-            + "{\"chapterNo\":20,\"advance\":\"遭到伏击身受重伤\"},"
-            + "{\"chapterNo\":21,\"advance\":\"疗伤期间想通夺舍手法\"},"
-            + "{\"chapterNo\":22,\"advance\":\"找到破解夺舍的阵法\"},"
-            + "{\"chapterNo\":23,\"advance\":\"布阵失败被反制\"},"
-            + "{\"chapterNo\":24,\"advance\":\"以自身神魂为饵诱敌\"},"
-            + "{\"chapterNo\":25,\"advance\":\"当众揭穿长老身份\"}]";
+            + "{\"chapterNo\":11,\"advance\":\"【悬疑】首次察觉体内异样\"},"
+            + "{\"chapterNo\":12,\"advance\":\"【学习】向师姐试探口风\"},"
+            + "{\"chapterNo\":13,\"advance\":\"【悬疑】确认识海被侵\"},"
+            + "{\"chapterNo\":14,\"advance\":\"【学习】暗中翻阅宗门典籍\"},"
+            + "{\"chapterNo\":15,\"advance\":\"【悬疑】找到前任受害者的记录\"},"
+            + "{\"chapterNo\":16,\"advance\":\"【学习】锁定嫌疑人范围\"},"
+            + "{\"chapterNo\":17,\"advance\":\"【悬疑】设局试探长老\"},"
+            + "{\"chapterNo\":18,\"advance\":\"【学习】取得长老的把柄\"},"
+            + "{\"chapterNo\":19,\"advance\":\"【悬疑】把柄被对方察觉\"},"
+            + "{\"chapterNo\":20,\"advance\":\"【学习】遭到伏击身受重伤\"},"
+            + "{\"chapterNo\":21,\"advance\":\"【悬疑】疗伤期间想通夺舍手法\"},"
+            + "{\"chapterNo\":22,\"advance\":\"【学习】找到破解夺舍的阵法\"},"
+            + "{\"chapterNo\":23,\"advance\":\"【悬疑】布阵失败被反制\"},"
+            + "{\"chapterNo\":24,\"advance\":\"【学习】以自身神魂为饵诱敌\"},"
+            + "{\"chapterNo\":25,\"advance\":\"【学习】当众揭穿长老身份\"}]";
 
     /**
      * 正常蓝图夹具：**带悬念档位表 + 章级主线推进**。
@@ -492,8 +492,8 @@ class BuildStageBlueprintNodeTest {
                 .thenReturn("{\"stageGoal\":\"目标\",\"endChapter\":55,\"arcNo\":3,\"arcGoal\":\"外门立身\","
                         + "\"coreSuspense\":\"外门何时露出破绽\","
                         + "\"suspenseLadder\":[\"无人察觉\",\"个别弟子起疑\",\"当众揭穿\"],"
-                        + "\"mainLineByChapter\":[{\"chapterNo\":11,\"advance\":\"弟子首次察觉异常\"},"
-                        + "{\"chapterNo\":12,\"advance\":\"向执事试探口风\"}],"
+                        + "\"mainLineByChapter\":[{\"chapterNo\":11,\"advance\":\"【悬疑】弟子首次察觉异常\"},"
+                        + "{\"chapterNo\":12,\"advance\":\"【学习】向执事试探口风\"}],"
                         + SCHEDULE_FIELD + "}");
         DefaultArmoryFactory.DynamicContext ctx = DefaultArmoryFactory.DynamicContext.builder()
                 .chapterOffset(10)

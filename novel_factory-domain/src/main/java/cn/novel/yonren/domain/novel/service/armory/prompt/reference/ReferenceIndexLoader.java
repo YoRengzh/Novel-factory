@@ -120,7 +120,8 @@ public class ReferenceIndexLoader {
                 digest = text.length() > DIGEST_MAX_LENGTH ? text.substring(0, DIGEST_MAX_LENGTH) + "…" : text;
             }
         }
-        return new ReferenceIndexEntry(fileName, title, digest, relativePath);
+        return new ReferenceIndexEntry(fileName, title, digest, relativePath,
+                ReferenceGroup.groupOf(fileName));
     }
 
 }

@@ -6,6 +6,7 @@ import cn.novel.yonren.domain.novel.model.valobj.StoryVO;
 import cn.novel.yonren.domain.novel.service.armory.llm.LlmInvokeService;
 import cn.novel.yonren.domain.novel.service.armory.llm.PlanBranchService;
 import cn.novel.yonren.domain.novel.service.armory.prompt.valobj.PromptContext;
+import cn.novel.yonren.domain.novel.service.job.GenerationJob;
 import cn.novel.yonren.types.exception.AppException;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -24,6 +25,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.contains;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -308,7 +310,7 @@ class ChapterPlanSegmentPlannerTest {
     @Test
     void planSegment_branchExplorationFeedsDirectionIntoPlanCall() {
         when(planBranchService.enabled()).thenReturn(true);
-        when(planBranchService.exploreAndPick(any(), any(), anyString(), anyString(), any()))
+        when(planBranchService.exploreAndPick(any(), any(), anyString(), anyString(), any(), any()))
                 .thenReturn("{\"structure\":\"双线并进\",\"direction\":\"先抑后扬\",\"risks\":[\"节奏压力\"]}");
         when(llmInvokeService.invoke(any(), any(), any(), contains("【已选规划方向】"), any()))
                 .thenReturn(compliantPlan());
@@ -327,7 +329,7 @@ class ChapterPlanSegmentPlannerTest {
     void planSegment_branchFails_fallsBackToSingleDraft() {
         // 分支推演未产出可用方向：静默回退单稿路径，不失败
         when(planBranchService.enabled()).thenReturn(true);
-        when(planBranchService.exploreAndPick(any(), any(), anyString(), anyString(), any()))
+        when(planBranchService.exploreAndPick(any(), any(), anyString(), anyString(), any(), any()))
                 .thenReturn(null);
         when(llmInvokeService.invoke(any(), any(), any(), anyString(), any()))
                 .thenReturn(compliantPlan());
@@ -338,5 +340,38 @@ class ChapterPlanSegmentPlannerTest {
 
         assertEquals(3, planned.plan().getChapters().size());
         verify(llmInvokeService, times(1)).invoke(any(), any(), any(), anyString(), any());
+    }
+
+    /**
+     * 取消在重试轮次头部生效：第一轮输出章数不符 → 置位取消 → 第二轮**不得发出**，
+     * 且以取消语义（AppException）终止而非"计划彻底失败"。
+     */
+    @Test
+    void planSegment_cancelRequestedBetweenAttempts_stopsBeforeNextCall() {
+        GenerationJob job = new GenerationJob("job-cancel-1");
+        when(llmInvokeService.invoke(any(), any(), any(), anyString(), any()))
+                .thenAnswer(invocation -> {
+                    // 第一次调用已发出，模拟用户在响应返回前点了取消
+                    job.requestCancel();
+                    return planJson("1", LADDER.get(0));
+                });
+
+        assertThrows(AppException.class, () -> planner.planSegment(
+                new StoryVO(), PromptContext.builder().build(), "prompt",
+                1, 3, blueprintWithLadder(), null, usedPromptMap, null, null, job));
+        // 取消后不再重试：总共只发生一次模型调用
+        verify(llmInvokeService, times(1)).invoke(any(), any(), any(), anyString(), any());
+    }
+
+    /** 取消信号在首次调用前已置位：一次模型调用都不应发出 */
+    @Test
+    void planSegment_alreadyCancelled_makesNoCall() {
+        GenerationJob job = new GenerationJob("job-cancel-2");
+        job.requestCancel();
+
+        assertThrows(AppException.class, () -> planner.planSegment(
+                new StoryVO(), PromptContext.builder().build(), "prompt",
+                1, 3, blueprintWithLadder(), null, usedPromptMap, null, null, job));
+        verify(llmInvokeService, never()).invoke(any(), any(), any(), anyString(), any());
     }
 }

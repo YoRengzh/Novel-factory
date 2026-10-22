@@ -176,11 +176,12 @@ public class ChapterWorker {
     @Resource
     private ConsistencyIndexService consistencyIndexService;
 
-    @Resource
-    private IStoryRepository storyRepository;
-
+    /** 机械校验事件留痕（账本失配等）：只写 WARN 无法聚合统计，落盘才能量化管道漏损 */
     @Resource
     private cn.novel.yonren.domain.novel.service.armory.quality.MechanicalEventRecorder mechanicalEventRecorder;
+
+    @Resource
+    private IStoryRepository storyRepository;
 
     /**
      * 执行整批逐章生成，完成后把正文/摘要/质量债/风格统计回写 DynamicContext，
@@ -239,6 +240,15 @@ public class ChapterWorker {
         int plannedSegmentEnd = plannedEndStored != null ? plannedEndStored : Integer.MAX_VALUE;
 
         int idx = 0;
+        // 蓝图/卷落盘降频用的变化检测：两者一个批次内至多变一次（阶段/卷边界），
+        // 而此前每章全量重写（写放大随书线性增长）。**判据是列表大小 + 阶段报告是否被回写**：
+        //   · 链式生成只做 append，大小变化即结构变化；
+        //   · 阶段末章会 setStageReport 回写蓝图**内容**（大小不变）——只比大小会让阶段报告漏盘；
+        //   · 首章 counts=-1 强制写一次建立基线（resume 场景该文件已在盘上，重写是幂等的）。
+        // 树尾 PersistChapterPlanNode 仍会无条件全量兜底，故任何判断失误都不会永久丢数据。
+        int lastBlueprintCount = -1;
+        int lastVolumeCount = -1;
+        boolean blueprintDirty = true;
         while (true) {
             // 已规划章节用尽：跨段批次且有未规划段 → 用最新记忆惰性规划下一段（消除陈旧）；
             // 全部规划完成（或无分段）→ 批次结束
@@ -332,10 +342,9 @@ public class ChapterWorker {
             String usedPatternBlacklist = buildUsedPatternBlacklist(summaries, globalNo);
             // 前缀总预算守门：各块独立封顶之和仍可能击穿模型输入窗口，统一按优先级装配——
             // 渲染顺序：末态红线 → 记忆各节（buildMemoryBlocks） → 门禁类块 → 三账本/伏笔账；
-            // 记忆拆为子块：整块截尾会先牺牲最近/纠错类尾部，分块后牺牲顺序由 priority 决定。
             // 第 4 档内按入参顺序贪心填装，三账本/伏笔账（常合计 5k+ 字，第 4 档主要消耗方）抽到末尾——
             // 预算吃紧时由它们承担截断，保住情节模式黑名单/审校反馈两个小纠正通道
-            //（截断不清零余量后，同档大块排末位才轮得到它挨刀。伏笔账按动态权重
+            //（实测第 111/112/115 章：截断[一致性索引]清零预算后两通道整批出局。伏笔账按动态权重
             //  分级渲染、尾部为最低分背景条目，是最抗截的块，见 ChapterMemoryService.renderForeshadowing）
             List<PromptBudgetGuard.Block> ledgerBlocks = detachLedgerBlocks(memoryBlocks);
             List<PromptBudgetGuard.Block> prefixBlocks = new ArrayList<>();
@@ -370,13 +379,25 @@ public class ChapterWorker {
 
             String userPrompt = buildChapterPrompt(dynamicContext.getStoryContext(), item, fullPrefix, globalNo,
                     contract, storyContext);
-            if (mode == GenerationMode.FREE) {
-                // FREE：契约完整时把节拍降为"建议顺序"，把场景划分与对白比例的自由还给模型
-                userPrompt += FREE_BEATS_NOTE;
+            // 段计划遗留违规（2026-10-13）：计划层二次重规划仍未通过的推进问题，在此转成对写手的硬约束。
+            // 实测第 136 章：计划闸门报了"136/137 事件重合、档位倒退"仍放行，写手拿到的是一份残缺契约，
+            // 首稿 87 字（把重叠事件写完就无料可写）——把违规原文交给写手，至少能止损到"本章写别的"。
+            if (StringUtils.isNotBlank(dynamicContext.getPlanResidualViolations())) {
+                userPrompt += "\n\n【本段计划的遗留问题（规划校验两次未通过仍放行，写作时必须规避）】"
+                        + dynamicContext.getPlanResidualViolations()
+                        + "\n⚠️ 以上问题意味着本段计划存在相邻章推进雷同或档位安排不当。"
+                        + "你只负责本章：**严格按本章计划的关键事件写作，不得把相邻章的推进内容写进本章**；"
+                        + "若本章计划与相邻章确有重叠，只写属于本章的那一部分（不同的场景、不同的对手、不同的结果），"
+                        + "并保证本章有一个明确的、可与相邻章区分开的推进落点。";
             }
-            String beatsPrompt = beats == null ? "" : chapterBeatsService.renderBeatsPrompt(beats);
             // 场景节拍层：计划 → 正文之间插入逐拍供给（防注水的治本改动）；
-            // 节拍不可用时用通用骨架兜底——保住因果链，而不是放任模型自由发挥
+            // 节拍不可用时用通用骨架兜底——保住因果链，而不是放任模型自由发挥。
+            // FREE（enforcesBeats=false）时节拍降为"建议顺序"，把场景划分与对白比例的自由还给模型。
+            // ⚠️ 这句话必须由**节拍块自己**说：此前它由 FREE_BEATS_NOTE 单独追加在节拍块**之前**，
+            // 紧随其后的节拍块又写着"请逐拍扩写，不要跳过或合并"——后者更靠后、更具体，实际生效，
+            // 于是 enforcesBeats() 写好了、有单测、生产代码却从未调用，FREE 名不副实。
+            String beatsPrompt = beats == null ? ""
+                    : chapterBeatsService.renderBeatsPrompt(beats, mode.enforcesBeats());
             userPrompt += StringUtils.isNotBlank(beatsPrompt) ? beatsPrompt : FALLBACK_SKELETON;
             if (mode.forbidsOutOfPlanElements()) {
                 userPrompt += RECOVERY_CONSTRAINTS;
@@ -451,22 +472,22 @@ public class ChapterWorker {
             // 抢救成功返回 partial 标记的残缺记忆（仅剧情摘要，账本状态缺失）
             String ledgerPrompt = chapterMemoryService.renderLedgerPrompt(summaries);
             // 摘要携带待回收伏笔账（新→旧封顶），回收登记才能逐字沿用原文、账本核销匹配才可靠。
-            // 带 ID 前缀版：模型可回抄 [F章号-序号] 精确销账，不再依赖措辞吻合
+            // 带 ID 前缀版（2026-10-13）：模型可回抄 [F章号-序号] 精确销账，不再依赖措辞吻合
             List<String> pendingForeshadowing = chapterMemoryService.buildForeshadowContextListWithIds(
                     summaries, ChapterMemoryService.FORESHADOW_CONTEXT_LIMIT);
             ChapterSummaryEntity summary = chapterSummaryService.summarize(
                     requestParameter.getStoryVO(), item, chapterContent.getContent(), globalNo,
                     ledgerPrompt, pendingForeshadowing, summaries);
-            // 账本失配留痕：本章回收清单与待收账本一条都没匹配上时，把失配事实结构化落盘——
-            // 这是"账本按文本核销"这条设计的漏损计量点，只写 WARN 日志无法聚合
-            //（伏笔结构化 ID 改造的效果验证依赖这个数字）。fail-soft
+            // 账本失配留痕（2026-10-13）：本章回收清单与待收账本一条都没匹配上时，
+            // 把失配事实结构化落盘——这是"账本按文本核销"这条设计的漏损计量点，
+            // 只写 WARN 日志无法聚合（伏笔结构化 ID 改造的效果验证依赖这个数字）。fail-soft
             ChapterSummaryService.LedgerMismatch ledgerMismatch = chapterSummaryService.consumeLedgerMismatch();
             if (ledgerMismatch != null) {
                 mechanicalEventRecorder.recordLedgerMismatch(storyDir, globalNo,
                         ledgerMismatch.resolvedCount(), ledgerMismatch.pendingCount(),
                         ledgerMismatch.resolved());
             }
-            // 种子补 new 留痕：模型偶尔只填 foreshadowSeeds 漏填 foreshadowingNew，
+            // 种子补 new 留痕（2026-10-14）：模型偶尔只填 foreshadowSeeds 漏填 foreshadowingNew，
             // 机械层已无条件补齐（ChapterSummaryService.syncSeedsIntoNew）——补齐事实落结构化流水，
             // 用于回答"漏填率多高、补进来的条目后来有没有被回收"。fail-soft 同上一块
             ChapterSummaryService.SeedNewSync seedNewSync = chapterSummaryService.consumeSeedNewSync();
@@ -544,6 +565,9 @@ public class ChapterWorker {
                 reviewStageExitConditions(module, stageBlueprint, summaries, dynamicContext);
                 settleStageBreakerForeshadows(requestParameter, module, stageBlueprint, summaries,
                         foreshadowSettlements, globalNo, storyDir, dynamicContext);
+                // 上述三步都会**就地回写蓝图内容**（阶段报告/退出核验/清账标注）而列表大小不变——
+                // 必须显式置脏，否则降频逻辑会把这批回写判成"无变化"而漏盘
+                blueprintDirty = true;
             }
 
             // 逐章同步上下文：惰性分段规划依赖最新记忆（下一段规划在章间触发）
@@ -552,24 +576,50 @@ public class ChapterWorker {
             dynamicContext.setPrevChapterTail(chapterMemoryService.tailByParagraph(
                     chapterContent.getContent(), ChapterMemoryService.DEFAULT_PREV_TAIL_LENGTH));
 
-            // 逐章检查点：正文/记忆/质量债/风格统计/阶段蓝图即写即存（失败仅告警，树尾持久化节点最终兜底）
+            // 逐章检查点：正文/记忆/质量债/风格统计/阶段蓝图即写即存。
+            // 分级容错：**正文与摘要**是核心交付物——写失败必须立即终止本批，否则磁盘上正文编号
+            // 出现缺口，而 resume 的锁步校验对缺口硬失败（validateResumeLockStep），用户从此无法续写，
+            // 只能手工修目录；"树尾持久化会重写"的兜底只在活到树尾时成立。
+            // 其余为增强件（风格/蓝图/排期/向量索引），保持 fail-soft：写失败不影响正文与记忆的完整性。
             if (storyDir != null) {
                 try {
                     storyRepository.writeChapters(storyDir, List.of(chapterContent));
                     storyRepository.writeChapterSummaries(storyDir, summaries);
+                } catch (Exception e) {
+                    log.error("第 {} 章核心交付物（正文/摘要）落盘失败，终止本批——"
+                            + "继续生成会在正文编号上留缺口，resume 锁步校验将拒绝续写", globalNo, e);
+                    throw new AppException(ResponseCode.UN_ERROR.getCode(),
+                            "第 " + globalNo + " 章正文/摘要落盘失败，本批终止（已完成章节均已落盘，可 resume 续写）："
+                                    + e.getMessage());
+                }
+                try {
                     storyRepository.writeQualityDebts(storyDir, qualityDebts);
                     storyRepository.writeStyleStat(storyDir, styleStat);
                     storyRepository.writeStyleFingerprints(storyDir, styleFingerprints);
                     storyRepository.writeConsistencyIndex(storyDir, consistencyIndex);
-                    storyRepository.writeStageBlueprints(storyDir, dynamicContext.getStageBlueprints());
-                    storyRepository.writeVolumes(storyDir, dynamicContext.getVolumes());
-                    // 伏笔排期表随批落盘：stamp() 只就地改内存，蓝图节点仅在补采时写一次——
-                    // 漏了这里，PLANTED/PAID/MISSED 与排期状态重启即丢（实测两批 MISSED 从未落盘）
+                    // 蓝图/卷**只在变化时写**（2026-10-13）：两者一个批次内至多变一次
+                    //（阶段边界/卷边界），而此前每章全量重写——写放大随书线性增长。
+                    // 蓝图有两个变化源：链式 append（大小变）+ 阶段末章的就地回写（大小不变，
+                    // 故须靠 blueprintDirty 显式置脏）；卷在章循环内只读，比大小即可。
+                    // 树尾 PersistChapterPlanNode 仍会无条件全量兜底，故不漏盘。
+                    int blueprintCount = sizeOf(dynamicContext.getStageBlueprints());
+                    int volumeCount = sizeOf(dynamicContext.getVolumes());
+                    if (blueprintDirty || blueprintCount != lastBlueprintCount) {
+                        storyRepository.writeStageBlueprints(storyDir, dynamicContext.getStageBlueprints());
+                        lastBlueprintCount = blueprintCount;
+                        blueprintDirty = false;
+                    }
+                    if (volumeCount != lastVolumeCount) {
+                        storyRepository.writeVolumes(storyDir, dynamicContext.getVolumes());
+                        lastVolumeCount = volumeCount;
+                    }
+                    // 伏笔排期表**每章都写**：stamp() 逐章推进 PLANNED→PLANTED→PAID/MISSED，
+                    // 状态随时在变，不能降频（漏写会让状态重启即丢，实测两批 MISSED 从未落盘）
                     storyRepository.writeForeshadowSchedule(storyDir, dynamicContext.getForeshadowSchedules());
                     // 二期/三期/五期：本章摘要 + 最新账本 + 设定幂等写入故事记忆集合；worldId 合法时 bible 点另写世界集合
                     storyMemoryService.indexAfterChapter(module, storyDir, summaries, storyContext.getWorldId());
                 } catch (Exception e) {
-                    log.error("第 {} 章检查点落盘失败，已跳过（树尾持久化会重写）", globalNo, e);
+                    log.error("第 {} 章增强件落盘失败，已跳过（树尾持久化会重写）", globalNo, e);
                 }
             }
 
@@ -893,9 +943,13 @@ public class ChapterWorker {
         return blueprint.getEndChapter() == null ? Integer.MAX_VALUE : blueprint.getEndChapter();
     }
 
+    /** 列表大小（null 安全）：蓝图/卷落盘降频的变化判据 */
+    private static int sizeOf(List<?> list) {
+        return list == null ? 0 : list.size();
+    }
+
     /** 故事记忆检索的下界：近 N 章窗口内章节已在摘要节直给，检索仅唤醒更早章节（账本/设定点不受限） */
-    private static Integer recallMinChapterNo(List<ChapterSummaryEntity> summaries) {
-        if (summaries == null || summaries.isEmpty()) {
+    private static Integer recallMinChapterNo(List<ChapterSummaryEntity> summaries) {        if (summaries == null || summaries.isEmpty()) {
             return null;
         }
         int latest = summaries.get(summaries.size() - 1).getChapterNo();
@@ -960,7 +1014,8 @@ public class ChapterWorker {
         ChapterPlanSegmentPlanner.PlannedSegment planned = planSegmentPlanner.planSegment(
                 requestParameter.getStoryVO(), planCtx, prompt,
                 segment.startChapter(), segment.endChapter(), segment.blueprint(), rosterNames,
-                dynamicContext.getUsedPromptMap());
+                dynamicContext.getUsedPromptMap(),
+                summaries, dynamicContext.getForeshadowSettlements(), planJob);
 
         ChapterPlanAggregate aggregate = dynamicContext.getChapterPlanAggregate();
         if (aggregate.getChapters() == null) {
@@ -968,6 +1023,8 @@ public class ChapterWorker {
         }
         aggregate.getChapters().addAll(planned.plan().getChapters());
         dynamicContext.setPlannedSegmentEnd(segment.endChapter());
+        // 遗留违规随段规划落进上下文，逐章注入正文 prompt（见 buildChapterPrompt 的调用方）
+        dynamicContext.setPlanResidualViolations(planned.residualGateIssues());
         log.info("惰性分段规划：第 {}-{} 章段已规划（{} 章），规划记忆更新至第 {} 章",
                 segment.startChapter(), segment.endChapter(), planned.plan().getChapters().size(),
                 summaries.isEmpty() ? "-" : summaries.get(summaries.size() - 1).getChapterNo());
@@ -1109,6 +1166,17 @@ public class ChapterWorker {
                 decisions.size() - recoverCount - doneCount - parkedCount, recoverCount);
     }
 
+    /** 质量趋势读取（fail-soft）：读不到/解析不出都返回空表，由体检层跳过该行指标 */
+    private List<String> readQualityTrendSafely(Path storyDir) {
+        try {
+            List<String> lines = storyRepository.readQualityTrend(storyDir);
+            return lines == null ? List.of() : lines;
+        } catch (Exception e) {
+            log.warn("质量趋势读取失败，体检跳过质量评分行：{}", e.getMessage());
+            return List.of();
+        }
+    }
+
     /** 上一阶段（结束于 beforeChapter-1）未达成的退出条件块；无则返回 null */
     private String renderUnmetExitConditions(List<StageBlueprintEntity> blueprints, int beforeChapter) {
         if (blueprints == null) {
@@ -1171,10 +1239,16 @@ public class ChapterWorker {
                         log.info("第 {} 章正文经文本修复后解析成功", globalNo);
                     }
                 }
-                if (chapter != null) {
+                // 解析"成功"但正文为空 = 实际失败（重复 content 键取到后一个空串的典型形态）：
+                // 不能直接返回，否则后续校验/落盘会拿到空稿；交由下一级降级接住
+                if (chapter != null && StringUtils.isNotBlank(chapter.getContent())) {
                     // 正文实体以全局章节号为准（落盘文件名/续写衔接均依赖），不信任模型输出的编号
                     chapter.setChapterNo(globalNo);
                     return chapter;
+                }
+                if (chapter != null) {
+                    log.warn("第 {} 章正文第 {}/2 次输出解析为空正文（疑似重复 content 键），继续降级",
+                            globalNo, attempt);
                 }
                 log.warn("第 {} 章正文第 {}/2 次输出无法解析", globalNo, attempt);
             } catch (Exception e) {
@@ -1182,7 +1256,9 @@ public class ChapterWorker {
             }
         }
 
-        String content = JsonRepair.extractStringField(lastRaw, "content");
+        // 抢救：取**首个非空** content——重复键时 JSON 库会取到后一个空串，
+        // 但按出现顺序扫能拿回前面那段真正文（否则一条本可救回的稿子会被判死）
+        String content = JsonRepair.extractStringField(lastRaw, "content", true);
         if (StringUtils.isNotBlank(content)) {
             log.warn("第 {} 章正文解析失败，已抢救正文主体（标题取自章节计划）", globalNo);
             return ChapterContentEntity.builder()
@@ -1211,11 +1287,6 @@ public class ChapterWorker {
 
     /** 节拍前情上下文取最近几章（只取摘要，避免把整段记忆前缀塞进每章一次的节拍调用） */
     private static final int BEATS_CONTEXT_CHAPTERS = 2;
-
-    /** FREE 模式的节拍说明：契约完整时把节拍降为"建议顺序"，把场景与对白比例的自由还给模型 */
-    private static final String FREE_BEATS_NOTE =
-            "\n（以下节拍为**建议顺序**：在保证因果链与【本章完成条件】的前提下，"
-                    + "可自行调整场景划分与对白比例）";
 
     /** 节拍不可用时的兜底骨架：只保证因果链成立，不锁死场景数与篇幅 */
     private static final String FALLBACK_SKELETON = """
@@ -1320,9 +1391,23 @@ public class ChapterWorker {
                 .append("\n  结尾悬念：").append(contract.endingImage())
                 .append("\n【本章完成条件】以下条件全部自然完成后，本章立即结束、不再扩写：")
                 .append("\n  1) 关键事件全部落地并写出结果（见上）；")
-                .append("\n  2) 结尾停在「结尾悬念」所指的画面或动作上。")
-                .append("\n  完成即收笔：**不要**为了达到字数或密度指标追加新的冲突、解释、环境描写或心理总结；")
-                .append("宁可短而完整，不可长而注水。")
+                // 2) 是"形态"要求而非字数要求——2026-10-10 实测：同一段章节、同一份计划，
+                // 两次生成的字数差 21%、对白差 30%、情感词差 75%，而计划供给逐字相同。
+                // 根因是本条缺失：写手被要求"完成即收笔"，却没人要求"每个事件得演出来"，
+                // 于是把 4 个关键事件各用一段话交代过去，章就成了 977 字的流程说明。
+                .append("\n  2) **每个关键事件都必须演成一场戏**：有在场的对手或同伴、有一来一回的对话或具体动作、"
+                        + "有可看见的结果。**禁止**把关键事件压成一句过渡叙述（如「他把材料交了上去」"
+                        + "「两人谈完了」）——那是摘要，不是本章要交付的东西；")
+                // 3) 情感要正面要求，且明确它不算注水：本项目的反注水机制（挤水判据把"重复情绪"
+                // 列为首要目标、契约禁止"心理总结"）叠在一起，把**具体的情感呈现**也一起砍了——
+                // 实测一章情感词从 5 处掉到 1 处。而这本书的格调本来就是"温情细腻…有血有肉的生活细节"。
+                .append("\n  3) 至少一处**具体的情感时刻**：用动作、停顿、沉默、器物或对白把人物的情绪与关系变化"
+                        + "呈现出来（比如话说到一半把碗放下、伸手又收回去、把糖纸压平了才开口），"
+                        + "而不是用「他很担心」这类抽象心理总结；")
+                .append("\n  4) 结尾停在「结尾悬念」所指的画面或动作上。")
+                .append("\n  完成即收笔：**不要**为了凑字数追加新的冲突、解释、环境描写或**抽象的心理总结**；")
+                .append("宁可短而完整，不可长而注水。但上面的第 2、3 条是**内容本身**，不是凑数——")
+                .append("若发现写完还不足一场戏的量，说明事件被写薄了，该把它写细而不是收笔。")
                 .append("\n  建议骨架（可按剧情调整顺序，但因果链必须成立）：")
                 .append(contract.suggestedSkeleton())
                 .append("\n要求：");
@@ -1415,7 +1500,6 @@ public class ChapterWorker {
         }
     }
 
-
     /**
      * 把三账本/伏笔账从记忆块列表中抽出（原地移除、保持相对顺序），调用方将其追加到正文前缀末尾。
      * Block 是 record：label 在场景内唯一（装配器不变式），按 label 匹配再 removeAll 不会误伤其他块
@@ -1432,6 +1516,15 @@ public class ChapterWorker {
         return ledgers;
     }
 
+    /**
+     * 已用情节模式块（正文层）：委托 {@link UsedPatternPolicy}，与规划层共用同一实现。
+     *
+     * <p>此前这里有一份私有实现（"最近 5 章摘要前 80 字 + 首个节拍 goal→结果"），
+     * 规划层则完全没有对应块——重复的源头在规划层，正文层再劝也拦不住。
+     * 现两处共用同一实现，避免"规划说没重复、正文说重复"的口径分裂
+     * （项目里已因"两份判据各自演化"出过几次问题）。窗口沿用 5 章，与改造前一致，便于对照。
+     * 返回 null 表示无历史可参考（第 1 章或摘要为空）。
+     */
     private String buildUsedPatternBlacklist(List<ChapterSummaryEntity> summaries, int chapterNo) {
         return UsedPatternPolicy.render(summaries, chapterNo, UsedPatternPolicy.BODY_LOOKBACK);
     }
@@ -1461,16 +1554,5 @@ public class ChapterWorker {
                     .append(StringUtils.abbreviate(issue.getDescription(), 80));
         }
         return sb.toString();
-    }
-
-    /** 质量趋势读取（fail-soft）：读不到/解析不出都返回空表，由体检层跳过该行指标 */
-    private List<String> readQualityTrendSafely(Path storyDir) {
-        try {
-            List<String> lines = storyRepository.readQualityTrend(storyDir);
-            return lines == null ? List.of() : lines;
-        } catch (Exception e) {
-            log.warn("质量趋势读取失败，体检跳过质量评分行：{}", e.getMessage());
-            return List.of();
-        }
     }
 }

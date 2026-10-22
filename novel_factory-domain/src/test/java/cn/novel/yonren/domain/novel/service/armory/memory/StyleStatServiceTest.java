@@ -253,4 +253,53 @@ class StyleStatServiceTest {
                 "真重复（10 字问句）必须抓到——它就是本条判据的标定样本");
     }
 
+
+
+    // ==================== 移植自旧系统的闸门用例 ====================
+
+    /** 同一句在章内一字不差出现两次 → 检出（跨章查重只比"本章 vs 历史"，看不住章内自撞） */
+    @Test
+    @DisplayName("章内重复：同一句在章内出现两次即检出")
+    void intraChapterDuplicate_detectsRepeatedSentence() {
+        String content = "他把那封信折好收进内袋。院子里没有人，风把晾着的衣服吹得鼓起来。他把那封信折好收进内袋。";
+        List<String> dups = StyleStatService.intraChapterDuplicateSentences(content);
+        assertEquals(List.of("他把那封信折好收进内袋"), dups, "章内重复句应被检出：" + dups);
+    }
+
+    /** 重复句之间隔着别的短句也要抓到——只比相邻两句会漏掉这种形态（实测成稿就是这样） */
+    @Test
+    @DisplayName("章内重复：隔句重复同样检出")
+    void intraChapterDuplicate_detectsWhenSeparatedByOtherSentence() {
+        String content = "她把帆布包往枕头里侧推了推。她一直没睡着。她把帆布包往枕头里侧推了推。";
+        List<String> dups = StyleStatService.intraChapterDuplicateSentences(content);
+        assertEquals(1, dups.size(), "隔句重复应被检出：" + dups);
+    }
+
+    /** 短句复用是正常文体（称呼、短答），不得误报 */
+    @Test
+    @DisplayName("章内重复：短句复用不误报")
+    void intraChapterDuplicate_ignoresShortSentences() {
+        String content = "他点头。她笑了。他点头。她又笑了。";
+        assertTrue(StyleStatService.intraChapterDuplicateSentences(content).isEmpty(),
+                "短句复用不该误报");
+    }
+
+    /** 不重复的正文不得误报（宁可漏报不误伤） */
+    @Test
+    @DisplayName("章内重复：正常正文不误报")
+    void intraChapterDuplicate_noFalsePositiveOnNormalProse() {
+        String content = "他推开门，院子里没有人。风把晾着的衣服吹得鼓起来，绳子吱吱响。"
+                + "他站了一会儿，转身把门带上了。";
+        assertTrue(StyleStatService.intraChapterDuplicateSentences(content).isEmpty(),
+                "无重复的正常正文不得误报");
+    }
+
+    /** 同一句出现三次也只报一次（去重） */
+    @Test
+    @DisplayName("章内重复：多次重复只报一条")
+    void intraChapterDuplicate_reportsOncePerSentence() {
+        String content = "他把那封信折好收进内袋。他把那封信折好收进内袋。他把那封信折好收进内袋。";
+        assertEquals(1, StyleStatService.intraChapterDuplicateSentences(content).size(),
+                "同一句多次重复只报一条");
+    }
 }

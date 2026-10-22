@@ -789,10 +789,10 @@ class RollingOutlineServiceTest {
     void scheduleRepairPrompt_listsCarriedItems() {
         String prompt = new RollingOutlineService().buildForeshadowScheduleRepairPrompt(
                 null, stage11to55(), 300,
-                List.of(item("顾老头是否收徒", 12, 30)), List.of());
+                List.of(item("角色戊是否收徒", 12, 30)), List.of());
 
         assertTrue(prompt.contains("不要重复排"), prompt);
-        assertTrue(prompt.contains("顾老头是否收徒"), prompt);
+        assertTrue(prompt.contains("角色戊是否收徒"), prompt);
     }
 
     /**
@@ -860,9 +860,9 @@ class RollingOutlineServiceTest {
      */
     @Test
     void mergeScheduleItems_keepsCarriedVersionOnDuplicate() {
-        ForeshadowScheduleEntity.ScheduleItem carried = item("顾老头是否收徒", 12, 30);
+        ForeshadowScheduleEntity.ScheduleItem carried = item("角色戊是否收徒", 12, 30);
         carried.setStatus(ForeshadowScheduleEntity.STATUS_PLANTED);
-        ForeshadowScheduleEntity.ScheduleItem fresh = item("顾老头是否收徒。", 13, 40); // 归一后同 key
+        ForeshadowScheduleEntity.ScheduleItem fresh = item("角色戊是否收徒。", 13, 40); // 归一后同 key
 
         List<ForeshadowScheduleEntity.ScheduleItem> merged = new RollingOutlineService()
                 .mergeScheduleItems(List.of(carried), List.of(fresh, item("新线", 20, 60)));
@@ -888,5 +888,123 @@ class RollingOutlineServiceTest {
 
         assertEquals(1, carried.size(), "已兑现/已落空的线不该继续结转：" + carried);
         assertEquals("a", carried.get(0).getIntent());
+    }
+
+
+    // ==================== 移植自旧系统的闸门用例 ====================
+
+    @Test
+    void mainLineDisciplineFeedback_namesFixInstructions() {
+        String feedback = RollingOutlineService.mainLineDisciplineFeedback(List.of("第 106 章推进未标剧情线标签"));
+
+        assertTrue(feedback.contains("【学习】/【本金】/【程序】/【悬疑】/【关系】/【家庭】"), feedback);
+        assertTrue(feedback.contains("主粮线（学习/本金/程序）每段至少 2 章"), feedback);
+        assertTrue(feedback.contains("由谁对谁的什么交锋承载"), feedback);
+        assertTrue(feedback.contains("不得连续两章"), feedback);
+    }
+
+    /** 新标签【本金】【程序】合法且计入主粮配额：5 章里主粮 = 2 即达标（悬疑 ≤2、无连排） */
+    @Test
+    void mainLineDiscipline_acceptsCapitalAndCodeTags() {
+        StageBlueprintEntity blueprint = blueprintWithAdvances(
+                "【本金】甲向母亲逐笔对账某资产盈亏并被三问逼出资金规划",
+                "【关系】乙登门拜访甲家受到款待",
+                "【程序】甲独立写完第一个记账脚本并当众演示",
+                "【悬疑】丙带来旧案线索",
+                "【家庭】父母就旧物处置达成共识");
+
+        assertTrue(RollingOutlineService.mainLineDisciplineIssues(blueprint).isEmpty(),
+                RollingOutlineService.mainLineDistribution(blueprint));
+    }
+
+    /**
+     * 主粮配额下限：学习/本金/程序不足 2/5 必须被拦。
+     * 动机：只有悬疑上限时，压出来的空间被关系/家庭吃掉而非回到主粮——
+     * 实测 106-120 十五章主粮 3/15（其中 1 章行政）且本金 0、程序 0。
+     */
+    @Test
+    void mainLineDiscipline_flagsHardLineQuotaShortfall() {
+        StageBlueprintEntity blueprint = blueprintWithAdvances(
+                "【悬疑】甲发现信封异常并独自记录",
+                "【关系】甲乙就守密达成默契",
+                "【家庭】父母就封锁话题摊牌",
+                "【学习】甲完成一次限时练习",
+                "【悬疑】丙带来旧案线索");
+
+        List<String> issues = RollingOutlineService.mainLineDisciplineIssues(blueprint);
+
+        assertTrue(issues.stream().anyMatch(i -> i.contains("主粮线") && i.contains("1/5")),
+                "5 章仅 1 章主粮，应报配额不足：" + issues);
+    }
+
+    /** 无标签的推进必须逐章点名（治"封存仪式/拆信推断"式无主推进） */
+    @Test
+    void mainLineDiscipline_flagsMissingTags() {
+        StageBlueprintEntity blueprint = blueprintWithAdvances(
+                "角色甲封存证物，角色乙划下第七道杠",
+                "主角甲拆信比对反推出老厂区",
+                "【学习】角色庚挑明控分动机",
+                "【家庭】角色甲与角色乙就封锁话题摊牌");
+
+        List<String> issues = RollingOutlineService.mainLineDisciplineIssues(blueprint);
+
+        assertFalse(issues.isEmpty());
+        assertTrue(issues.stream().anyMatch(i -> i.contains("第 106 章") && i.contains("未标剧情线标签")),
+                issues.toString());
+        assertTrue(issues.stream().anyMatch(i -> i.contains("第 107 章") && i.contains("未标剧情线标签")),
+                issues.toString());
+    }
+
+    /** 暗线超半数 + 暗线连排各自独立成违规（治 106-110 段学习线蒸发） */
+    @Test
+    void mainLineDiscipline_flagsSuspenseQuotaAndRun() {
+        StageBlueprintEntity blueprint = blueprintWithAdvances(
+                "【悬疑】甲发现信封异常并独自记录",
+                "【悬疑】乙盘问甲未果",
+                "【学习】甲完成一次限时练习",
+                "【悬疑】丙带来旧案线索");
+
+        List<String> issues = RollingOutlineService.mainLineDisciplineIssues(blueprint);
+
+        assertTrue(issues.stream().anyMatch(i -> i.contains("超过半数")), issues.toString());
+        assertTrue(issues.stream().anyMatch(i -> i.contains("连续两章") && i.contains("106-107")), issues.toString());
+    }
+
+    @Test
+    void mainLineDiscipline_passesBalancedTaggedBeats() {
+        StageBlueprintEntity blueprint = blueprintWithAdvances(
+                "【学习】甲与乙就解题思路对峙",
+                "【悬疑】丙盘问甲的异常来源",
+                "【关系】甲乙就彼此守密达成默契",
+                "【学习】甲把方法迁移到新题型");
+
+        assertTrue(RollingOutlineService.mainLineDisciplineIssues(blueprint).isEmpty());
+    }
+
+    /** 线别分布观测行：固定顺序主粮在前，未标计数兜底 */
+    @Test
+    void mainLineDistribution_fixedOrderWithUntaggedTail() {
+        StageBlueprintEntity blueprint = blueprintWithAdvances(
+                "【本金】甲对账",
+                "无标签推进",
+                "【学习】甲刷题",
+                "【悬疑】线索",
+                "【家庭】摊牌",
+                "【关系】默契");
+
+        assertEquals("学习1 本金1 程序0 悬疑1 关系1 家庭1 未标1",
+                RollingOutlineService.mainLineDistribution(blueprint));
+    }
+
+
+    // ---- 移植用例的辅助构造 ----
+
+    private StageBlueprintEntity blueprintWithAdvances(String... advances) {
+        List<StageBlueprintEntity.MainLineBeat> beats = new ArrayList<>();
+        for (int i = 0; i < advances.length; i++) {
+            beats.add(new StageBlueprintEntity.MainLineBeat(106 + i, advances[i]));
+        }
+        return StageBlueprintEntity.builder().stageNo(8).startChapter(106)
+                .endChapter(105 + advances.length).mainLineByChapter(beats).build();
     }
 }

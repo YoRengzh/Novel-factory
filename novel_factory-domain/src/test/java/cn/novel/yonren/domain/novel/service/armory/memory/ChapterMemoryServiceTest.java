@@ -625,8 +625,12 @@ class ChapterMemoryServiceTest {
                 "最近记忆必须比账本更不可牺牲");
         assertTrue(blockByLabel(blocks, "近章摘要").priority() < blockByLabel(blocks, "久远唤醒").priority(),
                 "最近记忆必须比向量唤醒更不可牺牲");
-        assertTrue(blockByLabel(blocks, "上章结尾").priority() < blockByLabel(blocks, "三账本").priority(),
-                "尾部内容不得因位置靠后而在分块后仍先被牺牲");
+        // 三账本由 4 上调至 3：实测连续多章被整块截断后，写手看不到事实基准而编造出
+        // 与原文差一个量级的数值，且错值被摘要登记成正典。它与"上章结尾"同属"缺了就写错"
+        // 的档，故断言改为"不劣于"——账本不得比尾部衔接内容更易被牺牲。
+        assertTrue(blockByLabel(blocks, "三账本").priority()
+                        <= blockByLabel(blocks, "上章结尾").priority(),
+                "账本是事实基准，不得比上章结尾更易被牺牲（同档可接受）");
         assertFalse(blockByLabel(blocks, "境界锁定").truncatable(), "境界锁定截半即误导，只允许整块留弃");
         assertTrue(blockByLabel(blocks, "上章结尾").content().contains("上章结尾原文。"));
         assertTrue(blockByLabel(blocks, "偏差警示").content().contains("上章偏差：位置跳变"));
@@ -675,7 +679,7 @@ class ChapterMemoryServiceTest {
         StageBlueprintEntity blueprint = StageBlueprintEntity.builder()
                 .stageNo(1).startChapter(1).endChapter(5)
                 .stageGoal("周岁宴完成灵童半公开认证")
-                .tasks(List.of("顾老头在周岁宴后私下给出判断性语言"))
+                .tasks(List.of("角色戊在周岁宴后私下给出判断性语言"))
                 .build();
         VolumeBlueprintEntity volume = VolumeBlueprintEntity.builder()
                 .volumeNo(1).title("人间烟火").startChapter(1).endChapter(300)

@@ -87,7 +87,7 @@ class ChapterContractTest {
                                 "软软", "尚未确认无月的身份", "证据"))).build(),
                 ChapterSummaryEntity.builder().chapterNo(5)
                         .characterStates(List.of(new ChapterSummaryEntity.StateEntry(
-                                "软软", "已经确认无月就是江燃", "证据"))).build());
+                                "软软", "已经确认无月就是角色癸", "证据"))).build());
 
         ChapterContract contract = ChapterContract.of(item, summaries);
 
@@ -100,7 +100,7 @@ class ChapterContractTest {
     private ChapterContract contract(String goal, List<String> keyEvents, String endingHook) {
         return ChapterContract.of(ChapterPlanItemEntity.builder()
                 .chapterNo(9).title("第九章").goal(goal)
-                .characters(List.of("江燃")).keyEvents(keyEvents).endingHook(endingHook)
+                .characters(List.of("角色癸")).keyEvents(keyEvents).endingHook(endingHook)
                 .build(), null);
     }
 

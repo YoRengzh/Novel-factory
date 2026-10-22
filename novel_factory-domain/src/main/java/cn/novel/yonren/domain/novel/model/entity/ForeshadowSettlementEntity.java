@@ -28,27 +28,32 @@ public class ForeshadowSettlementEntity {
     public static final String DECISION_VOID = "VOID";
 
     /**
-     * 决策：**已完成**（这条线其实已在已写章节里自然兑现，回写排期并停止追问）。
+     * 决策：**已完成**（这条线其实已经在已写章节里自然兑现了，回写排期并停止追问）。
      *
-     * <p>原 schema 只有 RECOVER / VOID 两个出口，而逾期排期线的标注是「已过计划回收章——欠账」，
-     * 题面又写着"存疑一律 VOID"，模型只能选 RECOVER（结转下一阶段前段再收一次），闭环永远关不上：
+     * <p><b>为什么必须补这一档</b>（2026-10-09）：原 schema 只有 RECOVER / VOID 两个出口，
+     * 而裁决对逾期排期线的标注是「⚠️ 已过计划回收章——欠账」，题面又写着"存疑一律 VOID"，
+     * 于是模型只能选 RECOVER（= 结转下一阶段前段再收一次）。闭环就这样永远关不上：
      * RECOVER → 逾期补收 → 写手再写一遍 → 回收匹配器不认 → 排期项仍是 PLANTED → 下一阶段又 RECOVER。
-     * 最常见的真相其实是"已经写了、但账本没认出来"——DONE 就是给这条出口补的名分。
+     * 实测「2026」那条线在第 5 章埋、原计划第 45 章收，到第 100 章仍被每段下令"必须补收"，
+     * 而 100 章的摘要里它的关键锚（"2026"）出现 0 次——匹配器看不见它其实已经在第 93/95 章兑现。
      */
     public static final String DECISION_DONE = "DONE";
 
     /**
      * 决策：**长线在养**（这条线是设计上就要慢慢养的，保留追踪但**不再每段要求回收**）。
      *
-     * <p>RECOVER 的处置是"结转下一阶段前段限期回收"，一条被判 RECOVER 的长线会被每一段重新
-     * 下令回收一次，被催出来的只是"记号纸又一次被折好收起来"这类静态动作。
+     * <p><b>为什么必须有这一档</b>（2026-10-10）：RECOVER 的处置是"结转下一阶段前段限期回收"，
+     * 而一条被判 RECOVER 的长线会被**每一段重新下令回收一次**——规划层只好反复安排同一件事。
+     * 实测「2026」那条（第 0 章埋、计划第 45 章收）到第 100 章仍在被催收，而被催出来的
+     * 只是"格子纸又一次被折好塞进口袋"这类静态动作。它的意图原文写着"为后续身份暴露危机
+     * 埋下**长线**伏笔"——判它是长线本来就对，错的是只有 RECOVER 这一个出口可用。
      *
      * <p>与其它三档的处置差异：
      * <ul>
      *   <li>不像 {@link #DECISION_VOID} 那样出账——线仍在伏笔账里，观察者仍可能提到它；</li>
      *   <li>不像 {@link #DECISION_RECOVER} 那样注入【限期回收】——本段不主动安排它；</li>
      *   <li>不像 {@link #DECISION_DONE} 那样关账——排期项保持 PLANTED，真的兑现时
-     *       {@code matchPayoff} 仍会自动置 PAID（在养是可自动解除的）。</li>
+     *       {@code matchPayoff} 仍会自动把它置 PAID（在养是可自动解除的）。</li>
      * </ul>
      */
     public static final String DECISION_PARKED = "PARKED";
@@ -64,7 +69,7 @@ public class ForeshadowSettlementEntity {
 
     /**
      * 单条裁决：content=伏笔登记原文（账本按文本匹配，出账以此精确对齐），
-     * chapterNo=埋设章号，decision=RECOVER|VOID|DONE|PARKED，reason=裁决理由（RECOVER 必须含自然连接点），
+     * chapterNo=埋设章号，decision=RECOVER|VOID|DONE，reason=裁决理由（RECOVER 必须含自然连接点），
      * actualPayoffChapter=判 DONE 时该线实际兑现的章号（缺省为 null）
      */
     @Data
@@ -72,13 +77,9 @@ public class ForeshadowSettlementEntity {
     @NoArgsConstructor
     @AllArgsConstructor
     public static class SettlementDecision {
-        // 伏笔登记原文（账本按文本匹配，出账以此精确对齐）
         private String content;
-        // 埋设章号
         private Integer chapterNo;
-        // 裁决：RECOVER（限期回收）/ VOID（弃置出账）/ DONE（已完成）/ PARKED（长线在养）
         private String decision;
-        // 裁决理由（RECOVER 必须含自然连接点）
         private String reason;
         /** 判 DONE 时必填：该线在已写章节中实际兑现的章号；缺失或非法时 DONE 会被降级回 RECOVER */
         private Integer actualPayoffChapter;
@@ -93,7 +94,7 @@ public class ForeshadowSettlementEntity {
      * 提取全部"长线在养"条目的登记原文（跨阶段聚合、去重）。
      *
      * <p>用途与 {@link #voidedContents} **不同**：在养的线不出账（它仍在账本里、观察者仍可能提到它），
-     * 只用于把"漏收伏笔数"这类指标里的在养项排除——该指标定位是
+     * 只用于把"漏收伏笔数"这类指标里的在养项排除掉——那条指标的定位就是
      * "「有意养的长线」与「被写忘了的线」的分界线"，在养项已被明确裁定为前者，不该再算它漏收。
      */
     public static List<String> parkedContents(List<ForeshadowSettlementEntity> settlements) {

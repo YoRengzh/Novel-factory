@@ -676,8 +676,8 @@ class ChapterPlanPromptServiceTest {
     void scheduleBlock_rendersThreeSections() {
         StringBuilder sb = new StringBuilder();
         ChapterPlanPromptService.appendForeshadowScheduleBlock(sb, schedulesOf(
-                sched("顾老头是否收徒", 22, 35, ForeshadowScheduleEntity.STATUS_PLANNED),
-                sched("远大科技骗局清算", 18, 23, ForeshadowScheduleEntity.STATUS_PLANTED),
+                sched("角色戊是否收徒", 22, 35, ForeshadowScheduleEntity.STATUS_PLANNED),
+                sched("某科技公司骗局清算", 18, 23, ForeshadowScheduleEntity.STATUS_PLANTED),
                 sched("陆周氏旧锁承诺", 12, 19, ForeshadowScheduleEntity.STATUS_PLANTED)), 21, 25);
         String text = sb.toString();
 
@@ -685,7 +685,7 @@ class ChapterPlanPromptServiceTest {
         assertTrue(text.contains("本段不得兑现"), "必须明确禁止本段兑现：" + text);
         assertTrue(text.contains("必须兑现"), text);
         assertTrue(text.contains("逾期补收"), text);
-        assertTrue(text.contains("顾老头是否收徒"), text);
+        assertTrue(text.contains("角色戊是否收徒"), text);
     }
 
     /**

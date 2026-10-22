@@ -4,6 +4,7 @@ import cn.novel.yonren.domain.framework.StrategyHandler;
 import cn.novel.yonren.domain.novel.adapter.repository.IStoryRepository;
 import cn.novel.yonren.domain.novel.model.aggregate.StoryGenerateResultAggregate;
 import cn.novel.yonren.domain.novel.model.entity.ArmoryCommandEntity;
+import cn.novel.yonren.domain.novel.model.entity.ChapterSummaryEntity;
 import cn.novel.yonren.domain.novel.model.entity.ForeshadowScheduleEntity;
 import cn.novel.yonren.domain.novel.model.entity.ForeshadowSettlementEntity;
 import cn.novel.yonren.domain.novel.model.entity.StageBlueprintEntity;
@@ -14,6 +15,7 @@ import cn.novel.yonren.domain.novel.service.armory.AbstractArmorySupport;
 import cn.novel.yonren.domain.novel.service.armory.factory.DefaultArmoryFactory;
 import cn.novel.yonren.domain.novel.service.armory.llm.LlmInvokeService;
 import cn.novel.yonren.domain.novel.service.armory.memory.ChapterMemoryService;
+import cn.novel.yonren.domain.novel.service.armory.memory.ForeshadowScheduleService;
 import cn.novel.yonren.domain.novel.service.armory.memory.ForeshadowSettlementService;
 import cn.novel.yonren.domain.novel.service.armory.memory.OutlineSegmentParser;
 import cn.novel.yonren.domain.novel.service.armory.memory.RollingOutlineService;
@@ -21,7 +23,10 @@ import cn.novel.yonren.domain.novel.service.armory.memory.StageExitReviewService
 import cn.novel.yonren.domain.novel.service.armory.plan.StoryPacing;
 import cn.novel.yonren.domain.novel.service.armory.prompt.valobj.PromptContext;
 import cn.novel.yonren.domain.novel.service.armory.quality.SuspenseLadderPolicy;
+import cn.novel.yonren.domain.novel.service.job.GenerationJob;
 import cn.novel.yonren.types.enums.PromptScene;
+import cn.novel.yonren.types.enums.ResponseCode;
+import cn.novel.yonren.types.exception.AppException;
 import jakarta.annotation.Resource;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.lang3.StringUtils;
@@ -63,6 +68,10 @@ public class BuildStageBlueprintNode extends AbstractArmorySupport {
     @Resource
     private ForeshadowSettlementService foreshadowSettlementService;
 
+    /** 阶段出口裁决判 DONE 的线要回写排期表（置 PAID），否则下一段仍会把它当欠账反复下令 */
+    @Resource
+    private ForeshadowScheduleService foreshadowScheduleService;
+
     @Resource
     private IStoryRepository storyRepository;
 
@@ -99,6 +108,15 @@ public class BuildStageBlueprintNode extends AbstractArmorySupport {
 
         // 批次跨边界：上一版终点之后逐阶段生成，直至覆盖批次末章
         while (rollingOutlineService.needsGeneration(blueprints, batchEnd)) {
+            // 规划期协作取消/熔断检查（每轮迭代头部）：本节点链式生成可达 5-10 次 LLM 调用、
+            // 数分钟量级，且发生在 CallChapterPlanLlmNode 的入口检查**之前**——
+            // 缺了这里，"取消"在整个蓝图期不生效，用户按停止后仍继续烧 token。
+            // 与 CallChapterPlanLlmNode / planNextSegment 同款语义：抛异常交由作业层按取消/熔断收敛终态
+            GenerationJob planJob = dynamicContext == null ? null : dynamicContext.getJob();
+            if (planJob != null && (planJob.isCancelRequested() || planJob.isBudgetExceeded())) {
+                throw new AppException(ResponseCode.UN_ERROR.getCode(),
+                        "作业在阶段蓝图生成期已请求取消/触发熔断，停止规划（已完成章节不受影响，可 resume 续写）");
+            }
             StageBlueprintEntity previous = rollingOutlineService.latestOf(blueprints);
             int windowStart = ( previous == null ? nextChapterNo : previous.getEndChapter() + 1 );
             // 失败自动重试一次：蓝图决定本批任务/退出条件/排期，
@@ -189,8 +207,20 @@ public class BuildStageBlueprintNode extends AbstractArmorySupport {
 
         // 未达成的退出条件机械化结转：不信任模型自评，结转清单缺失即补
         mergeUnmetExitConditions(previous, blueprint);
+        // 结转任务机械兜底：模型漏掉的"进行中"任务原样补回（与上一条同款思路——
+        // 提示词已渲染上一版结转清单，但仍不把可靠性押在一次服从上）。
+        // 实测：第 14 阶段注入的"附加赛必须完成"在第 15 阶段 carriedTasks 中消失，
+        // 系统侧无法察觉，任务就此蒸发——此处补齐。
+        mergeMissingCarriedTasks(previous, blueprint);
         // 结转债务上限：跨段滚动的未完成任务超过硬上限的部分降级为背景清偿
         capCarriedTasks(blueprint);
+        // 冻结线越权机械观测（2026-10-13，只告警不拦截）：prompt 已加"冻结线红线"（见
+        // RollingOutlineService 第 3.1 条），此处兜底观测模型是否仍把冻结线排进了 tasks/exitConditions。
+        // 实测第 16 阶段：结转清单明写虹镇静默期"严禁新实物/新追查"，模型仍在 tasks 安排
+        // "角色甲透露虹镇旧事的新信息碎片"，第 140 章据此凭空造出地窖账册，与既有定案冲突。
+        // 为什么不拦截：冻结线的措辞是自由文本，机械判定"哪个 task 越了哪条线"会误伤；
+        // 故只留痕供人工复盘（该情形必然在正文侧表现为"新事实凭空出现"，体检的伏笔/一致性指标可见）。
+        warnFrozenLineViolations(previous, blueprint);
 
         // 悬念档位表补采：档位表是"主线推进闸门"的唯一标尺，但在完整蓝图 prompt 里
         // 它只是第 11 条要求——实测模型会在长 prompt 里**静默省略**这两个字段。缺了它，锚块不注入、
@@ -205,6 +235,9 @@ public class BuildStageBlueprintNode extends AbstractArmorySupport {
         // 缺了就**只问这一项**再补一次。档位表在补采之后才确定，所以本补采放在它之后，
         // 好把已定档位表一并喂进去（章级推进必须与档位相容，否则两张表会互相打架）。
         repairMainLine(requestParameter, dynamicContext, storyContext, promptContext, blueprint);
+        // 章级推进线别纪律：标签缺失/暗线超配额/暗线连排（治"整段滑进悬疑线、学习线蒸发"，
+        // 实测 106-110 段正是这样）——带反馈重问一次，仍不过 WARN 留痕（下游还有段计划对话承载闸门兜底）
+        enforceMainLineDiscipline(requestParameter, dynamicContext, storyContext, promptContext, blueprint);
 
         // 伏笔兑现排期表补采：同为"缺了就只问这一项"的聚焦补采。
         // 放在最后——它要看阶段区间与 hardTotal，与档位/章级推进无依赖但同属"蓝图缺失字段"家族。
@@ -216,57 +249,15 @@ public class BuildStageBlueprintNode extends AbstractArmorySupport {
                 blueprint.getCarriedTasks() == null ? 0 : blueprint.getCarriedTasks().size());
         // stageEnd 机械校验+回填：12.1 要求模型从【进度对齐·大纲路标】
         // 声明 stageEndYear/Age，但实测会胡写（写出早于故事开局的年份）——
-        // 不信任声明，以大纲段预算为准校验回填（零成本、确定性，与卷区间的机械钳制同款思路）
-        repairStageEndFromOutline(requestParameter, storyContext, blueprint, previous);
+        // 不信任声明，以重锚预算为准校验回填（零成本、确定性，与卷区间的机械钳制同款思路）
+        repairStageEndFromOutline(requestParameter, storyContext, dynamicContext.getChapterSummaries(),
+                blueprint, previous);
 
-        // 追进度三件套：跳接生成为任务队列第一条、结转任务重定基、
-        // 蓝图挂 pacing 要求供段计划 fail-closed 校验——三者缺一，时间跳跃就只活在散文里
-        applyPacing(requestParameter, storyContext, dynamicContext, blueprint);
+        // 追进度机制（时间跳跃任务 + 结转重定基 + 跳接 fail-closed）已于 2026-10-11 退役（进度治理方案 A）：
+        // 它连续多批未能把日历追回来，且与重锚方向相反——重锚后蓝图预算 = 正文实际时间 + 段时长，
+        // "滞后"不再存在，跳跃无从谈起。段计划侧的跳接校验（ChapterPlanSegmentPlanner）保留为通用能力：
+        // 仅当蓝图声明 pacing 字段时才触发，如今无人注入，自然休眠。
         return blueprint;
-    }
-
-    /**
-     * 追进度三件套：进度滞后此前只活在散文与体检报告里，规划层沿惯性行驶——整批都在
-     * 清偿结转债、把大纲声明的时间跳跃完全无视。三条机械措施：
-     * ①把跳接生成为任务队列第一条（任务才是规划的执行单元，散文指令排不进队列）；
-     * ②entryConstraints 写死结转重定基：跳接后旧债按新时间线清偿，不得拉回跳跃前；
-     * ③蓝图挂 pacing 要求（transient），段计划校验据此 fail-closed（见 ChapterPlanSegmentPlanner）
-     */
-    private void applyPacing(ArmoryCommandEntity requestParameter, StoryContextEntity storyContext,
-                             DefaultArmoryFactory.DynamicContext dynamicContext,
-                             StageBlueprintEntity blueprint) {
-        if (blueprint == null || storyContext == null || StringUtils.isBlank(storyContext.getChapterGoal())) {
-            return;
-        }
-        Integer anchorYear = StoryPacing.latestAnchorYear(dynamicContext.getChapterSummaries());
-        Integer budgetYear = StoryPacing.budgetStartYear(storyContext.getChapterGoal(), blueprint.getStartChapter());
-        if (anchorYear == null || budgetYear == null || budgetYear <= anchorYear) {
-            return;
-        }
-        int lag = budgetYear - anchorYear;
-        blueprint.setPacingAnchorYear(anchorYear);
-        blueprint.setPacingBudgetStartYear(budgetYear);
-        blueprint.setPacingLagYears(lag);
-        String jumpTask = "【追进度·最高优先级】第 " + blueprint.getStartChapter()
-                + " 章开篇执行时间跳跃：「" + lag + " 年后」，故事时间从 " + anchorYear
-                + " 年直接进入 " + budgetYear + " 年段；本段所有场景发生在跳跃后的时间线里";
-        if (blueprint.getTasks() == null) {
-            blueprint.setTasks(new ArrayList<>());
-        }
-        if (blueprint.getTasks().stream().noneMatch(t -> t != null && t.contains("【追进度"))) {
-            blueprint.getTasks().add(0, jumpTask);
-        }
-        if (blueprint.getEntryConstraints() == null) {
-            blueprint.setEntryConstraints(new ArrayList<>());
-        }
-        String rebase = "【时间重定基】本段包含时间跳跃：所有结转任务一律在跳跃后的时间线（" + budgetYear
-                + " 年段）下执行与重述，任务中的「当下」指跳跃后的时间；清偿可以是新场景或一句带过，"
-                + "不得把场景拉回跳跃前";
-        if (blueprint.getEntryConstraints().stream().noneMatch(c -> c != null && c.contains("【时间重定基】"))) {
-            blueprint.getEntryConstraints().add(rebase);
-        }
-        log.info("追进度注入：锚年 {} → 预算年 {}（滞后 {} 年），跳年任务与重定基约束已写入第 {} 段蓝图",
-                anchorYear, budgetYear, lag, blueprint.getStageNo());
     }
 
     /** 结转债务硬上限：跨段滚动的未完成任务超过硬上限的部分降级为背景清偿，不再逼规划层专门造场景 */
@@ -295,12 +286,21 @@ public class BuildStageBlueprintNode extends AbstractArmorySupport {
     /**
      * stageEnd 机械校验+回填：12.1 要求模型从【进度对齐·大纲路标】声明
      * stageEndYear/stageEndAge，但实测会胡写（写出早于故事开局的年份）。
-     * 校验规则：stageEndYear 必须含 4 位年份且 ≥ 大纲该段预算年份、≥ 上一阶段声明（单调递增）；
-     * stageEndAge 必须含数字且 ≥ 大纲段预算年龄（若大纲可算）。任一不合格即按大纲段预算回填——
-     * 大纲段无数值标记（境界纪年等）时保持声明原样，不编造。
+     * 下限 = **重锚预算**（2026-10-11 方案 A）：大纲段时间预算按正文实际锚点整体平移后取值，
+     * 而非大纲原预算——学校线里程碑保留顺序、随实际时间滑动，硬追原日历只会让蓝图声明
+     * 永远跑到正文前面（实测第 111-120 段：原机制回填出 2011/14 岁，正文实际 2010/12 岁）。
+     * 校验规则：stageEndYear 必须含 4 位年份且 ≥ 重锚预算、≥ 上一阶段声明（单调递增）；
+     * stageEndAge 同理。任一不合格即按重锚预算回填——无锚点/大纲段无数值标记时保持声明原样，不编造。
+     *
+     * <p><b>回填值同样受下限钳制（2026-10-13）</b>：重锚预算是"平移后的段末"，可能<em>低于</em>
+     * 上一阶段声明（段预算滞后于正文实际推进）。原实现只把下限用于"判不合格"、回填时直接写预算值，
+     * 于是 2011 → 2010 倒退被写进蓝图，而倒退值又成为下一阶段的单调下限基准——年份链与年龄链
+     * 越漂越小（实测 stage13/14 声明 2011/13 岁，stage15/16 回填 2010/12 岁）。
+     * 现在回填取 {@code max(预算值, 下限)}，两条链都严格单调。
      */
     private void repairStageEndFromOutline(ArmoryCommandEntity requestParameter,
                                            StoryContextEntity storyContext,
+                                           List<ChapterSummaryEntity> summaries,
                                            StageBlueprintEntity blueprint,
                                            StageBlueprintEntity previous) {
         if (blueprint == null || storyContext == null
@@ -311,6 +311,14 @@ public class BuildStageBlueprintNode extends AbstractArmorySupport {
         if (outline.isEmpty()) {
             return;
         }
+        // 重锚平移量从段首所在段计算（与蓝图 prompt 的进度对齐块同口径）；无锚点时 shift=null → 不平移
+        OutlineSegmentParser.OutlineSegment primary = outline.segmentFor(
+                blueprint.getStartChapter() == null ? 0 : blueprint.getStartChapter());
+        Integer shiftYears = StoryPacing.calendarShiftYears(primary, StoryPacing.latestAnchorYear(summaries));
+        Integer anchorAge = StoryPacing.latestAnchorAge(summaries);
+        Integer shiftAges = (primary != null && primary.ageStart() != null && anchorAge != null)
+                ? primary.ageStart() - anchorAge : null;
+
         int stageEndNo = blueprint.getEndChapter() == null ? 0 : blueprint.getEndChapter();
         OutlineSegmentParser.OutlineSegment seg = outline.segmentFor(stageEndNo);
         if (seg == null && !outline.segments().isEmpty()) {
@@ -319,45 +327,72 @@ public class BuildStageBlueprintNode extends AbstractArmorySupport {
         if (seg == null || (seg.yearStart() == null && seg.ageStart() == null)) {
             return; // 大纲段无数值时间标记（境界纪年等）——不编造，保持模型声明
         }
+        StoryPacing.SlidBudget slid = StoryPacing.slideSegment(seg, shiftYears, shiftAges);
         Integer declaredYear = extractYear(blueprint.getStageEndYear());
-        int floorYear = seg.yearStart() == null ? 0 : seg.yearStart();
+        int floorYear = slid.yearStart() == null ? 0 : slid.yearStart();
         Integer prevYear = previous == null || StringUtils.isBlank(previous.getStageEndYear())
                 ? null : extractYear(previous.getStageEndYear());
         if (prevYear != null && prevYear > floorYear) {
             floorYear = prevYear; // 相邻阶段单调递增下限
         }
         if (declaredYear == null || declaredYear < floorYear) {
-            String backfill = (seg.yearEnd() != null ? seg.yearEnd() : seg.yearStart()) + "年";
-            log.info("阶段蓝图 stageEndYear 不合格（声明 {}，下限 {}），已按大纲段预算回填为 {}",
+            // 回填值必须钳到下限：重锚预算是"平移后的段末年份"，它可能**低于上一阶段声明**
+            // （段预算滞后于正文实际推进时）。原实现直接写预算值，于是 2011 → 2010 倒退，
+            // 而该倒退值又成为下一阶段的单调下限基准，年份链越漂越小（实测 stage13/14=2011
+            // → stage15/16=2010）。日志里下限 2011 与回填 2010 并列出现即是此症。
+            Integer budgetYear = slid.yearEnd() != null ? slid.yearEnd() : slid.yearStart();
+            int backfilledYear = Math.max(budgetYear == null ? floorYear : budgetYear, floorYear);
+            String backfill = backfilledYear + "年";
+            log.info("阶段蓝图 stageEndYear 不合格（声明 {}，重锚下限 {}），已按重锚预算回填为 {}",
                     declaredYear, floorYear, backfill);
             blueprint.setStageEndYear(backfill);
         }
-        if (seg.ageStart() != null) {
+        if (slid.ageStart() != null) {
             Integer declaredAge = extractAge(blueprint.getStageEndAge());
-            int floorAge = seg.ageStart() == null ? 0 : seg.ageStart();
+            int floorAge = slid.ageStart();
+            // 年龄与年份同款单调下限：原实现只看段预算，不看上一阶段声明，
+            // 于是 13 岁 → 12 岁同样能写进去（实测 stage13/14=13岁 → stage15/16=12岁）
+            Integer prevAge = previous == null || StringUtils.isBlank(previous.getStageEndAge())
+                    ? null : extractAge(previous.getStageEndAge());
+            if (prevAge != null && prevAge > floorAge) {
+                floorAge = prevAge;
+            }
             if (declaredAge == null || declaredAge < floorAge) {
-                String backfill = (seg.ageEnd() != null ? seg.ageEnd() : seg.ageStart()) + "岁";
-                log.info("阶段蓝图 stageEndAge 不合格（声明 {}，下限 {}），已按大纲段预算回填为 {}",
+                Integer budgetAge = slid.ageEnd() != null ? slid.ageEnd() : slid.ageStart();
+                int backfilledAge = Math.max(budgetAge == null ? floorAge : budgetAge, floorAge);
+                String backfill = backfilledAge + "岁";
+                log.info("阶段蓝图 stageEndAge 不合格（声明 {}，重锚下限 {}），已按重锚预算回填为 {}",
                         declaredAge, floorAge, backfill);
                 blueprint.setStageEndAge(backfill);
             }
         }
     }
 
+    /**
+     * 从模型声明里取年份。走 {@link StoryPacing#parseYear} 统一口径——
+     * 模型写"二〇〇九年"这类中文数字也必须认，否则 stageEnd 判定会误以为"声明无效"而反复回填
+     */
     private static Integer extractYear(String text) {
-        if (StringUtils.isBlank(text)) {
-            return null;
-        }
-        java.util.regex.Matcher m = java.util.regex.Pattern.compile("(\\d{4})\\s*年").matcher(text);
-        return m.find() ? Integer.parseInt(m.group(1)) : null;
+        return StoryPacing.parseYear(text);
     }
 
+    /**
+     * 从模型声明里取年龄。先走 {@link StoryPacing#parseAge} 整串口径（与体检的
+     * stageEndAge 读取同源，"十三岁"这类中文声明也认、裸"4"也认）；整串不匹配时
+     * 退回搜索串内第一个"数字+岁"（声明常带附加语境，如"13岁（初三）"）。
+     * 早先只搜索阿拉伯数字+岁：模型写"十三岁"会被判"声明无效"而白白覆写掉有效值。
+     */
     private static Integer extractAge(String text) {
         if (StringUtils.isBlank(text)) {
             return null;
         }
-        java.util.regex.Matcher m = java.util.regex.Pattern.compile("(\\d{1,3})\\s*岁").matcher(text);
-        return m.find() ? Integer.parseInt(m.group(1)) : null;
+        Integer whole = StoryPacing.parseAge(text);
+        if (whole != null) {
+            return whole;
+        }
+        java.util.regex.Matcher m = java.util.regex.Pattern
+                .compile("(\\d{1,3}|[一二三四五六七八九十]{1,3})\\s*岁").matcher(text);
+        return m.find() ? StoryPacing.parseAge(m.group(1)) : null;
     }
 
     /**
@@ -522,6 +557,56 @@ public class BuildStageBlueprintNode extends AbstractArmorySupport {
     }
 
     /**
+     * **章级推进线别纪律**（2026-10-11）：对补采产出的章级主线推进做机械校验——
+     * 每条须带剧情线标签、悬疑暗线不得超半数/连续两章（规则与话术见
+     * {@code RollingOutlineService#mainLineDisciplineIssues}）。
+     * 违规走聚焦补采同款"带反馈重问一次"：按原补采 prompt 追加驳回反馈重取，
+     * 补丁可用则替换；仍违规则 WARN 留痕放行——蓝图层没有重试循环，
+     * 下游还有段计划的对话承载闸门作第二道兜底。
+     */
+    private void enforceMainLineDiscipline(ArmoryCommandEntity requestParameter,
+                                           DefaultArmoryFactory.DynamicContext dynamicContext,
+                                           StoryContextEntity storyContext, PromptContext promptContext,
+                                           StageBlueprintEntity blueprint) {
+        List<String> issues = RollingOutlineService.mainLineDisciplineIssues(blueprint);
+        if (issues.isEmpty()) {
+            log.info("阶段蓝图第{}阶段章级推进线别分布: {}", blueprint.getStageNo(),
+                    RollingOutlineService.mainLineDistribution(blueprint));
+            return;
+        }
+        log.warn("阶段蓝图第{}阶段的章级推进未过线别纪律，带反馈重问一次：{}",
+                blueprint.getStageNo(), String.join("；", issues));
+        String retryPrompt = rollingOutlineService.buildMainLineRepairPrompt(storyContext, blueprint,
+                dynamicContext.getChapterSummaries())
+                + RollingOutlineService.mainLineDisciplineFeedback(issues);
+        Map<String, String> retryPrompts = new HashMap<>();
+        String raw;
+        try {
+            raw = llmInvokeService.invoke(requestParameter.getStoryVO(), PromptScene.STAGE_BLUEPRINT,
+                    promptContext, retryPrompt, retryPrompts);
+        } catch (Exception e) {
+            log.warn("章级推进线别纪律重问调用失败，按现状放行（体检/段计划闸门可见）：{}",
+                    blueprint.getStageNo(), e.getMessage());
+            return;
+        }
+        recordBlueprintPrompts(dynamicContext, retryPrompts);
+        RollingOutlineService.MainLinePatch patch = rollingOutlineService.parseMainLinePatch(raw, blueprint);
+        if (patch == null || patch.mainLineByChapter() == null || patch.mainLineByChapter().isEmpty()) {
+            log.warn("章级推进线别纪律重问未取得可用补丁，按现状放行（第{}阶段）", blueprint.getStageNo());
+            return;
+        }
+        blueprint.setMainLineByChapter(patch.mainLineByChapter());
+        List<String> stillBad = RollingOutlineService.mainLineDisciplineIssues(blueprint);
+        if (stillBad.isEmpty()) {
+            log.info("章级推进线别纪律：重问后通过（第{}阶段）——线别分布: {}", blueprint.getStageNo(),
+                    RollingOutlineService.mainLineDistribution(blueprint));
+        } else {
+            log.warn("章级推进线别纪律重问后仍未通过，放行本次蓝图（第{}阶段）：{}",
+                    blueprint.getStageNo(), String.join("；", stillBad));
+        }
+    }
+
+    /**
      * 上一阶段退出条件核验（外部审计）：仅在上一版蓝图声明了退出条件且尚未核验时执行一次，
      * 结果写回蓝图的 exitResults（随 rolling-outline.json 落盘），供生成 prompt 结转指令使用。
      * 核验失败返回 null → 不写结果，链式生成回退模型自评结转（fail-soft）
@@ -594,18 +679,32 @@ public class BuildStageBlueprintNode extends AbstractArmorySupport {
             return;
         }
         dynamicContext.setForeshadowSettlements(settlements);
+        // 回写排期表：判 DONE 的线必须真的关账（置 PAID）、判 PARKED 的线要记长线在养——
+        // 否则下一段仍会以「逾期补收」再下一次令
+        int paid = foreshadowScheduleService.applySettlementOutcomes(
+                dynamicContext.getForeshadowSchedules(), decisions,
+                previous.getEndChapter() == null ? 0 : previous.getEndChapter());
         Path storyDir = dynamicContext.getStoryDir();
         if (storyDir != null) {
             try {
                 storyRepository.writeForeshadowSettlements(storyDir, settlements);
+                if (paid > 0) {
+                    storyRepository.writeForeshadowSchedule(storyDir, dynamicContext.getForeshadowSchedules());
+                }
             } catch (Exception e) {
                 log.error("阶段出口清账补办结算落盘失败，本轮仅内存生效", e);
             }
         }
         long recoverCount = decisions.stream()
                 .filter(d -> ForeshadowSettlementEntity.DECISION_RECOVER.equals(d.getDecision())).count();
-        log.info("阶段出口清账补办完成：第{}阶段，未填 {} 条 = 弃置 {} + 限期回收 {}（回收项将注入本批规划）",
-                previous.getStageNo(), decisions.size(), decisions.size() - recoverCount, recoverCount);
+        long doneCount = decisions.stream()
+                .filter(d -> ForeshadowSettlementEntity.DECISION_DONE.equals(d.getDecision())).count();
+        long parkedCount = decisions.stream()
+                .filter(d -> ForeshadowSettlementEntity.DECISION_PARKED.equals(d.getDecision())).count();
+        log.info("阶段出口清账补办完成：第{}阶段，未填 {} 条 = 已完成 {} + 长线在养 {} + 弃置 {} + 限期回收 {}"
+                        + "（已完成项已置 PAID；在养项不再催收；回收项将注入本批规划）",
+                previous.getStageNo(), decisions.size(), doneCount, parkedCount,
+                decisions.size() - recoverCount - doneCount - parkedCount, recoverCount);
     }
 
     /**
@@ -643,27 +742,33 @@ public class BuildStageBlueprintNode extends AbstractArmorySupport {
                 continue;
             }
             String condition = result.getCondition();
-            if (inheritedBefore.stream().anyMatch(c -> StringUtils.equals(c, condition))) {
+            // 章号引用重定基：结转到本阶段后，"第76-80章中至少有一章…"这类条件必须改为
+            // 引用**本阶段**的章号，否则校验侧只看本批记忆，结构上永远判定为未达成——
+            // 条件会无限结转、每批都拉低达成率，形成永久坏账（实测第5阶段 11 条里有 3 条如此，
+            // 备注明写"所给记忆仅包含第81-85章，无第76-80章内容，无法判定"）。
+            String rebased = rebaseConditionChapterRefs(condition, blueprint.getStartChapter(), blueprint.getEndChapter());
+            if (inheritedBefore.stream().anyMatch(c -> StringUtils.equals(c, condition)
+                    || StringUtils.equals(c, rebased))) {
                 // 已重验一次仍不达成 → 强制出账，不再结转
-                if (!containsCondition(carried, condition)) {
+                if (!containsCondition(carried, rebased)) {
                     carried.add(new StageBlueprintEntity.CarriedTaskEntity(
-                            "【未达成退出条件·出账】" + condition, "放弃",
+                            "【未达成退出条件·出账】" + rebased, "放弃",
                             "连续两阶段核验未达成，机械出账（不再结转，避免单调累积）；缺口："
                                     + StringUtils.defaultString(result.getNote(), "未达成")));
                     changed = true;
                 }
                 continue;
             }
-            if (conditions.stream().noneMatch(c -> StringUtils.equals(c, condition))) {
-                conditions.add(condition);
+            if (conditions.stream().noneMatch(c -> StringUtils.equals(c, rebased))) {
+                conditions.add(rebased);
                 changed = true;
             }
-            inherited.add(condition);
-            if (!containsCondition(carried, condition)) {
+            inherited.add(rebased);
+            if (!containsCondition(carried, rebased)) {
                 carried.add(new StageBlueprintEntity.CarriedTaskEntity(
-                        "【未达成退出条件】" + condition, "进行中",
+                        "【未达成退出条件】" + rebased, "进行中",
                         "机械结转并已注入本阶段退出条件（阶段末重验一次）："
-                                + StringUtils.defaultString(result.getNote(), "退出条件未达成")));
+                                + StringUtils.defaultString(result.getNote(), "未达成")));
                 changed = true;
             }
         }
@@ -674,10 +779,176 @@ public class BuildStageBlueprintNode extends AbstractArmorySupport {
         }
     }
 
-    /** 结转清单里是否已登记该条件（原文双向包含去重） */
+    /** 结转清单里是否已登记该条件（原文双向包含去重，比较前剥离引号类包裹字符） */
     private static boolean containsCondition(List<StageBlueprintEntity.CarriedTaskEntity> carried, String condition) {
+        String target = normalizeForDedupe(condition);
         return carried.stream().anyMatch(task -> task != null && task.getContent() != null
-                && (task.getContent().contains(condition) || condition.contains(task.getContent())));
+                && (normalizeForDedupe(task.getContent()).contains(target)
+                        || target.contains(normalizeForDedupe(task.getContent()))));
+    }
+
+    /**
+     * 去重比较用的归一化：剥离引号/书名号类包裹字符并去掉空白。
+     *
+     * <p><b>治什么</b>（2026-10-13 实测）：同一条约束的两份文本仅差一对引号——
+     * 模型写了「…必须是已封存状态余波…」，机械兜底的原文本是「…必须是『已封存』状态余波…」，
+     * 双向包含在引号处断开 ⇒ 同一约束被登记两次（静默期条目在 stage16 就重复了一对）。
+     * 引号是模型对同一概念的排版噪声，不承载语义差异，比较前剥离即可；
+     * 刻意只剥离引号类字符，不做同义改写（那会放大误判，把"改述"当成"同一事项"）。
+     */
+    private static String normalizeForDedupe(String text) {
+        if (text == null) {
+            return "";
+        }
+        return text.replaceAll("[「」『』“”\"'‘’《》\\s]", "");
+    }
+
+    /**
+     * 结转任务机械兜底：上一版标记为"进行中"的任务，若模型输出的 carriedTasks 里既没有
+     * 同名条目、也没有判为完成/放弃的记录，则原样补回（不信任模型的一次服从）。
+     *
+     * <p><b>治什么</b>：prompt 第 3 条要求"对上一版每条未完成任务逐条结转……严禁静默丢弃"，
+     * 但提示词此前**根本没渲染上一版 carriedTasks**（只渲染了 tasks/exitResults/stageReport），
+     * 模型只能凭近章摘要重猜 ⇒ 注入的约定事件（"面邀必须兑现""附加赛必须完成"）在换版时蒸发。
+     * 实测：第 14 阶段注入的附加赛任务在第 15 阶段 carriedTasks 中消失，而系统侧零告警。
+     * 提示词已同步补齐输入（见 RollingOutlineService 渲染处）；此处再加一道机械闸——
+     * 与 {@link #mergeUnmetExitConditions} 同款：不把可靠性押在一次服从上。
+     *
+     * <p>补回条目一律标"进行中"并注明来源，供阶段末复核与人工复盘；
+     * 与已有条目按内容双向包含去重，避免与模型自己写的措辞略异版本重复登记。
+     */
+    private void mergeMissingCarriedTasks(StageBlueprintEntity previous, StageBlueprintEntity blueprint) {
+        if (previous == null || previous.getCarriedTasks() == null || previous.getCarriedTasks().isEmpty()
+                || blueprint == null) {
+            return;
+        }
+        List<StageBlueprintEntity.CarriedTaskEntity> carried = blueprint.getCarriedTasks() != null
+                ? new ArrayList<>(blueprint.getCarriedTasks()) : new ArrayList<>();
+        boolean changed = false;
+        for (StageBlueprintEntity.CarriedTaskEntity task : previous.getCarriedTasks()) {
+            if (task == null || StringUtils.isBlank(task.getContent())) {
+                continue;
+            }
+            // 只兜底"进行中"：完成/放弃是模型对上一版的显式处置，不该被复活
+            String status = StringUtils.defaultIfBlank(task.getStatus(), "进行中").trim();
+            if (!"进行中".equals(status)) {
+                continue;
+            }
+            String content = task.getContent().trim();
+            if (containsCondition(carried, content)) {
+                continue;
+            }
+            carried.add(new StageBlueprintEntity.CarriedTaskEntity(content, "进行中",
+                    "机械结转兜底：上一版标记进行中，模型本次未登记处置（原 note："
+                            + StringUtils.abbreviate(StringUtils.defaultString(task.getNote(), "无"), 120) + "）"));
+            changed = true;
+        }
+        if (changed) {
+            blueprint.setCarriedTasks(carried);
+            log.info("结转任务机械兜底：补回模型漏登记的进行中任务，第{}阶段结转 {} 条",
+                    blueprint.getStageNo(), carried.size());
+        }
+    }
+
+    /** 冻结线关键词（自由文本措辞的机械识别口径）：命中即视为"该线处于冻结/静默期" */
+    private static final List<String> FROZEN_LINE_MARKERS = List.of("静默期", "冻结", "禁止", "不得推进");
+
+    /**
+     * 冻结线越权观测（2026-10-13，<b>只告警不拦截</b>）。
+     *
+     * <p>prompt 第 3.1 条已明令"含静默/冻结字样的结转条目不得排进 tasks/exitConditions/档位/章级推进"，
+     * 此处机械兜底观测模型是否仍越权。判定口径刻意宽松（关键词命中即报），因为它的产物是
+     * 一条 WARN 日志、不是拦截动作——宁可多报几条供人工扫一眼，也不要漏掉真越权。
+     *
+     * <p><b>为什么不拦截</b>：冻结线措辞是自由文本，"哪个 task 越了哪条线"的机械判定必然误伤
+     * （如"冻结"可能出现在与冻结线无关的技术描述里）；而该情形的后果在正文侧可见
+     * （新事实凭空出现 → 与既有定案冲突 → 一致性指标与人工复盘能抓到）。
+     * 实测第 16 阶段：结转清单明写虹镇静默期"严禁新实物/新追查"，
+     * 模型仍在 tasks 安排"角色甲透露虹镇旧事的新信息碎片"，第 140 章据此造出地窖账册。
+     */
+    private void warnFrozenLineViolations(StageBlueprintEntity previous, StageBlueprintEntity blueprint) {
+        if (previous == null || blueprint == null
+                || previous.getCarriedTasks() == null || previous.getCarriedTasks().isEmpty()) {
+            return;
+        }
+        List<String> frozen = previous.getCarriedTasks().stream()
+                .filter(t -> t != null && StringUtils.isNotBlank(t.getContent()))
+                .map(StageBlueprintEntity.CarriedTaskEntity::getContent)
+                .filter(c -> FROZEN_LINE_MARKERS.stream().anyMatch(c::contains))
+                .toList();
+        if (frozen.isEmpty()) {
+            return;
+        }
+        List<String> planned = new ArrayList<>();
+        if (blueprint.getTasks() != null) {
+            planned.addAll(blueprint.getTasks());
+        }
+        if (blueprint.getExitConditions() != null) {
+            planned.addAll(blueprint.getExitConditions());
+        }
+        if (planned.isEmpty()) {
+            return;
+        }
+        for (String frozenLine : frozen) {
+            for (String item : planned) {
+                if (StringUtils.isBlank(item) || item.contains("静默") || item.contains("冻结")
+                        || item.contains("禁止") || item.contains("不得")) {
+                    // 新条目自身带冻结措辞 = 模型在复述约束，不是越权
+                    continue;
+                }
+                if (sharesTopicWith(frozenLine, item)) {
+                    log.warn("第{}阶段疑似冻结线越权（观测项，未拦截）：结转条目「{}」处于冻结期，"
+                                    + "但本阶段 tasks/exitConditions 出现「{}」——请人工核对是否安排了新推进",
+                            blueprint.getStageNo(), StringUtils.abbreviate(frozenLine, 50),
+                            StringUtils.abbreviate(item, 60));
+                }
+            }
+        }
+    }
+
+    /**
+     * 粗粒度主题重合：冻结线文本里的中文实词（≥2 字）是否出现在候选条目里。
+     * 只用于上面那条观测日志的降噪（避免把完全无关的任务也报出来）。
+     */
+    private static boolean sharesTopicWith(String frozenLine, String candidate) {
+        java.util.regex.Matcher m = java.util.regex.Pattern.compile("[\\u4e00-\\u9fff]{2,}")
+                .matcher(frozenLine);
+        java.util.Set<String> topics = new java.util.HashSet<>();
+        while (m.find()) {
+            topics.add(m.group());
+        }
+        // 去掉冻结约束自身的高频通用词，剩下的才是"线名"
+        topics.removeIf(t -> List.of("静默期", "严禁", "禁止", "不得", "实物", "追查", "动作",
+                "下一段", "出现", "状态", "余波", "转移", "宣言", "相关", "必须", "允许").contains(t));
+        return topics.stream().anyMatch(candidate::contains);
+    }
+
+    /** 条件文本里的章号区间引用（"第76-80章"/"第 76-80 章"），用于结转时的重定基 */
+    private static final java.util.regex.Pattern CONDITION_CHAPTER_RANGE =
+            java.util.regex.Pattern.compile("第\\s*\\d+\\s*[-–—~]\\s*\\d+\\s*章");
+
+    /**
+     * 结转条件重定基：把条件里引用的**旧章号区间**改写为本阶段区间。
+     *
+     * <p><b>治什么</b>：上一阶段未达成的出口条件常写成「第76-80章中至少有一章可观察到…」。
+     * 原样结转后，阶段末校验只拿**本批（如第81-85章）的记忆**去核验——条件要求证明的是
+     * 第76-80章的事，结构上永远不可能达成。于是它每阶段被判未达成、无限结转，
+     * 同时每批都拉低「出口条件达成率」（实测第5阶段 11 条中 3 条如此，备注明写
+     * 「所给记忆仅包含第81-85章，无第76-80章内容，无法判定」）。
+     *
+     * <p><b>为什么只改章号而不丢弃条件</b>：条件描述的是**要达成的叙事状态**（如"独立房间布置完毕"），
+     * 状态本身可能仍未达成、仍值得追（搬进新居后房间确实要在后续章节交代）。丢弃=丢失叙事承诺；
+     * 只重写章号区间，语义就从"在旧章里找证据"变成"在本阶段继续把它写出来"，既可核验又可执行。
+     *
+     * <p>无章号引用（多数条件本就如此）时原样返回，零副作用。
+     */
+    private static String rebaseConditionChapterRefs(String condition, Integer startChapter, Integer endChapter) {
+        if (StringUtils.isBlank(condition) || startChapter == null || endChapter == null) {
+            return condition;
+        }
+        String replacement = "第" + startChapter + "-" + endChapter + "章";
+        String rebased = CONDITION_CHAPTER_RANGE.matcher(condition).replaceAll(replacement);
+        return StringUtils.equals(rebased, condition) ? condition : rebased;
     }
 
     /**

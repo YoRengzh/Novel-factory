@@ -26,6 +26,7 @@ import org.springframework.stereotype.Service;
 
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -87,10 +88,10 @@ public class ChapterSummaryService {
     }
 
     /**
-     * 带时间锚的重载：timePoint 要求写出年份后，模型必须知道**当前故事年份**。
+     * 带时间锚的重载（2026-10-13）：timePoint 要求写出年份后，模型必须知道**当前故事年份**。
      *
-     * <p><b>为什么必须给锚</b>：实测有章节正文只写"某月某日"（年份在前章），
-     * 摘要模型据此自行猜年份且猜错——该摘要一旦入库即成为下一章的
+     * <p><b>为什么必须给锚</b>：实测第 136 章正文只写"三月十七号"（年份在前章），
+     * 摘要模型据此猜成"2010年3月17日"，而正典是 2011 年——该摘要一旦入库即成为下一章的
      * 时序锚，年份错位会自我固化（并且污染"进度对齐"体检的口径）。
      * 锚由调用方用历史摘要渲染（{@code ConsistencyIndexService.renderTimeAnchor}），
      * 与规划/正文/审校用的是同一根锚，三处同源。
@@ -139,6 +140,9 @@ public class ChapterSummaryService {
                     summary.setForeshadowingResolved(
                             sanitizeResolved(summary.getForeshadowingResolved(), pendingForeshadowing));
                     validateStateEvidence(summary, content);
+                    // 数值事实兜底：必须在一致性证据校验**之前**——回填的事实取正文原句作证据，
+                    // 走同一道 EvidenceMatch 校验，才能与模型输出的事实同等待遇
+                    backfillNumericFacts(summary, content);
                     validateConsistencyEvidence(summary, content);
                     log.info("章节摘要生成完成，chapterNo: {}, 一致性偏差 {} 条", globalNo,
                             summary.getContinuityConflicts() == null ? 0 : summary.getContinuityConflicts().size());
@@ -173,6 +177,12 @@ public class ChapterSummaryService {
         }
     }
 
+    /**
+     * 容错解析：模型（尤其关闭思考模式后）常把 foreshadowingNew 从字符串数组误输出成对象数组
+     * （{content,excerpt,importance}，即 foreshadowSeeds 的结构），导致 Jackson 反序列化失败。
+     * 此处先尝试把 foreshadowingNew 数组内每个对象元素的 content 字段提出、重建为字符串数组，再整体解析。
+     * 若字段本身已是字符串数组或整体非对象结构则原样返回 null（由调用方走后续降级），绝不破坏成功路径。
+     */
     private ChapterSummaryEntity tryConvertWithForeshadowFix(String raw) {
         if (raw == null || raw.isBlank()) {
             return null;
@@ -226,8 +236,9 @@ public class ChapterSummaryService {
      * （账本状态缺失，但核心剧情事实保住，避免整章记忆空洞）
      */
     private ChapterSummaryEntity salvageSummary(String raw, int globalNo, String title) {
-        String summary = JsonRepair.extractStringField(raw, "summary");
-        if (summary == null) {
+        // 取首个非空 summary——重复键时 JSON 库会取到后一个空串，按出现顺序扫才能拿回真正文
+        String summary = JsonRepair.extractStringField(raw, "summary", true);
+        if (StringUtils.isBlank(summary)) {
             return null;
         }
         return ChapterSummaryEntity.builder()
@@ -280,7 +291,7 @@ public class ChapterSummaryService {
                 .append("无法给出原文证据的状态不要输出该条；")
                 .append("\n6. foreshadowingNew：本章新埋下、尚未兑现的伏笔，写明角色与具体内容；")
                 .append("【格式强制】foreshadowingNew 必须是字符串数组，每项只是一句伏笔的纯文本描述，")
-                .append("如 [\"角色甲发现旧宅封存处有异动\", \"角色乙随身物件的来历无人能解释\"]；")
+                .append("如 [\"主角乙发现剑冢封印松动\", \"角色辛体内魔气即将暴走\"]；")
                 .append("严禁在 foreshadowingNew 里输出对象结构；含 content/excerpt/importance 的对象只能出现在 foreshadowSeeds。")
                 .append("伏笔必须是读者可感知的明确悬念或承诺——纯氛围渲染、场景点缀、无悬念指向的描写不得登记为伏笔；")
                 .append("与【此前埋设、尚未回收的伏笔账】实质重复的内容（同一悬念或同一人物势头的换句重述）严禁再次登记；")
@@ -292,20 +303,20 @@ public class ChapterSummaryService {
                 .append("大多数伏笔应为 2-4 分，评分影响回收调度优先级，必须克制客观，每章评 5 分的伏笔至多 1 条；")
                 .append("同时必须为 seed 登记 resolvable（布尔值），判断**这条内容是否承担「兑现义务」**")
                 .append("（系统据此区分「要养要收的伏笔」与「人物状态/氛围点缀」）：")
-                .append("resolvable=true —— 有人**承诺/约定**了什么（「答应替对方保管某物」「约定来日再验证」），")
-                .append("或出现了**未解释的物件/信息**（「夹层里一张来源未明的纸」「那件事再没人提起」）；")
-                .append("resolvable=false —— 只是**人物的状态判断**（「长辈觉得这孩子举止反常」）、")
-                .append("**氛围描写**（「邻人说孩子眼神清亮」）或**当时的事实陈述**（「手里的钱刚好只够周转」）；")
+                .append("resolvable=true —— 有人**承诺/约定**了什么（「答应打银锁」「约定开春来验证」），")
+                .append("或出现了**未解释的物件/信息**（「夹层里一张来源未明的纸」「那家公司没再被提起」）；")
+                .append("resolvable=false —— 只是**人物的状态判断**（「父母觉得孩子邪性」）、")
+                .append("**氛围描写**（「张阿婆说小孩子眼睛干净」）或**当时的事实陈述**（「存折加棺材本刚够八千」）；")
                 .append("拿不准时填 true（宁可多算，不要漏掉真伏笔）。")
                 .append("⚠️ resolvable=false 的条目**不应出现在 foreshadowingNew 里**（那里只登记真伏笔），")
                 .append("本字段主要用于纠正历史数据与边界情况；")
                 .append("同时为有明确谜底的伏笔（importance≥2）在 seed 中登记 payoffHints（3-8 条，每条 ≤20 字）：")
                 .append("该伏笔的谜底/答案关键词——揭示时才会出现的人名、真相短语或关键道具名，")
-                .append("如 [\"事故背后另有主使\", \"那件信物其实是关键凭证\"]；")
+                .append("如 [\"魔气源头是宗主\",\"血玉实为封印钥匙\"]；")
                 .append("系统会在揭示前的所有章节机械拦截这些词，防止谜底提前泄露，因此只登记揭示后才该出现的词，")
                 .append("严禁把伏笔本身的前题词（埋设章已在用的词）登记进来；纯氛围伏笔可省略；")
-                .append("正确示例：\"foreshadowingNew\":[\"旧宅封存处出现异动\"],\"foreshadowSeeds\":[{\"content\":\"旧宅封存处出现异动\",\"excerpt\":\"…\",\"importance\":4}]；")
-                .append("错误示例：\"foreshadowingNew\":[{\"content\":\"旧宅封存处出现异动\"}]（对象不能放进 foreshadowingNew）。")
+                .append("正确示例：\"foreshadowingNew\":[\"剑冢封印松动\"],\"foreshadowSeeds\":[{\"content\":\"剑冢封印松动\",\"excerpt\":\"…\",\"importance\":4}]；")
+                .append("错误示例：\"foreshadowingNew\":[{\"content\":\"剑冢封印松动\"}]（对象不能放进 foreshadowingNew）。")
                 .append("\n7. foreshadowingResolved：本章兑现的伏笔，只能从【此前埋设、尚未回收的伏笔账】中选取。")
                 .append("**账中每条都带 [F章号-序号] 形式的 ID——登记时回抄该 ID（如 \"[F7-2]\"），")
                 .append("ID 是最可靠的销账凭据（机械层按 ID 精确核销，不会因措辞差异漏账）。**")
@@ -315,25 +326,25 @@ public class ChapterSummaryService {
                 .append("**必须逐条登记**。漏记的后果不是「少记一笔」：该线永远关不掉账，")
                 .append("会在后续每一段被反复要求回收，把同一件事重写很多遍。")
                 .append("\n   判断口径：看**状态是否变化**，不是看物件是否出现。"
-                        + "「那件东西又摆回了原处」不算兑现；「对方当面说出不再追问、等他自己开口」算关系/认知变化。")
+                        + "「格子纸又出现在桌上」不算兑现；「父亲说出我不问了、等他自己开口」算关系/认知变化。")
                 .append("\n   ✅ 正确一（首选）：[\"[F7-2]\"]——回抄账中的 ID，最可靠；")
-                .append("\n   ✅ 正确二（账中无 ID 时）：[\"甲与乙就那件事达成不再追问的默契\"]（账中原话，逐字沿用）")
-                .append("\n   ❌ 错误一：用自己的话复述事件经过（如「长辈把纸收进了盒子」）——无 ID 时账本按文本匹配，对不上就等于没登记；")
+                .append("\n   ✅ 正确二（账中无 ID 时）：[\"角色甲与角色乙就2026达成不再追问的默契\"]（账中原话，逐字沿用）")
+                .append("\n   ❌ 错误一：用自己的话复述事件经过（如「父亲把纸放进铁盒」）——无 ID 时账本按文本匹配，对不上就等于没登记；")
                 .append("\n   ❌ 错误二：因为「这条线埋得太久了、像是老账」就留空——老账恰恰最需要登记，")
                 .append("它正是被反复催收的那一批；")
                 .append("\n   ❌ 错误三：把本章**新埋**的线写进这里（新埋的归 foreshadowingNew）；")
                 .append("\n   确实一条都没兑现时，才输出空数组；")
-                .append("\n8. timePoint：本章结束时的**时间**（只写时间不写地点），如\"决战结束当日的深夜\"；")
+                .append("\n8. timePoint：本章结束时的**时间**（只写时间不写地点），如\"外门大比当日深夜\"；")
                 .append("⚠️ **现实年代题材（故事时间锚定在真实年份）必须写出年份**，格式\"YYYY年X月X日\"，")
-                .append("如\"2003年5月12日上午\"；只写\"五月十二\"会让后续所有章节的年份锚失效——")
-                .append("实测某批 10 章摘要全部只写月份，时序锚取不到年份，规划层据此臆造出错误年份")
-                .append("（正文实际年代与之错位），年份链整段错位。")
+                .append("如\"2010年3月1日上午\"；只写\"三月一号\"会让后续所有章节的年份锚失效——")
+                .append("实测第 131-140 章摘要全部只写月份，时序锚取不到年份，规划层据此臆造出 2013 年")
+                .append("（而正文实际是 2010 年），年份链整段错位。")
                 .append("若本章未推进日期，写\"YYYY年X月X日（承接上章同日）\"；")
                 .append("境界纪年等非现实题材不受此限，沿用原口径。")
                 .append("\n9. placePoint：本章结束时主角所在的**地点**（只写地点不写时间），")
-                .append("用 2-12 字的稳定地名，如\"主角居所\"\"营地北坡哨卡\"；")
-                .append("**同一地点在不同章必须用完全一致的写法**（严禁\"讲堂\"与\"讲堂内\"、")
-                .append("\"藏书阁密室\"与\"藏书阁地下密室\"混用）——该字段用于统计地点轨迹，")
+                .append("用 2-12 字的稳定地名，如\"主角甲小院\"\"后山北坡第三号防御节点\"；")
+                .append("**同一地点在不同章必须用完全一致的写法**（严禁\"阵法堂\"与\"阵法堂内\"、")
+                .append("\"天机阁地下密室\"与\"天机阁密室\"混用）——该字段用于统计地点轨迹，")
                 .append("写法漂移会使同一地点被计成多个；场景确实迁移时才换新地名。")
                 .append("\n10. continuityConflicts：对照下方当前账本，找出本章正文中与账本矛盾之处")
                 .append("（位置瞬移、伤势凭空消失、修为倒退、死者复活等），逐条描述；无冲突则为空数组；")
@@ -365,9 +376,9 @@ public class ChapterSummaryService {
                 .append("\n目标：").append(nullToBlank(item.getGoal()))
                 .append("\n关键事件：").append(item.getKeyEvents() == null ? "" : String.join("、", item.getKeyEvents()))
                 .append("\n结尾悬念：").append(nullToBlank(item.getEndingHook()));
-        // 时间锚：timePoint 强制带年份后，模型必须知道**当前故事年份**才能写对。
-        // 不给锚时它会从正文里的零散线索猜——实测有章正文只写"某月某日"（年份在前章），
-        // 摘要便据此猜错年份；该值入库即成为下一章的时序锚，错位会自我固化。
+        // 时间锚（2026-10-13）：timePoint 强制带年份后，模型必须知道**当前故事年份**才能写对。
+        // 不给锚时它会从正文里的零散线索猜——实测第 136 章正文只写"三月十七号"，摘要便填成
+        // "2010年3月17日"（正典是 2011 年）；该值入库即成为下一章的时序锚，错位会自我固化。
         if (historyForAnchor != null && !historyForAnchor.isEmpty()) {
             String anchor = ConsistencyIndexService.renderTimeAnchor(historyForAnchor);
             if (StringUtils.isNotBlank(anchor)) {
@@ -407,7 +418,7 @@ public class ChapterSummaryService {
                 excerpt = EvidenceMatch.truncate(excerpt, SEED_EXCERPT_MAX_LENGTH);
                 // 引用非当章正文（编造/漂移）则置空，content 保留用于账本匹配。
                 // 收编：此前是裸 content.indexOf——模型换了引号形态
-                // （如某故事正文通篇半角引号）就会把真实引用误清空；
+                // （本故事 ch3/ch4 正文通篇半角引号）就会把真实引用误清空；
                 // 现走 EvidenceMatch，只放宽标点/空白差异，编造引用仍拒收。
                 seed.setExcerpt(StringUtils.isNotBlank(excerpt)
                         && EvidenceMatch.contained(excerpt, normalizedContent) ? excerpt : null);
@@ -421,7 +432,7 @@ public class ChapterSummaryService {
     }
 
     /**
-     * 为本章伏笔种子分配**稳定 ID**：格式 {@code F{埋设章号}-{序号}}。
+     * 为本章伏笔种子分配**稳定 ID**（2026-10-13）：格式 {@code F{埋设章号}-{序号}}。
      *
      * <p><b>为什么在机械层分配</b>：ID 是记账凭据，模型的职责是语义判断（这是不是伏笔、
      * 算不算已兑现），记账归机械层——与 excerpt 子串校验、账本核销同一分工。
@@ -491,7 +502,7 @@ public class ChapterSummaryService {
             if (matched == 0) {
                 log.warn("本章回收清单 {} 条在待收账本里一条都没匹配上（措辞漂移？）——账本按文本核销，"
                         + "对不上就不会关账，该线会被反复要求回收：{}", cleaned.size(), cleaned);
-                // 结构化留痕：这是"账本按文本核销"这条设计的漏损计量点，
+                // 结构化留痕（2026-10-13）：这是"账本按文本核销"这条设计的漏损计量点，
                 // 只写日志无法聚合统计——伏笔结构化 ID 改造的效果验证依赖这个数字
                 lastLedgerMismatch = new LedgerMismatch(cleaned.size(),
                         pendingForeshadowing.size(), List.copyOf(cleaned));
@@ -527,7 +538,7 @@ public class ChapterSummaryService {
     /**
      * 与账本核销同口径：**ID 命中优先，文本互相包含回退**。
      *
-     * <p>账本清单带 {@code [F7-2] } 前缀（见
+     * <p>2026-10-13 起账本清单带 {@code [F7-2] } 前缀（见
      * {@code ChapterMemoryService.buildForeshadowContextListWithIds}），故：
      * <ul>
      *   <li>登记值是 ID 形态（{@code [F7-2]} / {@code F7-2}）时——与账本条目的 ID 前缀精确比对；</li>
@@ -575,7 +586,7 @@ public class ChapterSummaryService {
         }
         List<String> kept = new ArrayList<>();
         List<String> dropped = new ArrayList<>();
-        // 账本行可能带 [F7-2] ID 前缀：比对前剥离，否则包含匹配恒不成立，
+        // 账本行可能带 [F7-2] ID 前缀（2026-10-13）：比对前剥离，否则包含匹配恒不成立，
         // 重述过滤会静默失效（换句重述的伏笔将反复入账、未填池虚胖）
         List<String> pendingTrimmed = pendingForeshadowing.stream()
                 .filter(StringUtils::isNotBlank)
@@ -601,6 +612,8 @@ public class ChapterSummaryService {
             return;
         }
         summary.setForeshadowingNew(kept);
+        // 种子按**剔除后**的 new 同步收缩——否则种子里留着已被判为重述的条目，
+        // 而 new 里没有它，两个字段对同一条线给出相反结论（种子侧还以为它是本章新埋）
         if (summary.getForeshadowSeeds() != null) {
             Set<String> keptContents = kept.stream().map(String::trim).collect(Collectors.toSet());
             summary.setForeshadowSeeds(summary.getForeshadowSeeds().stream()
@@ -613,7 +626,7 @@ public class ChapterSummaryService {
     }
 
     /**
-     * **种子 → 新埋清单的无条件补齐**：把种子里声明了兑现义务
+     * **种子 → 新埋清单的无条件补齐**（2026-10-14）：把种子里声明了兑现义务
      * （{@code resolvable=TRUE}）而 {@code foreshadowingNew} 里缺失的条目补进 new。
      * 补齐前先过重述闸：与待回收账（剥离 ID 前缀后）实质重复的种子不补——
      * 那是模型换句重述的账本旧线，{@code filterRestatedForeshadows} 只挡 new 侧，
@@ -837,6 +850,144 @@ public class ChapterSummaryService {
             log.info("章节摘要一致性事实证据校验未通过 {} 条，已隔离待裁决，chapterNo: {}，档位分布 {}",
                     pending.size(), summary.getChapterNo(), tierCounts);
         }
+    }
+
+    /**
+     * **数值型事实的机械兜底**：正文里出现了带经济/计量单位的数字，而本章一致性事实里
+     * 没有任何 NUMBER 条目覆盖它时，按正文原句回填一条。
+     *
+     * <p><b>治什么</b>：摘要模型偶尔整章不输出 {@code consistencyFacts}（实测某章正文明确写了
+     * 「七块二跌到三块出头」并据此做了持币决策，但该章 facts 为空）——于是这条最关键的数值锚
+     * 在账本里不存在，后续章节的写手看不到它，只能自己编一个量级（实测后文把同一资产
+     * 写成「十七块跌到九块」，与原文的「三块出头」差了一个量级，且此后这个错值反而成了正典）。
+     *
+     * <p><b>为什么只兜底"经济/计量"类数字</b>：普通叙述里的数字（年份、年龄、楼层、页码）
+     * 本就大量出现，全量回填会把账本灌满噪声。限定在带单位且单位属于价格/数量/金额这一族，
+     * 才能既覆盖"资产价格/持仓/金额"这类真正需要跨章一致的事实，又不误伤日常叙述。
+     *
+     * <p><b>为什么回填而不只是告警</b>：告警只在日志里，下一章照样看不到；回填后它会进入
+     * 一致性索引与三账本，真正参与后续章节的生成。证据取正文原句，天然通过 EvidenceMatch。
+     *
+     * <p>只补"未覆盖"的：本章已有 NUMBER 事实时，说明模型已做登记，机械层不重复也不改写
+     * （改写会覆盖模型更准确的语义归类，比如它可能已把该数字归到更贴切的 subject 下）。
+     */
+    private void backfillNumericFacts(ChapterSummaryEntity summary, String content) {
+        if (StringUtils.isBlank(content)) {
+            return;
+        }
+        List<ChapterSummaryEntity.ConsistencyFact> facts = summary.getConsistencyFacts() == null
+                ? new ArrayList<>() : new ArrayList<>(summary.getConsistencyFacts());
+        boolean hasNumberFact = facts.stream().anyMatch(f -> f != null
+                && "NUMBER".equalsIgnoreCase(nullToBlank(f.getType()).trim()));
+        if (hasNumberFact) {
+            return;
+        }
+        List<String> sentences = splitSentences(content);
+        List<ChapterSummaryEntity.ConsistencyFact> added = new ArrayList<>();
+        Set<String> seen = new LinkedHashSet<>();
+        for (int i = 0; i < sentences.size(); i++) {
+            String sentence = sentences.get(i).trim();
+            if (sentence.length() < MIN_NUMERIC_FACT_SENTENCE) {
+                continue;
+            }
+            // matcher 每次调用都是新对象：必须持有同一个 matcher 才能 find() 后取 group()
+            java.util.regex.Matcher numeric = NUMERIC_WITH_UNIT.matcher(sentence);
+            if (!numeric.find()) {
+                continue;
+            }
+            // 经济语境允许出现在**本句或相邻句**：真实对话里价格常与"这是什么"分开说
+            //（实测事故原句：「七块二跌到三块出头。」角色甲把电子词典推过来——本句无经济词）。
+            // 窗口取 ±1 句，既能覆盖"上一句交代行情、下一句报数字"的常见写法，又不至于把整章都算进来。
+            if (!hasEconomicContextNear(sentences, i)) {
+                continue;
+            }
+            String value = numeric.group();
+            if (!seen.add(value)) {
+                continue;
+            }
+            ChapterSummaryEntity.ConsistencyFact fact = new ChapterSummaryEntity.ConsistencyFact();
+            fact.setType("NUMBER");
+            fact.setSubject(economicSubjectNear(sentences, i));
+            fact.setValue(value);
+            fact.setScope("本章");
+            fact.setEvidence(sentence.length() > EvidenceMatch.STATE_EVIDENCE_MAX_LENGTH
+                    ? sentence.substring(0, EvidenceMatch.STATE_EVIDENCE_MAX_LENGTH) : sentence);
+            added.add(fact);
+            if (added.size() >= MAX_NUMERIC_FACTS_PER_CHAPTER) {
+                break;
+            }
+        }
+        if (added.isEmpty()) {
+            return;
+        }
+        facts.addAll(added);
+        summary.setConsistencyFacts(facts);
+        log.info("章节摘要数值事实兜底回填 {} 条（模型未登记任何 NUMBER 事实，按正文原句补齐），chapterNo: {}，新增：{}",
+                added.size(), summary.getChapterNo(),
+                added.stream().map(f -> f.getSubject() + "=" + f.getValue()).toList());
+    }
+
+    /** 数值兜底：句长下限（太短的句子容易只有数字没有语义主体） */
+    private static final int MIN_NUMERIC_FACT_SENTENCE = 8;
+    /** 单章最多回填条数：防止一段行情罗列刷满账本 */
+    private static final int MAX_NUMERIC_FACTS_PER_CHAPTER = 5;
+
+    /**
+     * 带单位的数字：价格/数量/金额。刻意只认这些单位——年份、年龄、楼层等日常数字不进账本。
+     *
+     * <p>覆盖两种口语形态：① {@code 17块 / 3.5元 / 两百枚}；② {@code 七块二 / 三块出头}
+     * （中文价格常用"块"后接角位或模糊后缀）。第二类必须单独认，否则「七块二跌到三块出头」
+     * 这种最典型的价格叙述会被整句漏掉——实测事故原文正是这个形态。
+     */
+    private static final java.util.regex.Pattern NUMERIC_WITH_UNIT = java.util.regex.Pattern.compile(
+            "(?:[0-9]+(?:\\.[0-9]+)?|[一二三四五六七八九十百千两几]+(?:十|百|千)?)\\s*(?:块|元|美元|枚|股|万|亿)"
+                    + "(?:[一二三四五六七八九]|出头|多|左右|上下)?");
+
+    /**
+     * 经济语义上下文：句子必须同时出现这些词之一，才认定为"需要跨章一致的数值事实"。
+     * 与 {@link #NUMERIC_WITH_UNIT} 是**与**关系——单有数字（"走了三里路"）或单有经济词
+     * （"他说起行情"）都不够，避免把无关叙述写进账本。
+     *
+     * <p>判定窗口见 {@link #hasEconomicContextNear}：允许落在相邻句，因为真实对话里
+     * 价格数字与"这是什么"常常分属两句。
+     */
+    private static final java.util.regex.Pattern ECONOMIC_CONTEXT = java.util.regex.Pattern.compile(
+            "某资产|行情|价格|币价|股价|仓位|持仓|补仓|建仓|清仓|割肉|亏损|盈利|本金|市值|估值|融资|报价|跌到|涨到");
+
+    /** 数值句的经济语境判定窗口：本句与前后各一句 */
+    private static final int ECONOMIC_CONTEXT_WINDOW = 1;
+
+    /** 在 {@code index} 的 ±{@link #ECONOMIC_CONTEXT_WINDOW} 句范围内找经济语境 */
+    private static boolean hasEconomicContextNear(List<String> sentences, int index) {
+        int from = Math.max(0, index - ECONOMIC_CONTEXT_WINDOW);
+        int to = Math.min(sentences.size() - 1, index + ECONOMIC_CONTEXT_WINDOW);
+        for (int i = from; i <= to; i++) {
+            if (ECONOMIC_CONTEXT.matcher(sentences.get(i)).find()) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /** 取窗口内首个经济语境词作为 subject；取不到时用通用标签（已通过语境判定，必有） */
+    private static String economicSubjectNear(List<String> sentences, int index) {
+        int from = Math.max(0, index - ECONOMIC_CONTEXT_WINDOW);
+        int to = Math.min(sentences.size() - 1, index + ECONOMIC_CONTEXT_WINDOW);
+        for (int i = from; i <= to; i++) {
+            java.util.regex.Matcher m = ECONOMIC_CONTEXT.matcher(sentences.get(i));
+            if (m.find()) {
+                return m.group();
+            }
+        }
+        return "数值";
+    }
+
+    /** 按句末符与换行切句（与 StyleStatService 同口径，供数值兜底逐句扫描） */
+    private static List<String> splitSentences(String text) {
+        return java.util.Arrays.stream(text.split("[。！？…\\n]+"))
+                .map(String::trim)
+                .filter(StringUtils::isNotEmpty)
+                .toList();
     }
 
     private String nullToBlank(String value) {

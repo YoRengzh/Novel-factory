@@ -50,8 +50,9 @@ class DynamicReferenceServiceTest {
         llmRuntimeConfig = mock(LlmRuntimeConfig.class);
         when(llmRuntimeConfig.effectiveReferenceMode(anyString()))
                 .thenAnswer(inv -> inv.getArgument(0));   // 默认透传 yml 模式（无覆盖）
+        // 第 7 个参数是 FeatureToggles：传 null 表示不启用分组开关（按全开处理，等价旧行为）
         service = new DynamicReferenceService(referenceIndexLoader, selector, retriever, fileLoader,
-                properties, llmRuntimeConfig);
+                properties, llmRuntimeConfig, null);
 
         when(referenceIndexLoader.getIndex()).thenReturn(List.of());
         when(fileLoader.load(anyString())).thenReturn("资料内容");

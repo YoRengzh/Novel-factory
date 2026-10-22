@@ -157,7 +157,7 @@ class SuspenseLadderPolicyTest {
     void toleratesModelFormatting() {
         List<SuspenseLadderPolicy.Beat> beats = List.of(
                 beat(1, "1. " + LADDER.get(0), false),
-                beat(2, LADDER.get(1) + "（江燃在课桌上敲出了节奏）", false));
+                beat(2, LADDER.get(1) + "（角色癸在课桌上敲出了节奏）", false));
 
         assertTrue(SuspenseLadderPolicy.violations(beats, LADDER).isEmpty());
     }

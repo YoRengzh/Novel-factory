@@ -4,6 +4,8 @@ import cn.novel.yonren.domain.novel.adapter.repository.IStoryRepository;
 import cn.novel.yonren.domain.novel.model.aggregate.ChapterPlanAggregate;
 import cn.novel.yonren.domain.novel.model.aggregate.StoryGenerateResultAggregate;
 import cn.novel.yonren.domain.novel.model.entity.ArmoryCommandEntity;
+import cn.novel.yonren.domain.novel.model.entity.ChapterSummaryEntity;
+import cn.novel.yonren.domain.novel.model.entity.QualityDebtEntity;
 import cn.novel.yonren.domain.novel.model.valobj.properties.StoryProperties;
 import cn.novel.yonren.domain.novel.service.armory.StoryGenerateService;
 import cn.novel.yonren.domain.novel.service.armory.factory.DefaultArmoryFactory;
@@ -31,7 +33,11 @@ import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
 
-
+/**
+ * 作业编排服务：异步提交 → 单线程 worker 执行 → 进度/取消/章节计划裁决/终态。
+ * D9 个人用范围：只做触发/进度/取消/裁决，无列表/详情/导出；job-status.json 仅供崩溃后人工查看。
+ * MDC trace-id 与 jobId 同源，生成期间全部日志与 LLM usage 记账按 job 归因
+ */
 @Service
 @Slf4j
 public class StoryJobService {
@@ -355,8 +361,16 @@ public class StoryJobService {
                     pending.command, job, pending.dynamicContext);
             finishJob(pending.command, job, result);
         } catch (Throwable e) {
-            job.markFailed(extractMessage(e));
-            log.error("作业 {} 审批后续跑失败：{}", job.getJobId(), job.getErrorMessage(), e);
+            if (job.isCancelRequested()) {
+                // 与 runJob 同款收敛：取消信号已置位时抛出的异常（含续跑期惰性规划的取消检查）
+                // 按 CANCELLED 终态处理——此前这里一律 markFailed，用户取消会被误报成失败
+                job.markCancelled();
+                job.setCurrentStage("CANCELLED_DURING_RUN");
+                log.info("作业 {} 在取消请求后终止：{}", job.getJobId(), extractMessage(e));
+            } else {
+                job.markFailed(extractMessage(e));
+                log.error("作业 {} 审批后续跑失败：{}", job.getJobId(), job.getErrorMessage(), e);
+            }
         } finally {
             persistJobStatusIfPossible(pending.command, job);
             MDC.remove("trace-id");
@@ -437,7 +451,16 @@ public class StoryJobService {
                 return;
             }
             int chaptersDone = countChapters(storyDirName);
-            BatchHealthReport health = assessHealth(storyDirName);
+            // 体检口径取**本批窗口**（2026-10-13）：判停答的是"这一批写得健不健康"，
+            // 此前吃全书历史——早期几批的坏账会把 overall 永久压在 CRITICAL（续批永久停机），
+            // 而旧债后来全清也无法恢复；反过来"这批突然劣化"会被历史好数据稀释而漏判。
+            // 窗口 = 本批区间 [batchStart, batchEnd]（含已完成章）；全书口径仍保留给 /health 观测端点。
+            int batchEnd = chaptersDone;
+            int batchSize = command.getStoryContextEntity() == null
+                    || command.getStoryContextEntity().getChapterCount() == null
+                    ? 0 : command.getStoryContextEntity().getChapterCount();
+            int batchStart = Math.max(1, batchEnd - Math.max(0, batchSize) + 1);
+            BatchHealthReport health = assessHealth(storyDirName, batchStart, batchEnd);
             RunPlanService.Decision decision = runPlanService.decide(chaptersDone, job.getBatchRound(), health);
             if (!decision.continueNext()) {
                 log.info("作业 {} 停止自动续批：{}", job.getJobId(), decision.reason());
@@ -478,11 +501,35 @@ public class StoryJobService {
 
     /** 批末体检结论（读盘重算，纯机械零 LLM 成本）；读取失败返回 null（不做健康判停） */
     private BatchHealthReport assessHealth(String storyDirName) {
+        return assessHealth(storyDirName, 0, 0);
+    }
+
+    /**
+     * 批末体检结论（带**批次窗口**）：{@code [batchStart, batchEnd]} 内的章节才参与判停。
+     *
+     * <p><b>为什么判停必须窗口化</b>：指标此前在全书历史上计算，于是"这本书写得健不健康"
+     * 与"这一批写得健不健康"被混为一谈——早期批次的坏账会把 overall 永久压在停线上
+     *（自动续批永久停机，且旧债后来全清也恢复不了）；反向的"这批突然劣化"则会被
+     * 大量历史好数据稀释到看不出。全书口径仍可用于观测（{@code batchStart<=0} 即全量）。
+     *
+     * <p>窗口只过滤**章节级**数据（摘要/质量债）；阶段蓝图是全书长期锚（数量少、语义为"方向"），
+     * 不受窗口约束——过滤掉它会让"阶段规划覆盖"类指标失真。
+     */
+    private BatchHealthReport assessHealth(String storyDirName, int batchStart, int batchEnd) {
         try {
             Path storyDir = storyRepository.resolveStoryDirectory(storyDirName);
+            List<ChapterSummaryEntity> summaries = storyRepository.readChapterSummaries(storyDir);
+            List<QualityDebtEntity> debts = storyRepository.readQualityDebts(storyDir);
+            if (batchStart > 0 && batchEnd >= batchStart) {
+                summaries = filterByChapterWindow(summaries,
+                        ChapterSummaryEntity::getChapterNo, batchStart, batchEnd);
+                debts = filterByChapterWindow(debts, QualityDebtEntity::getChapterNo, batchStart, batchEnd);
+                log.info("批末体检窗口：第 {}-{} 章（摘要 {} 条 / 质量债 {} 条）",
+                        batchStart, batchEnd, summaries.size(), debts.size());
+            }
             return batchHealthService.assess(
-                    storyRepository.readChapterSummaries(storyDir),
-                    storyRepository.readQualityDebts(storyDir),
+                    summaries,
+                    debts,
                     storyRepository.readStageBlueprints(storyDir),
                     null,
                     // 结算台账：伏笔类指标须据此排除已弃置条目的污染，并产出静默兑现数
@@ -491,6 +538,21 @@ public class StoryJobService {
             log.warn("作业批末体检读取失败，跳过健康判停：{}", storyDirName, e);
             return null;
         }
+    }
+
+    /** 按章号窗口过滤（null/空输入原样返回；章号为 null 的条目保留——无从判定归属，宁可多算） */
+    private static <T> List<T> filterByChapterWindow(List<T> items,
+                                                     java.util.function.Function<T, Integer> chapterNoOf,
+                                                     int start, int end) {
+        if (items == null || items.isEmpty()) {
+            return items;
+        }
+        return items.stream()
+                .filter(item -> {
+                    Integer no = chapterNoOf.apply(item);
+                    return no == null || (no >= start && no <= end);
+                })
+                .collect(java.util.stream.Collectors.toCollection(java.util.ArrayList::new));
     }
 
     /**

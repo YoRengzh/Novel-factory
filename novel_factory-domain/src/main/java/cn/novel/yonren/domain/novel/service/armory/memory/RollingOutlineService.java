@@ -7,6 +7,7 @@ import java.util.HashSet;
 import cn.novel.yonren.domain.novel.model.entity.StageBlueprintEntity;
 import cn.novel.yonren.domain.novel.model.entity.StoryContextEntity;
 import cn.novel.yonren.domain.novel.model.entity.VolumeBlueprintEntity;
+import cn.novel.yonren.domain.novel.service.armory.plan.StoryPacing;
 import cn.novel.yonren.types.utils.JsonParseFallback;
 import com.fasterxml.jackson.core.json.JsonReadFeature;
 import com.fasterxml.jackson.databind.DeserializationFeature;
@@ -17,9 +18,19 @@ import org.springframework.stereotype.Service;
 
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 
-
+/**
+ * 滚动大纲服务：阶段蓝图的触发判断/窗口计算/prompt 组装/解析规整，纯函数无状态——
+ * LLM 调用与落盘由蓝图节点与仓储承担。
+ * 治长线漂移：近程记忆只有 5 章摘要，阶段方向原先只存在于静态大纲；
+ * 每跨过阶段边界生成一版阶段蓝图链式锚定，生成输入固定四件套：
+ * 原始大纲（北极星）+ 上一版蓝图（强制结转审计）+ 近章摘要 + 待回收伏笔。
+ * 窗口规则：起步首版用默认窗长（1-10 章）写死；老故事中途接入的首版即自适应；
+ * 后续蓝图起点 = 上一版终点 + 1，终点由模型按弧线自定，机械钳制在 30-80 章内
+ */
 @Service
 @Slf4j
 public class RollingOutlineService {
@@ -33,6 +44,16 @@ public class RollingOutlineService {
     /** 里程碑任务条数上限 */
     public static final int MAX_TASKS = 6;
 
+    /**
+     * **章级主线推进的排期窗**（章，2026-10-02）。
+     *
+     * <p>阶段长度被 {@link #MIN_STAGE_LENGTH}/{@link #MAX_STAGE_LENGTH} 钳制在 30-80 章
+     * （批次不足时才截断到批次末），一次产出 80 条章级推进不现实——输出过长易被
+     * {@code finish_reason=length} 静默截断。故只要求覆盖阶段开头的有界窗口，
+     * 批次跑完若有余量，由下一版蓝图续写（与滚动大纲的既有哲学一致）。
+     *
+     * <p>取 15 = 3 个标准段（段长 5 章），够覆盖一次续写的批次量。
+     */
     public static final int MAINLINE_WINDOW = 15;
     /** 阶段进入护栏条数上限 */
     public static final int MAX_ENTRY_CONSTRAINTS = 6;
@@ -84,7 +105,21 @@ public class RollingOutlineService {
         return StringUtils.isBlank(anchor) ? "" : "\n" + anchor + "\n";
     }
 
-
+    /**
+     * 组装**悬念档位补采 prompt**（2026-09-22）。
+     *
+     * <p><b>为什么需要补采</b>：档位表是"主线推进闸门"的唯一标尺，但在完整蓝图 prompt 里
+     * 它只是第 11 条要求——实测模型会在长 prompt 里**静默省略**这两个字段
+     * （同批用短聚焦 prompt 探针则 100% 给出：5 档、全是可观察表述）。
+     * 若就此放过，档位表恒为 null，锚块不注入、校验跳过、指标不出——整条推进链路**一声不响地空转**。
+     * 所以缺了就**再问一次，只问这两个字段**（短 prompt 服从率高），而不是把可靠性押在一次服从上。
+     *
+     * <p>输入用"故事大纲 + 本阶段目标/任务"即可：档位表描述的是主线悬念的推进阶段，
+     * 不需要完整上下文；prompt 越短，模型越不会漏字段。
+     *
+     * <p><b>时序锚（2026-10-04）</b>：档位/里程碑同样会产出"婴儿写数论"式超龄表述，
+     * 补采短 prompt 也不例外——与主蓝图同口径注入锚，新书首段用设定兜底。
+     */
     public String buildSuspenseLadderRepairPrompt(StoryContextEntity storyContext,
                                                   StageBlueprintEntity blueprint,
                                                   List<ChapterSummaryEntity> summaries) {
@@ -157,6 +192,17 @@ public class RollingOutlineService {
         return Math.min(end, start + MAINLINE_WINDOW - 1);
     }
 
+    /**
+     * 组装**章级主线推进补采 prompt**（2026-10-02）。
+     *
+     * <p><b>为什么又是"聚焦补采"</b>：与 {@code suspenseLadder} 同样的理由——
+     * 那条字段当年放在完整蓝图 prompt 里（十几个要求 + 长 schema）会被模型**静默省略**，
+     * 最后靠"只问这两个字段"的短 prompt 才稳定。**可靠性来自"缺了就补问"，不来自"要求写得够醒目"。**
+     * 章级推进更是个逐章数组，放在长 prompt 里被省略的概率只会更高。
+     *
+     * <p>输入带**已确定的档位表**：章级推进必须与档位相容（不得出现档位倒退），
+     * 否则两张表会互相打架——校验侧却是各自独立跑的，冲突要到很晚才暴露。
+     */
     public String buildMainLineRepairPrompt(StoryContextEntity storyContext, StageBlueprintEntity blueprint,
                                             List<ChapterSummaryEntity> summaries) {
         int start = blueprint == null || blueprint.getStartChapter() == null ? 1 : blueprint.getStartChapter();
@@ -192,20 +238,215 @@ public class RollingOutlineService {
                 .append("**严禁**写成内心感受、情绪波动或氛围渲染；\n")
                 .append("3. 相邻两章**不得雷同**——读者要能一眼看出这两章各自推进了什么；")
                 .append("更不得用「继续观察」「进一步推进」这类空话占位；\n")
+                .append("3.1 ⚠️ **每条必须回答『比上一章多知道了什么 / 改变了什么决定』**——这是主线推进的实质：\n")
+                .append("  若上一章已说过「角色丁决定守密」，本章不能写成「角色丁守住秘密」——那是同一件事换场景；")
+                .append("  要写的是「角色丁把守密从答应升级为**主动对外遮挡**」或「角色甲把判断从怀疑升级为**摊牌**」；")
+                .append("  若两章的推进语可互换位置（把本章和上一章的顺序对调也读得通），说明推进写空了，必须重写；\n")
+                .append("  （实测反例：连续 4 章的推进都是「核心圈初步形成保护性默契」+ 各换场景——内容变了、档位语义没变，")
+                .append("   阅读观感就是整段停滞。档位语义级推进 = 新事实被知晓 / 新决定被做出，不是「又发生了一件事」。）\n")
+                .append("3.2 ⚠️ **每条推进必须写明由谁对谁的什么交锋承载**（盘问/拒绝/对峙/合作/撞见/被迫表态）——")
+                .append("**禁止**写成纯单人独处动作链（整理/比对/记录/发呆）或纯流程仪式（清点/封装/锁存/交接）：\n")
+                .append("  主线事实本身可以是单人认知推进，但**落点必须在人际接触中暴露**——")
+                .append("「主角独自推断出 X」的合法写法是「被同伴撞见推理痕迹，两人就『你到底在查什么』对峙，他在拒答中让 X 暴露」；")
+                .append("（实测反例：封存仪式章「清点→倒石灰→焊死→锁门→交钥匙」有两个人在场却无一句交锋，正文只写出 1055 字；")
+                .append("拆信推断章整章独处，全章有效对白 5 句。）\n")
+                .append("3.3 ⚠️ **每条推进必须以剧情线标签开头**，六选一：")
+                .append("【学习】（数学/竞赛/学业能力成长）/【本金】（某资产/家庭财务/资本积累与变现）")
+                .append("/【程序】（编程/技术工程/工具制作）/【悬疑】（暗线/旧案/异常事件）")
+                .append("/【关系】（同伴/家庭/情感）/【家庭】（父母线/亲情决策）；\n")
+                .append("  ⚠️ **主粮配额：学习+本金+程序 合计每段 ≥2 章**——本书的底色是硬核成长线，主粮不许缺席；\n")
+                .append("  主粮章的推进必须取自故事圣经章节目标时间表上该学段的**里程碑链条**")
+                .append("（如初一自学计算机与算法、初二重返省级联赛并拿到名次、竞赛奖金完成家庭财务正循环），")
+                .append("不得用「整理笔记/查规则/归档备案」类行政动作充数——那是事务不是成长；\n")
+                .append("  且**悬疑暗线每段至多半数、不得连续两章**——暗线信息可以改由主粮/关系场景承载")
+                .append("（如竞赛讨论中带出线索、同伴对话中暴露变化），")
+                .append("严禁整段连排暗线把主角自身的成长挤出舞台（实测 106-110 段暗线连排，学习线整段缺席；")
+                .append("106-120 十五章主粮仅 3 章、本金 0/程序 0——这是本纪律要拦截的头号问题）。\n")
                 .append("4. 整体必须与上方档位表相容：档位索引不得倒退，且每一章的推进应能对应到某个档位；\n")
                 .append("5. 不要输出 Markdown，不要输出解释文字。\n");
         sb.append("\n请严格按照以下 JSON 格式输出（**只输出这一个字段**）：\n")
                 .append("{\"mainLineByChapter\":[{\"chapterNo\":").append(start)
-                .append(",\"advance\":\"本章主线推进（可观察表述）\"},")
-                .append("{\"chapterNo\":").append(Math.min(start + 1, end)).append(",\"advance\":\"…\"}]}");
+                .append(",\"advance\":\"【学习】本章主线推进（可观察表述，写明谁对谁的什么交锋承载）\"},")
+                .append("{\"chapterNo\":").append(Math.min(start + 1, end)).append(",\"advance\":\"【本金】…\"}]}");
         return sb.toString();
     }
 
+    // ==================== 章级推进 · 线别纪律（2026-10-11） ====================
 
+    /**
+     * 章级推进允许的剧情线标签：主粮线（学习/本金/程序）受**下限**配额约束，
+     * 悬疑为暗线（受**上限**约束），关系/家庭为成长面（无配额，填满剩余空间）。
+     * 2026-10-11 由四标签扩为六：本金/程序原先在词汇表里不存在——财务章只能标【家庭】
+     * （111 章某资产核算）、技术章无标可打，硬核线在标签层面就不可见（实测 106-120 主粮仅 3/15）。
+     */
+    public static final Set<String> MAIN_LINE_TAGS = Set.of("学习", "悬疑", "关系", "家庭", "本金", "程序");
+
+    /** 主粮线标签：本书的底色是硬核成长（学业/资本/技术），配额下限见 {@link #mainLineDisciplineIssues} */
+    public static final Set<String> HARD_LINE_TAGS = Set.of("学习", "本金", "程序");
+
+    /** 主粮配额下限分子/分母：每段主粮章 ≥ 总章数×2/5（5 章段即 ≥2 章），与悬疑上限（≤半数）对称 */
+    public static final int HARD_LINE_MIN_NUMERATOR = 2;
+    public static final int HARD_LINE_DENOMINATOR = 5;
+
+    /** 线别分布观测行的固定显示顺序（主粮在前）——Set 无序，观测行需要稳定可 diff */
+    private static final String[] TAG_DISPLAY_ORDER = {"学习", "本金", "程序", "悬疑", "关系", "家庭"};
+
+    /**
+     * 章级推进的**线别纪律**机械校验：每条推进必须以剧情线标签开头；悬疑暗线
+     * 每段不得超过半数、不得连续两章；主粮线（学习/本金/程序）每段不得低于 2/5。
+     * 治两个方向——"整段滑进暗线、主角学习线蒸发"（上限）与"压掉暗线后空间被关系/家庭
+     * 吃掉、硬核主粮仍缺席"（下限，实测 106-120 主粮 3/15、本金 0、程序 0）。
+     *
+     * <p>返回违规清单（空 = 通过）。执法通道与聚焦补采同款：调用方（BuildStageBlueprintNode）
+     * 据此**带反馈重问一次**，仍不过则 WARN 留痕——蓝图层没有重试循环，
+     * 下游还有段计划的对话承载闸门作第二道兜底。
+     */
+    public static List<String> mainLineDisciplineIssues(StageBlueprintEntity blueprint) {
+        List<String> issues = new ArrayList<>();
+        if (blueprint == null || blueprint.getMainLineByChapter() == null) {
+            return issues;
+        }
+        List<StageBlueprintEntity.MainLineBeat> beats = blueprint.getMainLineByChapter().stream()
+                .filter(b -> b != null && b.getChapterNo() != null && StringUtils.isNotBlank(b.getAdvance()))
+                .toList();
+        if (beats.isEmpty()) {
+            return issues;
+        }
+        int suspense = 0;
+        int hardLine = 0;
+        Integer prevNo = null;
+        boolean prevSuspense = false;
+        for (StageBlueprintEntity.MainLineBeat beat : beats) {
+            String advance = beat.getAdvance().trim();
+            String tag = null;
+            if (advance.startsWith("【")) {
+                int close = advance.indexOf('】');
+                if (close > 1 && MAIN_LINE_TAGS.contains(advance.substring(1, close))) {
+                    tag = advance.substring(1, close);
+                }
+            }
+            if (tag == null) {
+                issues.add("第 " + beat.getChapterNo() + " 章推进未标剧情线标签"
+                        + "（须以【学习】/【本金】/【程序】/【悬疑】/【关系】/【家庭】之一开头）："
+                        + brief(advance));
+                prevSuspense = false;
+                prevNo = beat.getChapterNo();
+                continue;
+            }
+            if (HARD_LINE_TAGS.contains(tag)) {
+                hardLine++;
+            }
+            boolean isSuspense = "悬疑".equals(tag);
+            if (isSuspense) {
+                suspense++;
+                if (prevSuspense && prevNo != null && beat.getChapterNo() == prevNo + 1) {
+                    issues.add("第 " + prevNo + "-" + beat.getChapterNo() + " 章悬疑暗线连续两章"
+                            + "——暗线信息须改由学习/关系场景承载");
+                }
+            }
+            prevSuspense = isSuspense;
+            prevNo = beat.getChapterNo();
+        }
+        if (suspense * 2 > beats.size()) {
+            issues.add("悬疑暗线里程碑 " + suspense + "/" + beats.size() + " 超过半数"
+                    + "——把其中一部分改为【学习】/【关系】承载同一信息");
+        }
+        // 主粮下限：只有悬疑上限时，压出来的空间会被关系/家庭吃掉而非回到主粮——
+        // 实测 106-120 十五章主粮 3/15（学习）且本金 0、程序 0，其中 1 章还是行政事务。
+        // 上限治"暗线连排"，下限治"主粮蒸发"，两者必须成对存在
+        if (hardLine * HARD_LINE_DENOMINATOR < beats.size() * HARD_LINE_MIN_NUMERATOR) {
+            issues.add("主粮线（学习/本金/程序）仅 " + hardLine + "/" + beats.size() + " 章，"
+                    + "低于配额下限 2/5——本书的底色是硬核成长线，每段至少 2 章必须由主粮承载"
+                    + "（推进取自章节目标时间表的里程碑链条，行政动作不算数）");
+        }
+        return issues;
+    }
+
+    /**
+     * 线别分布观测行（固定顺序：主粮在前、未标兜底）——每段蓝图一眼可查，
+     * 不必再人工数 rolling-outline.json。观测不到的失衡就不会被修。
+     */
+    public static String mainLineDistribution(StageBlueprintEntity blueprint) {
+        if (blueprint == null || blueprint.getMainLineByChapter() == null) {
+            return "（无章级推进）";
+        }
+        Map<String, Integer> counts = new LinkedHashMap<>();
+        for (String tag : TAG_DISPLAY_ORDER) {
+            counts.put(tag, 0);
+        }
+        int untagged = 0;
+        for (StageBlueprintEntity.MainLineBeat beat : blueprint.getMainLineByChapter()) {
+            if (beat == null || StringUtils.isBlank(beat.getAdvance())) {
+                continue;
+            }
+            String advance = beat.getAdvance().trim();
+            String tag = null;
+            if (advance.startsWith("【")) {
+                int close = advance.indexOf('】');
+                if (close > 1 && MAIN_LINE_TAGS.contains(advance.substring(1, close))) {
+                    tag = advance.substring(1, close);
+                }
+            }
+            if (tag == null) {
+                untagged++;
+            } else {
+                counts.merge(tag, 1, Integer::sum);
+            }
+        }
+        StringBuilder sb = new StringBuilder();
+        for (Map.Entry<String, Integer> entry : counts.entrySet()) {
+            sb.append(sb.length() > 0 ? " " : "").append(entry.getKey()).append(entry.getValue());
+        }
+        if (untagged > 0) {
+            sb.append(" 未标").append(untagged);
+        }
+        return sb.toString();
+    }
+
+    /** 线别纪律驳回的回注话术：与聚焦补采同款差异化修正指令 */
+    public static String mainLineDisciplineFeedback(List<String> issues) {
+        return "\n\n【上一版章级主线推进被机械驳回】以下问题必须修正（其余部分可保留）：\n- "
+                + String.join("；\n- ", issues)
+                + "\n\n修正要求（逐条执行，**不得只换措辞**）："
+                + "\n1. 每条推进以【学习】/【本金】/【程序】/【悬疑】/【关系】/【家庭】之一**开头**；"
+                + "\n2. 主粮线（学习/本金/程序）每段至少 2 章——不足时把对应章的推进改为由主粮承载，"
+                + "内容取自章节目标时间表的里程碑链条（竞赛/学业/某资产/技术），行政动作不算数；"
+                + "\n3. 悬疑暗线至多半数、不得连续两章——暗线信息不删，改由主粮/关系场景承载"
+                + "（如同伴讨论中带出线索、对峙中暴露变化）；"
+                + "\n4. 每条推进写明**由谁对谁的什么交锋承载**，禁止纯独处动作链与纯流程仪式；"
+                + "\n5. 重新输出**完整** mainLineByChapter（章数与章号不变）。";
+    }
+
+    /** 违规信息里截断以便阅读 */
+    private static String brief(String value) {
+        return value == null ? "" : (value.length() <= 30 ? value : value.substring(0, 30) + "…");
+    }
+
+    // ==================== 伏笔兑现排期表 · 聚焦补采P2b） ====================
+
+    /**
+     * 伏笔排期补采结果（只含这一个字段）。
+     *
+     * <p>⚠️ 分量名必须**逐字等于 prompt 里给的 JSON key**（{@code foreshadowSchedule}）——
+     * 叫 {@code schedule} 会让 Jackson 找不到属性、整个 patch 反序列化为 null，
+     * 而调用方只会看到"补采没拿到结果"，根因极难追。（与 {@code MainLinePatch.mainLineByChapter} 同款约定。）
+     */
     public record ForeshadowSchedulePatch(
             List<ForeshadowScheduleEntity.ScheduleItem> foreshadowSchedule) {
     }
 
+    /**
+     * 组装**伏笔兑现排期表补采 prompt**（P2b）。
+     *
+     * <p>同为**聚焦补采**：排期表是个逐条对象数组，放在长 prompt 里被静默省略的概率只会比档位表更高。
+     *
+     * <p><b>核心要求是"至少 1 条跨阶段"</b>——这是治「段计划视野 5 章 ⇒ 只能本段内埋本段内收」
+     * 的唯一结构性手段。不写死这条，排期表会退化成"把本来就会收的线登记一遍"。
+     *
+     * <p><b>时序锚（2026-10-04）</b>：新书 1-5 章实测，无锚的排期补采会产出
+     * "4岁主角无意识写出2026年日期"这类违反时序锚的 intent——它经【必须埋设】强压给计划与写手后，
+     * 审校按锚判 BLOCKING，修订无法在不丢事件的前提下修复，整链死锁。锚在此处是源头闸门。
+     */
     public String buildForeshadowScheduleRepairPrompt(StoryContextEntity storyContext,
                                                      StageBlueprintEntity blueprint,
                                                      int hardTotal,
@@ -264,7 +505,16 @@ public class RollingOutlineService {
         return sb.toString();
     }
 
-
+    /**
+     * 解析排期表补采输出；不可用返回 null（调用方告警，不让缺失静默通过）。
+     *
+     * <p>逐条机械校验：章号齐全、{@code plant} 落在阶段区间内、{@code payoff > plant}、
+     * {@code payoff <= hardTotal}。任一条不合格即整表退回（半张表比没有更危险：
+     * 打标会因章号错位而大面积漏配）。
+     *
+     * <p>⚠️ **"至少 1 条跨阶段"不在这里判定**——那是"补采质量"问题而非"格式"问题，
+     * 由调用方决定是重问一次还是告警放行（见 {@code BuildStageBlueprintNode}）。
+     */
     public ForeshadowSchedulePatch parseForeshadowSchedulePatch(String raw, StageBlueprintEntity blueprint,
                                                                int hardTotal) {
         if (StringUtils.isBlank(raw)) {
@@ -316,7 +566,13 @@ public class RollingOutlineService {
         }
     }
 
-
+    /**
+     * 排期表**链式结转 + 去重**（P2b）。
+     *
+     * <p>新版补采的条目与上一版结转的活线条目会撞车（模型看不见上一版的全貌），
+     * 故按 **intent 归一文本去重，保留结转版**——结转条目带着 {@code status} 履历
+     * （已 PLANTED 的线不该被打回 PLANNED，否则打标会重来一遍）。
+     */
     public List<ForeshadowScheduleEntity.ScheduleItem> mergeScheduleItems(
             List<ForeshadowScheduleEntity.ScheduleItem> carried,
             List<ForeshadowScheduleEntity.ScheduleItem> fresh) {
@@ -349,7 +605,13 @@ public class RollingOutlineService {
         return intent == null ? "" : intent.replaceAll("[\\s\u3000“”\"「」『』，。、,.]", "");
     }
 
-
+    /**
+     * 解析章级主线推进补采输出；不可用返回 null——调用方据此告警，不让缺失静默通过。
+     *
+     * <p>校验口径：条目非空、且章号**连续覆盖排期窗**才认。
+     * 部分覆盖（如只给了前 3 章的条目）按不可用处理——半张表比没有更危险：
+     * 校验会因"缺章"不断驳回，而模型每次补采都只给前几条。
+     */
     public MainLinePatch parseMainLinePatch(String raw, StageBlueprintEntity blueprint) {
         if (StringUtils.isBlank(raw)) {
             return null;
@@ -405,7 +667,12 @@ public class RollingOutlineService {
         return blueprints.get(blueprints.size() - 1);
     }
 
-
+    /**
+     * 计算下一版蓝图的窗口：
+     * ① 无前版且下一章仍在默认窗长内（故事起步）——fixed，第 1-10 章写死；
+     * ② 无前版且已连载超出默认窗长（老故事中途接入）——首版即 adaptive，从下一章起；
+     * ③ 有前版——adaptive，起点 = 上一版终点 + 1，终点待模型自定（钳制见 normalize）
+     */
     public StageWindow nextWindow(StageBlueprintEntity previous, int nextChapterNo) {
         if (previous == null) {
             if (nextChapterNo <= STAGE_LENGTH) {
@@ -509,8 +776,8 @@ public class RollingOutlineService {
      * 组装蓝图生成 prompt：输入四件套 + 反配额约束 + 结转审计要求。
      * batchEnd 为本次批次的末章（chapterOffset + chapterCount），阶段终点不得超出。
      * hardTotal 为全书硬性完结上限（null=未强制）：非空时把上限注入完结契约，并在
-     * 距上限 ≤ CONVERGENCE_LEAD 时进入收官收敛（不再开新线、逐步清空终局节点）；
-     * 本阶段窗口直达上限时强制收官卷（finalVolumeDeclared=true + EPILOGUE + 终局节点全部完成）。
+     * ① 距上限 ≤ CONVERGENCE_LEAD 时进入收官收敛（不再开新线、逐步清空终局节点）；
+     * ② 本阶段窗口直达上限时强制收官卷（finalVolumeDeclared=true + EPILOGUE + 终局节点全部完成）。
      */
     public String buildGenerationPrompt(StoryContextEntity storyContext,
                                         StageBlueprintEntity previous,
@@ -591,27 +858,54 @@ public class RollingOutlineService {
         }
 
         // 进度对齐块：本阶段窗口覆盖的大纲段与里程碑——蓝图任务必须服务大纲路标。
-        // 此前 chapterGoal（作者的分章预算）从不进蓝图 prompt，规划层在 4 岁巷子上写"9 岁华杯赛"路标而无人对表。
+        // 此前 chapterGoal（作者的分章预算）从不进蓝图 prompt，规划层在 4 岁旧城街区上写"9 岁华杯赛"路标而无人对表。
         // chapterGoal 无结构（散文大纲/解析失败）时豁免——与体检的进度对齐指标同源同容错。
+        // 2026-10-11 方案 A（重锚）：正文实际时间落后大纲章段预算是结构性的（追历机制连续多批未收敛，
+        // 学校线里程碑锚在年龄上，硬追日历等于永远执行"未到期"的路标）——大纲段的时间预算按正文
+        // 实际锚点**整体平移**后作为本阶段执行时间线：学校线里程碑保留顺序随实际时间滑动；
+        // 某资产等真实历史事件不随平移（它们锚定真实年份，正文迟早会走到）。同一次生成内所有段
+        // 共用同一个平移量（从段首所在段计算），段间距不得被压乱。
         if (storyContext != null && StringUtils.isNotBlank(storyContext.getChapterGoal())) {
             OutlineSegmentParser.Outline outline = OutlineSegmentParser.parse(storyContext.getChapterGoal());
             if (!outline.isEmpty() && batchEnd > window.startChapter()) {
+                Integer anchorYear = StoryPacing.latestAnchorYear(summaries);
+                Integer anchorAge = StoryPacing.latestAnchorAge(summaries);
+                OutlineSegmentParser.OutlineSegment primary = outline.segmentFor(window.startChapter());
+                Integer shiftYears = StoryPacing.calendarShiftYears(primary, anchorYear);
+                Integer shiftAges = (primary != null && primary.ageStart() != null && anchorAge != null)
+                        ? primary.ageStart() - anchorAge : null;
                 sb.append("\n【进度对齐·大纲路标】（本阶段窗口覆盖的大纲段——tasks 必须把剧情推进到这些路标）\n");
+                if (shiftYears != null && shiftYears > 0) {
+                    sb.append("⚠️ 时间账重锚：正文实际在 ").append(anchorYear).append(" 年")
+                            .append(anchorAge == null ? "" : "/" + anchorAge + " 岁")
+                            .append("，大纲预算已按实际时间整体平移 ").append(shiftYears).append(" 年——")
+                            .append("下方【重锚预算】即本阶段的执行时间线。学校/竞赛/升学类里程碑**保留顺序**按重锚预算执行；")
+                            .append("某资产行情与真实历史事件**仍按真实年份**（不随平移）；原大纲年份只作里程碑顺序参考。\n");
+                }
                 int shown = 0;
                 for (OutlineSegmentParser.OutlineSegment seg : outline.segments()) {
                     if (seg.endChapter() < window.startChapter() || seg.startChapter() > batchEnd) {
                         continue;
                     }
+                    StoryPacing.SlidBudget slid = StoryPacing.slideSegment(seg, shiftYears, shiftAges);
+                    String slidLabel = slid.yearStart() == null && slid.ageStart() == null ? ""
+                            : "【重锚预算 " + (slid.yearStart() == null ? "" : slid.yearStart() + "-"
+                                    + (slid.yearEnd() == null ? slid.yearStart() : slid.yearEnd()) + "年")
+                            + (slid.ageStart() == null ? "" : " " + slid.ageStart() + "-"
+                                    + (slid.ageEnd() == null ? slid.ageStart() : slid.ageEnd()) + "岁")
+                            + "】";
                     sb.append("- 第 ").append(seg.startChapter()).append("-").append(seg.endChapter())
-                            .append(" 章").append(StringUtils.isBlank(seg.timeLabel()) ? ""
-                                    : "【" + seg.timeLabel() + "】")
+                            .append(" 章").append(slidLabel)
+                            .append(shiftYears != null && shiftYears > 0 && StringUtils.isNotBlank(seg.timeLabel())
+                                    ? "（原大纲" + seg.timeLabel() + "）" : "")
                             .append("：").append(seg.milestone()).append("\n");
                     shown++;
                 }
                 if (shown > 0) {
-                    sb.append("【任务配比·硬约束】本阶段 tasks 中成长/学习线（对照上方里程碑——竞赛、升学、能力节点）")
-                            .append("占比 ≥50%，悬疑/人际线 ≤40%；大纲段里程碑必须排入本阶段窗口内的对应章，")
-                            .append("不得整体顺延到后续阶段。\n");
+                    sb.append("【任务配比·硬约束】本阶段 tasks 必须把主粮线里程碑（竞赛/学业/某资产/技术）")
+                            .append("排进窗口内对应章——与章级主线推进的线别纪律同口径：主粮章（学习/本金/程序）")
+                            .append("每段 ≥2、悬疑暗线 ≤2（机械校验会驳回）；重锚预算内确实排不完的里程碑")
+                            .append("可顺延至后续段，但顺序不得乱、不得跳过。\n");
                 }
             }
         }
@@ -624,6 +918,25 @@ public class RollingOutlineService {
             if (previous.getTasks() != null) {
                 for (String task : previous.getTasks()) {
                     sb.append("- ").append(task).append("\n");
+                }
+            }
+            // 结转清单必须**原样渲染**：第 3 条要求模型"对上一版每条未完成任务逐条结转"，
+            // 而此前这里只渲染 tasks/exitResults/stageReport——模型根本看不到上一版 carriedTasks，
+            // 只能凭近章摘要重猜，于是被注入的约定事件（"面邀必须兑现""附加赛必须完成"）
+            // 在换版时被静默丢弃。实测：第 14 阶段注入的附加赛任务在第 15 阶段 carriedTasks 中消失，
+            // 系统侧无法察觉（模型不报错，只是不再提）。补齐输入，"逐条结转"才有据可依。
+            if (previous.getCarriedTasks() != null && !previous.getCarriedTasks().isEmpty()) {
+                sb.append("\n【上一版结转任务】（第 3 条要求逐条处置：完成/进行中/放弃，严禁静默丢弃）\n");
+                for (StageBlueprintEntity.CarriedTaskEntity task : previous.getCarriedTasks()) {
+                    if (task == null || StringUtils.isBlank(task.getContent())) {
+                        continue;
+                    }
+                    sb.append("- [").append(StringUtils.defaultIfBlank(task.getStatus(), "进行中")).append("] ")
+                            .append(task.getContent().trim());
+                    if (StringUtils.isNotBlank(task.getNote())) {
+                        sb.append("（").append(task.getNote().trim()).append("）");
+                    }
+                    sb.append("\n");
                 }
             }
             if (previous.getExitResults() != null && !previous.getExitResults().isEmpty()) {
@@ -735,11 +1048,32 @@ public class RollingOutlineService {
         }
         sb.append("\n【要求】\n")
                 .append("1. stageGoal：1-2 句，描述本阶段结束时故事应到达的状态，必须服务于故事大纲的方向。\n")
-                .append("2. tasks：3-6 条里程碑，必须是状态型目标（如\"主角突破至筑基期\"\"揭开某关键物来历的一半\"\"与某世家关系转为敌对\"），")
-                .append("严禁写成活动配额（如\"安排3场战斗\"\"回收5个伏笔\"）。\n")
+                .append("2. tasks：3-6 条里程碑，必须是**状态型目标**——每条都要能回答"
+                        + "\"谁比之前多知道了什么 / 谁做了什么不可逆的决定 / 谁与谁的关系变了\"（如\"主角突破至筑基期\""
+                        + "\"揭开古物来历的一半\"\"与某家关系转为敌对\"）。\n")
+                .append("  · 严禁写成活动配额（如\"安排3场战斗\"\"回收5个伏笔\"）。\n")
+                .append("  · ⚠️ **同样严禁写成\"完成某个动作/手续\"**：实测反例——"
+                        + "\"完成贴邮票投递的完整动作\"\"将格子纸与便条收入蓝皮本固定外层\"。"
+                        + "这类目标无法用场面承载，章节只能被写成流程说明（写手把每个动作拆开逐一描写，"
+                        + "全章没有戏）；必须把动作**换成谁因此改变了什么**，"
+                        + "例如\"角色甲把2026搁置下去，夫妻达成『等孩子自己开口』的默契\"。\n")
+                .append("  · 取词与题材相称：现实题材不要套用修炼类词（突破/修为/境界），"
+                        + "改用认知与关系词（确认/摊牌/放手/默许/被说服/达成默契）。\n")
+                .append("  · 自检：把一条 task 里的动作部分删掉后，若只剩下\"信寄出去了\"这类流程结果，"
+                        + "那它是流程不是里程碑，必须重写成它造成的认知或关系变化。\n")
+                .append("  · 2.1 ⚠️ **剧情线配比**：里程碑必须给主角的学习/能力/关系线留出明确份额——")
+                .append("悬疑/暗线类里程碑每段**至多半数且不得连续两章**，严禁整段连排暗线把主角自身的成长挤出舞台")
+                .append("（实测 106-110 段：封存仪式与拆信推断连排，竞赛/学业线整段缺席，评分 payoff/expectation 双低）。\n")
                 .append("3. carriedTasks：对【上一版阶段蓝图】中每条未完成任务逐条结转——已完成标\"完成\"，")
                 .append("部分推进标\"进行中\"并在 note 注明进展，决定不再推进标\"放弃\"并在 note 注明理由；")
                 .append("严禁静默丢弃未完成任务。若无上一版蓝图则输出空数组。\n")
+                .append("3.1 🚫 **冻结线红线**：若【上一版结转任务】中含\"静默期/冻结/禁止/不得推进\"字样的条目，")
+                .append("该剧情线本阶段**只允许结转，不得安排任何新任务**——严禁把它写进 tasks、exitConditions、")
+                .append("suspenseLadder 或 mainLineByChapter。实测反例（第 16 阶段）：结转清单明写"
+                        + "「虹镇线静默期：≤1次且必须是已封存状态余波、严禁新追查/新实物」，")
+                .append("模型却在 tasks 里安排了「角色甲透露虹镇旧事的新信息碎片」——把\"冻结\"读成了\"再注入一条\"，")
+                .append("于是第 140 章凭空多出地窖账册，与第 130 章\"铁箱已焊死封存\"的定案正面冲突。")
+                .append("冻结线的正确写法是：carriedTasks 里原样结转并保持\"进行中\"，tasks/exitConditions 里一个字都不提。\n")
                 .append("4. 待回收伏笔可把相关条目编排进本阶段任务，但必须与剧情自然契合，严禁为清账强行回收。\n")
                 .append("5. entryConstraints：2-4 条本阶段开始时应已成立的局面事实（承接上一版蓝图任务状态与近章摘要），")
                 .append("必须是事实性陈述，将作为本阶段章节规划的护栏。\n")
@@ -754,6 +1088,20 @@ public class RollingOutlineService {
                 .append("→ 只写证据实际会落地的那个场景（二选一还额外要求你把场景收敛，否则核验时两边都对不上）；\n")
                 .append("  · 跨章演化：「从 A 状态转变为 B 状态」→ 拆成「A 状态已成立」「B 状态已成立」两条。\n")
                 .append("  ⇒ 自检标准：这条条件的证据，能否在**某一章**里找到一段连续原文？找不到就说明它该拆开。\n")
+                .append("6.2 ⚠️ **条件只描述「叙事状态是否成立」，不得预设实现细节**。核验是拿摘要/正文去**匹配语义**，")
+                .append("而你并不知道正文最终会怎么落笔；一旦把写法写死，同一叙事意图用别的写法实现就会被判未达成。")
+                .append("下列写法一律禁止：\n")
+                .append("  · **指定台词原文**：「说出『到此为止』」「台词中出现『XXXX』」")
+                .append("→ 写「表达出终止追查的明确态度」——同义措辞（如\"到这儿为止\"）同样应判达成；\n")
+                .append("  · **指定精确次数**：「连续三次」「至少两次」「反复不少于 N 回」")
+                .append("→ 写「有过持续观察/多次关注的表现」；次数是执行细节，写死会把\"写了但次数不同\"判失败；\n")
+                .append("  · **指定物件位置/载体**：「铁盒内存在 X」「存放在抽屉最里层」「以某物覆盖」")
+                .append("→ 写「X 已被妥善收存（位置不限）」，除非该位置本身就是剧情关键；\n")
+                .append("  · **指定场景细枝**：「完成第一顿晚饭」「在某个具体时辰」")
+                .append("→ 写该场景要承载的叙事作用（如\"新居生活秩序已建立\"），让正文自选承载方式；\n")
+                .append("  · **指定说话人身份之外的措辞限定**：「由父亲或母亲说出」「用否定句式」→ 只保留\"由谁说出\"。\n")
+                .append("  ⇒ 自检标准：把这条条件交给一个**没看过正文**的人，他能仅凭\"叙事状态\"判断达成与否吗？")
+                .append("若他必须逐字比对台词、数字或位置才能判断，就说明写法写死了。\n")
                 .append("7. 上一阶段未达成的退出条件由系统**原样注入**本阶段 exitConditions 并在阶段末重验一次；")
                 .append("你无须在 carriedTasks 里重复登记，**严禁**把它们的原文或改写版再写进 exitConditions，")
                 .append("也严禁改写其措辞或标为放弃（重验仍不达成的由系统自动出账）；")
@@ -771,7 +1119,11 @@ public class RollingOutlineService {
                 .append("    - 档位会被逐章机械比对（章计划回填 suspenseBeat）：索引不得倒退，")
                 .append("非过渡章**不得连续 3 章停在同一档**；\n")
                 .append("    - **'产生怀疑又被自我否定圆回'不算推进**——若某章结束时的认知档位与章首相同，那就是原地章；\n")
-                .append("    - 档数要与阶段跨度匹配：2 档太粗会让整段无处可推，超过 6 档会让每档失去意义。\n")
+                .append("    - **档数必须 ≥ 本阶段章数**：4 档配 5 章必然多章共用一档（实测连续 4 章停在同一档——")
+                .append("档数少于章数时，最宽的那一档会被反复共用并撑满整段，主线观感上就是停滞；")
+                .append("相邻两档必须**语义可区分**（上一档结了什么新事实/谁下了什么新决定，下一档推进了什么），")
+                .append("严禁把'形成默契/关系深化/局势升级'这类**状态性宽词**当档位——它能装下整段，等于没有档位；")
+                .append("超过 6 档会让每档失去意义。\n")
                 .append("12. ⚠️ 里程碑必须与人物阶段（年龄/生理/状态）相符（对照上方【时序锚】，如给出）：\n")
                 .append("    - 先按【时序锚】估算本阶段结束时的故事时间与主角年龄；\n")
                 .append("    - tasks / suspenseLadder / exitConditions 中**不得出现超出该阶段能力边界的里程碑**")
@@ -781,8 +1133,9 @@ public class RollingOutlineService {
                 .append("当作阶段里程碑：载体换了，能力展示的本质没变；观察者的解读须跨章累积、保留不确定；\n")
                 .append("    - 圣经章节带目标只表示剧情方向，不得据此让主角跨越尚未到达的生理阶段；\n")
                 .append("    - 本阶段若跨过成长节点（周岁、入园、入学等），必须在 tasks 中显式安排过渡，不得跳级设定。\n")
-                .append("12.1 ⚠️ stageEndYear / stageEndAge（必填）：声明本阶段末的故事时间与主角年龄——**从上方【进度对齐·大纲路标】的末段取值**，")
-                .append("不得低于该段预算（否则进度持续滞后）；相邻两个阶段的 stageEnd 必须**单调递增**且不重叠。")
+                .append("12.1 ⚠️ stageEndYear / stageEndAge（必填）：声明本阶段末的故事时间与主角年龄——")
+                .append("**从上方【进度对齐·大纲路标】的重锚预算取值**（已按正文实际时间平移；")
+                .append("某资产等真实历史事件年份不随平移）。相邻两个阶段的 stageEnd 仍须**单调递增**且不重叠。")
                 .append("13. 不要输出 Markdown，不要输出解释文字。\n");
 
         int exampleEnd = window.adaptive() ? Math.min(window.startChapter() + 44, maxEnd)

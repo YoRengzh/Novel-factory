@@ -19,9 +19,21 @@ import java.util.regex.Pattern;
 @Service
 public class ConsistencyIndexService {
 
-    private static final int MAX_RENDER_ENTRIES = 20;
+    /**
+     * 每节渲染条数上限（2026-10-12 由 20 收紧到 12）：索引随连载线性增长，125 章时整块 2.9k
+     * 字符，是正文前缀预算饱和（章章 99-100%）挤出三账本/伏笔账的主力之一。上限只影响
+     * {@link #renderPrompt} 渲染视图，不截断底层数据（审计与排期仍看全量 index）。
+     */
+    private static final int MAX_RENDER_ENTRIES = 12;
 
-    /** 年龄类关键数字的识别词：subject 命中即视为年龄事实（如"某角色月龄""主角年龄"） */
+    /**
+     * 时间线按**章号**窗口：只渲染最近 W 章的条目（2026-10-12）。
+     * 时间线是"每章一条"的心跳数据，老条目与近章摘要（覆盖近 10 章）和三账本重复，
+     * 且随连载线性膨胀。按章号而非插入序截取：TIMELINE 事实与每章 timePoint 混排时不依赖插入序。
+     */
+    private static final int TIMELINE_WINDOW_CHAPTERS = 12;
+
+    /** 年龄类关键数字的识别词：subject 命中即视为年龄事实（如"主角甲月龄""主角年龄"） */
     private static final String[] AGE_SUBJECT_KEYWORDS = {"月龄", "年龄", "岁数"};
     public ConsistencyIndexEntity rebuild(List<ChapterSummaryEntity> summaries, StoryVO storyVO) {
         ConsistencyIndexEntity index = ConsistencyIndexEntity.builder().build();
@@ -89,6 +101,11 @@ public class ConsistencyIndexService {
                 : containsAny(content, mechanismTerms(name));
     }
 
+    /**
+     * 本章正文是否出现"机制名 + 原理解释关键词"的大段描述（段落 ≥ 50 字，每章最多计一次）。
+     * 与 {@link #mentionsMechanism} 的区别：本方法要求<em>大段解释原理</em>，只是提到名字不算。
+     * 机械统计结果由 ChapterWorker 写入摘要 {@code mechanismDescribed}，供跨批累计。
+     */
     public boolean describesMechanism(String content, StoryVO storyVO) {
         if (blank(content)) return false;
         String name = mechanismName(storyVO);
@@ -104,6 +121,18 @@ public class ConsistencyIndexService {
         return false;
     }
 
+    /**
+     * 金手指超期未使用检测：每个完整间隔只报一次；没有明确金手指设定时始终返回空。
+     *
+     * <p><b>interval &lt;= 1 直接放行</b>（2026-10-01 补）：间隔为 1 意味着"每章都必须用"，
+     * 此时 {@code gap % interval} 恒为 0 ⇒ 只要某章没用，其后的**每一章**都会命中。
+     * 实测该配置下 5 章 5 条 BLOCKING、章章修订两轮耗尽仍不收敛——因为写手根本无法
+     * 在"必须用金手指"与"金手指没额度"之间同时满足，这是一种自我不可能的要求。
+     * 间隔 1 本身是把"每章都得用"写成了配置，但那条要求应当由规划层表达，机械门禁只做兜底。
+     *
+     * @param currentContent 本章正文，可为 null。非空且本章已提及机制时直接放行——本检查在质量门内
+     *                       于摘要落盘前执行，只有回读正文才能避免"本章用了但摘要还没生成"的误判
+     */
     public List<ChapterIssueEntity> mechanismUsageIssues(List<ChapterSummaryEntity> summaries, StoryVO storyVO,
                                                          int chapterNo, String currentContent) {
         if (!cheatRuleEnabled(storyVO)) return List.of();
@@ -133,6 +162,22 @@ public class ConsistencyIndexService {
                 .build());
     }
 
+    /**
+     * 金手指/核心能力运作机制跨章重复描述检测（**增量口径**）。
+     *
+     * <p>2026-09-16 重写，修掉两处缺陷：
+     * <ol>
+     *   <li><b>计数器不归零</b>：原实现每章都用全量 contents 重算累计值，一旦第 3 个描述章出现，
+     *       其后<em>每一章</em>累计值都 &gt; 2 因而章章报 BLOCKING——162 章样本实测会连报
+     *       <b>135 章（83.3%）</b>；若直接当 BLOCKING 进修订闭环，等于从第 28 章起每章都要修订。
+     *       现改为：<b>只有"本章新引入描述 且 此前额度已用满"的那一章才报</b>（同一样本只报 3 章）</li>
+     *   <li><b>跨批丢历史</b>：原实现依赖 {@code chapterContents}，而它每个批次都从空列表开始 ⇒
+     *       "全篇至多 2 次"的上限每批都会重置，多批续写下形同虚设。现改为从<b>摘要</b>取历史
+     *       （{@code mechanismDescribed} 由 ChapterWorker 机械写入，摘要跨批预载）</li>
+     * </ol>
+     *
+     * @param currentDescribed 本章正文是否引入机制描述（{@link #describesMechanism}）
+     */
     public List<ChapterIssueEntity> mechanismDescriptionIssues(List<ChapterSummaryEntity> summaries, StoryVO storyVO,
                                                               int chapterNo, boolean currentDescribed) {
         if (!cheatRuleEnabled(storyVO)) return List.of();
@@ -206,7 +251,7 @@ public class ConsistencyIndexService {
     public String renderPrompt(ConsistencyIndexEntity index) {
         if (index == null) return "";
         StringBuilder sb = new StringBuilder("【跨章一致性索引】\n");
-        append(sb, "时间线", index.getTimeline());
+        append(sb, "时间线", windowTimeline(index.getTimeline()));
         append(sb, "伤情", index.getInjuries());
         append(sb, "术语", index.getTerms());
         append(sb, "关键数字", index.getNumbers());
@@ -215,7 +260,55 @@ public class ConsistencyIndexService {
         return sb.length() == "【跨章一致性索引】\n".length() ? "" : sb.toString();
     }
 
+    /**
+     * 时间线窗口：只保留最近 {@link #TIMELINE_WINDOW_CHAPTERS} 章的条目。
+     * 按条目自带章号判定（时间线是每章一条的心跳数据，老条目与近章摘要/三账本重复，
+     * 随连载线性膨胀——125 章时仅此一节约 1.2k 字符）。只影响渲染视图，不动底层数据。
+     */
+    private static List<?> windowTimeline(List<?> timeline) {
+        if (timeline == null || timeline.isEmpty()) {
+            return timeline;
+        }
+        int latest = -1;
+        for (Object o : timeline) {
+            if (o instanceof ConsistencyIndexEntity.TimelineEntry t && t.getChapterNo() != null) {
+                latest = Math.max(latest, t.getChapterNo());
+            }
+        }
+        if (latest < 0) {
+            return timeline;
+        }
+        int floor = latest - TIMELINE_WINDOW_CHAPTERS + 1;
+        List<Object> windowed = new ArrayList<>();
+        for (Object o : timeline) {
+            if (o instanceof ConsistencyIndexEntity.TimelineEntry t) {
+                if (t.getChapterNo() != null && t.getChapterNo() >= floor) {
+                    windowed.add(o);
+                }
+            } else {
+                // 非时间线条目（理论不存在）保守保留，不做静默丢弃
+                windowed.add(o);
+            }
+        }
+        return windowed;
+    }
 
+    /**
+     * 时序锚（2026-10-03）：把「当前故事时间 + 主角当前年龄」渲染成一段自包含的硬锚文本。
+     *
+     * <p><b>为什么需要它</b>：26-30 章批次出现"十一个月大的婴儿写数论证明、列乘法竖式"的能力失控。
+     * 根因不在写手——计划 prompt 里<b>当前月龄出现 0 次</b>，只有圣经 band"21-30 章步入小学／
+     * 自学高阶数学"，模型无从知道人物仍是婴儿，于是把"这一带应该读小学"直接落到了襁褓婴儿身上。
+     * 年龄必须像修为境界一样，在每一路 prompt 里被显式锁定。
+     *
+     * <p><b>为什么不编造</b>：只从摘要里已记录、且经证据校验入账的年龄类关键数字取材；
+     * 无年龄事实时返回空串，由装配器过滤该块，绝不猜一个年龄塞进去。
+     *
+     * <p><b>推算语义</b>：年龄值记于其来源章号（如第16章"十一个月"）；调用方（计划/正文/蓝图）
+     * 应当按当前故事时间往前推算，因此文本显式提示"按故事时间推算至本章"，而非把旧值当成本章值。
+     *
+     * @return 无年龄事实时返回空串
+     */
     public static String renderTimeAnchor(List<ChapterSummaryEntity> summaries) {
         if (summaries == null || summaries.isEmpty()) {
             return "";
@@ -265,6 +358,19 @@ public class ConsistencyIndexService {
         return sb.toString();
     }
 
+    /**
+     * 设定兜底年龄锚（2026-10-03）：新书首段还没有任何摘要 → 摘要驱动的 {@link #renderTimeAnchor} 为空，
+     * 第一章与首段计划会在"零年龄约束"下生成（实测：4 岁主角在首段做出超龄行为，
+     * 且审校年龄判据因 guard 无锚而不触发）。此处从故事设定保守提取年龄。
+     *
+     * <p><b>命中从严</b>：只在年龄明确绑定幼龄阶段词（"以4岁幼童的身份""4岁的孩童"）或"年仅/年方N岁"
+     * 时才命中——"前世38岁""他38岁时"这类成人年龄一律不锚，宁可无锚也不误锚。
+     *
+     * <p><b>只允许无摘要时兜底</b>（见 {@link #renderSettingsAgeAnchorIfNoSummaries}）：
+     * 有摘要后以摘要锚为准，否则会把故事起始年龄钉死在中期。
+     *
+     * @return 锚文本；未命中返回空串（不编造）
+     */
     public static String renderSettingsAgeAnchor(String worldSetting, String protagonist, String outline) {
         String text = nullToBlank(worldSetting) + "\n" + nullToBlank(outline);
         Matcher matcher = SETTINGS_CHILD_AGE.matcher(text);
@@ -337,7 +443,7 @@ public class ConsistencyIndexService {
         return index < 0 ? null : index;
     }
 
-    /** 主人公字段的头部人名（"某角色，灵魂是……"→"某角色"）；解析不出返回 null（锚里回退"主角"） */
+    /** 主人公字段的头部人名（"主角甲，灵魂是……"→"主角甲"）；解析不出返回 null（锚里回退"主角"） */
     private static String leadingName(String protagonist) {
         if (blank(protagonist)) {
             return null;
@@ -346,7 +452,7 @@ public class ConsistencyIndexService {
         return first.length() >= 2 && first.length() <= 6 ? first : null;
     }
 
-    /** 去掉 subject 里的年龄后缀，得到人物名（"某角色月龄"→"某角色"）；scope 缺失时的兜底 */
+    /** 去掉 subject 里的年龄后缀，得到人物名（"主角甲月龄"→"主角甲"）；scope 缺失时的兜底 */
     private static String stripAgeSuffix(String subject) {
         String stripped = subject;
         for (String keyword : AGE_SUBJECT_KEYWORDS) {

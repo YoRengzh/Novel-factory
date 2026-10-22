@@ -218,9 +218,9 @@ public final class ChapterPlanChecks {
         return issues.isEmpty() ? null : String.join("；", issues);
     }
 
-    /** 归一化：去空白与引号（与项目其它文本比对口径一致） */
+    /** 归一化：去空白与引号（与项目其它文本比对口径一致；实现复用仓库统一入口，勿另写正则） */
     private static String normalizeAdvance(String value) {
-        return value == null ? "" : value.replaceAll("[\\s\u3000“”\"「」『』]", "");
+        return ForeshadowSpanPolicy.normalize(value);
     }
 
     /** 违规信息里截断以便阅读 */
@@ -253,6 +253,153 @@ public final class ChapterPlanChecks {
                 + "\n2. 全段 timeAdvance 必须**单调递增**、不得倒退，并与阶段末目标（stageEndYear/stageEndAge）一致；"
                 + "\n3. 这是年龄/故事时间推进的唯一合法通道——不声明，时间锁就永远不会放行。";
     }
+
+    /**
+     * **跳月不得吞线**：某章 timeAdvance 一次跨越 ≥1 个月时，该章（或紧随其后的一章）必须显式
+     * 收束上一段铺开的待收线索，不能一句"日子被试卷切碎"就把整段过程带过。
+     *
+     * <p><b>治什么</b>：实测某段五章里安排两次跳月（+2 月、+2.5 月），把前后九章铺开的
+     * 「苏家观察员」「Vossner 座谈」两条线在跳月叙述里整段吞掉——观察员线前面埋了 9 章，
+     * 收尾只有一句"把记录件塞回枕下"；座谈座位表刚排出来就再没出现。读者视角是"刚铺就断"。
+     *
+     * <p><b>判据为什么用"待收线索关键词"而不是语义理解</b>：机械层没有语义能力，能做的是
+     * 逐字比对——把待收线索的描述切成关键词，看跳月章的关键事件里有没有命中。
+     * 命中即认为"这条线在本章被交代过"。宁可漏报（关键词切不准就不报）也不误报，
+     * 与其它规划闸门同款保守口径。
+     *
+     * <p><b>跳月判定</b>：从 timeAdvance 文本里抽"推进约 N 个月 / 跳月 / N 个月后 / 跨月"等表述，
+     * 或年份发生变化（跨年必然跨月）。只认显式写法——模型若写"推进到九月十五日"而上一章是
+     * 七月，文本里没有"月"字但日期跨度大，这类由 {@code timeAdvance} 的单调性负责，本闸门不猜。
+     *
+     * @param chapters   本段计划
+     * @param openThreads 上段遗产：尚未回收的伏笔内容（可为 null/空，此时不校验）
+     * @return null = 通过或无跳月；非 null = 违规说明（调用方带反馈重规划）
+     */
+    public static String validateJumpDoesNotSwallowThreads(List<ChapterPlanItemEntity> chapters,
+                                                          List<String> openThreads) {
+        if (chapters == null || chapters.isEmpty() || openThreads == null || openThreads.isEmpty()) {
+            return null;
+        }
+        List<String> swallowed = new ArrayList<>();
+        for (int i = 0; i < chapters.size(); i++) {
+            ChapterPlanItemEntity chapter = chapters.get(i);
+            if (chapter == null || StringUtils.isBlank(chapter.getTimeAdvance())
+                    || !isMonthJump(chapter.getTimeAdvance())) {
+                continue;
+            }
+            // 跳月章的"交代窗口"= 本章 + 下一章（跳月常在一章末尾发生，收束写在下一章开头）
+            String window = eventsText(chapter)
+                    + (i + 1 < chapters.size() ? eventsText(chapters.get(i + 1)) : "");
+            List<String> missed = unmatchedThreads(openThreads, window);
+            if (!missed.isEmpty()) {
+                swallowed.add("第" + chapter.getChapterNo() + "章跳月（" + brief(chapter.getTimeAdvance())
+                        + "）期间未交代 " + missed.size() + " 条已铺开的线：" + String.join("；", missed));
+            }
+        }
+        return swallowed.isEmpty() ? null : String.join("｜", swallowed);
+    }
+
+    /** 跳月违规的修正指令（与其它规划闸门同款：点名 + 可执行改法） */
+    public static String jumpSwallowFeedback(String issue) {
+        return "\n\n【上一版计划的时间跳跃吞掉了已铺开的线索】以下问题必须修正：\n- " + issue
+                + "\n\n修正要求（逐条执行，**不得只换措辞**）："
+                + "\n1. 跳月那章（或其下一章）必须**显式落地**上面点名的每条线："
+                + "在关键事件里写出它在本段时间内发生了什么结果——不必展开全过程，"
+                + "但必须有可核验的落点（谁做了什么决定、什么被确认、什么被公开）；"
+                + "\n2. 严禁用「这期间一切如常」「日子被试卷切碎」这类概述替代具体落点；"
+                + "\n3. 若某条线确实要在跳月后才推进，就不许在本段跳月——把跳月挪到该线收束之后；"
+                + "\n4. 重新输出**完整**计划（章数不变）。";
+    }
+
+    /** timeAdvance 是否表示"一次跨越 ≥1 个月"（只认显式写法，不做日期推算） */
+    static boolean isMonthJump(String timeAdvance) {
+        if (StringUtils.isBlank(timeAdvance)) {
+            return false;
+        }
+        String text = timeAdvance.trim();
+        // 显式"月"表述：跳月 / 跨月 / N 个月 / 两个半月 / 数月
+        if (text.matches(".*(跳月|跨月|几个月|数月|半[个]?月).*")) {
+            return true;
+        }
+        if (text.matches(".*[0-9一二三四五六七八九十两]+\\s*个半月.*")) {
+            return true;
+        }
+        if (text.matches(".*[0-9一二三四五六七八九十两]+\\s*个月.*")) {
+            return true;
+        }
+        // 跨年（必然跨月）：出现"次年/第二年/N 年后/跨年"
+        return text.matches(".*(次年|第二年|跨年|[0-9一二三四五六七八九十]+\\s*年后).*");
+    }
+
+    /** 章节关键事件的拼接文本（归一化，供关键词命中判定） */
+    private static String eventsText(ChapterPlanItemEntity chapter) {
+        if (chapter == null || chapter.getKeyEvents() == null) {
+            return "";
+        }
+        StringBuilder sb = new StringBuilder();
+        for (String event : chapter.getKeyEvents()) {
+            if (StringUtils.isNotBlank(event)) {
+                sb.append(normalizeAdvance(event));
+            }
+        }
+        return sb.toString();
+    }
+
+    /**
+     * 待收线索里**未被窗口文本命中**的那些。
+     *
+     * <p>判据取"命中任一段落级关键词即算交代"：机械层没有分词器，一条伏笔描述切出来的
+     * 片段质量参差（"随营观察"能命中，"的表现"命中不了）。要求过半命中会把
+     * "只写了主体、没写修饰"的正常交代也判成未交代——那正是误报。
+     * 反过来只要求命中一段，意味着模型只要提到这条线的核心名词就算过关，
+     * 宁可漏报（写得含糊也算交代）也不误伤，与其它规划闸门同款保守口径。
+     */
+    private static List<String> unmatchedThreads(List<String> openThreads, String window) {
+        List<String> missed = new ArrayList<>();
+        for (String thread : openThreads) {
+            if (StringUtils.isBlank(thread)) {
+                continue;
+            }
+            List<String> keywords = threadKeywords(thread);
+            if (keywords.isEmpty()) {
+                continue;
+            }
+            boolean hit = keywords.stream().anyMatch(window::contains);
+            if (!hit) {
+                missed.add(brief(thread));
+            }
+        }
+        return missed;
+    }
+
+    /**
+     * 把一条伏笔描述切成关键词锚点。
+     *
+     * <p><b>为什么用滑窗而不是整段</b>：中文没有词分隔，按标点切出来的往往是整句
+     * （"苏家旁支观察员随营观察"），而正文里写的是"苏家旁支观察员完成首次记录"——
+     * 整句比对永远命中不了。故对每个标点分段再做 3 字滑窗，任一窗口命中即算提到过这条线。
+     *
+     * <p><b>为什么是 3 字</b>：2 字窗口（"观察""座谈"）太泛，几乎任何正文都能撞上；
+     * 4 字以上切不出足够的窗口。3 字是"能命中又不至于过宽"的折中。
+     * 同一分段内窗口去重，避免长句产生大量重复锚点。
+     */
+    private static List<String> threadKeywords(String thread) {
+        java.util.LinkedHashSet<String> tokens = new java.util.LinkedHashSet<>();
+        for (String raw : thread.split("[\\s，。；：、（）()「」《》【】,.。:;!?！？]+")) {
+            String segment = normalizeAdvance(raw);
+            if (segment.length() < KEYWORD_ANCHOR_LENGTH) {
+                continue;
+            }
+            for (int i = 0; i + KEYWORD_ANCHOR_LENGTH <= segment.length(); i++) {
+                tokens.add(segment.substring(i, i + KEYWORD_ANCHOR_LENGTH));
+            }
+        }
+        return new ArrayList<>(tokens);
+    }
+
+    /** 关键词锚点长度：3 字（见 {@link #threadKeywords} 的取舍说明） */
+    private static final int KEYWORD_ANCHOR_LENGTH = 3;
+
 
     /**
      * 追进度跳接校验：跳接段（蓝图挂 pacing 且滞后 ≥1 年）的末章 timeAdvance 必须显式推进到
@@ -296,6 +443,181 @@ public final class ChapterPlanChecks {
                 + "\n4. 重新输出**完整**计划（章数不变）。";
     }
 
+    // ==================== 跨章场景重演校验（2026-10-09） ====================
+
+    /**
+     * 判"同一场景/同一动作被写了两遍"的判定线：归一化后最长公共连续片段 ≥ 该字数。
+     *
+     * <p><b>标定样本（第 96-100 章真实计划实测）</b>：
+     * <ul>
+     *   <li>真重复：第 96-99 章关键事件共享 15 字（「翻到主角甲算术本最后一页，指尖」，
+     *       两章连正文都写了同一个场景，第 99 章原文还用"再次"衔接）；第 96-98 章共享 11 字
+     *       （「主角甲在房间里把角色丙…」，同一个人在同一房间处理同一批信）；
+     *       第 97-100 章共享 19 字（同一条伏笔的回收被安排了两遍）；</li>
+     *   <li>跨字段：第 98-99 章的 suspenseBeat/mainLineAdvance 共享 <b>56 字</b>——
+     *       两章逐字用了同一句档位原文，只因第 99 章在**后面追加**了一句本章子项，
+     *       就绕过了现有的"相邻逐字相同"检查；</li>
+     *   <li>误报基线：本批其余两两组合最长只有 4-7 字（人名、地点、标点串）。</li>
+     * </ul>
+     * 取 10：落在误报基线（≤7）与真重复（≥11）之间且留有余量。
+     */
+    static final int SCENE_REPLAY_MIN_MATCH = 10;
+
+    /**
+     * **跨章场景重演校验**：段内任意两章（**不限于相邻**）的关键事件若共享一段较长的连续文本，
+     * 判为同一场景/同一动作被安排了两遍；悬念档位与章级推进字段之间同样比对。
+     *
+     * <p><b>为什么必须新增</b>：现有去重只看**相邻**两章——{@code duplicateBeatViolations}
+     * 与 {@link #validateMainLineAdvance} 都只比对"当前 vs 上一章"，且都要求**逐字相同**。
+     * 于是两种逃逸同时存在：①相隔两章的同一场景（第 96 与第 99 章）；②在共用原文后**追加一句**
+     * 本章子项（第 98 与第 99 章）——后者恰是 prompt 自己建议的写法（"档位原文之后附本章独有的
+     * 推进子项"），等于给出了绕过检查的标准姿势。
+     *
+     * <p><b>为什么用归一化 LCS 而不是相似度</b>：{@code UsedPatternPolicy} 记着这条教训——
+     * 同一套路的 3-gram Jaccard 只有 0.02-0.09，抓不到；结构化标签或归一化 LCS 才行。
+     *
+     * <p>软闸门：与其它推进校验同款——带反馈重规划一次，二次仍不过则告警放行
+     * （只有追进度跳接是 fail-closed，理由不适用这里）。
+     */
+    public static String validateSceneReplay(List<ChapterPlanItemEntity> chapters) {
+        return validateSceneReplay(chapters, null);
+    }
+
+    /** 带档位表的重载：调用方持有蓝图时传入，消除"同档位+各自独有推进"的误报 */
+    public static String validateSceneReplay(List<ChapterPlanItemEntity> chapters, List<String> suspenseLadder) {
+        if (chapters == null || chapters.size() < 2) {
+            return null;
+        }
+        // 推进指纹按章只算一次：剥离已命中的档位原文后，两两比对"独有推进"
+        List<String> advances = new ArrayList<>(chapters.size());
+        for (ChapterPlanItemEntity chapter : chapters) {
+            advances.add(advanceFingerprint(chapter, suspenseLadder));
+        }
+        List<String> issues = new ArrayList<>();
+        for (int i = 0; i < chapters.size(); i++) {
+            ChapterPlanItemEntity a = chapters.get(i);
+            if (a == null) {
+                continue;
+            }
+            for (int j = i + 1; j < chapters.size(); j++) {
+                ChapterPlanItemEntity b = chapters.get(j);
+                if (b == null) {
+                    continue;
+                }
+                // 同一对章至多报一条：先报事件重演（更常见、更好改），命中就不再报推进重合
+                String sharedEvents = sharedSpan(sceneFingerprint(a), sceneFingerprint(b));
+                if (sharedEvents != null) {
+                    issues.add("第 " + a.getChapterNo() + " 与第 " + b.getChapterNo()
+                            + " 章的关键事件高度重合（共享「" + sharedEvents + "」）——同一场景/同一动作"
+                            + "不得在段内两章重演，请合并到一章，或改写其中一章的事件与推进");
+                    continue;
+                }
+                String sharedAdvance = sharedSpan(advances.get(i), advances.get(j));
+                if (sharedAdvance != null) {
+                    issues.add("第 " + a.getChapterNo() + " 与第 " + b.getChapterNo()
+                            + " 章的悬念档位/主线推进描述重合（共享「" + brief(sharedAdvance) + "」）——"
+                            + "同一件事被排给了两章：请让其中一章改为推进别的事，"
+                            + "或把两章合成一章（在共用原文后追加一句话不算换了一件事）");
+                }
+            }
+        }
+        return issues.isEmpty() ? null : String.join("；", issues);
+    }
+
+    /**
+     * 事件指纹：关键事件逐条归一化后相连。
+     *
+     * <p>**刻意不含 characters**：人物名相连会拼出长片段（5 个角色名就有 15 字），
+     * 同一批配角反复出场是正常的，把它算进来会让"同一批人在场"被误判成"同一场景"。
+     * 实测人物名单独出现时把误报基线从 4-6 抬到 6-7，收益不足、风险实在。
+     */
+    private static String sceneFingerprint(ChapterPlanItemEntity item) {
+        StringBuilder sb = new StringBuilder();
+        if (item.getKeyEvents() != null) {
+            for (String event : item.getKeyEvents()) {
+                if (StringUtils.isNotBlank(event)) {
+                    sb.append(normalizeAdvance(stripForeshadowTemplate(event)));
+                }
+            }
+        }
+        return sb.toString();
+    }
+
+    /**
+     * 剥离关键事件里的伏笔登记模板前缀（2026-10-12）。
+     *
+     * <p><b>治什么</b>：规划层要求每章末尾登记一条伏笔，格式固定为
+     * {@code （伏笔埋设）埋设第N章计划中的《…》：<实际内容>}。该模板在多章之间**逐字相同**，
+     * 归一化后共享片段「。（伏笔埋设）埋设第13」就有 12 字，越过判定线 10 字
+     * ⇒ 段校验误报"关键事件高度重合"，白白触发一轮重规划（实测第 131-135 章段：
+     * 132 与 133/134 章两两被误报，二次重规划仍未过、被迫告警放行）。
+     *
+     * <p>模板之后的内容才是本章独有的伏笔设计——**只剥前缀、不剥内容**，
+     * 真重演（两章排了同一条伏笔的同一动作）仍会被抓到。
+     */
+    private static String stripForeshadowTemplate(String event) {
+        if (event == null) {
+            return null;
+        }
+        String text = event.trim();
+        if (!text.startsWith("（伏笔埋设）") && !text.startsWith("（伏笔回收）")
+                && !text.startsWith("(伏笔埋设)") && !text.startsWith("(伏笔回收)")) {
+            return text;
+        }
+        // 模板形如「（伏笔埋设）埋设第131章计划中的《…》：实际内容」——取首个全角/半角冒号之后的部分；
+        // 无冒号（模型未按格式写）时退化为整条保留，不做过度剥离
+        int colon = text.indexOf('：');
+        if (colon < 0) {
+            colon = text.indexOf(':');
+        }
+        return colon >= 0 && colon + 1 < text.length() ? text.substring(colon + 1).trim() : text;
+    }
+
+    /**
+     * 推进指纹：悬念档位 + 章级主线推进（两者合看，任一被复述都算"同一件事被排给两章"）。
+     *
+     * <p><b>已命中的档位表原文先剥离</b>（2026-10-12）：prompt 侧要求"suspenseBeat 以档位表原文
+     * 开头，再附本章独有的推进子项"——两章落在同一档位时，共享的档位原文（50+ 字）远超判定线
+     * 10 字，会把"同档位+各自独有推进"这个 prompt 自己要求的正常形态误判成重合（实测第 121-125
+     * 章段：121-123 同档位4、124-125 同档位5，全部被本项误报，与档位序校验的空格误报叠加后
+     * 反馈被噪声淹没，二次重规划仍未过，被迫告警放行）。剥离只对能**唯一定位**的章生效
+     * （{@code resolveIndex >= 0}）；<b>关键事件侧不豁免</b>——同档位下两章排同一件关键事件
+     * （实测 121/125 章都排了"日历背面补写短杠"）是真重演，必须保留执法。
+     */
+    private static String advanceFingerprint(ChapterPlanItemEntity item, List<String> suspenseLadder) {
+        String beat = normalizeAdvance(item.getSuspenseBeat());
+        int ladderIndex = SuspenseLadderPolicy.resolveIndex(item.getSuspenseBeat(), suspenseLadder);
+        if (ladderIndex >= 0) {
+            String entry = normalizeAdvance(suspenseLadder.get(ladderIndex));
+            if (!entry.isEmpty() && beat.startsWith(entry)) {
+                beat = beat.substring(entry.length());
+            }
+        }
+        return beat + normalizeAdvance(item.getMainLineAdvance());
+    }
+
+    /** 共享连续片段达到判定线时返回该片段，否则 null */
+    private static String sharedSpan(String a, String b) {
+        if (a == null || b == null || a.isEmpty() || b.isEmpty()) {
+            return null;
+        }
+        String span = ForeshadowSpanPolicy.longestCommonSubstringText(a, b);
+        return span.length() >= SCENE_REPLAY_MIN_MATCH ? span : null;
+    }
+
+    public static String sceneReplayFeedback(String issue) {
+        return "\n\n【上一版计划的跨章场景重演被机械驳回】以下问题必须修正：\n- " + issue
+                + "\n\n修正要求（逐条执行，**不得只换措辞**）："
+                + "\n1. 同一场景或同一物理动作（取信/折信/塞信/收进本子这类流程）只允许占用段内**一章**："
+                + "已在前章做过的动作，在后章不得再完整做一遍——要么合并到前章，要么让后章从"
+                + "「动作已经完成」的状态直接进戏；"
+                + "\n2. 同一件主线推进不得排给两章：两章的 mainLineAdvance/suspenseBeat 若指向同一件事，"
+                + "保留其中一章，另一章改为推进别的事；"
+                + "\n3. 在档位原文之后**追加一句话**并不能让两章变成不同的推进——"
+                + "共用的原文部分必须真正不同（谁知道了什么 / 谁做了什么决定 / 什么被公开）；"
+                + "\n4. 重新输出**完整**计划（章数不变）。";
+    }
+
     // ==================== 对话承载校验（2026-10-10） ====================
 
     /**
@@ -309,6 +631,20 @@ public final class ChapterPlanChecks {
     /** transition 章的对话承载事件下限（过渡章允许留白，但仍须一场当面戏） */
     static final int DIALOGUE_SCENES_MIN_TRANSITION = 1;
 
+    // ==================== 事件密度基准（2026-10-13） ====================
+
+    /**
+     * 常规章关键事件数基准：常态供给块与密度反馈块**共用此一处**。
+     *
+     * <p><b>为什么要单点</b>：此前常态块写"以 4 条为基准"、密度反馈块写"每章关键事件 ≥ 3 个"——
+     * 同一 prompt 内两条供给基准不一致，而反馈块是**纠偏**用的，要求反比常态更低，
+     * 等于让模型取低线即合规，反馈块效力被常态块稀释。与 {@link #DIALOGUE_SCENES_MIN} 同套路。
+     */
+    static final int KEY_EVENTS_BASELINE_NORMAL = 4;
+
+    /** 高潮/收束章的关键事件下限：信息密度最高的章写薄了等于白给 */
+    static final int KEY_EVENTS_BASELINE_CLIMAX = 4;
+
     /** 声明被认作"逐字复制"的最短归一化长度：低于此长的"声明"无法定位到具体事件，视为未声明 */
     private static final int DIALOGUE_DECLARATION_MIN_CHARS = 8;
 
@@ -316,8 +652,8 @@ public final class ChapterPlanChecks {
      * **对话承载校验**：把「有没有戏可演」从散文规则变成可机械核验的结构契约。
      *
      * <p><b>为什么必须新增</b>：keyEvents 是自由文本，事件的性质（双人当面戏 / 单人独处）
-     * 不在结构里——【对话承载·硬约束】写了"至少 2 个"却无人执法，实测有章的 5 条关键事件
-     * 全是单人特写（整理物件/写笔记/独处查看）照样放行。
+     * 不在结构里——【对话承载·硬约束】写了"至少 2 个"却无人执法，第 105 章 5 条关键事件
+     * 全是"整理私信/写笔记/看屏幕"的单人特写照样放行（characters 里甚至写着"电脑屏幕"）。
      * 声明（dialogueScenes）+ 逐字比对 + 人名计数，就是这条规则的执法通道。
      *
      * <p>逐章核验五条：
@@ -326,7 +662,7 @@ public final class ChapterPlanChecks {
      *   <li><b>数量</b>：有效声明（逐字命中 keyEvents 的**不同**事件数）达标；</li>
      *   <li><b>诚实</b>：声明必须逐字取自本章 keyEvents（归一化后互为包含），防占位虚报；</li>
      *   <li><b>双人</b>：匹配到的 keyEvent 须写到 ≥2 个人名——"谁对谁"的全名落点，代词不算；</li>
-     *   <li><b>占比</b>：非 transition 章"单人事件"（人名 &lt;2）不得超过一半——治实测坍缩章的
+     *   <li><b>占比</b>：非 transition 章"单人事件"（人名 &lt;2）不得超过一半——治第 96 章的
      *       "2 条合规但其余全是独白"逃逸形态。</li>
      * </ol>
      *
@@ -414,7 +750,7 @@ public final class ChapterPlanChecks {
                 + "\n\n修正要求（逐条执行，**不得只换措辞**）："
                 + "\n1. mainLineAdvance **照旧逐字取自蓝图**——蓝图定的主线里程碑是本章的**落点**，"
                 + "不是**事件本体**：里程碑不许改，但必须由 ≥2 场双人对峙/盘问/合作/拒绝承载"
-                + "（如「把某发现偷偷记在本子上」应演成「被同伴撞见并追问，两人就『你还在查什么』对峙，"
+                + "（如「把发现记录在蓝皮本」应演成「被同伴撞见锁抽屉，两人就『你还在查什么』对峙，"
                 + "他在拒答中完成记录」——同一信息落点，戏是补出来的，不是改蓝图）；"
                 + "\n2. 每条对话承载事件写明**谁对谁、围绕什么分歧**，人物一律用**全名**（代词不计入校验）；"
                 + "\n3. 把这 ≥2 条事件（transition 章 ≥1 条）**逐字复制**进对应章的 dialogueScenes 字段；"
@@ -470,147 +806,5 @@ public final class ChapterPlanChecks {
             }
         }
         return count;
-    }
-
-
-    // ==================== 跨章场景重演校验 ====================
-
-    /**
-     * 判"同一场景/同一动作被写了两遍"的判定线：归一化后最长公共连续片段 ≥ 该字数。
-     *
-     * <p><b>取值的标定口径</b>（以历史批次的真实计划为样本）：真重演的两章关键事件共享片段
-     * 普遍在 11 字以上（同一流程被拆到两章各写一遍，或同一条伏笔的回收被排给两章）；
-     * 而正常相邻章的两两共享最长只有 4-7 字（人名、地点、标点串）。取 10 落在
-     * 误报基线（≤7）与真重复（≥11）之间且留有余量。
-     * 另一类逃逸形态：两章共用同一句档位原文、只在后章**追加一句**本章子项——
-     * 相邻逐字比对放行了它，故必须做段内两两的长片段比对。
-     */
-    static final int SCENE_REPLAY_MIN_MATCH = 10;
-
-
-    public static String validateSceneReplay(List<ChapterPlanItemEntity> chapters) {
-        return validateSceneReplay(chapters, null);
-    }
-
-    /** 带档位表的重载：调用方持有蓝图时传入，消除"同档位+各自独有推进"的误报 */
-    public static String validateSceneReplay(List<ChapterPlanItemEntity> chapters, List<String> suspenseLadder) {
-        if (chapters == null || chapters.size() < 2) {
-            return null;
-        }
-        // 推进指纹按章只算一次：剥离已命中的档位原文后，两两比对"独有推进"
-        List<String> advances = new ArrayList<>(chapters.size());
-        for (ChapterPlanItemEntity chapter : chapters) {
-            advances.add(advanceFingerprint(chapter, suspenseLadder));
-        }
-        List<String> issues = new ArrayList<>();
-        for (int i = 0; i < chapters.size(); i++) {
-            ChapterPlanItemEntity a = chapters.get(i);
-            if (a == null) {
-                continue;
-            }
-            for (int j = i + 1; j < chapters.size(); j++) {
-                ChapterPlanItemEntity b = chapters.get(j);
-                if (b == null) {
-                    continue;
-                }
-                // 同一对章至多报一条：先报事件重演（更常见、更好改），命中就不再报推进重合
-                String sharedEvents = sharedSpan(sceneFingerprint(a), sceneFingerprint(b));
-                if (sharedEvents != null) {
-                    issues.add("第 " + a.getChapterNo() + " 与第 " + b.getChapterNo()
-                            + " 章的关键事件高度重合（共享「" + sharedEvents + "」）——同一场景/同一动作"
-                            + "不得在段内两章重演，请合并到一章，或改写其中一章的事件与推进");
-                    continue;
-                }
-                String sharedAdvance = sharedSpan(advances.get(i), advances.get(j));
-                if (sharedAdvance != null) {
-                    issues.add("第 " + a.getChapterNo() + " 与第 " + b.getChapterNo()
-                            + " 章的悬念档位/主线推进描述重合（共享「" + brief(sharedAdvance) + "」）——"
-                            + "同一件事被排给了两章：请让其中一章改为推进别的事，"
-                            + "或把两章合成一章（在共用原文后追加一句话不算换了一件事）");
-                }
-            }
-        }
-        return issues.isEmpty() ? null : String.join("；", issues);
-    }
-
-    /**
-     * 事件指纹：关键事件逐条归一化后相连。
-     *
-     * <p>**刻意不含 characters**：人物名相连会拼出长片段（5 个角色名就有 15 字），
-     * 同一批配角反复出场是正常的，把它算进来会让"同一批人在场"被误判成"同一场景"。
-     * 实测人物名单独出现时把误报基线从 4-6 抬到 6-7，收益不足、风险实在。
-     */
-    private static String sceneFingerprint(ChapterPlanItemEntity item) {
-        StringBuilder sb = new StringBuilder();
-        if (item.getKeyEvents() != null) {
-            for (String event : item.getKeyEvents()) {
-                if (StringUtils.isNotBlank(event)) {
-                    sb.append(normalizeAdvance(stripForeshadowTemplate(event)));
-                }
-            }
-        }
-        return sb.toString();
-    }
-
-
-    private static String stripForeshadowTemplate(String event) {
-        if (event == null) {
-            return null;
-        }
-        String text = event.trim();
-        if (!text.startsWith("（伏笔埋设）") && !text.startsWith("（伏笔回收）")
-                && !text.startsWith("(伏笔埋设)") && !text.startsWith("(伏笔回收)")) {
-            return text;
-        }
-        // 模板形如「（伏笔埋设）埋设第N章计划中的《…》：实际内容」——取首个全角/半角冒号之后的部分；
-        // 无冒号（模型未按格式写）时退化为整条保留，不做过度剥离
-        int colon = text.indexOf('：');
-        if (colon < 0) {
-            colon = text.indexOf(':');
-        }
-        return colon >= 0 && colon + 1 < text.length() ? text.substring(colon + 1).trim() : text;
-    }
-
-    /**
-     * 推进指纹：悬念档位 + 章级主线推进（两者合看，任一被复述都算"同一件事被排给两章"）。
-     *
-     * <p><b>已命中的档位表原文先剥离</b>：prompt 侧要求"suspenseBeat 以档位表原文
-     * 开头，再附本章独有的推进子项"——两章落在同一档位时，共享的档位原文（50+ 字）远超判定线
-     * 10 字，会把"同档位+各自独有推进"这个 prompt 自己要求的正常形态误判成重合。剥离只对能
-     * **唯一定位**的章生效（{@code resolveIndex >= 0}）；<b>关键事件侧不豁免</b>——同档位下两章
-     * 排同一件关键事件是真重演，必须保留执法。
-     */
-    private static String advanceFingerprint(ChapterPlanItemEntity item, List<String> suspenseLadder) {
-        String beat = normalizeAdvance(item.getSuspenseBeat());
-        int ladderIndex = SuspenseLadderPolicy.resolveIndex(item.getSuspenseBeat(), suspenseLadder);
-        if (ladderIndex >= 0) {
-            String entry = normalizeAdvance(suspenseLadder.get(ladderIndex));
-            if (!entry.isEmpty() && beat.startsWith(entry)) {
-                beat = beat.substring(entry.length());
-            }
-        }
-        return beat + normalizeAdvance(item.getMainLineAdvance());
-    }
-
-    /** 共享连续片段达到判定线时返回该片段，否则 null */
-    private static String sharedSpan(String a, String b) {
-        if (a == null || b == null || a.isEmpty() || b.isEmpty()) {
-            return null;
-        }
-        String span = ForeshadowSpanPolicy.longestCommonSubstringText(a, b);
-        return span.length() >= SCENE_REPLAY_MIN_MATCH ? span : null;
-    }
-
-    public static String sceneReplayFeedback(String issue) {
-        return "\n\n【上一版计划的跨章场景重演被机械驳回】以下问题必须修正：\n- " + issue
-                + "\n\n修正要求（逐条执行，**不得只换措辞**）："
-                + "\n1. 同一场景或同一物理动作流程（拿取/处理/收存同一件东西这类连续步骤）只允许占用段内**一章**："
-                + "已在前章做过的动作，在后章不得再完整做一遍——要么合并到前章，要么让后章从"
-                + "「动作已经完成」的状态直接进戏；"
-                + "\n2. 同一件主线推进不得排给两章：两章的 mainLineAdvance/suspenseBeat 若指向同一件事，"
-                + "保留其中一章，另一章改为推进别的事；"
-                + "\n3. 在档位原文之后**追加一句话**并不能让两章变成不同的推进——"
-                + "共用的原文部分必须真正不同（谁知道了什么 / 谁做了什么决定 / 什么被公开）；"
-                + "\n4. 重新输出**完整**计划（章数不变）。";
     }
 }

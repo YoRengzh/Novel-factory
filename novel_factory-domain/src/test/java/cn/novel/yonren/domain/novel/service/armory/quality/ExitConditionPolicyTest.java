@@ -102,7 +102,7 @@ class ExitConditionPolicyTest {
     @Test
     void multiPointFormFlagsContrastConditions() {
         assertEquals("对比/并列型", ExitConditionPolicy.multiPointForm(
-                "文本中呈现了许知意在线下清冷强硬与在线上撒娇吹捧的两种行为模式对比"));
+                "文本中呈现了角色壬在线下清冷强硬与在线上撒娇吹捧的两种行为模式对比"));
         assertEquals("对比/并列型", ExitConditionPolicy.multiPointForm("两种形象的反差"));
     }
 
@@ -121,7 +121,7 @@ class ExitConditionPolicyTest {
     void multiPointFormReturnsNullForSingleSceneCondition() {
         // 单场景条件没有结构性问题，未达成就是内容问题 —— 不该被盖上"结构性缺口"的帽子
         assertNull(ExitConditionPolicy.multiPointForm(
-                "文本中明确描写了江燃与许知意在实验室选拔赛上互相否决对方方案的完整冲突过程"));
+                "文本中明确描写了角色癸与角色壬在实验室选拔赛上互相否决对方方案的完整冲突过程"));
         assertNull(ExitConditionPolicy.multiPointForm("主角突破至炼气九层"));
         assertNull(ExitConditionPolicy.multiPointForm(""));
         assertNull(ExitConditionPolicy.multiPointForm(null));
@@ -129,7 +129,7 @@ class ExitConditionPolicyTest {
 
     @Test
     void multiPointFormDoesNotSplitOnConjunctionAlone() {
-        // 「与」作主语连接词时（江燃与许知意）条件仍是单场景，不得被判为多点取证
+        // 「与」作主语连接词时（角色癸与角色壬）条件仍是单场景，不得被判为多点取证
         assertNull(ExitConditionPolicy.multiPointForm("文本中描写了陆沉与苏清平共同破阵的过程"));
     }
 }

@@ -23,4 +23,12 @@ public class ReferenceIndexEntry {
     /** 相对 assets 的路径（如 references/dialogue-writing.md），用于按需加载全文 */
     private String relativePath;
 
+    /** 资料分组：决定哪些场景的索引里会出现它（见 {@link ReferenceGroup}） */
+    private String group;
+
+    /** 兼容旧构造：分组默认归入技法组（未分类资料的保守归属，保证不会被检索漏掉） */
+    public ReferenceIndexEntry(String fileName, String title, String digest, String relativePath) {
+        this(fileName, title, digest, relativePath, ReferenceGroup.TECHNIQUE);
+    }
+
 }

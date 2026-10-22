@@ -99,12 +99,20 @@
                     Math.round(PROGRESS_WIDTH * job.currentChapter / job.totalChapters)));
             }
             meta = '已挂起：等待章节计划裁决（正文尚未开始）';
+        } else if (job.status === 'CANCELLING') {
+            // 停止中：进度条冻结在当前进度。必须放在章号分支之前——轮询到 CANCELLING 时
+            // currentChapter 已有值，若先命中章号分支，显示会与取消前完全一致（看不出在停）
+            if (job.currentChapter != null && job.totalChapters) {
+                filled = Math.min(PROGRESS_WIDTH, Math.max(0,
+                    Math.round(PROGRESS_WIDTH * job.currentChapter / job.totalChapters)));
+            }
+            meta = '停止中：正在等当前步骤结束（已生成章节均已落盘）...';
         } else if (job.currentChapter != null && job.totalChapters) {
             filled = Math.min(PROGRESS_WIDTH, Math.max(0,
                 Math.round(PROGRESS_WIDTH * job.currentChapter / job.totalChapters)));
             var pct = Math.min(100, Math.round(job.currentChapter / job.totalChapters * 100));
             meta = '第 ' + job.currentChapter + ' / ' + job.totalChapters + ' 章 · ' + pct + '%';
-        } else if (job.status === 'RUNNING' || job.status === 'CANCELLING') {
+        } else if (job.status === 'RUNNING') {
             meta = '章节规划中，暂未进入逐章生成...';
         } else {
             meta = '等待生成...';
@@ -222,9 +230,22 @@
 
     btnCancel.addEventListener('click', function () {
         if (!currentJobId) return;
-        fetch(API_BASE + '/api/jobs/' + currentJobId + '/cancel', { method: 'POST' })
-        .then(function () {
-            btnCancel.disabled = true;
+        const jobId = currentJobId;
+        // 取消是协作式的：后端置位信号后由 worker 在下一个检查点收敛终态，
+        // 正在飞的模型请求无法撤回（单次可达数分钟）。所以按钮必须立刻给出
+        // "已受理、正在停"的反馈，否则用户看到的只有按钮变灰，与没反应无异
+        btnCancel.disabled = true;
+        showToast('取消已受理，正在停止当前步骤…');
+        fetchJson('/api/jobs/' + jobId + '/cancel', { method: 'POST' })
+        .then(function (job) {
+            if (job) renderJobStatus(job);
+            // 立即拉一次状态：状态已是 CANCELLED（排队期/审批挂起中取消）时马上收尾
+            pollStatus();
+        })
+        .catch(function (err) {
+            // 受理失败必须把按钮放开，否则用户既停不了作业也没法再点
+            btnCancel.disabled = false;
+            showToast('取消失败：' + err.message);
         });
     });
 
@@ -330,12 +351,13 @@
         const colors = {
             'PENDING': '#8b93a7',
             'RUNNING': '#7dd3fc',
+            'CANCELLING': '#fbbf24',
             'AWAITING_APPROVAL': '#fbbf24',
             'COMPLETED': '#34d399',
             'FAILED': '#f87171',
             'CANCELLED': '#fbbf24'
         };
-        const names = { 'AWAITING_APPROVAL': '待裁决' };
+        const names = { 'AWAITING_APPROVAL': '待裁决', 'CANCELLING': '停止中' };
         const color = colors[status] || '#8b93a7';
         const label = names[status] ? names[status] + ' (' + status + ')' : status;
         return '<span style="color:' + color + ';font-weight:600">' + esc(label) + '</span>';
@@ -389,10 +411,13 @@
             return;
         }
         interruptedStoryDir = job.storyDirName;
-        const at = job.currentChapter != null
-                ? '已推进到第 ' + job.currentChapter + ' 章附近' : '已有部分章节落盘';
+        // 已落盘章数以 chapterDurations 为准：规划期取消时 currentChapter 已是 1 但正文一章没写，
+        // 按 currentChapter 提示"已推进到第 1 章"会把"零章落盘"说成"写了一章"
+        const doneChapters = job.chapterDurations ? Object.keys(job.chapterDurations).length : 0;
+        const at = doneChapters > 0
+                ? '本次已落盘 ' + doneChapters + ' 章' : '本次未新增章节（规划阶段中断）';
         resumeActionHint.textContent = '「' + job.storyDirName + '」这次没写完（' + at + '）。'
-                + '已落盘的章节不会被重写，点下面会接着最后一章往后续写；'
+                + '续写会从该故事已落盘的最后一章接着往后写（已落盘章节不会重写）；'
                 + '若表单已被清空，会先把该故事的设定载回来。';
         resumeAction.classList.remove('hidden');
     }
@@ -1542,7 +1567,10 @@
         el.innerHTML = html;
     }
 
-    function metric(label, value) { return '<div class="metric-card"><strong>' + esc(String(value)) + '</strong><span>' + esc(label) + '</span></div>'; }
+    function metric(label, value, hint) {
+        return '<div class="metric-card"><strong>' + esc(String(value)) + '</strong><span>' + esc(label)
+            + (hint ? ' · ' + esc(String(hint)) : '') + '</span></div>';
+    }
     function renderLedger(id, entries) {
         var el = document.getElementById(id);
         el.innerHTML = entries.length ? entries.slice(0, 16).map(function (x) {
@@ -2151,6 +2179,11 @@
             metric('失败率', m.failureRate != null ? (m.failureRate * 100).toFixed(2) + '%' : '-'),
             metric('总 Tokens', formatNum(m.totalTokens)),
             metric('输入 / 输出', formatNum(m.promptTokens) + ' / ' + formatNum(m.completionTokens)),
+            // 思考占比：仅当有供应商上报思考量时才显示（混用非思考模型时该列无意义）
+            (m.reasoningCalls > 0
+                ? metric('思考占比', (m.reasoningTokenRatio * 100).toFixed(1) + '%',
+                    formatNum(m.reasoningTokens) + ' / ' + m.reasoningCalls + ' 次上报')
+                : ''),
             metric('累计耗时', formatDuration(m.durationMs)),
             metric('平均耗时', formatDuration(m.averageDurationMs))
         ].join('');

@@ -8,7 +8,23 @@ import lombok.NoArgsConstructor;
 import java.util.List;
 import java.util.Objects;
 
-
+/**
+ * 伏笔兑现排期表（2026-10-02 新增，P2b）：阶段蓝图为伏笔**预先排定埋设章与回收章**的前瞻台账。
+ *
+ * <p><b>为什么必须是"蓝图级的前瞻表"</b>：兑不兑现、什么时候兑现，是**长视野决策**——
+ * 而段计划一次只看 5 章，它只能"本段内埋本段内收"。但 seed 是**写正文时**才由摘要模型产生的，
+ * 蓝图无法给一条还不存在的伏笔打标。所以这里存的是**意图 + 章号**，
+ * 等种子真被埋下时再由记忆层按章号匹配回填。
+ *
+ * <p><b>为什么单开文件</b>：沿用 {@link ForeshadowSettlementEntity} 的约定——
+ * 老故事续写依赖 {@code summaries.json} 的顶层纯数组格式，加字段不如单开文件稳。
+ * ⚠️ 本文件**必须进检查点快照与续写预载**（见 {@code StoryRepository#collectSnapshotSources}），
+ * 否则审批挂起/崩溃恢复后排期表丢失、种子的打标悬空。
+ *
+ * <p><b>链式结转</b>：蓝图每版重建，但已排期的线必须跨版存活——
+ * 上一版 {@code PLANNED/PLANTED} 的条目**机械结转**进下一版（不由模型自报），与
+ * {@code StageBlueprintEntity.CarriedTaskEntity} 同一套做法。
+ */
 @Data
 @Builder
 @NoArgsConstructor
@@ -30,7 +46,6 @@ public class ForeshadowScheduleEntity {
     private Integer stageNo;
     // 本表覆盖的阶段区间（供注入时判断"本段落在谁的排期里"）
     private Integer startChapter;
-    // 覆盖区间终点章号（含，机械取自阶段蓝图 endChapter）
     private Integer endChapter;
 
     // 逐条排期
@@ -59,9 +74,9 @@ public class ForeshadowScheduleEntity {
         /** 实际回收章号（命中 foreshadowingResolved 时回填） */
         private Integer actualPayoffChapter;
         /**
-         * 长线在养标记：在哪一阶段末被裁决判为 PARKED（有意慢慢养的线）。null = 未在养。
+         * 长线在养标记：在哪一阶段末被裁决判为 {@code PARKED}（有意慢慢养的线）。null = 未在养。
          *
-         * <p><b>为什么用标记而不是新 status</b>：{@link #active()} 只认 PLANNED/PLANTED，
+         * <p><b>为什么用标记而不是新 status</b>（2026-10-10）：{@link #active()} 只认 PLANNED/PLANTED，
          * 新状态会被 {@code carriableItems} 静默丢掉——那等于把"在养"变成"停止追踪"，
          * 而它恰恰要继续被追踪（观察者仍可能提到它、真兑现时要能自动关账）。
          *
@@ -94,6 +109,12 @@ public class ForeshadowScheduleEntity {
         return schedules.get(schedules.size() - 1);
     }
 
+    /**
+     * 结转上一版的活线条目（PLANNED/PLANTED），供新版排期表并入。
+     *
+     * <p>与 {@code CarriedTaskEntity} 同款做法：**机械结转，不由模型自报**——
+     * 模型每次只看得见本阶段，让它自报结转必然漏。
+     */
     public static List<ScheduleItem> carriableItems(ForeshadowScheduleEntity previous) {
         return itemsOf(previous).stream()
                 .filter(Objects::nonNull)

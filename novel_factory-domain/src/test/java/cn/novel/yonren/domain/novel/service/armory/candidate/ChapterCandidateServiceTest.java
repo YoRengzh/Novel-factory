@@ -276,7 +276,7 @@ class ChapterCandidateServiceTest {
         List<ChapterSummaryEntity> summaries = List.of(
                 ChapterSummaryEntity.builder()
                         .chapterNo(1).title("第1章")
-                        .summary("江燃上线遇到软软，两人配合残血反杀。")
+                        .summary("角色癸上线遇到软软，两人配合残血反杀。")
                         .characterStates(List.of(new ChapterSummaryEntity.StateEntry(
                                 "软软", "尚未确认无月的真实身份", "线上角色'软软'")))
                         .build());
@@ -291,7 +291,7 @@ class ChapterCandidateServiceTest {
         String prompt = captor.getValue().getUserPrompt();
 
         assertTrue(prompt.contains("【本章开始时的既知事实与角色状态】"), "评审 prompt 必须带事实基线块");
-        assertTrue(prompt.contains("江燃上线遇到软软"), "基线须含最近章节摘要");
+        assertTrue(prompt.contains("角色癸上线遇到软软"), "基线须含最近章节摘要");
         assertTrue(prompt.contains("尚未确认无月的真实身份"), "基线须含账本状态（认知边界）");
         assertTrue(prompt.contains("事实与认知一致性"), "评审维度须含事实一致性");
         assertTrue(prompt.contains("【题材与人物语域基准】"));

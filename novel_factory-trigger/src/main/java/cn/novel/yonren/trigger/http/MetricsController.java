@@ -30,6 +30,8 @@ public class MetricsController {
     public Map<String, Object> llm() {
         long calls = 0, failures = 0, promptChars = 0, responseChars = 0;
         long promptTokens = 0, completionTokens = 0, totalTokens = 0, durationMs = 0;
+        // 思考用量：仅部分供应商上报（reasoning_content / reasoning_tokens），缺失记 0
+        long reasoningChars = 0, reasoningTokens = 0, reasoningCalls = 0;
         Map<String, Long> byModel = new LinkedHashMap<>();
         for (Path usageLog : usageLogs()) {
             try {
@@ -45,6 +47,13 @@ public class MetricsController {
                         completionTokens += item.getLongValue("completionTokens");
                         totalTokens += item.getLongValue("totalTokens");
                         durationMs += item.getLongValue("durationMs");
+                        long rc = item.getLongValue("reasoningChars");
+                        long rt = item.getLongValue("reasoningTokens");
+                        if (rc > 0 || rt > 0) {
+                            reasoningCalls++;
+                            reasoningChars += rc;
+                            reasoningTokens += rt;
+                        }
                         String model = item.getString("model");
                         if (model != null && !model.isBlank()) byModel.merge(model, 1L, Long::sum);
                     } catch (RuntimeException ignored) {
@@ -66,6 +75,12 @@ public class MetricsController {
         result.put("totalTokens", totalTokens);
         result.put("durationMs", durationMs);
         result.put("averageDurationMs", calls == 0 ? 0D : (double) durationMs / calls);
+        // 思考占比：只统计上报了思考量的调用；混用非思考模型时该比例才有解释力
+        result.put("reasoningChars", reasoningChars);
+        result.put("reasoningTokens", reasoningTokens);
+        result.put("reasoningCalls", reasoningCalls);
+        result.put("reasoningTokenRatio", completionTokens == 0 ? 0D
+                : (double) reasoningTokens / completionTokens);
         result.put("byModel", byModel);
         return result;
     }

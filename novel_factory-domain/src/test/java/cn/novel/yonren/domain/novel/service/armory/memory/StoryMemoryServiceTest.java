@@ -1,5 +1,6 @@
 package cn.novel.yonren.domain.novel.service.armory.memory;
 
+import static org.mockito.Mockito.doThrow;
 import cn.novel.yonren.domain.novel.adapter.llm.EmbeddingGateway;
 import cn.novel.yonren.domain.novel.adapter.repository.VectorStore;
 import cn.novel.yonren.domain.novel.model.entity.ChapterPlanItemEntity;
@@ -647,4 +648,165 @@ class StoryMemoryServiceTest { /*MARKER-CHECK-1*/
         return Paths.get("story");
     }
 
+
+
+    // ==================== 移植自旧系统的闸门用例 ====================
+
+    @Test
+    void indexChapter_repairsFullyAfterFailedWrite(@TempDir Path storyDir) throws Exception {
+        Files.writeString(storyDir.resolve("story-bible.txt"), "小说名称：测试");
+        when(chapterMemoryService.buildCharacterLedger(anyList())).thenReturn(List.of(
+                new LedgerEntry("主角甲", "报名三班", 1, 1, null, null, false),
+                new LedgerEntry("角色丁", "报名一班", 2, 2, null, null, false)));
+        when(chapterMemoryService.buildLedger(anyList(), any())).thenReturn(List.of());
+        List<ChapterSummaryEntity> summaries = threeChapters();
+        // 第一次写入失败 → 索引被标记为脏；下一次写入必须退化为全量，把缺失的块补回来
+        doThrow(new IllegalStateException("写入失败")).when(vectorStore).upsert(anyString(), anyList());
+        service.indexChapter(module(), storyDir, summaries, 1, null);
+        clearInvocations(vectorStore);
+
+        service.indexChapter(module(), storyDir, summaries, 2, null);
+
+        ArgumentCaptor<List<VectorPoint>> captor = ArgumentCaptor.forClass(List.class);
+        verify(vectorStore, times(1)).upsert(anyString(), captor.capture());
+        List<VectorPoint> points = captor.getValue();
+        assertEquals(2, points.stream().filter(p -> "ledger".equals(p.getPayload().get("kind"))).count(),
+                "脏标记后的写入要带上全量账本，不能只写本章条目");
+        assertEquals(1, points.stream().filter(p -> "bible".equals(p.getPayload().get("kind"))).count());
+    }
+
+    @Test
+    void indexChapter_writesOnlyTouchedLedgerEntries_andBibleOnlyWhenChanged(@TempDir Path storyDir) throws Exception {
+        Files.writeString(storyDir.resolve("story-bible.txt"), "小说名称：测试");
+        when(chapterMemoryService.buildCharacterLedger(anyList())).thenReturn(List.of(
+                new LedgerEntry("主角甲", "报名三班", 1, 1, null, null, false),
+                new LedgerEntry("角色丁", "报名一班", 2, 2, null, null, false)));
+        when(chapterMemoryService.buildLedger(anyList(), any())).thenReturn(List.of());
+        List<ChapterSummaryEntity> summaries = threeChapters();
+        service.indexChapter(module(), storyDir, summaries, 1, null);
+        clearInvocations(vectorStore);
+
+        service.indexChapter(module(), storyDir, summaries, 2, null);
+
+        ArgumentCaptor<List<VectorPoint>> captor = ArgumentCaptor.forClass(List.class);
+        verify(vectorStore, times(1)).upsert(anyString(), captor.capture());
+        List<VectorPoint> points = captor.getValue();
+        List<String> ledgerNames = points.stream().filter(p -> "ledger".equals(p.getPayload().get("kind")))
+                .map(p -> p.getPayload().get("name")).toList();
+        assertEquals(List.of("角色丁"), ledgerNames,
+                "只写本章提及过的账本条目：没提及的条目其已存点仍是最新状态，无需重写");
+        assertEquals(1, points.stream().filter(p -> "chapter".equals(p.getPayload().get("kind"))).count());
+        assertEquals(0, points.stream().filter(p -> "bible".equals(p.getPayload().get("kind"))).count(),
+                "bible 未变更则不再逐章重嵌设定点");
+    }
+
+    /**
+     * 核对口径必须只数**受管的点**（2026-10-14）。
+     *
+     * <p>背景：实测 145 章回滚时日志报「应有受管点 453，实际 454」——差值恒为 1 个卷方向点。
+     * 成因是对账用**集合总数**与"应有受管点"比对，而删除时刻意跳过卷点（那是卷生成路径维护的），
+     * 两个口径必然差一个卷点数。必现的误报会训练人忽略这条 WARN。
+     *
+     * <p>本用例守住关键行为：**集合里有卷点不触发任何额外写删**——
+     * 修正后对账不再因卷点存在而误判（旧实现在此场景会报点数不符）。
+     */
+    @Test
+    void rebuildIndex_countIgnoresUnmanagedVolumePoints(@TempDir Path storyDir) throws Exception {
+        Files.writeString(storyDir.resolve("story-bible.txt"), "小说名称：测试");
+        when(chapterMemoryService.buildCharacterLedger(anyList())).thenReturn(List.of());
+        when(chapterMemoryService.buildLedger(anyList(), any())).thenReturn(List.of());
+        List<ChapterSummaryEntity> summaries = threeChapters();
+        // 先让集合内容与期望一致（空集合 → 全写）
+        service.rebuildIndex(module(), storyDir, summaries, null);
+        ArgumentCaptor<List<VectorPoint>> first = ArgumentCaptor.forClass(List.class);
+        verify(vectorStore).upsert(anyString(), first.capture());
+        List<VectorPoint> desired = first.getValue();
+        clearInvocations(vectorStore);
+
+        // 集合现状 = 期望点集（文本一致）+ 一个卷方向点；总数比受管点数多 1
+        List<StoredPoint> stored = new ArrayList<>();
+        for (VectorPoint p : desired) {
+            stored.add(StoredPoint.builder()
+                    .id((String) p.getId())
+                    .kind(p.getPayload().get("kind"))
+                    .text(p.getPayload().get("text"))
+                    .build());
+        }
+        stored.add(StoredPoint.builder().id("99999999-8888-7777-6666-555544443333")
+                .kind("volume").text("第1卷《外门篇》：站稳外门").build());
+        when(vectorStore.listPoints(anyString())).thenReturn(stored);
+        when(vectorStore.count(anyString())).thenReturn((long) stored.size());
+
+        service.rebuildIndex(module(), storyDir, summaries, null);
+
+        // 卷点不该被删；受管点文本全一致 ⇒ 一个都不该重写
+        verify(vectorStore, never()).delete(anyString(), anyList());
+        verify(vectorStore, never()).upsert(anyString(), anyList());
+    }
+
+    /**
+     * 回归：**改写已存在点不得被算成"新增"**（2026-10-19）。
+     *
+     * <p>实测 165 章回滚：日志报「应有受管点 518，实际 524」并给出"可能有漏写/漏删"的 WARN，
+     * 而集合里受管点实测恰好 518（多出的 6 正是本次改写数）。旧式
+     * {@code managedStored - toDelete + toWrite} 把"文本变了要重写"当成"新增了一个点"，
+     * 每次回滚都虚增「改写条数」个点——必现误报会训练人忽略这条 WARN。
+     *
+     * <p>本用例只断言行为：改写场景下集合点数不变，因此不应产生任何"点数不符"的告警。
+     * 通过 logback 捕获日志验证（不依赖返回值）。
+     */
+    @Test
+    void rebuildIndex_rewriteOnly_doesNotInflateManagedCount(@TempDir Path storyDir) throws Exception {
+        Files.writeString(storyDir.resolve("story-bible.txt"), "小说名称：测试");
+        when(chapterMemoryService.buildCharacterLedger(anyList())).thenReturn(List.of());
+        when(chapterMemoryService.buildLedger(anyList(), any())).thenReturn(List.of());
+        List<ChapterSummaryEntity> summaries = threeChapters();
+        service.indexChapter(module(), storyDir, summaries, 1, null);
+        clearInvocations(vectorStore);
+
+        // 先拿"应有"点集
+        service.rebuildIndex(module(), storyDir, summaries, null);
+        ArgumentCaptor<List<VectorPoint>> first = ArgumentCaptor.forClass(List.class);
+        verify(vectorStore).upsert(anyString(), first.capture());
+        List<VectorPoint> desired = first.getValue();
+        clearInvocations(vectorStore);
+
+        // 集合现状：点数与期望完全相同，但**其中一个点的文本过时**（回滚导致的状态回退）
+        List<StoredPoint> stored = new ArrayList<>();
+        boolean marked = false;
+        for (VectorPoint p : desired) {
+            boolean stale = !marked;
+            if (stale) {
+                marked = true;
+            }
+            stored.add(StoredPoint.builder()
+                    .id((String) p.getId())
+                    .kind(p.getPayload().get("kind"))
+                    .text(stale ? "过时文本" : p.getPayload().get("text"))
+                    .build());
+        }
+        when(vectorStore.listPoints(anyString())).thenReturn(stored);
+        // 集合总数 = 受管点数（无卷点）：改写不改变总数
+        when(vectorStore.count(anyString())).thenReturn((long) stored.size());
+
+        ch.qos.logback.classic.Logger logger =
+                (ch.qos.logback.classic.Logger) org.slf4j.LoggerFactory.getLogger(StoryMemoryService.class);
+        ch.qos.logback.core.read.ListAppender<ch.qos.logback.classic.spi.ILoggingEvent> appender =
+                new ch.qos.logback.core.read.ListAppender<>();
+        appender.start();
+        logger.addAppender(appender);
+        try {
+            service.rebuildIndex(module(), storyDir, summaries, null);
+        } finally {
+            logger.detachAppender(appender);
+        }
+
+        // 只改写了 1 个点，点数不变 ⇒ 不得出现"受管点数不符"告警
+        boolean mismatchWarned = appender.list.stream()
+                .anyMatch(e -> e.getLevel() == ch.qos.logback.classic.Level.WARN
+                        && e.getFormattedMessage().contains("受管点数不符"));
+        assertTrue(!mismatchWarned,
+                "改写已存在点不得被算成新增（否则每次回滚都误报点数不符）："
+                        + appender.list.stream().map(e -> e.getFormattedMessage()).toList());
+    }
 }

@@ -1,5 +1,6 @@
 package cn.novel.yonren.domain.novel.service.armory.quality;
 
+import cn.novel.yonren.domain.novel.model.entity.ChapterPlanItemEntity;
 import cn.novel.yonren.domain.novel.model.entity.ChapterSummaryEntity;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -169,5 +170,109 @@ class ForeshadowLedgerPressurePolicyTest {
                 .foreshadowSeeds(seeds)
                 .foreshadowingResolved(new ArrayList<>(resolved))
                 .build();
+    }
+
+
+    // ==================== 移植自旧系统的闸门用例 ====================
+
+    /** 高压期：计划里新埋多于回收 → 驳回（自然语言警告之外必须有人执法） */
+    @Test
+    @DisplayName("净增闸门：高压期新埋多于回收即驳回")
+    void validatePlanNetGrowth_blocksWhenPlantedExceedsRecovered() {
+        List<ChapterSummaryEntity> summaries = highPressureSummaries();
+
+        List<ChapterPlanItemEntity> plan = planWith(161,
+                "某人做了一件事。（新埋第161章某条线索）",
+                "另一件事发生。（新埋第161章另一条线索）",
+                "真相揭晓。（回收第120章埋设的某条）");
+        String issue = ForeshadowLedgerPressurePolicy.validatePlanNetGrowth(plan, summaries, List.of());
+        assertNotNull(issue, "新埋 2 / 回收 1 应被驳回");
+        assertTrue(issue.contains("净增"), "理由应给出净增读数：" + issue);
+    }
+
+    /** 未带结构化前缀的条目不计——模型漏标时静默放行（宁可漏报不误伤） */
+    @Test
+    @DisplayName("净增闸门：未标前缀的事件不计入")
+    void validatePlanNetGrowth_ignoresUnmarkedEvents() {
+        List<ChapterSummaryEntity> summaries = highPressureSummaries();
+
+        List<ChapterPlanItemEntity> plan = planWith(161,
+                "某人做了一件事，带来了某个变化",
+                "真相揭晓。（回收第120章埋设的某条）");
+        assertNull(ForeshadowLedgerPressurePolicy.validatePlanNetGrowth(plan, summaries, List.of()),
+                "无前缀的普通事件不算新埋");
+    }
+
+    /** 高压期：回收 ≥ 新埋 → 放行 */
+    @Test
+    @DisplayName("净增闸门：高压期回收不少于新埋即放行")
+    void validatePlanNetGrowth_passesWhenBalanced() {
+        List<ChapterSummaryEntity> summaries = highPressureSummaries();
+
+        List<ChapterPlanItemEntity> plan = planWith(161,
+                "某人做了一件事。（新埋第161章某条线索）",
+                "真相揭晓。（回收第120章埋设的某条）");
+        assertNull(ForeshadowLedgerPressurePolicy.validatePlanNetGrowth(plan, summaries, List.of()),
+                "回收=新埋应放行");
+    }
+
+    /** 行内标记形态（prompt 实际教的写法）必须被识别——只认前缀式会让闸门静默空转 */
+    @Test
+    @DisplayName("净增闸门：识别行内标记（回收第N章埋设的/新埋第N章）")
+    void validatePlanNetGrowth_recognizesInlineMarkers() {
+        List<ChapterSummaryEntity> summaries = highPressureSummaries();
+
+        List<ChapterPlanItemEntity> bad = planWith(161,
+                "他做了一件事。（新埋第161章某条线索）",
+                "又发生一件事。（新埋第161章另一条线索）",
+                "某事揭晓。（回收第120章埋设的某条）");
+        assertNotNull(ForeshadowLedgerPressurePolicy.validatePlanNetGrowth(bad, summaries, List.of()),
+                "行内标记 2 埋 1 收应被驳回（前缀式识别会漏掉这种形态）");
+
+        List<ChapterPlanItemEntity> good = planWith(161,
+                "他做了一件事。（新埋第161章某条线索）",
+                "某事揭晓。（回收第120章埋设的某条）",
+                "另一事确认。（回收第130章埋设的某条）");
+        assertNull(ForeshadowLedgerPressurePolicy.validatePlanNetGrowth(good, summaries, List.of()),
+                "行内标记 1 埋 2 收应放行");
+    }
+
+    /** 低压期：不做净增要求（本条只治"账已满还在铺新线"） */
+    @Test
+    @DisplayName("净增闸门：低压期不做要求")
+    void validatePlanNetGrowth_skipsWhenNotHighPressure() {
+        List<ChapterSummaryEntity> summaries = new ArrayList<>();
+        summaries.add(chapter(1, List.of("某条伏笔的完整描述文本"), List.of()));
+        summaries.add(chapter(2, List.of(), List.of()));
+
+        List<ChapterPlanItemEntity> plan = planWith(3,
+                "（伏笔埋设）埋设第3章计划中的《甲》：某事发生",
+                "（伏笔埋设）埋设第3章计划中的《乙》：另一事发生");
+        assertNull(ForeshadowLedgerPressurePolicy.validatePlanNetGrowth(plan, summaries, List.of()),
+                "低压期不要求净增配平");
+    }
+
+
+    // ---- 移植用例的辅助构造 ----
+
+    /** 造高压期历史（45 条在途 > 40 高压线） */
+    private static List<ChapterSummaryEntity> highPressureSummaries() {
+        List<ChapterSummaryEntity> summaries = new ArrayList<>();
+        List<String> newItems = new ArrayList<>();
+        for (int i = 0; i < 45; i++) {
+            newItems.add("伏笔" + i + "的完整描述文本");
+        }
+        summaries.add(chapter(1, newItems, List.of()));
+        summaries.add(chapter(2, List.of(), List.of()));
+        return summaries;
+    }
+
+    /** 造一段含指定关键事件的计划（单章），包成列表供闸门消费 */
+    private static List<ChapterPlanItemEntity> planWith(int chapterNo, String... keyEvents) {
+        ChapterPlanItemEntity item = ChapterPlanItemEntity.builder()
+                .chapterNo(chapterNo)
+                .keyEvents(List.of(keyEvents))
+                .build();
+        return List.of(item);
     }
 }

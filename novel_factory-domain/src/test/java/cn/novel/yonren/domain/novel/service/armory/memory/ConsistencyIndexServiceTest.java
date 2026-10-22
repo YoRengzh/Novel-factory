@@ -334,4 +334,52 @@ class ConsistencyIndexServiceTest {
         assertEquals(20, r.getLastChapter());
         assertTrue(service.renderPrompt(index).contains("关系台账"));
     }
+
+
+    // ==================== 移植自旧系统的闸门用例 ====================
+
+    /** 分节条数上限：术语积到 20 条时只渲染最近 12 条，老术语让位（视图截取，不删数据） */
+    @Test
+    void renderPrompt_sectionCapKeepsLatestEntries() {
+        List<ChapterSummaryEntity> summaries = new java.util.ArrayList<>();
+        for (int i = 1; i <= 20; i++) {
+            summaries.add(ChapterSummaryEntity.builder().chapterNo(i)
+                    .consistencyFacts(List.of(new ChapterSummaryEntity.ConsistencyFact(
+                            "TERM", "术语" + String.format("%02d", i), "别名" + i, null, "证据")))
+                    .build());
+        }
+        ConsistencyIndexEntity index = service.rebuild(summaries, new StoryVO());
+        assertEquals(20, index.getTerms().size(), "底层索引保留全量");
+
+        String rendered = service.renderPrompt(index);
+        assertTrue(rendered.contains("术语20"), "最新术语必须渲染");
+        assertTrue(rendered.contains("术语09"), "窗口内沿必须渲染");
+        assertFalse(rendered.contains("术语01"), "最老术语不再渲染");
+        assertFalse(rendered.contains("术语08"), "上限外的条目不再渲染");
+    }
+
+    /**
+     * 时间线按章号窗口：只渲染最近 W 章。时间线是"每章一条"的心跳数据，
+     * 老条目与近章摘要/三账本重复，随连载线性膨胀——125 章时仅此一节约 1.2k 字符，
+     * 是正文前缀预算饱和（章章 99-100%）挤出三账本/伏笔账的主力之一。
+     */
+    @Test
+    void renderPrompt_timelineWindowedByChapterNumber() {
+        List<ChapterSummaryEntity> summaries = new java.util.ArrayList<>();
+        for (int i = 1; i <= 30; i++) {
+            summaries.add(ChapterSummaryEntity.builder()
+                    .chapterNo(i)
+                    .summary("故事推进到新地点" + i + "号")
+                    .timePoint("T" + String.format("%02d", i))
+                    .build());
+        }
+        ConsistencyIndexEntity index = service.rebuild(summaries, new StoryVO());
+        assertEquals(30, index.getTimeline().size(), "底层索引保留全量，窗口只作用于渲染视图");
+
+        String rendered = service.renderPrompt(index);
+        assertTrue(rendered.contains("T30"), "最新章必须渲染");
+        assertTrue(rendered.contains("T19"), "窗口下沿（30-12+1=19）必须渲染");
+        assertFalse(rendered.contains("T18"), "窗口外的老条目不再渲染");
+        assertFalse(rendered.contains("T01"), "开篇条目不再渲染");
+    }
 }

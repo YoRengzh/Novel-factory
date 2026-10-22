@@ -208,7 +208,7 @@ class ChapterWorkerTest {
                 .chapterNo(9)
                 .title("第九章")
                 .goal("保护软软时暴露一个只有许意见过的动作")
-                .characters(List.of("江燃", "软软"))
+                .characters(List.of("角色癸", "软软"))
                 .keyEvents(List.of("事件甲", "事件乙"))
                 .endingHook("怀疑增加但身份未确认")
                 .build();
@@ -235,7 +235,7 @@ class ChapterWorkerTest {
         // 任务层必须完整渲染计划条目
         assertTrue(prompt.contains("标题：第九章"));
         assertTrue(prompt.contains("目标：保护软软时暴露一个只有许意见过的动作"));
-        assertTrue(prompt.contains("角色：江燃、软软"));
+        assertTrue(prompt.contains("角色：角色癸、软软"));
         assertTrue(prompt.contains("关键事件：事件甲、事件乙"));
         assertTrue(prompt.contains("结尾悬念：怀疑增加但身份未确认"));
         assertTrue(prompt.contains("\"chapterNo\":9"));
@@ -280,12 +280,12 @@ class ChapterWorkerTest {
         // 模型只能靠猜，于是会把"怀疑"写成"确认"（实测候选评审就抓到过这种认知提前升级）
         ChapterPlanItemEntity item = ChapterPlanItemEntity.builder()
                 .chapterNo(5).title("第五章").goal("目标")
-                .characters(List.of("许知意")).keyEvents(List.of("事件甲")).endingHook("悬念")
+                .characters(List.of("角色壬")).keyEvents(List.of("事件甲")).endingHook("悬念")
                 .build();
         List<ChapterSummaryEntity> summaries = List.of(
                 ChapterSummaryEntity.builder().chapterNo(4).title("第四章").summary("……")
                         .characterStates(List.of(new ChapterSummaryEntity.StateEntry(
-                                "许知意", "尚未确认无月的真实身份", "证据")))
+                                "角色壬", "尚未确认无月的真实身份", "证据")))
                         .build());
 
         String prompt = chapterWorker.buildChapterPrompt("【全局设定】", item, null, 5,
@@ -397,12 +397,12 @@ class ChapterWorkerTest {
                 .build();
 
         // 段规划经规划执行器（与链式路径同一实现）：打桩并验证调用契约
-        when(planSegmentPlanner.planSegment(any(), any(), anyString(), eq(3), eq(4), any(), any(), any()))
-                .thenReturn(new ChapterPlanSegmentPlanner.PlannedSegment("segment-2-raw", segment2Plan));
+        when(planSegmentPlanner.planSegment(any(), any(), anyString(), eq(3), eq(4), any(), any(), any(), any(), any(), any()))
+                .thenReturn(new ChapterPlanSegmentPlanner.PlannedSegment("segment-2-raw", segment2Plan, null));
 
         chapterWorker.generateAll(command, ctx);
 
-        verify(planSegmentPlanner, times(1)).planSegment(any(), any(), anyString(), eq(3), eq(4), any(), any(), any());
+        verify(planSegmentPlanner, times(1)).planSegment(any(), any(), anyString(), eq(3), eq(4), any(), any(), any(), any(), any(), any());
 
         // 4 章全部生成（首段 2 章 + 惰性规划段 2 章），段计划已合并进整批计划
         assertEquals(4, ctx.getChapterContents().size());
@@ -641,5 +641,37 @@ class ChapterWorkerTest {
         issue.setSeverity("MINOR");
         issue.setDescription(description);
         return issue;
+    }
+
+
+    // ==================== 移植自旧系统的闸门用例 ====================
+
+    /**
+     * 回归：模型输出**重复 content 键**（先完整正文、后补空串）时不得判死。
+     * JSON 库对重复键取后一个值（空串），旧实现认为"解析成功"直接返回空稿；
+     * 现在空正文视为失败，并由抢救逻辑取首个非空 content 拿回真正文。
+     */
+    @Test
+    void generateAll_duplicateContentKey_salvagesFirstNonBlankContent() throws Exception {
+        String duplicated = "{\"chapterNo\":1,\"title\":\"第一章\","
+                + "\"content\":\"这是真正文内容，长度足够。\",\"content\":\"\",\"note\":\"\"}";
+        // 两次尝试都给重复键输出：第一次判空正文 → 重试 → 仍失败 → 抢救首个非空 content
+        when(llmInvokeService.invoke(any(), any(), any(), anyString(), anyMap()))
+                .thenReturn(duplicated);
+
+        GenerationJob job = new GenerationJob("job-dupkey");
+        DefaultArmoryFactory.DynamicContext ctx = context(job);
+
+        chapterWorker.generateAll(command(), ctx);
+
+        // 落盘正文必须是抢救回来的那段（不是空串）
+        org.mockito.ArgumentCaptor<java.util.List<cn.novel.yonren.domain.novel.model.entity.ChapterContentEntity>> captor =
+                org.mockito.ArgumentCaptor.forClass(java.util.List.class);
+        verify(storyRepository, org.mockito.Mockito.atLeastOnce())
+                .writeChapters(any(), captor.capture());
+        boolean salvaged = captor.getAllValues().stream()
+                .flatMap(java.util.List::stream)
+                .anyMatch(c -> c.getContent() != null && c.getContent().contains("这是真正文内容"));
+        assertTrue(salvaged, "重复键时必须抢救首个非空 content，而不是落盘空稿");
     }
 }

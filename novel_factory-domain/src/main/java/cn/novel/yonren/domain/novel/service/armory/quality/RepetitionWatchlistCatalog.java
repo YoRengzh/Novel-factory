@@ -11,7 +11,24 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
-
+/**
+ * **重复意象盯防清单**：{@code assets/config/repetition-watchlist.txt} 的加载器。
+ *
+ * <p><b>与 {@link FatiguePatternCatalog} 的分工</b>：那份管**词性套话**（副词/眼神/身体反应，
+ * 与题材无关，是文风层面的病）；本表管**题材相关的具体意象**——同一件东西（物件/场景/动作）
+ * 被反复用作情绪载体时点名，要求换载体。典型病症：同一个意象每隔几章出现一次，
+ * 每次都承担同样的抒情功能（实测「敲钟/金锤/股权」在重生文里被反复用作前世锚点）。
+ *
+ * <p><b>为什么外置成文件而不是加字段/写死代码</b>：意象是**题材知识**，不是流水线逻辑。
+ * 把它做成 {@code ChapterSummaryEntity} 的字段（如 pastLifeRecalled）等于把"重生"这个题材
+ * 焊进所有题材共用的领域实体——玄幻/悬疑用不上，还要每章付一次模型标注成本。
+ * 外置后：换题材换文件，代码零改动；增删词条即时生效。
+ *
+ * <p><b>按题材分组</b>：{@code [common]} 对所有题材生效，{@code [urban]}/{@code [fantasy]} 等
+ * 按 {@code GenreTypeVO.code} 取用（与 {@code genres/} 素材目录同一套题材标识）。
+ * 匹配口径是正文**逐字子串包含**，故词条须写得足够具体（「敲钟」能命中「上市敲钟」，
+ * 而「股权」会误伤「股权结构」这类正常叙述）。
+ */
 @Slf4j
 public final class RepetitionWatchlistCatalog {
 
@@ -74,8 +91,28 @@ public final class RepetitionWatchlistCatalog {
     /** 缓存指纹：文件内容哈希，文件改动即时失效（与索引类缓存同约定） */
     private static volatile int cachedHash;
 
+    /**
+     * 测试注入的覆盖清单：非 null 时 {@link #get()} 直接返回它，不读文件。
+     *
+     * <p>为什么需要这个接缝：打包清单按设计**默认为空**（意象是"这本书反复用了什么"的判断，
+     * 不预置任何具体作品词条），于是"累计/点名/阈值"这些机制的验证不能依赖打包文件里恰好有词条——
+     * 测试需要自己给一份清单。这个接缝只影响测试进程（生产路径恒为 null）。
+     */
+    private static volatile Watchlist override;
+
+    /** 测试专用：注入覆盖清单（传 null 恢复读文件）。返回旧值，便于用例 finally 还原 */
+    public static Watchlist overrideForTest(Watchlist replacement) {
+        Watchlist previous = override;
+        override = replacement;
+        return previous;
+    }
+
     /** 取清单（进程内缓存；文件内容变化时自动重载） */
     public static Watchlist get() {
+        Watchlist injected = override;
+        if (injected != null) {
+            return injected;
+        }
         try {
             ClassPathResource resource = new ClassPathResource(FILE);
             if (!resource.exists()) {
@@ -106,7 +143,7 @@ public final class RepetitionWatchlistCatalog {
     }
 
     /** 解析 txt：# 注释与空行忽略，[组名] 行切换当前组，词条按组归集 */
-    static Watchlist parse(String text) {
+    public static Watchlist parse(String text) {
         Map<String, List<String>> groups = new LinkedHashMap<>();
         String current = GROUP_COMMON;
         for (String raw : text.split("\\R")) {

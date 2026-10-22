@@ -161,6 +161,16 @@ public class SpringAiLlmGateway implements LlmGateway {
 
     @Override
     public String complete(StoryVO.Module module, LlmCall call) {
+        // 思考捕获用 ThreadLocal 传递：无论成功、失败还是降级换站，出方法前必须清，
+        // 否则线程池复用会把本次调用的思考用量带给下一章
+        try {
+            return completeInner(module, call);
+        } finally {
+            ReasoningCapture.clearAll();
+        }
+    }
+
+    private String completeInner(StoryVO.Module module, LlmCall call) {
         StoryVO.Module effective = llmRuntimeConfig.applyApi(module);
         // 场景感知覆盖：场景覆盖 > 全局覆盖 > yml 静态（场景条目缺项已由 resolveChatModel 回落统一模型）
         StoryVO.Module.ChatModel primary = llmRuntimeConfig.applyModel(
@@ -192,13 +202,20 @@ public class SpringAiLlmGateway implements LlmGateway {
         for (int i = 0; i < live.size(); i++) {
             StoryVO.Module.ChatModel selected = live.get(i);
             long start = System.currentTimeMillis();
+            // 每站开跑前清掉上一站残留的思考快照：否则降级换站后，新站的账会记上旧站的思考用量
+            ReasoningCapture.clearForRecord();
             try {
                 ChatResponse response = callOnce(effective, selected, call);
                 String content = response.getResult().getOutput().getText();
+                // 思考捕获（拦截器在响应侧写入）：chars=思考正文字符数，tokens=供应商报的思考 token
+                ReasoningCapture.Snapshot reasoning = ReasoningCapture.take();
+                // 部分中转站把思考以 <think>...</think> 混在 content 里返回：剥离后再判定与返回，
+                // 否则思考文本会被当成正文交给调用方（JSON 场景直接解析失败）
+                content = stripThinkingMarkup(content);
                 // 空回复/思考吃穿输出预算视为失败，换链上备选重试：思考型模型的思考 token 从输出预算
                 // 中扣除，思考失控时会把预算全烧在思维链上，content 只剩空串或不可解析的残片，却以
                 // HTTP 200 记账成功——调用方拿残片按"解析失败"静默降级，备选链因"无异常"从未触发。
-                // 判据以 usage 为主、不依赖 finish_reason（预算烧穿时它可能仍报正常结束），三判据见下。
+                // 判据以 usage 为主、不依赖 finish_reason（预算烧穿时它可能仍报正常结束），四判据见下。
                 // 实测案例：glm-5.3 烧穿 32000/16384 全空（判定①）；deepseek 备选 16383/16384 撞上限
                 // 只吐 672 字符残 JSON——旧判据"正文 < 500 字符"放过了它，在解析层翻车后整链又烧一轮。
                 // 反例保护：撞上限但 JSON 完整（26524 token/4296 字符的合法计划）判成功放行。
@@ -216,11 +233,17 @@ public class SpringAiLlmGateway implements LlmGateway {
                 //    但思考挤占下输出常死在 JSON 结构中途（responseFormat 并非所有供应商都守约），
                 //    must 真解析判定（see looksTruncatedJson：事故输出死在中文引号中间，尾字符启发式判不出）；
                 // ③ 正文为空——无论用量如何，空串对调用方没有意义，能换站就换（用量缺失的供应商
-                //    思考场景只是其子集，不再单列判据）。
+                //    思考场景只是其子集，不再单列判据）；
+                // ④ 思考 token 占预算 ≥ 80%——不必等正文变空：思考已吃掉大部分预算，剩下那点余量
+                //    写不出合格长文本。这条在 glm 型故障里能提前一次调用止损（判定①要等全文烧完）。
                 boolean nearCeiling = effectiveMaxTokens != null && effectiveMaxTokens > 0
                         && completionTokens * 10 >= effectiveMaxTokens * 9;
                 long contentChars = StringUtils.length(content);
-                boolean burnedBudget = nearCeiling && (contentChars == 0 || looksTruncatedJson(content));
+                boolean reasonDominates = effectiveMaxTokens != null && effectiveMaxTokens > 0
+                        && reasoning != null && reasoning.tokens() != null
+                        && reasoning.tokens() * 10 >= effectiveMaxTokens * 8;
+                boolean burnedBudget = reasonDominates
+                        || (nearCeiling && (contentChars == 0 || looksTruncatedJson(content)));
                 boolean burnLike = burnedBudget || StringUtils.isBlank(content);
                 if (burnLike && i + 1 < live.size()) {
                     if (burnedBudget && job != null) {
@@ -405,6 +428,32 @@ public class SpringAiLlmGateway implements LlmGateway {
     }
 
     /**
+     * 剥离混进正文的思考标记。部分中转站不把思考放进 reasoning_content，
+     * 而是用 &lt;think&gt;…&lt;/think&gt;（或 &lt;thinking&gt;）包在 content 里返回。
+     * 不剥离的后果：正文里出现大段推理文字，JSON 场景直接解析失败、正文场景出现"模型自述"。
+     * 只剥标记块，不碰正常文本；无标记时零开销（indexOf 判断先走）。
+     */
+    static String stripThinkingMarkup(String content) {
+        if (StringUtils.isBlank(content)) {
+            return content;
+        }
+        // 两种形态：① <think>…</think> 标签块；② ```reasoning/think/thinking 围栏块。
+        // 正常正文既无 < 也无反引号，两个分支都不进，零正则开销
+        String cleaned = content;
+        if (cleaned.indexOf('<') >= 0) {
+            cleaned = cleaned.replaceAll(
+                    "(?is)<think(?:ing)?\\b[^>]*>.*?</think(?:ing)?>", "");
+        }
+        if (cleaned.indexOf("`") >= 0) {
+            cleaned = cleaned.replaceAll(
+                    "(?is)```(?:reasoning|think|thinking)[^\\n]*\\n.*?```", "");
+        }
+        // 只剩空白时说明整段都是思考：返回空串让上层按"空回复"处理（换站/失败），
+        // 而不是把一段空白当正文交出去
+        return cleaned.isBlank() ? "" : cleaned.stripLeading();
+    }
+
+    /**
      * 过滤降级链中本作业已烧穿的站点。全部烧穿时分流：fail 模式直接抛
      * {@link BudgetBurnException}（黑名单内的模型重试必然复发，再调一次只是把同样的
      * token 再烧一遍）；skip 模式回退原链走既有出口（烧穿换站 → 链尾 fail-soft）。
@@ -504,26 +553,25 @@ public class SpringAiLlmGateway implements LlmGateway {
             if (Boolean.TRUE.equals(api.getZeroDataRetention())) {
                 request.getHeaders().set("x-cmd-zdr", "1");
             }
-            boolean injectable = disableThinking && !injectionRejected.get();
-            if (!injectable || body == null || body.length == 0) {
-                return execution.execute(request, body);
-            }
-            String path = request.getURI().getPath();
-            if (path == null || !path.endsWith("/chat/completions")) {
-                return execution.execute(request, body);
-            }
+            String path = request.getURI() == null ? null : request.getURI().getPath();
+            boolean chatPath = path != null && path.endsWith("/chat/completions");
+            boolean injectable = disableThinking && !injectionRejected.get() && chatPath;
+
             byte[] payload = body;
-            try {
-                ObjectNode node = (ObjectNode) JSON.readTree(body);
-                node.put("enable_thinking", false);
-                payload = JSON.writeValueAsBytes(node);
-            } catch (Exception e) {
-                log.warn("注入 enable_thinking=false 失败，按原请求发送：{}", e.getMessage());
+            if (injectable && body != null && body.length > 0) {
+                try {
+                    ObjectNode node = (ObjectNode) JSON.readTree(body);
+                    node.put("enable_thinking", false);
+                    payload = JSON.writeValueAsBytes(node);
+                } catch (Exception e) {
+                    log.warn("注入 enable_thinking=false 失败，按原请求发送：{}", e.getMessage());
+                }
             }
+
             ClientHttpResponse response = execution.execute(request, payload);
             // 自愈：强制思考模型对 enable_thinking=false 返回 4xx——去掉该参数
             // 原样重试一次，并记住本实例后续跳过注入。重试走的是余下执行链，不会重新进入本拦截器成环
-            if (response.getStatusCode().is4xxClientError()) {
+            if (injectable && response.getStatusCode().is4xxClientError()) {
                 injectionRejected.set(true);
                 log.warn("enable_thinking 注入被供应商拒绝（HTTP {}），已去除该参数重试一次，"
                         + "本模型实例后续请求不再注入（强制思考模型按供应商默认开启思考）",
@@ -531,11 +579,162 @@ public class SpringAiLlmGateway implements LlmGateway {
                 response.close();
                 ObjectNode stripped = (ObjectNode) JSON.readTree(payload);
                 stripped.remove("enable_thinking");
-                return execution.execute(request, JSON.writeValueAsBytes(stripped));
+                response = execution.execute(request, JSON.writeValueAsBytes(stripped));
             }
-            return response;
+
+            // 响应侧：提取思考内容并剥离，交给 Spring AI 的永远是干净正文。
+            // 只处理 chat/completions（其余路径如 embeddings 无此字段，且不必缓冲）
+            if (!chatPath) {
+                return response;
+            }
+            return bufferAndExtractReasoning(response);
         };
         return baseRestClientBuilder().requestInterceptor(interceptor);
+    }
+
+    /**
+     * 把响应体读进内存、提取思考内容，再以可重复读取的包装返回。
+     *
+     * <p><b>为什么必须在这里做</b>：Spring AI 1.0.0 的 {@code OpenAiApi.ChatCompletionMessage}
+     * 没有 {@code reasoning_content} 字段，供应商返回的思考内容会被 Jackson 静默丢弃——正文不受污染，
+     * 但调用方也拿不到任何思考信号（长度、占用 token），烧穿判定只能靠 usage 反推。
+     * 在这一层提取，既补上观测信号，又能剥掉混进 content 的思考标记。
+     *
+     * <p><b>代价</b>：响应体全量读入内存。项目全部调用都是非流式（chatModel.call），
+     * 单章正文量级几十 KB，可接受；若将来引入流式必须改成增量扫描。
+     */
+    private ClientHttpResponse bufferAndExtractReasoning(ClientHttpResponse response) {
+        byte[] body;
+        try (java.io.InputStream in = response.getBody()) {
+            body = in.readAllBytes();
+        } catch (Exception e) {
+            log.warn("响应体缓冲失败，跳过思考内容提取：{}", e.getMessage());
+            return response;
+        }
+        try {
+            extractReasoning(body);
+        } catch (Exception e) {
+            // 提取是增强能力，失败绝不影响正常解析
+            log.debug("思考内容提取失败（不影响调用）：{}", e.getMessage());
+        }
+        return new BufferedClientHttpResponse(response, body);
+    }
+
+    /** 从响应 JSON 里读出思考长度与思考 token，写入线程级捕获槽 */
+    private void extractReasoning(byte[] body) throws Exception {
+        if (body.length == 0) {
+            return;
+        }
+        var root = JSON.readTree(body);
+        if (root == null || !root.has("choices")) {
+            return;
+        }
+        var choices = root.get("choices");
+        if (choices == null || !choices.isArray() || choices.isEmpty()) {
+            return;
+        }
+        var message = choices.get(0).get("message");
+        long chars = 0;
+        if (message != null) {
+            // 主流命名：DashScope / DeepSeek / Kimi 用 reasoning_content；部分中转站用 reasoning
+            for (String field : new String[]{"reasoning_content", "reasoning"}) {
+                var node = message.get(field);
+                if (node != null && !node.isNull()) {
+                    chars += node.asText("").length();
+                }
+            }
+        }
+        Long reasoningTokens = null;
+        var usage = root.get("usage");
+        if (usage != null) {
+            // OpenAI / DashScope：usage.completion_tokens_details.reasoning_tokens
+            var details = usage.get("completion_tokens_details");
+            if (details != null && details.has("reasoning_tokens")) {
+                reasoningTokens = details.get("reasoning_tokens").asLong();
+            } else if (usage.has("reasoning_tokens")) {
+                reasoningTokens = usage.get("reasoning_tokens").asLong();
+            }
+        }
+        if (chars > 0 || reasoningTokens != null) {
+            ReasoningCapture.set(chars, reasoningTokens);
+        }
+    }
+
+    /** 线程级思考捕获：拦截器写入，complete() 取用后即清（同一 worker 线程同步调用） */
+    static final class ReasoningCapture {
+        record Snapshot(long chars, Long tokens) {
+        }
+
+        private static final ThreadLocal<Snapshot> HOLDER = new ThreadLocal<>();
+        /** 本次调用已消费的快照：供紧随其后的 recordUsage 记账用，调用结束清除 */
+        private static final ThreadLocal<Snapshot> FOR_RECORD = new ThreadLocal<>();
+
+        static void set(long chars, Long tokens) {
+            HOLDER.set(new Snapshot(chars, tokens));
+        }
+
+        /**
+         * 取走并清空：每次调用结束后必须调，避免线程复用把上一章的数据带给下一章。
+         * 同时留在 FOR_RECORD，让随后的 recordUsage 能把这两个数写进账本
+         */
+        static Snapshot take() {
+            Snapshot snapshot = HOLDER.get();
+            HOLDER.remove();
+            FOR_RECORD.set(snapshot);
+            return snapshot;
+        }
+
+        /** 记账用：只读不清（一次调用可能记多次账：成功/失败/降级） */
+        static Snapshot currentForRecord() {
+            return FOR_RECORD.get();
+        }
+
+        /** 换站前清除上一站残留，避免新站记上旧站的思考用量 */
+        static void clearForRecord() {
+            FOR_RECORD.remove();
+        }
+
+        /** 整个调用（含降级链）结束时清理，避免跨调用泄漏 */
+        static void clearAll() {
+            HOLDER.remove();
+            FOR_RECORD.remove();
+        }
+    }
+
+    /** 可重复读取的响应包装：body 已在内存，Spring AI 仍可正常解析 */
+    private static final class BufferedClientHttpResponse implements ClientHttpResponse {
+        private final ClientHttpResponse delegate;
+        private final byte[] body;
+
+        BufferedClientHttpResponse(ClientHttpResponse delegate, byte[] body) {
+            this.delegate = delegate;
+            this.body = body;
+        }
+
+        @Override
+        public org.springframework.http.HttpStatusCode getStatusCode() throws java.io.IOException {
+            return delegate.getStatusCode();
+        }
+
+        @Override
+        public String getStatusText() throws java.io.IOException {
+            return delegate.getStatusText();
+        }
+
+        @Override
+        public void close() {
+            delegate.close();
+        }
+
+        @Override
+        public java.io.InputStream getBody() {
+            return new java.io.ByteArrayInputStream(body);
+        }
+
+        @Override
+        public org.springframework.http.HttpHeaders getHeaders() {
+            return delegate.getHeaders();
+        }
     }
 
     private RestClient.Builder baseRestClientBuilder() {
@@ -585,6 +784,18 @@ public class SpringAiLlmGateway implements LlmGateway {
                 line.put("promptTokens", promptTokens);
                 line.put("completionTokens", completionTokens);
                 line.put("totalTokens", totalTokens);
+            }
+            // 思考用量（供应商上报时才有）：量化日志据此显示"思考占比"，
+            // 也是判据④（思考 token 占预算 ≥80%）的事后证据。
+            // 由 complete() 在本次调用开始时写入线程级暂存，记账后随调用结束清除
+            ReasoningCapture.Snapshot reasoning = ReasoningCapture.currentForRecord();
+            if (reasoning != null) {
+                if (reasoning.chars() > 0) {
+                    line.put("reasoningChars", reasoning.chars());
+                }
+                if (reasoning.tokens() != null) {
+                    line.put("reasoningTokens", reasoning.tokens());
+                }
             }
             if (error != null) {
                 String message = error.getClass().getSimpleName() + ": " + error.getMessage();

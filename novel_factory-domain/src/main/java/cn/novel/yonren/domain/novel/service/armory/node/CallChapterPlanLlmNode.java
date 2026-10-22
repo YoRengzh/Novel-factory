@@ -91,6 +91,8 @@ public class CallChapterPlanLlmNode extends AbstractArmorySupport {
         // 对话承载闸门的人名来源：角色账本名册（新书首段摘要为空 → 空名册，闸门自动降级）
         List<String> rosterNames = chapterMemoryService.characterRoster(dynamicContext.getChapterSummaries());
         List<RollingOutlineService.StageSegment> segments = dynamicContext.getPlanSegments();
+        // 规划期取消/熔断检查下放到规划器：本节点入口只查一次，挡不住内部的分支推演与降级重试链路
+        GenerationJob job = dynamicContext.getJob();
         if (segments == null || segments.size() <= 1) {
             // 单段批次：合成覆盖整批的一段走规划器——分支推演/降级重试/闸门口径与分段路径完全一致
             int batchStart = dynamicContext.getChapterOffset() + 1;
@@ -98,7 +100,7 @@ public class CallChapterPlanLlmNode extends AbstractArmorySupport {
             ChapterPlanSegmentPlanner.PlannedSegment planned = planner.planSegment(
                     requestParameter.getStoryVO(), ctx, dynamicContext.getPrompt(),
                     batchStart, batchEnd, dynamicContext.getStageBlueprint(), rosterNames,
-                    dynamicContext.getUsedPromptMap());
+                    dynamicContext.getUsedPromptMap(), null, null, job);
             dynamicContext.setRawResult(planned.raw());
             dynamicContext.setChapterPlanAggregate(planned.plan());
             return planned.plan();
@@ -112,7 +114,7 @@ public class CallChapterPlanLlmNode extends AbstractArmorySupport {
             ChapterPlanSegmentPlanner.PlannedSegment parsed = planner.planSegment(
                     requestParameter.getStoryVO(), ctx, prompts.get(i),
                     segment.startChapter(), segment.endChapter(), segment.blueprint(), rosterNames,
-                    dynamicContext.getUsedPromptMap());
+                    dynamicContext.getUsedPromptMap(), null, null, job);
             mergedChapters.addAll(parsed.plan().getChapters());
             rawSegments.add(parsed.raw());
         }

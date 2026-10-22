@@ -11,7 +11,7 @@ import java.util.regex.Pattern;
 
 /**
  * 故事时间定位：时序锚实际值（最新摘要）与大纲段预算年的统一解析口径。
- * 规划层（fail-closed 校验）与观测层（进度对齐指标）必须看同一把尺子，
+ * 规划层（时间账重锚与 fail-closed 校验）与观测层（进度达标指标）必须看同一把尺子，
  * 两边各算各的就会出现"体检说滞后、规划说无需跳接"的口径分裂。
  *
  * <p>{@link #parseYear(String)} 是全书唯一的自由文本取年口径：摘要 timePoint 的年份写法
@@ -184,7 +184,7 @@ public final class StoryPacing {
      * 年龄类事实的 subject 识别词（与 {@code ConsistencyIndexService.AGE_SUBJECT_KEYWORDS} 同源）。
      *
      * <p><b>刻意不含裸"岁"字</b>：subject 是模型自由写的短串，含"岁"不等于在陈述当前年龄——
-     * 实测反例：「某角色幼时写下成年年份」（叙述"六年前四岁时涂的记号纸"）也含"岁"，
+     * 实测反例：「主角甲四岁涂2026」（叙述"六年前四岁时涂的格子纸"）也含"岁"，
      * 被误当作当前年龄读成 4 岁，直接让体检报出"年龄滞后 7 岁"的假 CRITICAL。
      * 只有"年龄/月龄/岁数"这类**状态词**才代表当前状态。
      */
@@ -274,5 +274,50 @@ public final class StoryPacing {
             }
         }
         return null;
+    }
+
+    // ==================== 大纲重锚（2026-10-11，进度治理方案 A） ====================
+
+    /**
+     * 重锚后的段预算：大纲段时间标记按正文实际锚点整体平移后的取值。
+     *
+     * @param yearStart/yearEnd 平移后的段预算年份（原段无年份时为 null）
+     * @param ageStart/ageEnd   平移后的段预算年龄
+     * @param shiftYears        平移量（正 = 大纲跑在正文前面、预算向后让；0 = 无滞后）
+     */
+    public record SlidBudget(Integer yearStart, Integer yearEnd, Integer ageStart, Integer ageEnd, int shiftYears) {
+    }
+
+    /**
+     * **重锚平移量**：大纲段起始年份到正文实际锚点的距离（大纲跑在正文前面为正）。
+     * 同一次蓝图生成/校验内的所有段必须共用**同一个**平移量（从段首所在段计算），
+     * 否则多段窗口的段间距会被压乱——调用方不得逐段各算各的。
+     * 锚点缺失（全书未写/摘要无时间记录）或段无数值年份（境界纪年）时返回 null（不平移，不臆造）。
+     */
+    public static Integer calendarShiftYears(OutlineSegmentParser.OutlineSegment seg, Integer anchorYear) {
+        if (seg == null || anchorYear == null || seg.yearStart() == null) {
+            return null;
+        }
+        return seg.yearStart() - anchorYear;
+    }
+
+    /**
+     * 按平移量滑动段预算。年龄维度优先用独立平移量（{@code shiftAges}，由调用方按
+     * 实际年龄锚计算；年龄≠年份，生日在年内漂移）；取不到时退用年份平移量（一岁≈一年）。
+     * shiftYears 为 null（无锚/无预算）时原样返回，不平移。
+     */
+    public static SlidBudget slideSegment(OutlineSegmentParser.OutlineSegment seg,
+                                          Integer shiftYears, Integer shiftAges) {
+        if (seg == null || shiftYears == null) {
+            return new SlidBudget(seg == null ? null : seg.yearStart(), seg == null ? null : seg.yearEnd(),
+                    seg == null ? null : seg.ageStart(), seg == null ? null : seg.ageEnd(), 0);
+        }
+        int ageShift = shiftAges != null ? shiftAges : shiftYears;
+        return new SlidBudget(
+                seg.yearStart() == null ? null : seg.yearStart() - shiftYears,
+                seg.yearEnd() == null ? null : seg.yearEnd() - shiftYears,
+                seg.ageStart() == null ? null : seg.ageStart() - ageShift,
+                seg.ageEnd() == null ? null : seg.ageEnd() - ageShift,
+                shiftYears);
     }
 }

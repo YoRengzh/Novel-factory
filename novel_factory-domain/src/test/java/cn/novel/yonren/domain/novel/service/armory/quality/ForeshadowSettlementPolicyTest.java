@@ -58,7 +58,7 @@ class ForeshadowSettlementPolicyTest {
         assertTrue(ForeshadowSettlementPolicy.looksSilentlyResolved(
                 decision("VOID", "买书承诺已在第24章旧书铺挑书情节中兑现，伏笔已自然消解。")));
         assertTrue(ForeshadowSettlementPolicy.looksSilentlyResolved(
-                decision("VOID", "父母对角色丙异常的认知已在第16章顾老头测试中自然承接并深化，该伏笔已被消化。")));
+                decision("VOID", "父母对角色丙异常的认知已在第16章角色戊测试中自然承接并深化，该伏笔已被消化。")));
         assertTrue(ForeshadowSettlementPolicy.looksSilentlyResolved(
                 decision("VOID", "老顾见证异常已在第21章正式测试中升级为外部认证，该早期见证已被覆盖。")));
         assertTrue(ForeshadowSettlementPolicy.looksSilentlyResolved(

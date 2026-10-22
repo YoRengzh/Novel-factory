@@ -212,4 +212,34 @@ class JsonRepairTest {
         assertEquals(expected, JsonRepair.repair(bad));
     }
 
+
+
+    // ==================== 移植自旧系统的闸门用例 ====================
+
+    /** 全部为空时返回 null（调用方据此判失败，而不是拿空串当成功） */
+    @Test
+    void extractStringField_skipBlank_allBlankReturnsNull() {
+        String raw = "{\"content\":\"\",\"content\":\"   \"}";
+        assertNull(JsonRepair.extractStringField(raw, "content", true));
+    }
+
+    /** 重复键且**首个为空**时，skipBlank 必须继续往后找，而不是返回空串 */
+    @Test
+    void extractStringField_skipBlank_skipsLeadingEmptyValue() {
+        String raw = "{\"content\":\"\",\"content\":\"后面的真正文\"}";
+        assertEquals("后面的真正文", JsonRepair.extractStringField(raw, "content", true));
+        // 不跳过时返回空串（旧语义，保持向后兼容）
+        assertEquals("", JsonRepair.extractStringField(raw, "content"));
+    }
+
+    /** 回归：重复 content 键（先有正文、后补空串）——skipBlank 必须拿回前面那段真正文 */
+    @Test
+    void extractStringField_skipBlank_takesFirstNonBlankAmongDuplicateKeys() {
+        String raw = "{\"chapterNo\":167,\"title\":\"四十分钟的边界\","
+                + "\"content\":\"真正文内容\",\"content\":\"\",\"note\":\"\"}";
+        // 旧行为：首个出现即返回（拿到真正文，但若首个是空串就会丢稿）
+        assertEquals("真正文内容", JsonRepair.extractStringField(raw, "content"));
+        // 显式 skipBlank 同样拿到非空值
+        assertEquals("真正文内容", JsonRepair.extractStringField(raw, "content", true));
+    }
 }

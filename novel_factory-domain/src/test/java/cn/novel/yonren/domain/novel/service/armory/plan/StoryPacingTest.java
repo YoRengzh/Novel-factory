@@ -227,4 +227,66 @@ class StoryPacingTest {
         other.add(withAge(5, "傍晚", "木匣位置", "抽屉最里层"));
         assertNull(StoryPacing.latestAnchorAge(other));
     }
+
+
+    // ==================== 移植自旧系统的闸门用例 ====================
+
+    @Test
+    void calendarShiftYears_measuresOutlineAheadOfProse() {
+        // 大纲 121-130 预算 2012 年起，正文实际 2010 → 大纲跑在正文前面 2 年
+        assertEquals(2, StoryPacing.calendarShiftYears(
+                segment(121, 130, "2012-2013年（14-15岁）", 2012, 2013, 14, 15), 2010));
+        // 正文追平/超前大纲 → 平移量 ≤0（预算不动或前移）
+        assertEquals(0, StoryPacing.calendarShiftYears(
+                segment(121, 130, "2012-2013年（14-15岁）", 2012, 2013, 14, 15), 2012));
+        // 锚点缺失或段无年份（境界纪年）→ null（不臆造）
+        assertNull(StoryPacing.calendarShiftYears(
+                segment(121, 130, "炼气期", null, null, null, null), 2010));
+        assertNull(StoryPacing.calendarShiftYears(
+                segment(121, 130, "2012-2013年（14-15岁）", 2012, 2013, 14, 15), null));
+    }
+
+    @Test
+    void slideSegment_ageShiftFallsBackToYearShift() {
+        // 实际年龄锚取不到时，年龄维度退用年份平移量（一岁≈一年）
+        OutlineSegmentParser.OutlineSegment seg =
+                segment(121, 130, "2012-2013年（14-15岁）", 2012, 2013, 14, 15);
+        StoryPacing.SlidBudget slid = StoryPacing.slideSegment(seg, 2, null);
+
+        assertEquals(12, slid.ageStart());
+        assertEquals(13, slid.ageEnd());
+    }
+
+    @Test
+    void slideSegment_slidesYearAndAgeIndependently() {
+        // 实测场景：正文 2010 年/12 岁，大纲段 121-130 预算 2012-2013 年/14-15 岁
+        OutlineSegmentParser.OutlineSegment seg =
+                segment(121, 130, "2012-2013年（14-15岁）", 2012, 2013, 14, 15);
+        StoryPacing.SlidBudget slid = StoryPacing.slideSegment(seg, 2, 2);
+
+        assertEquals(2010, slid.yearStart());
+        assertEquals(2011, slid.yearEnd());
+        assertEquals(12, slid.ageStart());
+        assertEquals(13, slid.ageEnd());
+        assertEquals(2, slid.shiftYears());
+    }
+
+    @Test
+    void slideSegment_withoutShiftKeepsOriginalBudget() {
+        OutlineSegmentParser.OutlineSegment seg =
+                segment(121, 130, "2012-2013年（14-15岁）", 2012, 2013, 14, 15);
+        StoryPacing.SlidBudget slid = StoryPacing.slideSegment(seg, null, null);
+
+        assertEquals(2012, slid.yearStart());
+        assertEquals(14, slid.ageStart());
+        assertEquals(0, slid.shiftYears());
+    }
+
+    /** 造一个只关心时间预算的段（其余字段给默认值） */
+    private static OutlineSegmentParser.OutlineSegment segment(int start, int end, String timeLabel,
+                                                               Integer yearStart, Integer yearEnd,
+                                                               Integer ageStart, Integer ageEnd) {
+        return new OutlineSegmentParser.OutlineSegment(start, end, 1, timeLabel,
+                yearStart, yearEnd, ageStart, ageEnd, "里程碑");
+    }
 }

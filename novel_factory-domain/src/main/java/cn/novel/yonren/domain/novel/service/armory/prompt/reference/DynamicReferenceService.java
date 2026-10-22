@@ -2,6 +2,7 @@ package cn.novel.yonren.domain.novel.service.armory.prompt.reference;
 
 import cn.novel.yonren.domain.novel.model.valobj.StoryVO;
 import cn.novel.yonren.domain.novel.model.valobj.properties.ReferenceSelectorProperties;
+import cn.novel.yonren.domain.novel.service.armory.FeatureToggles;
 import cn.novel.yonren.domain.novel.service.armory.prompt.PromptRuleFileLoader;
 import cn.novel.yonren.domain.novel.service.armory.prompt.valobj.PromptContext;
 import cn.novel.yonren.domain.novel.service.armory.prompt.valobj.PromptRule;
@@ -29,6 +30,8 @@ public class DynamicReferenceService {
     private final PromptRuleFileLoader fileLoader;
     private final ReferenceSelectorProperties selectorProperties;
     private final cn.novel.yonren.domain.novel.service.armory.LlmRuntimeConfig llmRuntimeConfig;
+    /** 功能开关（可选）：资料分组开关关闭时整组不参与选择。为 null 时按全开处理（单测直接 new） */
+    private final cn.novel.yonren.domain.novel.service.armory.FeatureToggles toggles;
 
     /** 选择结果缓存：LRU（accessOrder）+ 容量封顶；key 含索引哈希，资料更新即失效 */
     private final Map<String, List<PromptRule>> selectionCache = Collections.synchronizedMap(
@@ -51,7 +54,10 @@ public class DynamicReferenceService {
         }
 
         List<ReferenceIndexEntry> index = referenceIndexLoader.getIndex();
-        String cacheKey = buildCacheKey(module, scene, ctx, index);
+        // 按场景裁剪索引：58 份平铺时选择器要在长表里挑 3 份，选准率随条目数下降；
+        // 先筛到该场景实际可用的分组，选择范围更聚焦（向量模式不受影响，它走语义召回）
+        List<ReferenceIndexEntry> sceneIndex = filterByScene(index, scene);
+        String cacheKey = buildCacheKey(module, scene, ctx, sceneIndex);
         if (config.isCacheEnabled()) {
             List<PromptRule> cached = selectionCache.get(cacheKey);
             if (cached != null) {
@@ -71,7 +77,7 @@ public class DynamicReferenceService {
                         "动态资料向量检索失败，不降级 LLM 选择，作业终止：" + e.getMessage(), e);
             }
         } else {
-            selected = llmReferenceSelector.select(module, scene, ctx, index);
+            selected = llmReferenceSelector.select(module, scene, ctx, sceneIndex);
         }
         // 正文场景用收紧预算：写正文时模型需要的是本章计划而非教材，整篇资料会稀释注意力
         int recallChars = scene == PromptScene.CHAPTER_CONTENT
@@ -84,6 +90,44 @@ public class DynamicReferenceService {
         log.info("动态资料装配完成，key: {}, 模式: {}, 选中 {} 份，注入 {} 条规则",
                 cacheKey, llmRuntimeConfig.effectiveReferenceMode(config.getMode()), selected.size(), rules.size());
         return rules;
+    }
+
+    /**
+     * 按场景裁剪索引：只保留该场景用得上的资料分组。
+     *
+     * <p>收益：ref-select 的索引表从 58 行降到十几二十行，模型选择更聚焦。
+     * 代价：跨组资料（如技法组的 de-ai-principles 对计划场景也有用）不会出现在该场景——
+     * 因此 {@link ReferenceGroup#groupsFor} 每个场景都配了不止一组，且未列出的场景给全量。
+     *
+     * <p>三组开关（FeatureToggles 的 referenceGroup*）关闭时该组整体不参与选择，
+     * 用于"省 token / 降耗时"——关掉题材组后设定阶段只靠模型自身常识。
+     */
+    private List<ReferenceIndexEntry> filterByScene(List<ReferenceIndexEntry> index, PromptScene scene) {
+        if (index == null || index.isEmpty()) {
+            return index;
+        }
+        java.util.Set<String> allowed = new java.util.HashSet<>(ReferenceGroup.groupsFor(scene));
+        // 运行时开关：关掉的组整体剔除（开关未注入时按全开处理，保持旧行为）
+        if (toggles != null) {
+            if (!toggles.effective(FeatureToggles.REFERENCE_GROUP_TECHNIQUE)) {
+                allowed.remove(ReferenceGroup.TECHNIQUE);
+            }
+            if (!toggles.effective(FeatureToggles.REFERENCE_GROUP_STRUCTURE)) {
+                allowed.remove(ReferenceGroup.STRUCTURE);
+            }
+            if (!toggles.effective(FeatureToggles.REFERENCE_GROUP_GENRE)) {
+                allowed.remove(ReferenceGroup.GENRE);
+            }
+        }
+        if (allowed.isEmpty()) {
+            // 三组全关：不注入任何资料（用户明确要求省 token）
+            return List.of();
+        }
+        List<ReferenceIndexEntry> filtered = index.stream()
+                .filter(e -> e.getGroup() == null || allowed.contains(e.getGroup()))
+                .toList();
+        // 裁剪后为空（分组配置与文件名不匹配）时回退全量：宁可多给，不可静默断供
+        return filtered.isEmpty() ? index : filtered;
     }
 
     private boolean isVectorMode(ReferenceSelectorProperties config) {

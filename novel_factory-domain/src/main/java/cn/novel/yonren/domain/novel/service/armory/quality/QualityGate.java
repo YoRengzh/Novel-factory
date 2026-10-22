@@ -13,6 +13,7 @@ import cn.novel.yonren.domain.novel.service.armory.audit.AuditSampleService;
 import cn.novel.yonren.domain.novel.service.armory.audit.ChapterAuditService;
 import cn.novel.yonren.domain.novel.service.armory.memory.ChapterMemoryService;
 import cn.novel.yonren.domain.novel.service.armory.memory.ConsistencyIndexService;
+import cn.novel.yonren.domain.novel.service.armory.memory.StyleStatService;
 import cn.novel.yonren.domain.novel.service.armory.revise.ChapterReviseService;
 import cn.novel.yonren.types.enums.GenreTypeVO;
 import jakarta.annotation.Resource;
@@ -28,9 +29,6 @@ import java.util.List;
  * 审校是质量门：彻底失败抛异常终止本批（绝不等价于零问题）；
  * 修订失败则保留原稿并把 BLOCKING 问题作为质量债返回（审校结论不因修订失败而丢失）。
  * 从 GenerateChapterContentNode 自然拆出（D8），逐行等价
- * 八期扩展：正文级对话承载对账——计划声明了 dialogueScenes 的章，轮次密度坍缩从 MINOR
- * 升级 BLOCKING 进修订闭环（计划承诺的对话被写成动作/沉默是写手违约），缺失场景由
- * {@link DialoguePresencePolicy} 识别并作为修订靶点下发，修订采纳后机械重扫闭环。
  */
 @Service
 @Slf4j
@@ -62,6 +60,25 @@ public class QualityGate {
         return storyProperties != null && storyProperties.getAudit().isEnabled();
     }
 
+    /**
+     * 审校 → 修订（若启用）→ 修订稿复审的闭环自愈链（四期）：生成正文后、风格统计合并前调用。
+     * 首审发现 BLOCKING 且修订启用时，逐轮"修订 → 采纳闸门 → 复审"，复审干净即闭环；
+     * 轮次（story.revise.max-attempts）耗尽仍未闭环时，把最终 BLOCKING 记为质量债并落失败样本。
+     * 审校/复审硬失败照旧抛 AppException 终止本批；修订调用异常保留审校结论（不重试省 token）。
+     * 六期扩展：伏笔保密边界（禁泄关键词机械兜底 + 审校判变相泄露）、大纲偏离检测
+     * （关键事件覆盖率过低时给审校注入加审预警），并通过 GateResult 暴露通过质量分级
+     * （低置信通过供候选选优触发、CLEAN_PASS 供文风指纹库入库）。
+     * 七期扩展：内容密度检测（有效对话句数<25时给审校注入加审预警，WARN 语义不直接 BLOCKING）。
+     * 八期扩展：正文级对话承载对账——计划声明了 dialogueScenes 的章，轮次密度坍缩从 MINOR
+     * 升级 BLOCKING 进修订闭环（计划承诺的对话被写成动作/沉默是写手违约），缺失场景由
+     * {@link DialoguePresencePolicy} 识别并作为修订靶点下发，修订采纳后机械重扫闭环。
+     * 九期扩展（2026-10-13）：篇幅坍缩硬底线——有效字低于
+     * {@link ChapterLengthPolicy#COLLAPSE_FLOOR_CHARACTERS} 的"提纲式废稿"记 BLOCKING；
+     * 且**修订稿也要重新过线**（首审告警发生在重写前，重写后不复测就是 136 章废稿出厂的直接原因）。
+
+     *
+     * @return 质量门结论：未修复 BLOCKING 清单 + 通过质量分级 + MINOR 残留/修订轮次
+     */
     public GateResult auditAndReviseIfEnabled(ArmoryCommandEntity requestParameter,
                                               ChapterPlanItemEntity item,
                                               ChapterContentEntity chapterContent,
@@ -69,6 +86,10 @@ public class QualityGate {
                                               StyleStatEntity styleStat,
                                               int globalNo,
                                               Path storyDir) {
+        // 段落结构兜底：写手偶尔把整章当成单个字符串吐出（实测 4/10 章换行数为 0，
+        // 单章 3000~4600 字挤成一段）。必须在任何按行统计之前重排，否则对白行占比会被误算为 1.0
+        // （ratioOf = 含引号行/非空行，整章仅 1 行且含引号 ⇒ 恒 1.0），段落密度审校也无从下手。
+        // 重排是纯机械动作、不改一个字；异常信号另行记 MINOR 回灌规划层。
         List<ChapterIssueEntity> structureIssues = List.of();
         if (chapterContent != null) {
             String raw = chapterContent.getContent();
@@ -89,6 +110,34 @@ public class QualityGate {
             log.warn("第 {} 章未达到 1500 字参考线，实际有效字数 {}（不阻塞，密度信号将回灌规划层）", globalNo,
                     ChapterLengthPolicy.effectiveCharacterCount(chapterContent.getContent()));
         }
+        // 篇幅坍缩硬底线（2026-10-13）：低于 800 有效字 = 提纲式废稿，BLOCKING 进修订闭环。
+        // 与上面 1500 线告警的分工见 ChapterLengthPolicy#COLLAPSE_FLOOR_CHARACTERS 的类注释：
+        // 1500 答"计划给的料够不够"（回灌规划层），本线答"这一稿是不是根本不成篇"（当场返工）。
+        // 实测第 136 章终稿 674 字、无场景铺展，正是缺了这条线才出厂。
+        List<ChapterIssueEntity> lengthIssues = List.of();
+        // 独立开关：不与 1500 参考线告警共用——共用会让"关掉告警"静默连硬底线一起关掉
+        if (storyProperties.getAudit().isEnforceCollapseFloor()
+                && chapterContent != null && ChapterLengthPolicy.isCollapsed(chapterContent.getContent())) {
+            int effective = ChapterLengthPolicy.effectiveCharacterCount(chapterContent.getContent());
+            log.warn("第 {} 章篇幅坍缩：有效字 {} 低于硬底线 {}，记 BLOCKING 进修订闭环", globalNo,
+                    effective, ChapterLengthPolicy.COLLAPSE_FLOOR_CHARACTERS);
+            ChapterIssueEntity collapsed = new ChapterIssueEntity();
+            collapsed.setDimension("aesthetic");
+            collapsed.setSeverity("BLOCKING");
+            collapsed.setEvidence("全章有效字 " + effective + "，低于硬底线 " + ChapterLengthPolicy.COLLAPSE_FLOOR_CHARACTERS);
+            collapsed.setDescription("篇幅坍缩：本章有效字 " + effective + " 低于硬底线 "
+                    + ChapterLengthPolicy.COLLAPSE_FLOOR_CHARACTERS + "，已塌成提纲——场景没有铺展、"
+                    + "对白与动作被压成概述。这不是'写得短'，是这一稿根本不成篇，必须返工重写。");
+            collapsed.setSuggestion("按计划的关键事件逐条铺展成场面：每个事件至少给出一处可观察的场景、"
+                    + "两轮以上有来有回的对话、以及人物的动作与反应；不要靠环境描写或心理独白凑字数。"
+                    + "不要压缩既有情节，只把被概述掉的过程写出来。");
+            lengthIssues = List.of(collapsed);
+        }
+        // 上沿同口径告警：字数超标不是"写得多"，而是**关键事件数没变、水变多了**——
+        // 实测第 20 章 4170 字 / 5 个关键事件，对照第 19 章 2205 字 / 5 个关键事件。
+        // 与下沿一样只告警不阻塞，信号回灌规划层（见 ChapterPlanPromptService 的注水反馈）。
+        // 刻意**不豁免过渡章**：下沿豁免过渡章是因为它本就该短；写得比常规章还长的过渡章
+        // 恰恰是最典型的注水形态。
         if (chapterContent != null && ChapterLengthPolicy.exceedsReference(chapterContent.getContent())) {
             log.warn("第 {} 章超出 {} 字参考上沿，实际有效字数 {}（不阻塞，注水信号将回灌规划层）", globalNo,
                     ChapterLengthPolicy.MAXIMUM_REFERENCE_CHARACTERS,
@@ -157,6 +206,9 @@ public class QualityGate {
         mechanicalIssues.addAll(secrecyIssues);
         mechanicalIssues.addAll(mechanismIssues);
         mechanicalIssues.addAll(titleIssues);
+        // 篇幅坍缩（机械 BLOCKING，2026-10-13）：与文风/标题等程度类问题不同，
+        // 它是"这一稿不成篇"的形态判断，必须在首审就进修订闭环
+        mechanicalIssues.addAll(lengthIssues);
         // 段落结构坍缩（机械，）：正文被写成一个巨型文本块。注意必须用**重排前**的原文
         // 做判定，重排后段落数已被补齐，再判就永远不命中。MINOR 落债回灌，不进修订
         // （根因在写手侧，为分段重写整章不成比例；兜底重排已在方法入口完成）
@@ -187,9 +239,9 @@ public class QualityGate {
                     bracketIssues.stream().map(ChapterIssueEntity::getEvidence).toList());
         }
         mechanicalIssues.addAll(bracketIssues);
-        // 引号风格漂移检测（机械，MINOR）：本章台词几乎全用弯引号而本书主流是直角引号
+        // 引号风格漂移检测（机械，MINOR，2026-10-13）：本章台词几乎全用弯引号而本书主流是直角引号
         // （或反之）。两种写法都合法、现有检测都不报，但同书混用是读者一眼可见的排版不一致——
-        // 实测某章整章重写稿的台词引号几乎全用弯引号，其余各章全是直角引号。MINOR 落债回灌，不触发修订。
+        // 实测第 136 章重写稿 8 组弯引号，其余 139 章全是「」。MINOR 落债回灌，不触发修订。
         List<ChapterIssueEntity> quoteStyleIssues = chapterContent == null ? List.of()
                 : DialogueRatioPolicy.checkQuoteStyleDrift(chapterContent.getContent(),
                         item.getChapterType() == null ? null : item.getChapterType().getCode(),
@@ -200,11 +252,11 @@ public class QualityGate {
         }
         mechanicalIssues.addAll(quoteStyleIssues);
         // 对白轮次坍缩检测（机械，P1，2026-10-09）：篇幅够、关键事件也落地了，但轮次密度低于劣化线——
-        // 典型形态是通篇动作分解与内心推演（实测坍缩章远低于劣化线，同批其它章成倍于它）。
+        // 典型形态是通篇动作分解与内心推演（实测第 96 章 4.4 次/千字，劣化线 6.0，同批其它章 12-27）。
         // 与上面两条的分工：那两条判**格式**（引号有没有、是不是括号），这条判**有没有戏**。
         // 为什么必须落债：已有的 ContentDensityPolicy 预警（<25 句）只进审校 prompt，而审校规则里
         // BLOCKING 仅限四类硬伤、MINOR 明写"只记录不触发修订"——它在设计上就不会产生任何动作，
-        // 实测有章报了预警后原稿照样放行。落成质量债才会随记忆回灌到规划层与下一章 prompt。
+        // 实测第 96 章报了预警后原稿照样放行。落成质量债才会随记忆回灌到规划层与下一章 prompt。
         List<ChapterIssueEntity> densityCollapse = dialogueDensityCollapse(item, chapterContent, summaries);
         if (!densityCollapse.isEmpty()) {
             log.warn("第 {} 章对白轮次坍缩：{}", globalNo,
@@ -212,8 +264,8 @@ public class QualityGate {
         }
         mechanicalIssues.addAll(densityCollapse);
         // 跨章对白逐字重复（机械，2026-10-10）：同一句台词与早期章节一字不差 → BLOCKING，走定向修订。
-        // 此前这类重复只进「风格警示」（下一章的软提示）与 MINOR 记账，于是相隔两章的正文
-        // 一字不差地重复了同一句台词——两句都留在了成稿里。对白重复是读者最容易
+        // 此前这类重复只进「风格警示」（下一章的软提示）与 MINOR 记账，于是第 100 章与第 102 章
+        // 一字不差地问了同一句「三班还等得到吗？」——两句都留在了成稿里。对白重复是读者最容易
         // 察觉的硬伤（人物像在复读），修法又机械（改掉这一句），所以放进 BLOCKING 让它真的被改。
         List<ChapterIssueEntity> dialogueRepeat = dialogueRepeatIssues(chapterContent, styleStat);
         if (!dialogueRepeat.isEmpty()) {
@@ -221,6 +273,16 @@ public class QualityGate {
                     dialogueRepeat.stream().map(ChapterIssueEntity::getEvidence).toList());
         }
         mechanicalIssues.addAll(dialogueRepeat);
+        // 章内相邻整句重复（机械，2026-10-15）：同一句在本章内部一字不差地出现两次 → BLOCKING。
+        // 与上一块的跨章查重互补——那个只比"本章 vs 历史"，本章自己内部撞车不在射程内。
+        // 实测成因：段落密度审校的改写补丁把"删除该段"误写成"保留原句再接一遍"，
+        // 而那条路径的采纳闸门只查机械文风违规与语义锚，重复句两条都不碰，于是漏进成稿。
+        List<ChapterIssueEntity> intraRepeats = intraChapterRepeatIssues(chapterContent);
+        if (!intraRepeats.isEmpty()) {
+            log.warn("第 {} 章章内整句重复 {} 句：{}", globalNo, intraRepeats.size(),
+                    intraRepeats.stream().map(ChapterIssueEntity::getEvidence).toList());
+        }
+        mechanicalIssues.addAll(intraRepeats);
         // 严重度分层：机械问题按档分流——BLOCKING 进修订闭环，
         // MINOR（文风程度问题）只记录、不触发修订也不触发候选，见 GateResult 类注释
         List<ChapterIssueEntity> mechanicalMinor = nonBlockingOf(mechanicalIssues);
@@ -293,7 +355,10 @@ public class QualityGate {
         int maxAttempts = Math.max(1, storyProperties.getRevise().getMaxAttempts());
         // 上一轮采纳闸门拒绝原因（方案2回传）：让次轮修订知道为何被拒，定向避免而非盲改
         String previousRejectionReason = null;
-        // 无进展检测：上一轮未修复 BLOCKING 清单的内容指纹（见 blockingFingerprint）
+        // 无进展检测（2026-10-13）：上一轮结束时的 BLOCKING 清单指纹。
+        // 实测（候选服务注释记录的样本）：两轮 revise + 两轮 audit-verify 共 10 次调用 53k token
+        // 之后，未修复清单与首轮逐字相同——纯损耗。判据用"问题描述归一化后的多重集"，
+        // 而非条数：条数相同但换了问题不算无进展（那说明修订有推进）。
         String previousBlockingFingerprint = null;
         for (int attempt = 1; attempt <= maxAttempts; attempt++) {
             reviseRounds = attempt;
@@ -341,6 +406,28 @@ public class QualityGate {
                 // 对白轮次坍缩重算（2026-10-11）：声明了对话场景的章它是 BLOCKING——修订真的把
                 // 对话补进正文即机械闭环；未声明的章是 MINOR。降档项以最终稿重算，口径与上面一致
                 rescan.addAll(dialogueDensityCollapse(item, chapterContent, summaries));
+                // 篇幅坍缩重算（2026-10-13，本次修复的核心）：首审的字数告警发生在重写**之前**，
+                // 而整章重写是"以现有 BLOCKING 为靶点"的——它可能把章写得更短却修好了那几条，
+                // 于是废稿照样闭环。实测第 136 章：首审 87 字 → 整章重写 → 终稿 674 字
+                // 却因"原 BLOCKING 已修复"而放行。修订稿必须重新过篇幅硬底线，才算真闭环。
+                if (storyProperties.getAudit().isEnforceMinimumChapterLength()
+                        && ChapterLengthPolicy.isCollapsed(chapterContent.getContent())) {
+                    int effective = ChapterLengthPolicy.effectiveCharacterCount(chapterContent.getContent());
+                    ChapterIssueEntity stillCollapsed = new ChapterIssueEntity();
+                    stillCollapsed.setDimension("aesthetic");
+                    stillCollapsed.setSeverity("BLOCKING");
+                    stillCollapsed.setEvidence("修订稿全章有效字 " + effective + "，仍低于硬底线 "
+                            + ChapterLengthPolicy.COLLAPSE_FLOOR_CHARACTERS);
+                    stillCollapsed.setDescription("篇幅坍缩（修订稿仍未达标）：有效字 " + effective
+                            + " 低于硬底线 " + ChapterLengthPolicy.COLLAPSE_FLOOR_CHARACTERS
+                            + "，仍是提纲形态。修订必须把被概述掉的过程铺展开，而不是在短稿上做局部替换。");
+                    stillCollapsed.setSuggestion("按计划关键事件逐条铺展成场面：每个事件至少一处可观察场景、"
+                            + "两轮以上有来有回的对话、人物的动作与反应；不要靠环境描写或心理独白凑字数。");
+                    rescan.add(stillCollapsed);
+                    log.warn("第 {} 章第 {}/{} 轮修订稿篇幅仍坍缩：有效字 {} 低于硬底线 {}，继续修订",
+                            globalNo, attempt, maxAttempts, effective,
+                            ChapterLengthPolicy.COLLAPSE_FLOOR_CHARACTERS);
+                }
                 // 降档项以最终稿重扫结果为准：修订可能清掉或改变文风问题，留旧版记录会误导观测层
                 mechanicalMinor = nonBlockingOf(rescan);
                 List<ChapterIssueEntity> newBlocking = new java.util.ArrayList<>(blockingOf(rescan));
@@ -362,16 +449,6 @@ public class QualityGate {
                     return GateResult.of(List.of(), minorCount, mechanicalMinor, attempt, semanticMinors, auditVerifyDegraded);
                 }
                 currentBlocking = newBlocking;
-                // 无进展检测：本轮未修复清单与上一轮完全相同（指纹一致）说明修订没推进——
-                // 继续重试只是烧 token 与时间，提前结束循环（BLOCKING 照旧记债，不掩盖问题）
-                String fingerprint = blockingFingerprint(currentBlocking);
-                if (attempt < maxAttempts && fingerprint.equals(previousBlockingFingerprint)) {
-                    log.warn("第 {} 章修订第 {}/{} 轮未修复清单与上一轮相同（无进展），"
-                                    + "提前结束修订循环省掉无效轮次——BLOCKING 问题照旧记债",
-                            globalNo, attempt, maxAttempts);
-                    break;
-                }
-                previousBlockingFingerprint = fingerprint;
                 log.warn("第 {} 章第 {}/{} 轮复审仍发现 BLOCKING 问题 {} 条，继续修订",
                         globalNo, attempt, maxAttempts, currentBlocking.size());
                 previousRejectionReason = "修订稿已通过采纳闸门，但复审仍发现 BLOCKING 问题："
@@ -381,6 +458,19 @@ public class QualityGate {
                         reviseResult.decision().getReason());
                 previousRejectionReason = reviseResult.decision().getReason();
             }
+            // 无进展检测（2026-10-13）：本轮结束的未修复清单若与上轮指纹一致，下一轮必然同样无效。
+            // 实测样本（候选服务注释）：两轮 revise + 两轮 audit-verify 共 10 次调用 53k token 后，
+            // 未修复清单与首轮逐字相同——纯损耗。**不改变放行判定**（仍走"轮次耗尽"路径记债），
+            // 只省掉确定无效的重复劳动。判据用"描述归一化后的多重集"而非条数：
+            // 条数相同但换了问题说明修订有推进，不该误判。
+            String fingerprint = blockingFingerprint(currentBlocking);
+            if (attempt < maxAttempts && fingerprint.equals(previousBlockingFingerprint)) {
+                log.warn("第 {} 章修订第 {}/{} 轮未修复清单与上一轮相同（无进展），"
+                                + "提前结束修订循环省掉无效轮次——BLOCKING 问题照旧记债",
+                        globalNo, attempt, maxAttempts);
+                break;
+            }
+            previousBlockingFingerprint = fingerprint;
         }
 
         log.warn("第 {} 章修订 {} 轮后仍有 BLOCKING 问题 {} 条（结论交由上层处置：主路径记为质量债，"
@@ -389,6 +479,38 @@ public class QualityGate {
         auditSampleService.record(storyDir, globalNo, item, chapterContent.getContent(),
                 currentBlocking, maxAttempts, ledgerPrompt, foreshadowing);
         return GateResult.of(currentBlocking, minorCount, mechanicalMinor, maxAttempts, semanticMinors, auditVerifyDegraded);
+    }
+
+    /**
+     * 本书台词引号的主流风格是否为弯引号（2026-10-13，供 {@link DialogueRatioPolicy#checkQuoteStyleDrift}）。
+     *
+     * <p>数据源是 {@link StyleStatEntity#getUsedDialogueLines()}——历史章节的对白句（含引号）。
+     * 取不到足够样本时返回 {@code null}，检测整体跳过：新书前几章还没有历史，
+     * 此时"主流"尚未形成，报漂移只会误伤。
+     */
+    private static Boolean mainstreamCurlyQuotes(StyleStatEntity styleStat) {
+        if (styleStat == null || styleStat.getUsedDialogueLines() == null
+                || styleStat.getUsedDialogueLines().size() < 10) {
+            return null;
+        }
+        int corner = 0;
+        int curly = 0;
+        for (String line : styleStat.getUsedDialogueLines()) {
+            if (line == null) {
+                continue;
+            }
+            if (line.indexOf('「') >= 0) {
+                corner++;
+            }
+            if (line.indexOf('\u201C') >= 0) {
+                curly++;
+            }
+        }
+        int total = corner + curly;
+        if (total < 10) {
+            return null;
+        }
+        return curly * 2 > total;
     }
 
     /** 审校与修订共用的语域检查契约；只给 fantasy 附加仙侠词表，其他题材保持中性。 */
@@ -451,9 +573,9 @@ public class QualityGate {
     /**
      * 人物档案锚（代词与既定事实），注入审校 guard。
      *
-     * <p><b>为什么必须给审校</b>（2026-10-10）：正文曾把女性角色的代词连写错三章，而审校
+     * <p><b>为什么必须给审校</b>（2026-10-10）：正文把女主角色庚写成「他」连写了三章，而审校
      * 只有 MINOR 叙事问题、一条 BLOCKING 都没报——不是它没看见，而是**没有可对照的锚**：
-     * 账本里既没有"该角色是女"也没有"她报哪个班"，判"事实矛盾"无从下嘴。
+     * 账本里既没有"角色庚是女"也没有"她报另一班"，判"事实矛盾"无从下嘴。
      * 给了锚之后，代词写错、班级/亲属写错就落在审校规则既有的「事实矛盾」类里，可判 BLOCKING。
      */
     private static String characterProfileHint(ArmoryCommandEntity requestParameter) {
@@ -497,6 +619,39 @@ public class QualityGate {
                     + "）——读者会认为人物在复读同一句话。");
             issue.setSuggestion("只改这一句：换一个问法或说法，或把这次交流改成动作/神态等非对白表达；"
                     + "不要只改标点、增减语气词或换成同义句来糊过去。其余正文不要改动。");
+            issues.add(issue);
+        }
+        return issues;
+    }
+
+    /**
+     * 章内整句重复（机械）：同一句在本章内部一字不差地出现两次以上 → 每句一条 BLOCKING。
+     *
+     * <p><b>为什么进 BLOCKING 而不是 MINOR</b>：相邻整句复制是读者一眼可见的硬伤
+     * （"这段写了两遍"），修法极其机械（删掉重复的那一遍），定向修订的成本远低于留在成稿里的代价。
+     * 与跨章对白重复同一处置逻辑（{@link #dialogueRepeatIssues}）。
+     *
+     * <p>口径只认精确相等（去空白后），短句不判——近重复与短句复用走风格警示的软通道。
+     */
+    private List<ChapterIssueEntity> intraChapterRepeatIssues(ChapterContentEntity chapterContent) {
+        if (chapterContent == null || StringUtils.isBlank(chapterContent.getContent())) {
+            return List.of();
+        }
+        List<String> repeats = StyleStatService.intraChapterDuplicateSentences(chapterContent.getContent());
+        if (repeats.isEmpty()) {
+            return List.of();
+        }
+        List<ChapterIssueEntity> issues = new java.util.ArrayList<>(repeats.size());
+        for (String sentence : repeats) {
+            ChapterIssueEntity issue = new ChapterIssueEntity();
+            issue.setDimension("aesthetic");
+            issue.setSeverity("BLOCKING");
+            issue.setEvidence(sentence);
+            issue.setDescription("章内整句重复：本章这句话一字不差地出现了两次以上（" + sentence
+                    + "）——读者会立刻看出这一段被写了两遍。");
+            issue.setSuggestion("删掉重复的那一遍，只保留语义位置最合适的一处；"
+                    + "若两处都想保留，把其中一处改写成不同的表达（动作/神态/别的说法），"
+                    + "不要只改标点或增减语气词。其余正文不要改动。");
             issues.add(issue);
         }
         return issues;
@@ -611,51 +766,6 @@ public class QualityGate {
     }
 
     /**
-     * 按严重度筛选：非 BLOCKING 档（机械文风程度问题）。
-     * 这些只落质量债供观测统计，不进修订闭环、不计入 grade、不触发候选选优。
-     */
-    private static List<ChapterIssueEntity> nonBlockingOf(List<ChapterIssueEntity> issues) {
-        if (issues == null || issues.isEmpty()) {
-            return List.of();
-        }
-        return issues.stream()
-                .filter(issue -> issue != null && !"BLOCKING".equalsIgnoreCase(issue.getSeverity()))
-                .toList();
-    }
-
-    /**
-     * 本书台词引号的主流风格是否为弯引号（供 {@link DialogueRatioPolicy#checkQuoteStyleDrift}）。
-     *
-     * <p>数据源是 {@link StyleStatEntity#getUsedDialogueLines()}——历史章节的对白句（含引号）。
-     * 取不到足够样本时返回 {@code null}，检测整体跳过：新书前几章还没有历史，
-     * 此时"主流"尚未形成，报漂移只会误伤。
-     */
-    private static Boolean mainstreamCurlyQuotes(StyleStatEntity styleStat) {
-        if (styleStat == null || styleStat.getUsedDialogueLines() == null
-                || styleStat.getUsedDialogueLines().size() < 10) {
-            return null;
-        }
-        int corner = 0;
-        int curly = 0;
-        for (String line : styleStat.getUsedDialogueLines()) {
-            if (line == null) {
-                continue;
-            }
-            if (line.indexOf('「') >= 0) {
-                corner++;
-            }
-            if (line.indexOf('\u201C') >= 0) {
-                curly++;
-            }
-        }
-        int total = corner + curly;
-        if (total < 10) {
-            return null;
-        }
-        return curly * 2 > total;
-    }
-
-    /**
      * 未修复 BLOCKING 清单的**内容指纹**：供修订循环做"无进展检测"。
      *
      * <p>取描述文本（trim + 去空白）排序后拼接——多重集语义：
@@ -679,5 +789,18 @@ public class QualityGate {
                 })
                 .sorted()
                 .collect(java.util.stream.Collectors.joining("\u0001"));
+    }
+
+    /**
+     * 按严重度筛选：非 BLOCKING 档（机械文风程度问题）。
+     * 这些只落质量债供观测统计，不进修订闭环、不计入 grade、不触发候选选优。
+     */
+    private static List<ChapterIssueEntity> nonBlockingOf(List<ChapterIssueEntity> issues) {
+        if (issues == null || issues.isEmpty()) {
+            return List.of();
+        }
+        return issues.stream()
+                .filter(issue -> issue != null && !"BLOCKING".equalsIgnoreCase(issue.getSeverity()))
+                .toList();
     }
 }

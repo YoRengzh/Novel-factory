@@ -40,9 +40,8 @@ public class ChapterMemoryService {
 
     /** 近程记忆保留的摘要章数 */
     public static final int RECENT_SUMMARY_COUNT = 5;
-
     /**
-     * 上一章结尾原文的近似字数（由 500 提到 2000）：
+     * 上一章结尾原文的近似字数。2026-09-30 由 500 提到 2000（杠杆三）：
      * 写第 N 章时模型只凭"摘要 + 500 字结尾"续写，等于每次都在"按梗概重写"而非"接着原文写"——
      * 文风断裂与 AI 味的一大来源。加厚到 2000 字（约最后 3-5 个自然段）让模型接住前章的语感与节奏。
      * 代价：每章正文 prompt 增加约 1.5k 字符（前缀总额 18000 内，优先级 3 高于账本/疲劳词，不挤关键块）。
@@ -68,6 +67,10 @@ public class ChapterMemoryService {
     public static final int MAX_DEBT_ISSUES = 5;
     /** 蓝图生成的伏笔输入条数上限（硬区优先，其次软区，最后未填） */
     public static final int BLUEPRINT_FORESHADOW_LIMIT = 20;
+    /** 阶段蓝图结转任务的渲染上限：只保留"进行中"的前 N 条（已完成/放弃不进写手前缀） */
+    public static final int MAX_BLUEPRINT_CARRIED_TASKS = 6;
+    /** 结转任务进展说明（note）的截断长度：note 常是规划层审计语言，写手只需知道缺口本身 */
+    public static final int MAX_CARRIED_NOTE_CHARS = 60;
 
     /** 记忆子块间分隔符（与 PromptBudgetGuard 的块间分隔符同口径） */
     private static final String SECTION_SEPARATOR = "\n\n";
@@ -117,19 +120,56 @@ public class ChapterMemoryService {
     private static final List<String> ADVANCE_MARKERS =
             List.of("摊牌", "对质", "败露", "揭穿", "拆穿", "翻脸", "闹翻", "上门", "对峙", "戳穿", "识破");
     /** 揭示章豁免的词面匹配下限：关键事件与伏笔描述的最长公共子串达到该长度即认定指向同一伏笔
-     * （计划层常只引用伏笔核心短语而非全文，如"回收第N章埋设的某条伏笔"） */
+     * （计划层常只引用伏笔核心短语而非全文，如"回收第N章埋设的剑冢封印松动"） */
     private static final int REVEAL_MATCH_MIN_CHARS = 6;
     /** 禁泄关键词总量封顶：防百章后清单线性膨胀 */
     private static final int SECRECY_KEYWORD_LIMIT = 12;
 
+    /**
+     * 过短的关键词不得进机械禁泄扫描：这类词常是伏笔的**主体**而非**谜底**，
+     * 逐字扫描会把正常叙事判成泄露。
+     *
+     * <p><b>2026-10-01 实测反例</b>：第 1 章伏笔「主角甲听到'表哥'二字时意识一紧」的
+     * payoffHints 里混进了字面词 {@code 表哥}。但它不是谜底——谜底是"表哥是谁、与前世何关"，
+     * 而"表哥"只是**这条疑问指向的那个人**。第 4 章标题《表哥的投资经》正是该伏笔的推进章，
+     * 正文必然出现"表哥"，于是被逐字扫描判成 BLOCKING 泄露。
+     *
+     * <p>真正的谜底词（"萝卜章""集资骗局""签到系统"）都 ≥3 字，2 字词几乎必是主体词，
+     * 故以 3 字为门槛。这会让少量真·二字谜底漏过机械层——由 LLM 审校兜底（同"未登记
+     * payoffHints 的存量伏笔自动跳过"的既有口径）。
+     */
     private static final int SECRECY_MIN_KEYWORD_CHARS = 3;
 
+    /**
+     * 禁泄词的最短保密跨度：埋设后不足该章数的伏笔**不进禁泄表**（2026-10-01 新增）。
+     *
+     * <p><b>为什么需要</b>：本机制隐含假设"伏笔有一段较长的保密窗口"，但实测写作节奏是
+     * <b>下一章就兑现</b>——第 10 章埋的伏笔（老顾论斤卖书、角色乙买书钱）在第 11 章就逐字写出谜底，
+     * 跨度仅 1 章。这类伏笔的关键词几乎**必然**命中扫描，于是禁泄表持续产出 BLOCKING，
+     * 写手被迫把本该说清的信息改成含糊表述，信息传递效率反而下降。
+     *
+     * <p><b>豁免的是扫描，不是观测</b>：伏笔仍照常进伏笔账、照常参与卷末清账与揭示判定，
+     * 只是它的关键词不再进逐字扫描表。真正的问题（伏笔寿命过短）由规划层反馈治本
+     * ——见 {@code ChapterPlanPromptService.appendForeshadowSpanFeedback}。
+     * 机械扫描在这里只负责"别误拦正常兑现"，不负责评价伏笔写得好不好。
+     *
+     * <p>取值 2：跨度 1（本章埋、下章用）几乎都是正常推进，豁免；跨度 ≥2 仍进表。
+     * 若日后发现跨度 2 也普遍误拦，再上调——但**不要**为了少误拦而把真泄底一起放行。
+     */
     private static final int SECRECY_MIN_SPAN_CHAPTERS = 2;
 
     /**
      * 构建本章禁泄清单：收集"已埋未揭"且登记了 payoffHints（谜底关键词）的伏笔；
      * 本章计划关键事件匹配到回收/揭示意图的伏笔（揭示章豁免）不进清单。
-     * 未登记 payoffHints 的存量伏笔自动跳过（不误伤），纯靠 LLM 审校兜底
+     * 未登记 payoffHints 的存量伏笔自动跳过（不误伤），纯靠 LLM 审校兜底。
+     *
+     * <p><b>行数封顶 + 风险排序</b>（2026-10-12）：清单行数与关键词共用
+     * {@link #SECRECY_KEYWORD_LIMIT} 上限——候选取"与本章关键事件文本交叠最多"的线优先
+     * （写手正在写它，最可能顺手泄底），其余按埋设章号新→旧。老线百章未泄属低风险，
+     * 交由逐字扫描兜底的口径不变：被截掉的线**仍参与扫描**吗？不——扫描与清单同源，
+     * 被截掉的线连关键词一起不进扫描。这是有意的取舍：老线的谜底若真被写出，LLM 审校
+     * 兜底判"变相泄露"；换来的是清单块从 2.3k 字符（58 条在途时）回落到可控体量，
+     * 不再被前缀预算整块丢弃。
      */
     public SecrecyGuard buildSecrecyGuard(List<ChapterSummaryEntity> summaries, ChapterPlanItemEntity item) {
         if (summaries == null || summaries.isEmpty()) {
@@ -149,9 +189,13 @@ public class ChapterMemoryService {
                         .map(k -> k.replaceAll("[\\s“”\"「」『』]", ""))
                         .toList();
 
-        List<String> keywords = new ArrayList<>();
-        StringBuilder lines = new StringBuilder();
         int currentNo = item == null || item.getChapterNo() == null ? 0 : item.getChapterNo();
+        // 先收集全部候选（豁免后），再按"本章泄露风险"排序取前 K——行数与关键词共用同一份选择，
+        // 保持"扫描与清单同源同口径"（2026-10-12 前行数无上限，58 条在途伏笔时块体 2.3k 字符，
+        // 是正文前缀预算饱和（100%）被整块丢弃的常客；丢弃后写手失去保密边界）
+        record Candidate(PendingForeshadow foreshadow, List<String> hints, int affinity) {
+        }
+        List<Candidate> candidates = new ArrayList<>();
         for (PendingForeshadow p : pending) {
             ChapterSummaryEntity.SeedEntry seed = matchSeed(seedIndex, p.content());
             if (seed == null || seed.getPayoffHints() == null || seed.getPayoffHints().isEmpty()) {
@@ -172,7 +216,20 @@ public class ChapterMemoryService {
             if (isRevealChapter(keyEvents, p.content()) || isAdvanceChapter(keyEvents, p.content())) {
                 continue;
             }
-            for (String hint : hints) {
+            candidates.add(new Candidate(p, hints, keyEventAffinity(keyEvents, p.content())));
+        }
+        // 风险排序：①与本章关键事件有文本交叠的排最前——写手本章大概率要写到这条线，
+        // 最可能顺手写出谜底（第 124 章"禁泄命中 1 条"正是近线）；②其余按埋设章号新→旧——
+        // 刚埋的线活跃在当前叙事空间，老线百章未泄属低风险（旧实现按埋设顺序取最老，排序恰好相反）
+        candidates.sort(Comparator.comparingInt(Candidate::affinity).reversed()
+                .thenComparing((Candidate c) -> c.foreshadow().chapterNo(), Comparator.reverseOrder()));
+        List<Candidate> selected = candidates.size() > SECRECY_KEYWORD_LIMIT
+                ? candidates.subList(0, SECRECY_KEYWORD_LIMIT) : candidates;
+
+        List<String> keywords = new ArrayList<>();
+        StringBuilder lines = new StringBuilder();
+        for (Candidate c : selected) {
+            for (String hint : c.hints()) {
                 if (keywords.size() >= SECRECY_KEYWORD_LIMIT) {
                     break;
                 }
@@ -184,8 +241,9 @@ public class ChapterMemoryService {
                     keywords.add(hint);
                 }
             }
-            lines.append("- ").append(p.content()).append("（第").append(p.chapterNo()).append("章埋）→ 禁泄：")
-                    .append(String.join("、", hints)).append("\n");
+            lines.append("- ").append(c.foreshadow().content())
+                    .append("（第").append(c.foreshadow().chapterNo()).append("章埋）→ 禁泄：")
+                    .append(String.join("、", c.hints())).append("\n");
         }
         if (keywords.isEmpty()) {
             return NO_SECRECY;
@@ -209,6 +267,17 @@ public class ChapterMemoryService {
                         .longestCommonSubstring(event, foreshadow) >= REVEAL_MATCH_MIN_CHARS);
     }
 
+    /**
+     * 推进章判定：本章计划要"处理/了结"这条伏笔，但**还不揭示谜底**（摊牌、对质、骗局败露、上门闹事）。
+     *
+     * <p>与 {@link #isRevealChapter} 的区别：揭示章要求谜底被说出，故整条伏笔全部豁免；
+     * 推进章只说"这条线本章要动"，谜底仍未揭晓——理论上仍该禁泄谜底。
+     * 但**伏笔的主体词**（"表哥"这个人）必然出现在正文里，机械逐字扫描无法区分
+     * "主体词"与"谜底词"，所以整条豁免，改由 LLM 审校判"有没有顺手把谜底说破"。
+     *
+     * <p>2026-10-01 实测：第 4 章计划"亲戚骗局登场"，关键事件含"摊牌/对质"，
+     * 而第 1 章的"表哥"伏笔被逐字判成泄露——正是缺了这条豁免。
+     */
     private boolean isAdvanceChapter(List<String> normalizedKeyEvents, String foreshadowContent) {
         if (normalizedKeyEvents.isEmpty() || StringUtils.isBlank(foreshadowContent)) {
             return false;
@@ -218,6 +287,25 @@ public class ChapterMemoryService {
                 ADVANCE_MARKERS.stream().anyMatch(event::contains)
                         && cn.novel.yonren.domain.novel.service.armory.quality.PlanAdherencePolicy
                         .longestCommonSubstring(event, foreshadow) >= REVEAL_MATCH_MIN_CHARS);
+    }
+
+    /**
+     * 本章关键事件与伏笔描述的最长公共子串（禁泄候选用，无标记词语义）：
+     * >0 说明本章叙事大概率触到这条线——写手正在写它，谜底随手带出的风险最高。
+     * 与 {@link #isRevealChapter}/{@link #isAdvanceChapter} 同一匹配口径
+     * （{@code PlanAdherencePolicy.longestCommonSubstring}），只是不带标记词门槛。
+     */
+    private static int keyEventAffinity(List<String> normalizedKeyEvents, String foreshadowContent) {
+        if (normalizedKeyEvents.isEmpty() || StringUtils.isBlank(foreshadowContent)) {
+            return 0;
+        }
+        String foreshadow = foreshadowContent.replaceAll("[\\s“”\"「」『』]", "");
+        int best = 0;
+        for (String event : normalizedKeyEvents) {
+            best = Math.max(best, cn.novel.yonren.domain.novel.service.armory.quality.PlanAdherencePolicy
+                    .longestCommonSubstring(event, foreshadow));
+        }
+        return best;
     }
 
     /**
@@ -280,6 +368,15 @@ public class ChapterMemoryService {
                 qualityDebts, stageBlueprint, volume, recallHits, null));
     }
 
+    /**
+     * 记忆前缀的分块视图（2026-09-28）：各节独立成块交由 PromptBudgetGuard 装配，不再整块交给总额守门——
+     * 单块只能"整体截尾"，而尾部恰是最近/纠错类内容（上章结尾 → 质量债 → 偏差警示 先被牺牲），
+     * 中部三账本/唤醒却与末态红线部分重复地更早保住，牺牲顺序与价值顺序相反。
+     * 拆分后牺牲顺序由 priority 决定（刻度见 PromptBudgetGuard 类注释），渲染顺序仍为旧版拼接顺序
+     * （唯一例外：三账本/伏笔账在正文前缀中被 {@code ChapterWorker} 抽出挪至末尾，见其装配处注释）
+     *
+     * @param volume 当前章所属卷（调用方用 RollingOutlineService.volumeAt 按章号选取），可为 null
+     */
     public List<PromptBudgetGuard.Block> buildMemoryBlocks(List<ChapterSummaryEntity> summaries,
                                                            String prevChapterTail,
                                                            List<String> pendingConflicts,
@@ -320,8 +417,16 @@ public class ChapterMemoryService {
                     .append("仅当本章计划的关键事件明确包含突破/晋升时才允许变化，且变化必须有过程铺垫与代价。\n\n");
         }
         blocks.add(section("境界锁定", MEMORY_PRIORITY_REALM_LOCK, false, head));
+
+        // 时序锚：主角当前年龄与故事时间。与境界锁定同级、同样不可截断——
+        // 26-30 章批次因计划 prompt 里"当前月龄出现 0 次"，把圣经 band"21-30 章步入小学／自学高阶数学"
+        // 直接落到了十一个月大的婴儿身上（写数论证明、列乘法竖式）。年龄必须像境界一样每路显式锁定：
+        // 认知可超前、媒介不可超前。无年龄事实时**整块不加入**（不编造、也不留空标签占位）。
         String timeAnchor = ConsistencyIndexService.renderTimeAnchor(ordered);
         if (StringUtils.isNotBlank(timeAnchor)) {
+            // 时序锚 v2境界式）：年龄/时间升级为锁定值——禁止擅自增减，
+            // 唯一合法推进通道是计划声明的 timeAdvance（与【主角境界锁定】同一数据流）。
+            // 45 章时间冻结（2002 年 7 月走了 2-3 周）的根因就是旧锚只"描述推算"、无推进通道
             String locked = timeAnchor + "\n【时间锁】年龄/故事时间以上述值为准，禁止在正文中擅自增长、倒退或跳跃；"
                     + (StringUtils.isNotBlank(timeAdvance)
                             ? "本章计划允许推进至：" + timeAdvance + "（唯一合法推进通道，须有场景交代过夜/生日/学期跨越）。"
@@ -339,17 +444,25 @@ public class ChapterMemoryService {
         renderStageBlueprint(blueprintBody, stageBlueprint);
         blocks.add(section("阶段蓝图", MEMORY_PRIORITY_DIRECTION, true, blueprintBody));
 
-        // 近 N 章剧情摘要（最近章在本节内，与纠错类同级——"保最近"由分块优先级承担，而非整块截尾）
+        // 近 N 章剧情摘要。**倒序渲染（最新在前）**：本块可截断，而 PromptBudgetGuard 的截断从
+        // **尾部**切（truncate 取 substring(0, cut)）——旧→新渲染会让"最新一章的摘要"最先被切掉，
+        // 而它恰是衔接本章最要紧的一条。与伏笔账"尾部放最低分条目抗截"是同一条纪律：
+        // 块内条目按重要性降序排，截断只伤最不要紧的那端。
         StringBuilder recent = new StringBuilder("【前章剧情摘要】\n");
-        ordered.stream()
-                .skip(Math.max(0, ordered.size() - RECENT_SUMMARY_COUNT))
-                .forEach(s -> recent.append("- 第").append(s.getChapterNo()).append("章《")
-                        .append(nullToBlank(s.getTitle())).append("》：")
-                        .append(nullToBlank(s.getSummary())).append("\n"));
-        appendCharacterBeats(recent, ordered);
+        // 最新时点紧随表头：它是本章时间连续性的硬锚（只一行），排尾会在截断时先丢
         if (ordered.get(ordered.size() - 1).getTimePoint() != null) {
             recent.append("最新时点：").append(ordered.get(ordered.size() - 1).getTimePoint()).append("\n");
         }
+        List<ChapterSummaryEntity> recentWindow = ordered.subList(
+                Math.max(0, ordered.size() - RECENT_SUMMARY_COUNT), ordered.size());
+        for (int i = recentWindow.size() - 1; i >= 0; i--) {
+            ChapterSummaryEntity s = recentWindow.get(i);
+            recent.append("- 第").append(s.getChapterNo()).append("章《")
+                    .append(nullToBlank(s.getTitle())).append("》：")
+                    .append(nullToBlank(s.getSummary())).append("\n");
+        }
+        // 配角轨迹垫底：块内重要性最低，承担截断
+        appendCharacterBeats(recent, ordered);
         blocks.add(section("近章摘要", MEMORY_PRIORITY_RECENT, true, recent));
 
         // 久远记忆·相关性唤醒：向量检索注入（窗口外章节 + 账本/设定），分数降序，尾部的命中最低分
@@ -396,6 +509,17 @@ public class ChapterMemoryService {
         return blocks;
     }
 
+    /**
+     * 新书首段兜底：摘要为空时，把"设定兜底年龄锚"作为记忆首块（时序锚，priority 与境界锁定同级、
+     * 不可截断）追加进记忆块列表。
+     *
+     * <p><b>为什么需要</b>：{@link #buildMemoryBlocks} 以摘要为输入，无摘要时产不出年龄锚——
+     * 首段计划与第一章会在"零年龄约束"下生成（2026-10-03 实测：4 岁主角首段做出超龄行为，
+     * 且审校年龄判据因 guard 无锚而不触发）。年龄从故事设定保守提取，命中从严（见
+     * {@link ConsistencyIndexService#renderSettingsAgeAnchor}）。
+     *
+     * <p><b>有摘要时不追加</b>：以摘要锚为准，防止把故事起始年龄钉死在中期。
+     */
     public void prependSettingsAnchorIfNoSummaries(List<PromptBudgetGuard.Block> blocks,
                                                    List<ChapterSummaryEntity> summaries,
                                                    String worldSetting, String protagonist, String outline) {
@@ -413,7 +537,20 @@ public class ChapterMemoryService {
     private static final int MEMORY_PRIORITY_REALM_LOCK = 1;
     private static final int MEMORY_PRIORITY_RECENT = 2;
     private static final int MEMORY_PRIORITY_DIRECTION = 3;
-    private static final int MEMORY_PRIORITY_LEDGER = 4;
+    /**
+     * 三账本/伏笔账：由 4 上调至 <b>3</b>（2026-10-19 实测）。
+     *
+     * <p><b>为什么必须上调</b>：连续多章（实测 169-175）出现
+     * {@code 截断[三账本, 伏笔账]}——**整块被丢弃**，写手完全看不到角色/物品/势力状态与
+     * 在途伏笔。后果不是"文风变差"而是**事实编造**：同一资产的价格在 163 章是「三块出头」，
+     * 而三账本被截断后的 166/172 章写成了「十几美元」「十七块跌到九块」，
+     * 且错值随后被摘要登记进账本、反而成了正典。
+     *
+     * <p>三账本不是"背景补完"而是**事实基准**：与禁泄清单、阶段蓝图同属"缺了就写错"的一类。
+     * 排在"久远唤醒"(5)之后被优先牺牲，方向本身就是反的——远期回忆缺一章只损失氛围，
+     * 账本缺一章直接产出与设定矛盾的正文。
+     */
+    private static final int MEMORY_PRIORITY_LEDGER = 3;
 
     /**
      * 两个账本块的 label（公开供 ChapterWorker 按 label 抽取）：正文前缀中这两个块被挪到
@@ -423,6 +560,20 @@ public class ChapterMemoryService {
     public static final String LEDGER_BLOCK_LABEL = "三账本";
     public static final String FORESHADOW_BLOCK_LABEL = "伏笔账";
 
+    /**
+     * 久远回唤的优先级：2026-09-29 由 6 提到 4，2026-10-01 又由 4 降至 <b>5</b>。
+     *
+     * <p><b>提到 4 的理由（仍然成立）</b>：三账本只覆盖最近 {@link #ACTIVE_WINDOW} 章的活跃窗口，
+     * 超过窗口的历史除了被裁掉的近章摘要，**唯一通路就是回唤**——把它排在账本之后丢弃，
+     * 等于"预算一紧就先忘记远期、保留近期"，与长篇连载对长程一致性的需求方向相反。
+     *
+     * <p><b>为什么又降回 5（2026-10-01 实测）</b>：第 8/12/13 章连续出现
+     * 「丢弃[疲劳词红线、审校反馈、风格警示、情节模式黑名单]」——降回 5 是为了给这三块**行为指导**让位。
+     * 两者的代价不对等：行为指导块每章都被写手消费，缺一块就直接导致同类问题**每章重犯**
+     * （同批超长章与禁泄违例连续三批反复发作，高度怀疑与此相关）；
+     * 而回唤只是背景补完，缺一两章不破坏连贯。回唤仍**高于**文风指纹(7)与情节模式黑名单(8)，
+     * 并未退回最早的"最先被牺牲"位置。
+     */
     private static final int MEMORY_PRIORITY_RECALL = 5;
 
     /** 记忆节 → 装配块：内容两端空白归一（块间距由装配器分隔符统一负责）；空白节由装配器过滤 */
@@ -435,6 +586,18 @@ public class ChapterMemoryService {
     /** 单个实体档案的字符封顶（超出截断，档案是增益件不挤占记忆预算） */
     static final int DOSSIER_CHARS = 260;
 
+    /**
+     * 实体档案块（docs/enhancement-plan.md E1）：休眠超过 {@link #ACTIVE_WINDOW} 章的实体，
+     * 其早期设定与当前状态既不在近章摘要窗口内，语义检索也未必按名词精确命中——
+     * 本块把休眠实体的 首见章/上次出现/当前状态/关联关系/早期事实 组装成档案注入。
+     *
+     * <p>两种模式：{@code item} 非空（正文路径）=只注入本章计划涉及的实体
+     * （characters 精确命中 + goal/keyEvents/endingHook 文本包含 + 别名词典命中）；
+     * {@code item} 为空（规划路径）=注入最久未见的休眠实体——规划层据此安排"谁重新出场"，
+     * 避免配角蒸发。封顶 {@link #DOSSIER_LIMIT} 个，按最久未见优先。
+     * 休眠判定复用 {@code buildLedger} 的 lastChapterNo 语义（每次提及刷新）。
+     * 三账本为空或无休眠实体时返回空列表（首发/冷启动不注入）。
+     */
     public List<PromptBudgetGuard.Block> buildEntityDossierBlocks(List<ChapterSummaryEntity> summaries,
                                                                   ChapterPlanItemEntity item,
                                                                   ConsistencyIndexEntity index) {
@@ -691,6 +854,12 @@ public class ChapterMemoryService {
     /** 末态红线携带的持有物条数上限（按最近更新章号取最新） */
     private static final int EDGE_STATE_ITEM_LIMIT = 5;
 
+    /**
+     * 账本末态红线：从账本提炼"截至上一章结束时"的主角位置/境界/持有关键物，一行式硬约束。
+     * 治"正文开头承接上一幕、账本记录章末状态"的衔接类矛盾——连续 9 章 consistency 债的
+     * 复发根因是这三要素被几十行账本淹没，单独置顶让正文与修订都有明确的对齐锚点。
+     * 无任何可提炼事实时返回空串（第 1 章前）
+     */
     public String renderLedgerEdgeState(List<ChapterSummaryEntity> summaries) {
         if (summaries == null || summaries.isEmpty()) {
             return "";
@@ -862,10 +1031,10 @@ public class ChapterMemoryService {
      * 供摘要登记使用——未填（冻结）条目保留在内，剧情自然触达时仍可逐字登记核销出账；
      * 全量清单随章节数线性膨胀，此处统一封顶。
      *
-     * <p><b>为什么要给逾期项留位</b>：此前是纯"最新 N 条"，于是**埋得越早的线越看不见**。
+     * <p><b>为什么要给逾期项留位</b>（2026-10-10）：此前是纯"最新 N 条"，于是**埋得越早的线越看不见**。
      * 而摘要 prompt 要求回收条目"逐字沿用账中描述"——一条掉出清单的线，模型根本无从逐字登记，
-     * 于是它永远关不掉账、被反复要求回收。一条埋在第 0 章的老线早就掉出最新 20 条之外；
-     * 体检同时报出「清账静默兑现」高占比，两者是同一个缺口的两面。
+     * 于是它永远关不掉账、被反复要求回收。实测「2026」那条埋在第 0 章，早就掉出了最新的 20 条之外；
+     * 体检同时报出「清账静默兑现 80 条（占弃置 66%）」，两者是同一个缺口的两面。
      *
      * <p>逾期 = 已过计划回收章（{@code scheduledPayoffChapter}），与"漏收伏笔数"指标同一口径——
      * 那个指标度量的问题，这里正是它的成因之一。
@@ -901,7 +1070,7 @@ public class ChapterMemoryService {
     }
 
     /**
-     * 带 **ID 前缀**的待回收清单：供**摘要模型**消费，格式 {@code [F7-2] 伏笔描述}。
+     * 带 **ID 前缀**的待回收清单（2026-10-13）：供**摘要模型**消费，格式 {@code [F7-2] 伏笔描述}。
      *
      * <p>与 {@link #buildForeshadowContextList} 的区别：那个返回纯文本描述（供文本匹配与既有 prompt
      * 路径使用，保持零改动），本方法额外附上机械层分配的稳定 ID，让模型能**回抄 ID** 而不是复述措辞。
@@ -941,6 +1110,28 @@ public class ChapterMemoryService {
         return StringUtils.isBlank(pending.foreshadowId())
                 ? pending.content()
                 : "[" + pending.foreshadowId() + "] " + pending.content();
+    }
+
+    // ==================== 伏笔 ID 形态工具（委托唯一实现 {@link ForeshadowIds}） ====================
+    //
+    // 形态定义已抽到 quality 包的 ForeshadowIds（2026-10-14）：消费端从两处涨到三处——
+    // 本类的账本核销、ChapterSummaryService 的失配检测、ForeshadowSpanPolicy 的寿命/在途配对——
+    // 三份实现稍有差异就会让"核销成功"与"仍在途"对同一条线给出相反结论。
+    // 这里保留同名静态方法仅为兼容既有调用点，逻辑一律委托。
+
+    /** 归一化 ID 形态：{@code [F7-2]} / {@code F7-2} / {@code （F7-2）} → {@code F7-2}；非 ID 返回 null */
+    static String normalizeForeshadowIdForm(String value) {
+        return ForeshadowIds.normalize(value);
+    }
+
+    /** 提取账本行的 ID 前缀（{@code [F7-2] 描述} → {@code F7-2}）；无前缀返回 null */
+    static String extractForeshadowIdPrefix(String pendingLine) {
+        return ForeshadowIds.extractPrefix(pendingLine);
+    }
+
+    /** 剥离账本行的 ID 前缀（{@code [F7-2] 描述} → {@code 描述}）；无前缀原样返回 */
+    static String stripForeshadowIdPrefix(String pendingLine) {
+        return ForeshadowIds.stripPrefix(pendingLine);
     }
 
     /**
@@ -1060,9 +1251,9 @@ public class ChapterMemoryService {
                 summary.getForeshadowingResolved().stream()
                         .filter(StringUtils::isNotBlank)
                         .map(String::trim)
-                        // **ID 优先**：模型回抄 ID（如 F7-2）时按 ID 精确核销——
-                        // 这是解决"措辞漂移导致账永远关不掉"的正解（某条线其实早已兑现，
-                        // 却因摘要措辞与账本原文对不上而在后续章仍被反复催收）。
+                        // **ID 优先**（2026-10-13）：模型回抄 ID（如 F7-2）时按 ID 精确核销——
+                        // 这是解决"措辞漂移导致账永远关不掉"的正解（「2026」那条线第 93/95 章
+                        // 其实已兑现，却因摘要措辞与账本原文对不上而到第 100 章仍被催收）。
                         // 回退：非 ID 形态（老数据/模型仍复述文本）走既有双向 contains。
                         .forEach(resolved -> pending.removeIf(p -> isResolved(p, resolved)));
             }
@@ -1085,28 +1276,6 @@ public class ChapterMemoryService {
             }
         }
         return pending.content().contains(resolved) || resolved.contains(pending.content());
-    }
-
-    // ==================== 伏笔 ID 形态工具（委托唯一实现 {@link ForeshadowIds}） ====================
-    //
-    // 形态定义抽到 quality 包的 ForeshadowIds：消费端有三处——本类的账本核销、
-    // ChapterSummaryService 的失配检测、ForeshadowSpanPolicy 的寿命/在途配对——
-    // 三份实现稍有差异就会让"核销成功"与"仍在途"对同一条线给出相反结论。
-    // 这里保留同名静态方法仅为兼容既有调用点，逻辑一律委托。
-
-    /** 归一化 ID 形态：{@code [F7-2]} / {@code F7-2} / {@code （F7-2）} → {@code F7-2}；非 ID 返回 null */
-    static String normalizeForeshadowIdForm(String value) {
-        return ForeshadowIds.normalize(value);
-    }
-
-    /** 提取账本行的 ID 前缀（{@code [F7-2] 描述} → {@code F7-2}）；无前缀返回 null */
-    static String extractForeshadowIdPrefix(String pendingLine) {
-        return ForeshadowIds.extractPrefix(pendingLine);
-    }
-
-    /** 剥离账本行的 ID 前缀（{@code [F7-2] 描述} → {@code 描述}）；无前缀原样返回 */
-    static String stripForeshadowIdPrefix(String pendingLine) {
-        return ForeshadowIds.stripPrefix(pendingLine);
     }
 
     /**
@@ -1170,6 +1339,14 @@ public class ChapterMemoryService {
     /**
      * 渲染阶段蓝图节：滚动大纲的方向锚定（仅当前版入前缀，历史链只落盘供审计）。
      * 里程碑任务明确"方向语境"定位——规划层按剧情自然推进，严禁为凑任务注水
+     *
+     * <p><b>结转任务裁剪</b>（2026-10-12）：①已完成/放弃的结转不再渲染——它们没有可执行动作
+     * （已完成项的事实由三账本承载，放弃裁决属规划层）；②"进行中"条目封顶
+     * {@link #MAX_BLUEPRINT_CARRIED_TASKS} 条；③note 截断到 {@link #MAX_CARRIED_NOTE_CHARS}。
+     * 依据：结转任务携带的"机械结转并已注入本阶段退出条件（阶段末重验一次）：复合条件 2 个
+     * 分句中有 2 个未达成…"是给**规划/核验层**看的审计语言，对**写手**是纯噪声——第 13 阶段
+     * 实测 17 条结转 ≈1.9k 字符，是【阶段蓝图】块膨胀到 2.9k、把三账本/伏笔账挤出 18000
+     * 前缀预算的主力之一。这与 {@link #renderForeshadowing} 的"写手视图无元信息"是同一条纪律。
      */
     private void renderStageBlueprint(StringBuilder sb, StageBlueprintEntity blueprint) {
         if (blueprint == null) {
@@ -1187,16 +1364,29 @@ public class ChapterMemoryService {
             }
         }
         if (blueprint.getCarriedTasks() != null && !blueprint.getCarriedTasks().isEmpty()) {
-            sb.append("上一阶段遗留：\n");
-            for (StageBlueprintEntity.CarriedTaskEntity carried : blueprint.getCarriedTasks()) {
-                if (carried == null || StringUtils.isBlank(carried.getContent())) {
+            List<StageBlueprintEntity.CarriedTaskEntity> carried = new ArrayList<>();
+            for (StageBlueprintEntity.CarriedTaskEntity task : blueprint.getCarriedTasks()) {
+                if (task == null || StringUtils.isBlank(task.getContent())) {
                     continue;
                 }
-                sb.append("- ").append(carried.getContent()).append("（").append(nullToBlank(carried.getStatus()));
-                if (StringUtils.isNotBlank(carried.getNote())) {
-                    sb.append("，").append(carried.getNote());
+                // status 为空的老数据保守保留（无法判定已完成/放弃）
+                if (StringUtils.isNotBlank(task.getStatus()) && !"进行中".equals(task.getStatus().trim())) {
+                    continue;
                 }
-                sb.append("）\n");
+                carried.add(task);
+            }
+            if (!carried.isEmpty()) {
+                sb.append("上一阶段遗留：\n");
+                carried.stream().limit(MAX_BLUEPRINT_CARRIED_TASKS).forEach(task -> {
+                    sb.append("- ").append(task.getContent()).append("（")
+                            .append(nullToBlank(task.getStatus()).trim());
+                    if (StringUtils.isNotBlank(task.getNote())) {
+                        String note = task.getNote().trim();
+                        sb.append("，").append(note.length() > MAX_CARRIED_NOTE_CHARS
+                                ? note.substring(0, MAX_CARRIED_NOTE_CHARS) + "…" : note);
+                    }
+                    sb.append("）\n");
+                });
             }
         }
     }
@@ -1210,7 +1400,7 @@ public class ChapterMemoryService {
      * <p><b>写手视图无元信息（2026-10-04，新书 26-30 章实测）</b>：本节供**正文写手**消费，
      * 严禁携带"（第N章埋）""滞留N章""本章计划必须评估"等规划层语言——实测写手把
      * "（第15章埋）"逐字抄进正文（章节编号元信息泄露，读者立刻出戏），并把"必须评估回收"
-     * 当行动指令去回收石子线、违反物品账本的已埋状态。章号/滞留/评估指令只属于计划层视图。
+     * 当行动指令去回收弹珠线、违反物品账本的已埋状态。章号/滞留/评估指令只属于计划层视图。
      */
     private void renderForeshadowing(StringBuilder sb, List<ChapterSummaryEntity> ordered) {
         List<PendingForeshadow> pending = buildPendingForeshadowDetailed(ordered);
@@ -1405,7 +1595,7 @@ public class ChapterMemoryService {
         // 判定依据：合并时 lastChapterNo **每次提及都会刷新**（见 buildLedger），
         // 故"首现章 == 最近提及章" ⟺ 只出现过一次。
         // 动因：实测本书第 16 章物品账本活跃 26 条 1737 字中，有 14 条（888 字，占一半）只出现过一次，
-        // 且清一色是年代布景道具（英雄牌蓝黑墨水／绿豆汤／油纸包点心／洛阳轴承厂纸盒…）——
+        // 且清一色是年代布景道具（英雄牌蓝黑墨水／绿豆汤／油纸包桃酥／洛阳轴承厂纸盒…）——
         // 它们不会再被引用，保留状态没有连续性价值，却持续吃前缀预算并挤掉其他块。
         // 留名仍能提示"该名词在本书出现过"，避免后文生造出冲突的同名物。
         // 真正需要完整状态的恰是"被复用的东西状态变了"（集资合同×5、黑白电视×2），

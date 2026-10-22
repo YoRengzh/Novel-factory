@@ -6,6 +6,8 @@ import cn.novel.yonren.domain.novel.model.valobj.StoryVO;
 import cn.novel.yonren.domain.novel.model.valobj.properties.StoryProperties;
 import cn.novel.yonren.domain.novel.service.armory.plan.ChapterPlanPromptService;
 import cn.novel.yonren.domain.novel.service.armory.prompt.valobj.PromptContext;
+import cn.novel.yonren.domain.novel.service.job.GenerationJob;
+import cn.novel.yonren.types.exception.AppException;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
@@ -19,6 +21,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyMap;
@@ -122,7 +125,38 @@ class PlanBranchServiceTest {
         return storyVO;
     }
 
-    // ==================== 剥离规划专属指令 ====================
+    // ==================== 规划期取消 ====================
+
+    /** 稳健线返回前已置位取消：进取线不得再发出（省一次调用），且以取消语义抛出 */
+    @Test
+    void exploreAndPick_cancelledAfterFirstDraft_skipsSecondDraft() {
+        GenerationJob job = new GenerationJob("job-branch-1");
+        when(llmInvokeService.invoke(any(), any(), any(), anyString(), anyMap()))
+                .thenAnswer(invocation -> {
+                    job.requestCancel();
+                    return DIRECTION_A;
+                });
+
+        assertThrows(AppException.class, () -> service.exploreAndPick(
+                storyVO(), PromptContext.builder().build(), "规划 prompt", "chapter-plan",
+                new HashMap<>(), job));
+        org.mockito.Mockito.verify(llmInvokeService, org.mockito.Mockito.times(1))
+                .invoke(any(), any(), any(), anyString(), anyMap());
+    }
+
+    /** 取消已置位：一次分支调用都不发，也不触发评审 */
+    @Test
+    void exploreAndPick_alreadyCancelled_makesNoCall() {
+        GenerationJob job = new GenerationJob("job-branch-2");
+        job.requestCancel();
+
+        assertThrows(AppException.class, () -> service.exploreAndPick(
+                storyVO(), PromptContext.builder().build(), "规划 prompt", "chapter-plan",
+                new HashMap<>(), job));
+        org.mockito.Mockito.verify(llmInvokeService, org.mockito.Mockito.never())
+                .invoke(any(), any(), any(), anyString(), anyMap());
+        org.mockito.Mockito.verify(llmGateway, org.mockito.Mockito.never()).complete(any(), any(LlmCall.class));
+    }
 
     /**
      * **回归**：P1 上线后分支推演连续两个作业"进取线解析失败"。

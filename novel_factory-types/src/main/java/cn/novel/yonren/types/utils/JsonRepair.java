@@ -183,6 +183,20 @@ public final class JsonRepair {
      * 实测第 62 章 content ~8 千字触发 StackOverflowError 致整批作业暴毙
      */
     public static String extractStringField(String raw, String fieldName) {
+        return extractStringField(raw, fieldName, false);
+    }
+
+    /**
+     * 同 {@link #extractStringField}，但可取**首个非空白值**而非首个出现的值。
+     *
+     * <p><b>为什么需要它</b>：模型偶尔输出**重复键**——先写完整正文，再补一个
+     * {@code "content":""}。JSON 库对重复键取后一个值，于是"解析成功但正文为空"；
+     * 而这里按出现顺序扫，能取到前面那个真正的正文。没有这个变体时，
+     * 一条本可救回的正文会因为"空值也算取到了"而丢掉。
+     *
+     * @param skipBlank true = 跳过空白值继续找下一个同名键；false = 首个出现即返回（旧行为）
+     */
+    public static String extractStringField(String raw, String fieldName, boolean skipBlank) {
         String text = repair(raw);
         if (text == null || fieldName == null || fieldName.isBlank()) {
             return null;
@@ -195,7 +209,7 @@ public final class JsonRepair {
                 int valueStart = nextNonWhitespace(text, colon + 1);
                 if (valueStart >= 0 && text.charAt(valueStart) == '"') {
                     String value = scanStringBody(text, valueStart + 1);
-                    if (value != null) {
+                    if (value != null && (!skipBlank || !value.isBlank())) {
                         return value;
                     }
                 }

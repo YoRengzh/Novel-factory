@@ -12,9 +12,12 @@ import cn.novel.yonren.domain.novel.service.armory.llm.LlmInvokeService;
 import cn.novel.yonren.domain.novel.service.armory.memory.OutlineSegmentParser;
 import cn.novel.yonren.domain.novel.service.armory.memory.RollingOutlineService;
 import cn.novel.yonren.domain.novel.service.armory.memory.StoryMemoryService;
+import cn.novel.yonren.domain.novel.service.job.GenerationJob;
 import org.apache.commons.lang3.StringUtils;
 import cn.novel.yonren.domain.novel.service.armory.prompt.valobj.PromptContext;
 import cn.novel.yonren.types.enums.PromptScene;
+import cn.novel.yonren.types.enums.ResponseCode;
+import cn.novel.yonren.types.exception.AppException;
 import jakarta.annotation.Resource;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -81,6 +84,13 @@ public class BuildVolumeBlueprintNode extends AbstractArmorySupport {
 
         // 批次跨卷边界：最新卷终点之后逐卷生成，直至卷链覆盖批次末章
         while (rollingOutlineService.needsVolumeGeneration(volumes, batchEnd)) {
+            // 规划期协作取消/熔断检查（每轮迭代头部）：与 BuildStageBlueprintNode 同款——
+            // 卷链式生成发生在阶段蓝图与章节计划之前，缺了这里取消在整个卷蓝图期不生效
+            GenerationJob planJob = dynamicContext.getJob();
+            if (planJob != null && (planJob.isCancelRequested() || planJob.isBudgetExceeded())) {
+                throw new AppException(ResponseCode.UN_ERROR.getCode(),
+                        "作业在卷蓝图生成期已请求取消/触发熔断，停止规划（已完成章节不受影响，可 resume 续写）");
+            }
             VolumeBlueprintEntity previous = rollingOutlineService.latestVolumeOf(volumes);
             VolumeBlueprintEntity volume = generateForWindow(requestParameter, dynamicContext, previous, batchEnd);
             if (volume == null) {

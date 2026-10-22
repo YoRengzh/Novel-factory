@@ -17,7 +17,6 @@ import java.util.List;
 @AllArgsConstructor
 public class AuditResultEntity {
 
-    /** 本批审校发现的问题清单（维度/严重度/证据/建议，见 ChapterIssueEntity；BLOCKING 阻塞放行、MINOR 轻微） */
     @Builder.Default
     private List<ChapterIssueEntity> issues = new ArrayList<>();
 

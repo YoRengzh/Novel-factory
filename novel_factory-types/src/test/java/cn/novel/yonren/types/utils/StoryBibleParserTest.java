@@ -141,7 +141,7 @@ class StoryBibleParserTest {
      */
     @Test
     void parse_characterProfilesRoundTrip() {
-        String roster = "角色丙（男，用「他」）；角色己（女，用「她」）。既定事实（不得改写）：角色己报名志愿二班";
+        String roster = "角色丙（男，用「他」）；角色己（女，用「她」）。既定事实（不得改写）：角色己报名志愿另一班";
 
         StoryBibleParser.Snapshot bible = StoryBibleParser.parse(
                 "小说名称: 甲\n主人公: 角色丙\n主要人物: " + roster + "\n故事概述: 乙\n");

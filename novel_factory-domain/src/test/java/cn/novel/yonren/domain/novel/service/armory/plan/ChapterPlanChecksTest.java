@@ -1,5 +1,6 @@
 package cn.novel.yonren.domain.novel.service.armory.plan;
 
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import cn.novel.yonren.domain.novel.model.aggregate.ChapterPlanAggregate;
 import cn.novel.yonren.domain.novel.model.entity.ChapterPlanItemEntity;
 import cn.novel.yonren.domain.novel.model.entity.StageBlueprintEntity;
@@ -772,5 +773,86 @@ class ChapterPlanChecksTest {
         assertTrue(feedback.contains("逐字复制"), feedback);
         assertTrue(feedback.contains("全名"), feedback);
         assertTrue(feedback.contains("落点"), feedback);
+    }
+
+
+    // ==================== 移植自旧系统的闸门用例 ====================
+
+    /** isMonthJump 识别：显式跳月表述命中，日常推进不命中 */
+    @Test
+    void isMonthJump_recognizesExplicitMonthJumps() {
+        assertTrue(ChapterPlanChecks.isMonthJump("跳月推进约两个月"));
+        assertTrue(ChapterPlanChecks.isMonthJump("跨月推进"));
+        assertTrue(ChapterPlanChecks.isMonthJump("推进约两个半月"));
+        assertTrue(ChapterPlanChecks.isMonthJump("次年春天"));
+        assertFalse(ChapterPlanChecks.isMonthJump("推进3天"));
+        assertFalse(ChapterPlanChecks.isMonthJump("推进七天"));
+    }
+
+    /**
+     * 回归：跳月章未交代已铺开的线索 → 驳回。
+     * 实测事故：188/190 两次跳月把「苏家观察员」「Vossner 座谈」两条铺了九章的线整段吞掉。
+     */
+    @Test
+    void validateJumpDoesNotSwallowThreads_flagsSwallowedThreads() {
+        List<ChapterPlanItemEntity> plan = List.of(
+                chapterWithAdvance(186, "推进3天，至2011年7月11日傍晚", "主角甲与角色丙核对双轨出题规则"),
+                chapterWithAdvance(187, "推进5天，至2011年7月16日夜", "老教练提醒苏家旁支在食堂远远观察"),
+                chapterWithAdvance(188, "跳月推进约两个月，至2011年9月15日傍晚", "入营报到，摸底考核开始"),
+                chapterWithAdvance(189, "推进3天，至2011年9月18日深夜", "座谈座位表排出"),
+                chapterWithAdvance(190, "跳月推进约两个半月，至2011年12月中旬颁奖后归国夜", "双料金牌"));
+        List<String> threads = List.of(
+                "苏家旁支观察员将随营观察主角甲的表现",
+                "Vossner 座谈的议题与座位安排");
+
+        String issue = ChapterPlanChecks.validateJumpDoesNotSwallowThreads(plan, threads);
+
+        assertNotNull(issue, "跳月吞掉待收线索必须被驳回");
+        assertTrue(issue.contains("跳月"), issue);
+    }
+
+    /** 跳月章显式交代了线索 → 放行（不得误报） */
+    @Test
+    void validateJumpDoesNotSwallowThreads_passesWhenThreadsAddressed() {
+        List<ChapterPlanItemEntity> plan = List.of(
+                chapterWithAdvance(188, "跳月推进约两个月，至2011年9月15日",
+                        "入营报到；苏家旁支观察员完成首次记录并回报苏承远"),
+                chapterWithAdvance(189, "推进3天，至2011年9月18日",
+                        "Vossner 座谈如期举行，议题转向序列收敛"));
+
+        assertNull(ChapterPlanChecks.validateJumpDoesNotSwallowThreads(plan,
+                        List.of("苏家旁支观察员随营观察", "Vossner 座谈的议题")),
+                "线索已交代不得误报");
+    }
+
+    /** 没有跳月 → 不校验（日常推进不受此闸门约束） */
+    @Test
+    void validateJumpDoesNotSwallowThreads_skipsWhenNoMonthJump() {
+        List<ChapterPlanItemEntity> plan = List.of(
+                chapterWithAdvance(1, "推进3天", "某事发生"),
+                chapterWithAdvance(2, "推进5天", "另一事发生"));
+
+        assertNull(ChapterPlanChecks.validateJumpDoesNotSwallowThreads(plan,
+                List.of("某条待收线索")), "无跳月不校验");
+    }
+
+    /** 线索为空 → 不校验（无数据时静默放行，与其它闸门同款保守口径） */
+    @Test
+    void validateJumpDoesNotSwallowThreads_skipsWhenNoThreads() {
+        List<ChapterPlanItemEntity> plan = List.of(
+                chapterWithAdvance(1, "跳月推进两个月", "某事发生"));
+        assertNull(ChapterPlanChecks.validateJumpDoesNotSwallowThreads(plan, List.of()));
+        assertNull(ChapterPlanChecks.validateJumpDoesNotSwallowThreads(plan, null));
+    }
+
+
+    // ---- 移植用例的辅助构造 ----
+
+    private static ChapterPlanItemEntity chapterWithAdvance(int no, String advance, String... events) {
+        ChapterPlanItemEntity c = new ChapterPlanItemEntity();
+        c.setChapterNo(no);
+        c.setTimeAdvance(advance);
+        c.setKeyEvents(List.of(events));
+        return c;
     }
 }

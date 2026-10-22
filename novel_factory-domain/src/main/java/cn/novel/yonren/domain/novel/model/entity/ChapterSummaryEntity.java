@@ -48,7 +48,6 @@ public class ChapterSummaryEntity {
     private Boolean cheatMechanismUsed;
     // 时间线/伤情/术语/关键数字候选；证据不匹配者隔离，不进入一致性索引
     private List<ConsistencyFact> consistencyFacts;
-    // 证据校验未通过而被隔离的一致性事实候选：不进入一致性索引，待裁决层分流救回或人工确认
     private List<ConsistencyFact> pendingConsistencyFacts;
     // 与当前账本冲突的正文偏差描述（一致性软校验结果）
     private List<String> continuityConflicts;
@@ -201,19 +200,12 @@ public class ChapterSummaryEntity {
     @NoArgsConstructor
     @AllArgsConstructor
     public static class CharacterBeat {
-        // 配角名
         private String name;
-        // 该配角独立于主角的个人目标
         private String goal;
-        // 本章做出的主动决定
         private String decision;
-        // 该决定的直接后果
         private String consequence;
-        // 与主角（或其他角色）的关系变化
         private String relationshipChange;
-        // 下一步意图（供后续章延续其能动性）
         private String nextIntent;
-        // 支持该行为的正文连续原句（≤80 字）
         private String evidence;
     }
 
@@ -228,6 +220,24 @@ public class ChapterSummaryEntity {
         private String content;
         // 埋设处正文原文引用（≤80 字）；经子串校验，编造/漂移则为 null
         private String excerpt;
+
+        /**
+         * **伏笔稳定 ID**（2026-10-13 新增）：格式 {@code F{埋设章号}-{本章序号}}，如 {@code F7-2}。
+         *
+         * <p><b>为什么需要它</b>：全链路此前靠**文本匹配**关联伏笔——账本销账用双向 contains、
+         * 排期打标用 LCS≥4、寿命指标用 LCS≥6。这条设计漏损严重且难以计量，最典型的事故是
+         * 「2026」那条线第 5 章埋、第 93/95 章其实已兑现，却到第 100 章仍在被逐段下令补收——
+         * 根因就是摘要模型的措辞与账本原文对不上，机械层认不出"已经收了"。
+         *
+         * <p><b>为什么由机械层分配、不由模型填写</b>：ID 是记账凭据，模型的职责是语义判断
+         * （这是不是伏笔、算不算已兑现），记账归机械层。模型只需在回收时**回抄 ID**
+         * （选择题远比复述题可靠），机械层做集合差集即可，零模糊匹配。
+         *
+         * <p><b>兼容性</b>：老数据为 null——所有消费端在 ID 缺失时回退到既有文本匹配，
+         * 行为与引入前完全一致（与 {@code resolvable}/{@code scheduledPayoffChapter} 同款约定）。
+         */
+        private String foreshadowId;
+
         // 埋设时评估的主线重要度（1-5）：1=路人闲聊/氛围点缀，2=装备/支线，3=势力/地图级布局，
         // 4=重大转折/关系变化，5=主线核心/生死攸关；老数据为 null，打分时按默认档处理
         private Integer importance;
@@ -240,7 +250,7 @@ public class ChapterSummaryEntity {
          * "人物状态、氛围点缀、当时的事实陈述"分开。
          *
          * <p><b>为什么需要它</b>：实测 41 条埋设中，大量条目的本质是**状态或氛围**而非伏笔，例如
-         * "长辈评价这孩子举止反常""邻人说小孩子眼睛干净""现有存款加上借的刚够凑数"。
+         * "角色甲评价儿子'邪性'""张阿婆说小孩子眼睛干净""存折四千二加棺材本刚够八千"。
          * 它们永远处于"在途"，把「在途 31 条」这个数字注水，也让伏笔寿命指标的分母塞满永不兑现项
          * ——实测 `foreshadowSpan` 因此从 2.23 章"恶化"到 1.90 章（**指标惩罚了正确的修复**）。
          *
@@ -271,23 +281,6 @@ public class ChapterSummaryEntity {
          */
         private Integer scheduledPayoffChapter;
 
-        /**
-         * **伏笔稳定 ID**：格式 {@code F{埋设章号}-{本章序号}}，如 {@code F7-2}。
-         *
-         * <p><b>为什么需要它</b>：全链路此前靠**文本匹配**关联伏笔——账本销账用双向 contains、
-         * 排期打标用 LCS≥4、寿命指标用 LCS≥6。这条设计漏损严重且难以计量，最典型的事故是
-         * 某条线早期埋下、中段其实已兑现，却到几十章后仍在被逐段下令补收——
-         * 根因就是摘要模型的措辞与账本原文对不上，机械层认不出"已经收了"。
-         *
-         * <p><b>为什么由机械层分配、不由模型填写</b>：ID 是记账凭据，模型的职责是语义判断
-         * （这是不是伏笔、算不算已兑现），记账归机械层。模型只需在回收时**回抄 ID**
-         * （选择题远比复述题可靠），机械层做集合差集即可，零模糊匹配。
-         *
-         * <p><b>兼容性</b>：老数据为 null——所有消费端在 ID 缺失时回退到既有文本匹配，
-         * 行为与引入前完全一致（与 {@code resolvable}/{@code scheduledPayoffChapter} 同款约定）。
-         */
-        private String foreshadowId;
-
         /** 三参便利构造器（老 schema：无谜底关键词），兼容既有调用点 */
         public SeedEntry(String content, String excerpt, Integer importance) {
             this.content = content;
@@ -307,13 +300,9 @@ public class ChapterSummaryEntity {
     public static class ConsistencyFact {
         // TIMELINE / INJURY / TERM / NUMBER
         private String type;
-        // 事实主体（随 type 而定：事件/角色名/术语规范名/数字含义/「A与B」关系双方）
         private String subject;
-        // 事实值（随 type 而定：故事时间/伤情状态/正文别名或空/数值/变化后关系态）
         private String value;
-        // 作用范围/所属对象（如 INJURY 的受伤部位、NUMBER 的人物名）
         private String scope;
-        // 支持该事实的正文连续原句（≤50 字）
         private String evidence;
         // 证据档位（EvidenceMatch.Tier.code）：被隔离条目填逐出档供裁决层分流；放宽留痕档
         // （spread / anchored）入账时也填，供观测层统计

@@ -80,6 +80,9 @@ class QualityGateTest {
         MockitoAnnotations.openMocks(this);
         audit = new StoryProperties.AuditProperties();
         audit.setEnforceMinimumChapterLength(false);
+        // 篇幅坍缩底线与 1500 参考线告警是独立开关：本类多数用例用极短占位正文（"原文"）
+        // 驱动审校/修订分支，故默认关掉坍缩底线；坍缩相关用例自行打开
+        audit.setEnforceCollapseFloor(false);
         revise = new StoryProperties.ReviseProperties();
         when(storyProperties.getAudit()).thenReturn(audit);
         when(storyProperties.getRevise()).thenReturn(revise);
@@ -595,7 +598,8 @@ class QualityGateTest {
         // 有效字只数中文/字母/数字（不含标点），故这里堆够 800 才能进入坍缩判定
         StringBuilder longText = new StringBuilder("他把信纸摊开，折好，塞进信封，指腹把折痕压平。");
         for (int i = 0; i < 50; i++) {
-            longText.append("桌面上只剩习题册和一张报名表复印件，红章露出半截。");
+            // 句中加入序号：只为凑足密度判定所需篇幅，不得整句重复（否则会撞章内重复检测）
+            longText.append("桌面上只剩算术本和一张报名表复印件，红章露出半截，页角写着第").append(i).append("行批注。");
         }
         longText.append("「明天寄。」");
         chapterContent.setContent(longText.toString());
@@ -642,7 +646,8 @@ class QualityGateTest {
                 "角色乙：「嗯。」"));
         StringBuilder longText = new StringBuilder("他把信纸摊开，折好，塞进信封，指腹把折痕压平。");
         for (int i = 0; i < 50; i++) {
-            longText.append("桌面上只剩习题册和一张报名表复印件，红章露出半截。");
+            // 句中加入序号：只为凑足密度判定所需篇幅，不得整句重复（否则会撞章内重复检测）
+            longText.append("桌面上只剩算术本和一张报名表复印件，红章露出半截，页角写着第").append(i).append("行批注。");
         }
         longText.append("「既然记着，这个也记上。」");
         chapterContent.setContent(longText.toString());
@@ -669,7 +674,8 @@ class QualityGateTest {
                 "角色乙：「嗯。」"));
         StringBuilder longText = new StringBuilder("他把信纸摊开，折好，塞进信封，指腹把折痕压平。");
         for (int i = 0; i < 50; i++) {
-            longText.append("桌面上只剩习题册和一张报名表复印件，红章露出半截。");
+            // 句中加入序号：只为凑足密度判定所需篇幅，不得整句重复（否则会撞章内重复检测）
+            longText.append("桌面上只剩算术本和一张报名表复印件，红章露出半截，页角写着第").append(i).append("行批注。");
         }
         longText.append("「既然记着，这个也记上。」").append("「嗯。」");
         chapterContent.setContent(longText.toString());
@@ -711,7 +717,8 @@ class QualityGateTest {
         item.setDialogueScenes(List.of("角色乙：「嗯。」"));
         StringBuilder longText = new StringBuilder("他把信纸摊开，折好，塞进信封，指腹把折痕压平。");
         for (int i = 0; i < 50; i++) {
-            longText.append("桌面上只剩习题册和一张报名表复印件，红章露出半截。");
+            // 句中加入序号：只为凑足密度判定所需篇幅，不得整句重复（否则会撞章内重复检测）
+            longText.append("桌面上只剩算术本和一张报名表复印件，红章露出半截，页角写着第").append(i).append("行批注。");
         }
         chapterContent.setContent(longText.toString());
 
@@ -758,5 +765,85 @@ class QualityGateTest {
         assertTrue(result.unresolvedBlocking().isEmpty(),
                 "修订把对话补进正文后应机械闭环：" + result.unresolvedBlocking());
         verify(auditSampleService, never()).record(any(), anyInt(), any(), anyString(), anyList(), anyInt(), any(), anyString());
+    }
+
+
+    // ==================== 移植自旧系统的闸门用例 ====================
+
+    /** 坍缩底线的边界：800 字正好达标（不小于），799 低于底线必判（修订关闭时记债） */
+    @Test
+    void collapseFloor_boundaryIsInclusive() {
+        audit.setEnabled(false);
+        audit.setEnforceMinimumChapterLength(true);
+        // 验证坍缩底线本身，须显式打开（setUp 默认关闭以驱动其它分支）
+        audit.setEnforceCollapseFloor(true);
+        revise.setEnabled(false);
+
+        chapterContent.setContent("字".repeat(800));
+        assertTrue(qualityGate.auditAndReviseIfEnabled(command, item, chapterContent, List.of(), styleStat, 1, null)
+                .unresolvedBlocking().isEmpty(), "800 字正好达标，不得判坍缩");
+
+        chapterContent.setContent("字".repeat(799));
+        assertFalse(qualityGate.auditAndReviseIfEnabled(command, item, chapterContent, List.of(), styleStat, 1, null)
+                .unresolvedBlocking().isEmpty(), "799 字低于底线，必须判坍缩");
+    }
+
+    /**
+     * 篇幅坍缩硬底线（2026-10-13）：有效字低于 800 的提纲式废稿记 BLOCKING 并进修订闭环。
+     *
+     * <p>实测第 136 章整章重写后终稿仅 674 有效字，却因"原 BLOCKING 已修复"而放行出厂——
+     * 首审的字数告警发生在重写之前、重写后没有任何环节复测终稿。本用例钉住"坍缩即 BLOCKING"。
+     */
+    @Test
+    void collapsedChapter_isBlocking_andDrivesRevision() {
+        audit.setEnforceMinimumChapterLength(true);
+        // 坍缩底线是独立开关：本用例专门验证它，须显式打开（setUp 默认关闭以驱动其它分支）
+        audit.setEnforceCollapseFloor(true);
+        revise.setEnabled(true);
+        chapterContent.setContent("字".repeat(674));
+        when(chapterAuditService.audit(any(), any(), any(), any(), any(), any(), anyInt(), any()))
+                .thenReturn(AuditResultEntity.builder().issues(List.of()).build());
+        when(chapterReviseService.revise(any(), any(), any(), anyList(), any(), any(), any(), anyInt(), any()))
+                .thenReturn(new ChapterReviseService.ReviseResult(
+                        RevisionDecisionEntity.builder().accepted(false).reason("修订未通过采纳闸门").build(),
+                        null));
+
+        GateResult result =
+                qualityGate.auditAndReviseIfEnabled(command, item, chapterContent, List.of(), styleStat, 136, null);
+
+        assertTrue(result.unresolvedBlocking().stream()
+                        .anyMatch(i -> i.getDescription() != null && i.getDescription().contains("篇幅坍缩")),
+                "674 字必须记篇幅坍缩 BLOCKING：" + result.unresolvedBlocking());
+        verify(chapterReviseService, atLeastOnce()).revise(any(), any(), any(), anyList(), any(), any(), any(), anyInt(), any());
+    }
+
+    /**
+     * 修订稿必须重新过篇幅底线（2026-10-13，136 章事故的直接补丁）：
+     * 首审因其它 BLOCKING 触发重写，重写稿虽修好了那些问题却只有 674 字——
+     * 旧实现在此闭环放行，本用例钉住"修订稿仍坍缩 ⇒ 不闭环"。
+     */
+    @Test
+    void collapsedRevision_isNotAcceptedAsClosed() {
+        audit.setEnforceMinimumChapterLength(true);
+        revise.setMaxAttempts(1);
+        revise.setEnabled(true);
+        when(chapterAuditService.audit(any(), any(), any(), any(), any(), any(), anyInt(), any()))
+                .thenReturn(blockingResult());
+        when(chapterAuditService.verifyFixes(any(), any(), any(), anyList(), any(), any(), anyInt()))
+                .thenReturn(new ChapterAuditService.FixVerification(List.of(), false));
+        when(chapterReviseService.revise(any(), any(), any(), anyList(), any(), any(), any(), anyInt(), any()))
+                .thenReturn(new ChapterReviseService.ReviseResult(
+                        RevisionDecisionEntity.builder().accepted(true).reason("修订稿通过采纳闸门").build(),
+                        ChapterContentEntity.builder().chapterNo(1).title("修订标题")
+                                .content("字".repeat(674)).build()));
+
+        GateResult result =
+                qualityGate.auditAndReviseIfEnabled(command, item, chapterContent, List.of(), styleStat, 136, null);
+
+        assertFalse(result.unresolvedBlocking().isEmpty(),
+                "修订稿 674 字仍坍缩，不得当作闭环放行");
+        assertTrue(result.unresolvedBlocking().stream()
+                        .anyMatch(i -> i.getDescription() != null && i.getDescription().contains("篇幅坍缩")),
+                "必须带篇幅坍缩 BLOCKING：" + result.unresolvedBlocking());
     }
 }

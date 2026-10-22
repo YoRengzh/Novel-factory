@@ -6,7 +6,10 @@ import cn.novel.yonren.domain.novel.model.valobj.StoryVO;
 import cn.novel.yonren.domain.novel.model.valobj.properties.StoryProperties;
 import cn.novel.yonren.domain.novel.service.armory.plan.ChapterPlanPromptService;
 import cn.novel.yonren.domain.novel.service.armory.prompt.valobj.PromptContext;
+import cn.novel.yonren.domain.novel.service.job.GenerationJob;
 import cn.novel.yonren.types.enums.ModelScene;
+import cn.novel.yonren.types.enums.ResponseCode;
+import cn.novel.yonren.types.exception.AppException;
 import cn.novel.yonren.types.utils.JsonParseFallback;
 import com.fasterxml.jackson.core.json.JsonReadFeature;
 import com.fasterxml.jackson.databind.json.JsonMapper;
@@ -76,9 +79,23 @@ public class PlanBranchService {
      */
     public String exploreAndPick(StoryVO storyVO, PromptContext ctx, String prompt,
                                  String label, Map<String, String> usedPromptMap) {
+        return exploreAndPick(storyVO, ctx, prompt, label, usedPromptMap, null);
+    }
+
+    /**
+     * 带作业载体的重载：两版方向稿与评审共 3 次调用，之间检查取消/熔断信号。
+     *
+     * <p>为什么必须在这里检查：分支推演在 {@code ChapterPlanSegmentPlanner} 的重试循环**之前**
+     * 执行，三次调用串起来可达数分钟。{@code job} 为 null（同步调试路径）时全部检查跳过。
+     */
+    public String exploreAndPick(StoryVO storyVO, PromptContext ctx, String prompt,
+                                 String label, Map<String, String> usedPromptMap, GenerationJob job) {
         String branchPrompt = stripPlanSchema(prompt);
-        String rawA = tryInvokeDirection(storyVO, ctx, branchPrompt + VARIANT_A, label + "-branchA", usedPromptMap);
-        String rawB = tryInvokeDirection(storyVO, ctx, branchPrompt + VARIANT_B, label + "-branchB", usedPromptMap);
+        // 每稿发出前的取消检查在 tryInvokeDirection 入口统一做（评审前的检查见下方 pick 前）
+        String rawA = tryInvokeDirection(storyVO, ctx, branchPrompt + VARIANT_A, label + "-branchA",
+                usedPromptMap, job);
+        String rawB = tryInvokeDirection(storyVO, ctx, branchPrompt + VARIANT_B, label + "-branchB",
+                usedPromptMap, job);
         if (rawA == null && rawB == null) {
             return null;
         }
@@ -90,9 +107,28 @@ public class PlanBranchService {
             log.info("分支推演：进取线解析失败，采用稳健线方向");
             return rawA;
         }
+        throwIfCancelled(job, label + "-judge");
         String winner = pick(storyVO, rawA, rawB);
         log.info("分支推演：双稿在册，评审选择 {} 线方向", "B".equals(winner) ? "进取" : "稳健");
         return "B".equals(winner) ? rawB : rawA;
+    }
+
+    /**
+     * 分支推演期的取消/熔断检查：置位即抛异常，由作业层按 CANCELLED 收敛终态。
+     *
+     * <p>注意与 {@link #tryInvokeDirection} 的 catch 分工：那里吞掉的是**供应商侧**调用失败
+     * （降级语义），取消是用户意图，绝不能被当成"这一稿失败"而静默回退到另一条分支继续烧 token
+     */
+    private static void throwIfCancelled(GenerationJob job, String label) {
+        if (job == null) {
+            return;
+        }
+        if (job.isCancelRequested() || job.isBudgetExceeded()) {
+            log.info("分支推演 {} 调用前检测到{}，停止推演（已完成章节均已落盘，可 resume 续写）",
+                    label, job.isCancelRequested() ? "取消请求" : "预算熔断");
+            throw new AppException(ResponseCode.UN_ERROR.getCode(),
+                    "作业在分支推演期已请求取消/触发熔断，停止规划（已完成章节不受影响，可 resume 续写）");
+        }
     }
 
 
@@ -128,7 +164,9 @@ public class PlanBranchService {
 
     /** 单稿方向调用 + 可解析性校验（只要求 direction/structure/risks 字段可解析，多为小 JSON 不会截断）；失败返回 null */
     private String tryInvokeDirection(StoryVO storyVO, PromptContext ctx, String prompt,
-                                      String label, Map<String, String> usedPromptMap) {
+                                      String label, Map<String, String> usedPromptMap, GenerationJob job) {
+        // 分支稿自身也是规划调用：发出前检查一次，避免取消后还多打一次供应商
+        throwIfCancelled(job, label);
         try {
             String raw = llmInvokeService.invoke(storyVO, cn.novel.yonren.types.enums.PromptScene.CHAPTER_PLAN,
                     ctx, prompt, usedPromptMap);

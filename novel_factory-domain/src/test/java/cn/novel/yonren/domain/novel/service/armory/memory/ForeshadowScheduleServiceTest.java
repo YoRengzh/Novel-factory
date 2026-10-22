@@ -61,8 +61,8 @@ class ForeshadowScheduleServiceTest {
     @DisplayName("stamp：埋在排期章时回填 scheduledPayoffChapter")
     void stamp_fillsScheduledPayoffOnExactChapter() {
         ChapterSummaryEntity summary = chapter(12);
-        plant(summary, "顾老头是否收角色丙为徒");
-        List<ForeshadowScheduleEntity> schedules = scheduleWith(item("顾老头是否收角色丙为徒", 12, 30));
+        plant(summary, "角色戊是否收角色丙为徒");
+        List<ForeshadowScheduleEntity> schedules = scheduleWith(item("角色戊是否收角色丙为徒", 12, 30));
 
         ForeshadowScheduleService.StampResult r = service.stamp(summary, schedules);
 
@@ -83,8 +83,8 @@ class ForeshadowScheduleServiceTest {
     void stamp_matchesWithinWindow() {
         for (int offset : new int[]{-2, -1, 1, 2}) {
             ChapterSummaryEntity summary = chapter(12 + offset);
-            plant(summary, "顾老头是否收角色丙为徒");
-            List<ForeshadowScheduleEntity> schedules = scheduleWith(item("顾老头是否收角色丙为徒", 12, 30));
+            plant(summary, "角色戊是否收角色丙为徒");
+            List<ForeshadowScheduleEntity> schedules = scheduleWith(item("角色戊是否收角色丙为徒", 12, 30));
 
             assertEquals(1, service.stamp(summary, schedules).planted(),
                     "偏移 " + offset + " 章应仍能命中");
@@ -116,7 +116,7 @@ class ForeshadowScheduleServiceTest {
     void stamp_outsideWindowBecomesMissed() {
         ChapterSummaryEntity summary = chapter(20);
         plant(summary, "一条与排期意图完全无关的新伏笔描述");
-        List<ForeshadowScheduleEntity> schedules = scheduleWith(item("顾老头是否收角色丙为徒", 12, 30));
+        List<ForeshadowScheduleEntity> schedules = scheduleWith(item("角色戊是否收角色丙为徒", 12, 30));
 
         ForeshadowScheduleService.StampResult r = service.stamp(summary, schedules);
 
@@ -131,8 +131,8 @@ class ForeshadowScheduleServiceTest {
     @DisplayName("stamp：回收清单命中则判 PAID")
     void stamp_marksPaidWhenResolved() {
         ChapterSummaryEntity summary = chapter(30);
-        resolve(summary, "顾老头是否收角色丙为徒");
-        ForeshadowScheduleEntity.ScheduleItem planted = item("顾老头是否收角色丙为徒", 12, 30);
+        resolve(summary, "角色戊是否收角色丙为徒");
+        ForeshadowScheduleEntity.ScheduleItem planted = item("角色戊是否收角色丙为徒", 12, 30);
         planted.setStatus(ForeshadowScheduleEntity.STATUS_PLANTED);
         planted.setActualPlantChapter(12);
         List<ForeshadowScheduleEntity> schedules = scheduleWith(planted);
@@ -162,9 +162,9 @@ class ForeshadowScheduleServiceTest {
     @DisplayName("stamp：已打标的种子不重复认领")
     void stamp_doesNotReclaimStampedSeed() {
         ChapterSummaryEntity summary = chapter(12);
-        plant(summary, "顾老头是否收角色丙为徒");
+        plant(summary, "角色戊是否收角色丙为徒");
         summary.getForeshadowSeeds().get(0).setScheduledPayoffChapter(30);
-        List<ForeshadowScheduleEntity> schedules = scheduleWith(item("顾老头是否收角色丙为徒", 12, 30));
+        List<ForeshadowScheduleEntity> schedules = scheduleWith(item("角色戊是否收角色丙为徒", 12, 30));
 
         assertEquals(0, service.stamp(summary, schedules).planted(),
                 "已带 scheduledPayoffChapter 的种子不该被再次认领");

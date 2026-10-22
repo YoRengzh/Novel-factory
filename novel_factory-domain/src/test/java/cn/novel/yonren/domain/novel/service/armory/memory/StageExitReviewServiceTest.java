@@ -237,7 +237,7 @@ class StageExitReviewServiceTest {
         StageBlueprintEntity stage = quotedStage();
         stubModel("{\"results\":["
                 + "{\"condition\":\"无月与软软结为固定队伍搭档\",\"met\":true,\"chapterNo\":6,"
-                + "\"evidence\":\"江燃上线与软软在犹豫三秒后几乎同时确认绑定成功……固定搭档已生效\"},"
+                + "\"evidence\":\"角色癸上线与软软在犹豫三秒后几乎同时确认绑定成功……固定搭档已生效\"},"
                 + unmet(1) + "," + unmet(2) + "]}");
 
         List<StageBlueprintEntity.ExitConditionResult> results =
@@ -254,7 +254,7 @@ class StageExitReviewServiceTest {
         StageBlueprintEntity stage = quotedStage();
         stubModel("{\"results\":["
                 + "{\"condition\":\"无月与软软结为固定队伍搭档\",\"met\":true,\"chapterNo\":6,"
-                + "\"evidence\":\"江燃上线与软软在犹豫三秒后几乎同时确认绑定成功……两人组队进入地狱难度熔岩洞穴副本\"},"
+                + "\"evidence\":\"角色癸上线与软软在犹豫三秒后几乎同时确认绑定成功……两人组队进入地狱难度熔岩洞穴副本\"},"
                 + unmet(1) + "," + unmet(2) + "]}");
 
         List<StageBlueprintEntity.ExitConditionResult> results =
@@ -287,7 +287,7 @@ class StageExitReviewServiceTest {
         stubModel("{\"results\":["
                 + unmet(0) + ","
                 + unmet(1) + ","
-                + "{\"condition\":\"许知意线下清冷与线上撒娇的两种行为模式对比\",\"met\":true,\"chapterNo\":6,"
+                + "{\"condition\":\"角色壬线下清冷与线上撒娇的两种行为模式对比\",\"met\":true,\"chapterNo\":6,"
                 + "\"evidence\":\"编造的对比证据\"}]}");
 
         List<StageBlueprintEntity.ExitConditionResult> results =
@@ -320,7 +320,7 @@ class StageExitReviewServiceTest {
         String[] conditions = {
                 "无月与软软结为固定队伍搭档",
                 "敲键盘节奏与冷门BGM带出未解释细节",
-                "许知意线下清冷与线上撒娇的两种行为模式对比"};
+                "角色壬线下清冷与线上撒娇的两种行为模式对比"};
         return "{\"condition\":\"" + conditions[index] + "\",\"met\":false,\"note\":\"未达成\"}";
     }
 
@@ -333,7 +333,7 @@ class StageExitReviewServiceTest {
                 .exitConditions(List.of(
                         "无月与软软结为固定队伍搭档",
                         "敲键盘节奏与冷门BGM带出未解释细节",
-                        "许知意线下清冷与线上撒娇的两种行为模式对比"))
+                        "角色壬线下清冷与线上撒娇的两种行为模式对比"))
                 .build();
     }
 
@@ -346,7 +346,7 @@ class StageExitReviewServiceTest {
                         .build(),
                 ChapterSummaryEntity.builder()
                         .chapterNo(6).title("第6章")
-                        .summary("中午十二点，江燃上线与软软在犹豫三秒后几乎同时确认绑定成功，"
+                        .summary("中午十二点，角色癸上线与软软在犹豫三秒后几乎同时确认绑定成功，"
                                 + "系统提示“固定搭档已生效”。")
                         .build());
     }

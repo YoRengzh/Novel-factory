@@ -375,7 +375,7 @@ class StoryGenerateServiceTest {
                 .storyContextEntity(StoryContextEntity.builder().novel_title("甲").build())
                 .build();
         Path storyDir = Paths.get("docs/workspace/stories/20260831-story-0001");
-        String roster = "角色己（女，用「她」）。既定事实：角色己报名志愿二班";
+        String roster = "角色己（女，用「她」）。既定事实：角色己报名志愿另一班";
         when(storyRepository.resolveStoryDirectory("20260831-story-0001")).thenReturn(storyDir);
         when(storyRepository.readStoryBible(storyDir))
                 .thenReturn("小说名称: 甲\n主要人物: " + roster + "\n");

@@ -7,11 +7,8 @@ import java.util.Map;
 
 @Data
 public class StoryVO {
-    /** 全局默认值：写作语言与目标总章数，随 story-bible 落盘供续写读取 */
     private Defaults defaults;
-    /** 模型接入与路由：API 端点、统一/分场景模型、降级链 */
     private Module module;
-    /** 生成硬约束：总章数上限及其强制开关 */
     private Constraints constraints;
     /** 故事级一致性开关；由 story-bible/请求明确声明，未声明时不启用条件规则。 */
     private StoryFeatures features;
@@ -28,19 +25,14 @@ public class StoryVO {
 
     @Data
     public static class Defaults {
-        /** 写作语言（如 "中文"），落入 story-bible 供各环节与续写对齐 */
         private String language;
-        /** 目标总章数，落入 story-bible 供续写读取 */
         private Long totalCount;
     }
 
     @Data
     public static class Module {
-        /** 对话模型供应商接入：根地址、密钥与补全路径（module 级默认端点） */
         private AiApi aiApi;
-        /** 统一模型配置：unifiedModelEnabled=true 时全场景使用；分场景缺配时也回退到它 */
         private ChatModel chatModel;
-        /** 向量化专用接入（参考资料/记忆语料的 embedding），与对话模型相互独立 */
         private EmbeddingApi embeddingApi;
         // 总开关：true=所有场景统一用 chatModel；false=按 scene-models 分场景路由（未配置的场景回退 chatModel）
         private Boolean unifiedModelEnabled;
@@ -58,11 +50,10 @@ public class StoryVO {
          */
         private Map<String, List<String>> modelFallbacks;
 
+
         @Data
         public static class AiApi {
-            /** OpenAI 兼容服务根地址（补全路径另由 completionsPath 决定） */
             private String baseUrl;
-            /** 供应商 API 密钥（敏感凭据） */
             private String apiKey;
             // OpenAI 兼容补全路径（如智谱为 /chat/completions）；留空走 Spring AI 默认 /v1/chat/completions
             private String completionsPath;
@@ -72,13 +63,10 @@ public class StoryVO {
 
         @Data
         public static class EmbeddingApi {
-            /** 向量化服务根地址（OpenAI 兼容），独立于对话 ai-api 的端点 */
             private String baseUrl;
-            /** 向量化服务的 API 密钥（敏感凭据） */
             private String apiKey;
             // OpenAI 兼容 embeddings 路径（如智谱为 /embeddings）；留空走 Spring AI 默认 /v1/embeddings
             private String embeddingsPath;
-            /** embedding 模型名（换模型即换向量空间，存量向量需重新嵌入） */
             private String model;
             /**
              * 单次请求的**输入条数**上限（2026-09-22 新增）：不同供应商限制不同，
@@ -98,7 +86,6 @@ public class StoryVO {
 
         @Data
         public static class ChatModel {
-            /** 模型名（供应商模型 id，如 qwen3.8-max） */
             private String model;
             // 最大输出 token 数（单次生成上限）
             private Long maxTokens;
@@ -110,7 +97,6 @@ public class StoryVO {
             // 场景级 API 覆盖（第二模型族）：非空时优先于 module 级 ai-api；留空则沿用 module 级 base-url/api-key。
             // 仅 scene-models 条目可配（chapter-judge 指向异供应商如 DeepSeek 时使用）
             private String baseUrl;
-            /** 场景级密钥覆盖，与 baseUrl 配套；留空沿用 module 级 ai-api 的密钥 */
             private String apiKey;
             // 场景级补全路径覆盖：智谱 GLM 等供应商路径为 /chat/completions（base-url 已含 /v4），
             // 留空沿用 module 级 completionsPath

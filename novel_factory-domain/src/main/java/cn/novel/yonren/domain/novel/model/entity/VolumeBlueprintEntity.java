@@ -57,9 +57,7 @@ public class VolumeBlueprintEntity {
     @NoArgsConstructor
     @AllArgsConstructor
     public static class ArcPlan {
-        // 弧在卷内的序号（阶段蓝图 arcNo 据此归属本卷）
         private Integer arcNo;
-        // 弧的一句话目标（阶段蓝图的 arcGoal 取自此）
         private String oneLineGoal;
         /**
          * 弧预计章数（2026-09-16 #5 补齐）：让"本弧还剩几章"可以被机械回答，
@@ -76,13 +74,9 @@ public class VolumeBlueprintEntity {
     @NoArgsConstructor
     @AllArgsConstructor
     public static class ExitConditionResult {
-        // 对应的卷退出条件原文（与 volumeExitConditions 逐一对齐）
         private String condition;
-        // 是否达成（证据校验失败置 false）
         private Boolean met;
-        // 达成证据原文引用
         private String evidence;
-        // 未达成缺口说明 / 证据校验失败注记
         private String note;
     }
 }

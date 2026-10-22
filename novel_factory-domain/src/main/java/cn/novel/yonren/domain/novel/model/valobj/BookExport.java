@@ -19,7 +19,7 @@ import lombok.NoArgsConstructor;
 @AllArgsConstructor
 public class BookExport {
 
-    /** 附件文件名（已清洗非法字符并截断），如「示例书-分章TXT-65章-20261011.zip」（三种格式均为 .zip） */
+    /** 附件文件名（已清洗非法字符并截断），如「某故事-分章TXT-65章-20261011.zip」（三种格式均为 .zip） */
     private String fileName;
 
     /** 分章 ZIP 归档字节（响应正文，三种格式同形态） */

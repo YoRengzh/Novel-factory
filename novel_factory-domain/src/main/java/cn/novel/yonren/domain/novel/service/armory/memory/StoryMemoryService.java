@@ -29,6 +29,7 @@ import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
 import java.nio.charset.StandardCharsets;
 import java.util.UUID;
@@ -36,7 +37,17 @@ import java.util.concurrent.ExecutionException;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
-
+/**
+ * 故事记忆层：二期（跨章剧情记忆）与三期（人物/世界观记忆）共用一套向量通道。
+ * 每章检查点把本章摘要、最新三账本条目、story-bible 幂等写入集合 novel-memory-{故事目录名}；
+ * 五期扩展：worldId 合法时 bible 点另写 novel-world-{worldId}（仅 bible 共享，chapter/ledger 故事私有）。
+ * 写新章 / 规划批次前按相关性检索唤醒久远记忆，由 ChapterMemoryService 渲染进记忆前缀。
+ * 相关性门控（minScore）+ 字符预算（maxRecallChars）贯彻反注水原则；
+ * 检索链路失败语义（2026-09-28 细化）：**瞬时失败先做有界重试**（限流/5xx/网络 IO/向量库调用异常，
+ * 上限见 retrieve-max-attempts），重试耗尽或确定性失败（欠费/鉴权/参数/未配置）仍终止作业——
+ * llm 降级与静默跳过的质量不可接受（静默跳过会让整批在无记忆前缀下跑完，产出上看不出来）；
+ * 仅索引写入路径保持 fail-soft 告警（失败点可由下次幂等写入补齐）
+ */
 @Slf4j
 @Service
 @RequiredArgsConstructor
@@ -47,19 +58,30 @@ public class StoryMemoryService {
     public static final String KIND_BIBLE = "bible";
     public static final String KIND_VOLUME = "volume";
 
-    /** 回滚对账只动本链路管理的三类点：同集合里还有卷方向点（kind=volume），那是卷生成路径维护的 */
+    /** 回滚对账只管这三类点；同集合里的卷方向点（volume）由卷生成路径维护，不参与对账也不被删 */
     private static final Set<String> MANAGED_KINDS = Set.of(KIND_CHAPTER, KIND_LEDGER, KIND_BIBLE);
 
     private static final int EMBED_BATCH = 16;
     private static final Pattern WORLD_ID_PATTERN = Pattern.compile("^[a-zA-Z0-9][a-zA-Z0-9_-]{0,62}$");
 
-
+    /**
+     * 检索查询串安全上限（字符）：查询只需主题相关性，不需要全文保真。
+     * 无界查询（如规划查询拼入整个 storyContext）会被 embedding 供应商按参数错误拒绝
+     * （智谱 400/1210），导致该路检索静默失效（fail-soft 跳过、唤醒恒为 0）——
+     * 在网关入口统一截断兜底，任何查询构造方超长都不再致命
+     */
     private static final int MAX_QUERY_CHARS = 1200;
     /** buildPlanQuery 内 storyContext 贡献段截断（预留任务/目标段预算） */
     private static final int PLAN_QUERY_CONTEXT_CHARS = 500;
     /** buildPlanQuery 内阶段任务拼接段截断 */
     private static final int PLAN_QUERY_TASKS_CHARS = 400;
 
+    /**
+     * 单个记忆点的目标字符数（2026-09-27 切块）：此前"一章一个点、整份 bible 一个点"，
+     * 单点可达 2000~3000 字，导致唤醒预算实际绑不住（首条整条放进前缀），
+     * 且检索粒度太粗——命中一整章会把无关内容也一起拉进来。
+     * 现按句边界切成 ~600 字的点，预算才真正可绑定、召回也更精准。
+     */
     private static final int MEM_CHUNK_CHARS = 600;
 
     /** 切块标记：与"点边界"相关（只用于拼接时的自然断句），不计入语义 */
@@ -100,9 +122,17 @@ public class StoryMemoryService {
     }
 
     /**
-     * 核心索引方法：幂等写入指定章的摘要点 + 全量账本点 + 设定点到故事集合；
+     * 核心索引方法：幂等写入指定章的摘要点 + **本章动过的**账本条目 + 设定点（bible 变更时才写）到故事集合；
      * worldId 合法时 bible 点另写世界集合（novel-world-{worldId}）。
      * 失败仅告警——向量通道不可用不影响章节生成与落盘。
+     *
+     * <p>为什么账本可以只写"本章动过的条目"（而非旧实现的每章全量重写）：账本合并语义保证
+     * {@code lastChapterNo} 每次提及都刷新，所以任一时刻每个条目的点都恰好在它"最后一次被提及"
+     * 的那一章被写过；而状态只会在被提及时变化，故"本章没提及"的条目其已存点仍是最新状态。
+     * 这个增量把每章写入从"全量账本 + 设定（百章规模已 228 点）"降到"本章点 + 少数变动条目"。
+     *
+     * <p>安全性依赖两件事，都在下面显式处理：上次写入失败（脏标记）→ 本次全量补偿；
+     * bible 被作者改过（指纹不符）→ 本次补写设定点。
      */
     public void indexChapter(StoryVO.Module module, Path storyDir,
                              List<ChapterSummaryEntity> summaries, int chapterNo, String worldId) {
@@ -129,23 +159,38 @@ public class StoryMemoryService {
                 return;
             }
 
+            boolean fullRepair = indexDirty(storyDir);
+            boolean bibleChanged = fullRepair || bibleIndexOutdated(storyDir);
             List<MemText> storyTexts = new ArrayList<>(chapterTexts(storyDir, target));
-            appendLedgerTexts(storyDir, storyTexts, summaries);
-            storyTexts.addAll(bibleTexts(storyDir));
+            appendLedgerTexts(storyDir, storyTexts, summaries, fullRepair ? null : chapterNo);
+            if (bibleChanged) {
+                storyTexts.addAll(bibleTexts(storyDir));
+            }
             embedAndUpsert(module, storyTexts, collectionOf(storyDir));
 
-            if (isValidWorldId(worldId)) {
+            if (isValidWorldId(worldId) && bibleChanged) {
                 List<MemText> worldTexts = new ArrayList<>(worldBibleTexts(storyDir, worldId));
                 if (!worldTexts.isEmpty()) {
                     embedAndUpsert(module, worldTexts, worldCollectionOf(worldId));
                 }
             }
+            if (fullRepair) {
+                log.info("上次索引写入失败过，本章已按全量补偿（第 {} 章）", chapterNo);
+            }
             writeIndexMeta(module, storyDir);
         } catch (Exception e) {
-            log.warn("故事记忆索引失败，已跳过（不阻塞生成）：{}", e.getMessage());
+            markIndexDirty(module, storyDir);
+            log.warn("故事记忆索引失败，已跳过（不阻塞生成；已标记待补偿）：{}", e.getMessage());
         }
     }
 
+    /**
+     * 整集合重建：先清空集合（连旧键的残留点一起清掉），再用当前模型与当前切分方案重新索引全部章节。
+     *
+     * <p>必须清空而非就地覆盖：切块后键名变了（{@code #chapter#3} → {@code #chapter#3#0}），
+     * 只 upsert 会让新旧两套键同时存在，检索命中重复内容。
+     * 全量重建的成本是"每章一个点 + 账本 + 设定"，一次批量 embedding，相对一次章节生成可忽略。
+     */
     public void rebuild(StoryVO.Module module, Path storyDir,
                         List<ChapterSummaryEntity> summaries, String worldId) {
         if (!enabled(module, storyDir) || summaries == null || summaries.isEmpty()) {
@@ -161,7 +206,7 @@ public class StoryMemoryService {
                 }
                 texts.addAll(chapterTexts(storyDir, summary));
             }
-            appendLedgerTexts(storyDir, texts, summaries);
+            appendLedgerTexts(storyDir, texts, summaries, null);
             texts.addAll(bibleTexts(storyDir));
             embedAndUpsert(module, texts, collection);
 
@@ -183,6 +228,12 @@ public class StoryMemoryService {
         }
     }
 
+    /**
+     * 是否需要整集合重建：索引元数据缺失（老故事首次接入）或签名不符。
+     *
+     * <p>元数据缺失时分两种情况：全新建书（只有 1 章）视为正常首建，直接索引即可；
+     * 已有历史章节却无元数据，则无法确认集合里的向量出自哪个模型/哪版切分方案，保守重建。
+     */
     private boolean needsRebuild(StoryVO.Module module, Path storyDir, List<ChapterSummaryEntity> summaries) {
         String actual = indexSignature(module);
         String recorded = readIndexSignature(storyDir);
@@ -199,30 +250,88 @@ public class StoryMemoryService {
                 + "|" + (api == null || api.getDimensions() == null ? "" : api.getDimensions());
     }
 
-    private String readIndexSignature(Path storyDir) {
+    /** 索引元数据：签名 + 切分方案版本 + bible 指纹 + 脏标记；读不出按"缺失"处理（保守重建） */
+    private com.alibaba.fastjson2.JSONObject readIndexMeta(Path storyDir) {
         Path file = storyDir.resolve("memory").resolve(INDEX_META_FILE);
         if (!Files.isRegularFile(file)) {
             return null;
         }
         try {
-            return com.alibaba.fastjson2.JSON.parseObject(Files.readString(file)).getString("signature");
+            return com.alibaba.fastjson2.JSON.parseObject(Files.readString(file));
         } catch (Exception e) {
             // 元数据坏了按"缺失"处理（保守重建），不让它成为阻断点
             return null;
         }
     }
 
+    private String readIndexSignature(Path storyDir) {
+        com.alibaba.fastjson2.JSONObject meta = readIndexMeta(storyDir);
+        return meta == null ? null : meta.getString("signature");
+    }
+
+    /**
+     * 增量维护的两个前置判断（读元数据，不做任何 IO 写）：
+     *
+     * <p>bible 指纹不一致 = 作者改过设定（bible 是作者所有物，程序只在首建时写）→ 本次要补设定点；
+     * 换模型/换切分由 {@link #needsRebuild} 单独负责。
+     *
+     * <p>脏标记 = 上次索引写入失败了。增量写入只写"本章动过的条目"，若把上次失败缺失的点留在那儿，
+     * 没有任何后续动作会补它（旧实现每章全量重写，天然自愈）——所以这里必须显式记住失败，
+     * 下一次写入退化为全量补偿。
+     */
+    private boolean bibleIndexOutdated(Path storyDir) {
+        com.alibaba.fastjson2.JSONObject meta = readIndexMeta(storyDir);
+        String recorded = meta == null ? null : meta.getString("bibleHash");
+        return !Objects.equals(recorded, bibleHash(readBibleContent(storyDir)));
+    }
+
+    private boolean indexDirty(Path storyDir) {
+        com.alibaba.fastjson2.JSONObject meta = readIndexMeta(storyDir);
+        return meta != null && Boolean.TRUE.equals(meta.getBoolean("dirty"));
+    }
+
+    /** bible 内容指纹：只用于判断设定点是否要重嵌，非安全用途；算法缺失时退化为长度+hashCode（只会多写不会少写） */
+    static String bibleHash(String content) {
+        if (StringUtils.isBlank(content)) {
+            return "";
+        }
+        try {
+            byte[] digest = java.security.MessageDigest.getInstance("SHA-256")
+                    .digest(content.getBytes(StandardCharsets.UTF_8));
+            StringBuilder sb = new StringBuilder(16);
+            for (int i = 0; i < 8; i++) {
+                sb.append(String.format("%02x", digest[i]));
+            }
+            return sb.toString();
+        } catch (Exception e) {
+            return content.length() + "-" + content.hashCode();
+        }
+    }
+
     private void writeIndexMeta(StoryVO.Module module, Path storyDir) {
+        writeIndexMeta(module, storyDir, false);
+    }
+
+    /** @param dirty 上次写入是否失败：置位后下一次索引写入退化为全量补偿，成功后自动清零 */
+    private void writeIndexMeta(StoryVO.Module module, Path storyDir, boolean dirty) {
         try {
             Path dir = storyDir.resolve("memory");
             Files.createDirectories(dir);
-            String json = com.alibaba.fastjson2.JSON.toJSONString(
-                    Map.of("signature", indexSignature(module),
-                            "schemaVersion", MEMORY_SCHEMA_VERSION));
-            Files.writeString(dir.resolve(INDEX_META_FILE), json, java.nio.charset.StandardCharsets.UTF_8);
+            Map<String, Object> meta = new HashMap<>();
+            meta.put("signature", indexSignature(module));
+            meta.put("schemaVersion", MEMORY_SCHEMA_VERSION);
+            meta.put("bibleHash", bibleHash(readBibleContent(storyDir)));
+            meta.put("dirty", dirty);
+            Files.writeString(dir.resolve(INDEX_META_FILE),
+                    com.alibaba.fastjson2.JSON.toJSONString(meta), StandardCharsets.UTF_8);
         } catch (Exception e) {
             log.warn("索引元数据写入失败（下次可能触发一次多余的重建）：{}", e.getMessage());
         }
+    }
+
+    /** 索引写入失败时的留痕（best-effort）：让下一次写入知道自己缺了块，做一次全量补偿 */
+    private void markIndexDirty(StoryVO.Module module, Path storyDir) {
+        writeIndexMeta(module, storyDir, true);
     }
 
     /**
@@ -264,13 +373,7 @@ public class StoryMemoryService {
     }
 
     /**
-     * 回滚后的向量索引对账：**不整集合重嵌**，只改回滚窗口真正涉及的点。
-     *
-     * <p>回滚真正改变的只有回滚窗口内涉及的点（生产实测：105→100 章只有 26 个点——
-     * 5 个章节点消失、11 条只在后 5 章出现的账本条目要删、10 条状态被回退的账本条目要改），
-     * 其余数百个点（未受影响的章节、账本、设定）与回滚前一模一样。做法：
-     * 用 {@link VectorStore#listPoints} 把集合现状读回来（只取 id+文本，不重嵌），
-     * 与"当前应有的点集"逐 id 比对——文本不同或缺失的才 upsert，多余的才删。
+     * 回滚后的索引对账：让集合内容与回滚后的故事状态一致，**只动该动的点**。
      *
      * <p>退化路径两条，都保留旧语义：签名不符（换模型/换切分）走 {@link #rebuild} 整集合重建（含 world）；
      * 读不回现状（向量库抖动/集合结构异常）走整集合重写。world 集合多故事共享且 bible 不受回滚影响，刻意不动。
@@ -321,12 +424,31 @@ public class StoryMemoryService {
             }
             embedAndUpsert(module, toWrite, storyCollection);
             writeIndexMeta(module, storyDir);
-            long actual = vectorStore.count(storyCollection);
-            log.info("回滚索引对账完成：{}（{} 章，应有点 {}，实际 {}，改写 {}，删除 {}）",
-                    storyCollection, summaries.size(), desiredIds.size(), actual, toWrite.size(), toDelete.size());
-            if (actual != desiredIds.size()) {
-                log.warn("回滚索引对账后点数不符（应 {} 实际 {}）：集合里可能残留多余点，建议核对 {}",
-                        desiredIds.size(), actual, storyCollection);
+            // 核对口径必须与"应有"对齐：**只数本链路管理的点**（chapter/ledger/bible）。
+            // 此前用集合总数（vectorStore.count）与 desiredIds.size() 比对，而同一集合里
+            // 还有卷方向点（kind=volume，由卷生成路径维护、回滚刻意保留）——
+            // 两个口径撞在一起必然差一个卷点数，每次回滚都报一条"可能残留多余点"的误报
+            // （实测 145 章回滚：应 453 实际 454，差值 1 正是一个卷方向点）。
+            // 必现的误报会训练人忽略这条 WARN，以后真出问题也会被当成噪声。
+            //
+            // 第二个口径坑（2026-10-19 修正）：toWrite 里**多数是已存在点的改写**（id 相同、文本变了），
+            // 它们不增加点数。旧式 `managedStored - toDelete + toWrite` 把改写也当成新增，
+            // 于是每次回滚都多算「改写条数」个点（实测 165 章回滚：应 518 实际报 524，差值 6 正是改写数），
+            // 而集合实际受管点恰好 518。这里只加"原本不存在、这次才写入"的点。
+            long managedStored = stored.stream()
+                    .filter(p -> MANAGED_KINDS.contains(p.getKind()))
+                    .count();
+            long newlyInserted = toWrite.stream()
+                    .filter(t -> !storedText.containsKey(stableId(t.stableKey())))
+                    .count();
+            long actualManaged = managedStored - toDelete.size() + newlyInserted;
+            long totalInCollection = vectorStore.count(storyCollection);
+            log.info("回滚索引对账完成：{}（{} 章，应有受管点 {}，实际受管点 {}，集合总点数 {}，改写 {}，删除 {}）",
+                    storyCollection, summaries.size(), desiredIds.size(), actualManaged,
+                    totalInCollection, toWrite.size(), toDelete.size());
+            if (actualManaged != desiredIds.size()) {
+                log.warn("回滚索引对账后受管点数不符（应 {} 实际 {}）：{} 可能有漏写/漏删，建议核对",
+                        desiredIds.size(), actualManaged, storyCollection);
             }
         } catch (Exception e) {
             // 对账是"部分写入"语义：失败时集合内容可能滞后于回滚边界，必须说清，别留下"索引可用"的错觉
@@ -351,6 +473,34 @@ public class StoryMemoryService {
         }
     }
 
+    /**
+     * **删除该故事独占的记忆集合**（故事库删除操作的一部分）：{@code novel-memory-<故事目录名>}。
+     *
+     * <p><b>为什么必须删</b>：向量集合不随故事目录一起消失——它是 Qdrant 里的独立存储。
+     * 只删目录会留下孤儿集合长期占用向量库空间（每故事数百点），这是"删除故事释放内存"漏掉的一半。
+     *
+     * <p><b>为什么不删世界观集合</b>：{@code novel-world-<worldId>} 是**同世界多故事共享**的
+     * （同一世界观的设定点以 {@code worldId#storyId#bible} 为稳定键写入），整集合清空会误伤
+     * 该世界观下其它故事的召回。清本故事的 bible 点需要按 payload 过滤删点，属另一件事。
+     *
+     * <p><b>fail-soft</b>：向量库不可用（Qdrant 未启动）/清理失败只 WARN 不抛出——删目录是主操作，
+     * 向量残留不该阻断它（与 {@code CheckpointService} 回滚后重建索引的"不阻塞"约定一致）。
+     * 集合不存在时 {@code clear} 是静默 no-op，重复删除安全。
+     */
+    public void deleteStoryMemory(Path storyDir) {
+        if (storyDir == null) {
+            return;
+        }
+        String collection = collectionOf(storyDir);
+        try {
+            vectorStore.clear(collection);
+            log.info("故事记忆集合已删除：{}", collection);
+        } catch (Exception e) {
+            log.warn("故事记忆集合删除失败（已跳过，不影响目录删除；集合 {} 可能残留）：{}",
+                    collection, e.getMessage());
+        }
+    }
+
     /** 当前故事状态对应的完整点集：全部章节点 + 全量账本 + 设定（对账的"应有"侧） */
     private List<MemText> storyTexts(Path storyDir, List<ChapterSummaryEntity> summaries) {
         List<MemText> texts = new ArrayList<>();
@@ -359,7 +509,7 @@ public class StoryMemoryService {
                 texts.addAll(chapterTexts(storyDir, s));
             }
         }
-        appendLedgerTexts(storyDir, texts, summaries);
+        appendLedgerTexts(storyDir, texts, summaries, null);
         texts.addAll(bibleTexts(storyDir));
         return texts;
     }
@@ -385,7 +535,14 @@ public class StoryMemoryService {
         return retrieveWithOutcome(module, storyDir, queryText, minChapterNo, worldId).hits();
     }
 
-
+    /**
+     * 带**降级状态**的检索重载（2026-09-29）。
+     *
+     * <p>存在的理由：降级与"真无命中"返回的命中表**完全一样**（都是空表），调用方据此区分不了，
+     * 于是"本批有几章是在无记忆前缀下裸跑的"只能靠人翻日志。调用方（ChapterWorker）把 degraded
+     * 记到本章摘要的机械标记上，由体检汇总成指标——质量债是回灌给写手的"你上章犯的错"，
+     * 基础设施抖动塞进去等于给模型下错误指令，故不走那条通道。
+     */
     public RecallOutcome retrieveWithOutcome(StoryVO.Module module, Path storyDir,
                                              String queryText, Integer minChapterNo, String worldId) {
         return retrieveWithOutcome(module, storyDir, queryText, minChapterNo, worldId, null);
@@ -404,6 +561,17 @@ public class StoryMemoryService {
         }
     }
 
+    /**
+     * 检索（可指定 onlyKind 只召回某类记忆点：null=全部，VOLUME=卷方向）。
+     * 其余语义与五参重载一致。
+     *
+     * <p>失败语义（2026-09-29 统一为"降级留痕"）：瞬时失败先做有界重试（判定见
+     * {@link #isRetryableRetrievalFailure}），
+     * 重试耗尽或确定性失败（欠费/鉴权/参数/未配置）时**降级为空召回并 WARN 留痕**，不终止作业——
+     * 记忆唤醒是增强件；主链路 LLM 调用的欠费/鉴权失败会自行暴露，检索层无需代劳终止。
+     * 降级可 grep RECALL_DEGRADED 归因，与"降级必留痕"的既有口径一致（非静默）。
+     * 作业取消（线程中断）不降级也不重试，立即上抛交由上层收敛
+     */
     public RecallOutcome retrieveWithOutcome(StoryVO.Module module, Path storyDir,
                                              String queryText, Integer minChapterNo, String worldId, String onlyKind) {
         if (!enabled(module, storyDir) || StringUtils.isBlank(queryText)) {
@@ -685,11 +853,32 @@ public class StoryMemoryService {
         return out;
     }
 
-    private void appendLedgerTexts(Path storyDir, List<MemText> texts, List<ChapterSummaryEntity> summaries) {
+    /**
+     * @param onlyChapterNo 非空时只写 {@code lastChapterNo == 该章} 的条目（每章增量维护：本章新出现或
+     *                      状态变更的条目必在其中）；null = 全量（整集合重建、回滚对账、失败后的补偿写入）
+     */
+    private void appendLedgerTexts(Path storyDir, List<MemText> texts, List<ChapterSummaryEntity> summaries,
+                                   Integer onlyChapterNo) {
         String storyId = storyDir.getFileName().toString();
-        appendLedgerKind(storyId, texts, "角色", chapterMemoryService.buildCharacterLedger(summaries));
-        appendLedgerKind(storyId, texts, "物品", chapterMemoryService.buildLedger(summaries, ChapterSummaryEntity::getItemStates));
-        appendLedgerKind(storyId, texts, "势力", chapterMemoryService.buildLedger(summaries, ChapterSummaryEntity::getFactionStates));
+        appendLedgerKind(storyId, texts, "角色",
+                touchedOnly(chapterMemoryService.buildCharacterLedger(summaries), onlyChapterNo));
+        appendLedgerKind(storyId, texts, "物品",
+                touchedOnly(chapterMemoryService.buildLedger(summaries, ChapterSummaryEntity::getItemStates), onlyChapterNo));
+        appendLedgerKind(storyId, texts, "势力",
+                touchedOnly(chapterMemoryService.buildLedger(summaries, ChapterSummaryEntity::getFactionStates), onlyChapterNo));
+    }
+
+    /**
+     * "本章提及过的条目"过滤：{@code lastChapterNo} 每次提及都刷新，因此"状态在本章变过"必然是它的子集；
+     * 多写的那部分（只提及、未变化）文本与已存点相同，纯粹是省事的余量，不会造成内容偏差。
+     */
+    private static List<LedgerEntry> touchedOnly(List<LedgerEntry> entries, Integer onlyChapterNo) {
+        if (onlyChapterNo == null || entries == null || entries.isEmpty()) {
+            return entries;
+        }
+        return entries.stream()
+                .filter(e -> onlyChapterNo.equals(e.getLastChapterNo()))
+                .toList();
     }
 
     private void appendLedgerKind(String storyId, List<MemText> texts, String ledgerType, List<LedgerEntry> entries) {
@@ -761,27 +950,6 @@ public class StoryMemoryService {
 
     private String collectionOf(Path storyDir) {
         return properties.getCollectionPrefix() + "-" + storyDir.getFileName();
-    }
-
-    /**
-     * 删除该故事独占的记忆向量集合（故事库删除操作的配套清理）。
-     *
-     * <p>fail-soft：只 WARN 不抛——集合清理失败不应让目录删除结果变红，
-     * 残留集合可由后续同目录名重建时按稳定 ID 覆盖，或人工清理。
-     * 共享的世界观集合（worldCollectionOf）**不动**——同世界观下可能有其它故事在引用
-     */
-    public void deleteStoryMemory(Path storyDir) {
-        if (storyDir == null) {
-            return;
-        }
-        String collection = collectionOf(storyDir);
-        try {
-            vectorStore.clear(collection);
-            log.info("故事记忆集合已删除：{}", collection);
-        } catch (Exception e) {
-            log.warn("故事记忆集合删除失败（已跳过，不影响目录删除；集合 {} 可能残留）：{}",
-                    collection, e.getMessage());
-        }
     }
 
     private String worldCollectionOf(String worldId) {

@@ -48,6 +48,13 @@ public class FeatureToggles {
     /** 故事记忆向量检索（每章 embedding 调用 + 检索） */
     public static final String STORY_MEMORY = "storyMemory";
 
+    /** 资料分组·写作技法（AI 味/情绪/对话/句式/语域）：正文与修订的主力资料 */
+    public static final String REFERENCE_GROUP_TECHNIQUE = "referenceGroupTechnique";
+    /** 资料分组·结构模板（情节结构/大纲/节奏/钩子）：计划与蓝图场景的主力资料 */
+    public static final String REFERENCE_GROUP_STRUCTURE = "referenceGroupStructure";
+    /** 资料分组·题材设定（世界观/人物/种子原子/题材打法）：设定与蓝图场景的主力资料 */
+    public static final String REFERENCE_GROUP_GENRE = "referenceGroupGenre";
+
     private final StoryProperties storyProperties;
     private final ReferenceSelectorProperties referenceSelectorProperties;
     private final StoryMemoryProperties storyMemoryProperties;
@@ -71,7 +78,13 @@ public class FeatureToggles {
         REFERENCE_SELECTOR(FeatureToggles.REFERENCE_SELECTOR, "动态资料注入",
                 "按场景挑选写作技法资料注入 prompt；关掉则完全不带参考资料", "每章 1 次小调用"),
         STORY_MEMORY(FeatureToggles.STORY_MEMORY, "跨章记忆检索",
-                "从历史章节召回相关情节防失忆；关掉则只靠章节摘要前缀", "每章 1 次 embedding + 检索");
+                "从历史章节召回相关情节防失忆；关掉则只靠章节摘要前缀", "每章 1 次 embedding + 检索"),
+        REFERENCE_GROUP_TECHNIQUE(FeatureToggles.REFERENCE_GROUP_TECHNIQUE, "资料组 · 写作技法",
+                "AI 味判据、情绪外显、句式节奏、语域纪律等——写正文与修订时的主力资料", "不增加调用，只缩小选择范围"),
+        REFERENCE_GROUP_STRUCTURE(FeatureToggles.REFERENCE_GROUP_STRUCTURE, "资料组 · 结构模板",
+                "情节结构、大纲与章节模板、开篇设计、节奏控制——做计划与蓝图时的主力资料", "不增加调用，只缩小选择范围"),
+        REFERENCE_GROUP_GENRE(FeatureToggles.REFERENCE_GROUP_GENRE, "资料组 · 题材设定",
+                "世界观、人物与反派设计、题材打法、设定种子原子——做设定集与蓝图时的主力资料", "不增加调用，只缩小选择范围");
 
         private final String key;
         private final String label;
@@ -184,6 +197,8 @@ public class FeatureToggles {
             case QUALITY_REVIEW -> qualityReviewProperties.isEnabled();
             case REFERENCE_SELECTOR -> referenceSelectorProperties.isEnabled();
             case STORY_MEMORY -> storyMemoryProperties.isEnabled();
+            // 资料分组开关没有 yml 静态配置：静态值恒为开（保持旧行为），只能由运行时覆盖关闭
+            case REFERENCE_GROUP_TECHNIQUE, REFERENCE_GROUP_STRUCTURE, REFERENCE_GROUP_GENRE -> true;
             default -> true;
         };
     }
