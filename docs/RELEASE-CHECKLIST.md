@@ -129,3 +129,30 @@
 ## v0.2.0（规划中，届时补小节）
 
 预期增量：内置向量库成为默认（免 Qdrant 进程）；本清单步骤 3 的启动检查项去掉 Qdrant 前提；进阶档自验改为"无需任何额外进程"。注意：embedding 端点依赖不消失（同一把 Key 即可，详见 README）。
+
+---
+
+## 应用内更新（桌面版，v1.2.0+）
+
+每次发版必须按顺序做完三件事，缺任何一环「检查更新」都会退回「打开下载页」：
+
+1. **先重建后端**：`bash tools/build-release.sh` → `bash tools/package-native.sh`
+   （页面由 sidecar 的 jar 提供；只改前端不重打 jar，装出来的还是旧 UI）
+2. **再打安装包**：`cd electron && npm run dist`
+   产出 `StartDrafts-Setup-<版本>.exe` **以及 `latest.yml`**（sha512/size/文件名都在里面）
+3. **上传 Release 时 exe 与 latest.yml 一起传**，不要改名。electron-updater 按
+   `releases/download/<tag>/latest.yml` 读取版本与校验和；缺它必然 404
+
+验收：
+
+- [ ] `dist/electron/latest.yml` 存在，`path:` 与安装包文件名逐字一致，`sha512`/`size` 有值
+- [ ] Release 资产同时包含 exe 与 latest.yml
+- [ ] 装低版本 → 通知面板出现「下载更新」→ 有进度 → 变「安装并重启」→ 重启后版本已更新
+- [ ] 升级后无残留 `java.exe`，也不报"端口 8080 被占用"
+
+两条硬限制：
+
+- **基线**：第一个带 updater 的版本只能手动安装一次；应用内更新从它**之后**的版本开始生效
+  （更早的安装包没有 preload/updater 代码，只能走「打开下载页」）。
+- **版本号**：`electron/package.json` 与 `application.yml` 的 `app.version` 必须一起递增
+  （`build-release.sh` 会校验），且必须大于用户当前安装的版本，否则 `isUpdateAvailable=false`。

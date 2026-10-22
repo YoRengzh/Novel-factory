@@ -69,9 +69,24 @@ public class SpringAiEmbeddingGateway implements EmbeddingGateway {
         List<float[]> vectors = new ArrayList<>(capped.size());
         for (int start = 0; start < capped.size(); start += batchSize) {
             int end = Math.min(capped.size(), start + batchSize);
-            EmbeddingResponse response = callWithRetry(model, module, capped.subList(start, end));
-            for (Embedding embedding : response.getResults()) {
-                vectors.add(embedding.getOutput());
+            List<String> batch = capped.subList(start, end);
+            EmbeddingResponse response = callWithRetry(model, module, batch);
+            List<Embedding> results = response == null ? null : response.getResults();
+            // 条数必须与请求一一对应：少一条会让其后所有文本错配到别人的向量上
+            // （调用方按 index 配对，长度差看不出来，只表现为“记忆召回莫名其妙”）
+            if (results == null || results.size() != batch.size()) {
+                throw new IllegalStateException("embedding 返回条数与请求不一致：请求 " + batch.size()
+                        + " 条，返回 " + (results == null ? 0 : results.size())
+                        + " 条（批量起点 " + start + "，模型 " + module.getEmbeddingApi().getModel()
+                        + "）。为防止向量错位，已终止本次向量化");
+            }
+            for (Embedding embedding : results) {
+                float[] vector = embedding == null ? null : embedding.getOutput();
+                if (vector == null || vector.length == 0) {
+                    throw new IllegalStateException("embedding 返回空向量（批量起点 " + start
+                            + "，模型 " + module.getEmbeddingApi().getModel() + "）");
+                }
+                vectors.add(vector);
             }
         }
         return vectors;

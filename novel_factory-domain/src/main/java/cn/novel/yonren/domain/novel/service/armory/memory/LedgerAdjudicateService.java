@@ -99,30 +99,40 @@ public class LedgerAdjudicateService {
 
         for (Item item : batch) {
             Verdict verdict = verdicts.get(item.index());
-            String quote = verdict == null || !Boolean.TRUE.equals(verdict.getSupported())
-                    ? null
-                    : EvidenceMatch.truncate(verdict.getQuote(), QUOTE_MAX_LENGTH);
-            if (verdict != null && Boolean.TRUE.equals(verdict.getSupported())) {
-                EvidenceMatch.Tier tier = EvidenceMatch.classify(quote, content);
-                if (tier.isAccepted()) {
-                    if (item.state() != null) {
-                        // 先取来源账本再消费标记：顺序反了会让所有条目都落到角色账本（已由测试守住）
-                        ChapterSummaryEntity.AccountKind kind = accountOf(item.state());
-                        item.state().setEvidence(quote);
-                        item.state().setEvidenceTier(ADJUDICATED_TIER);
-                        item.state().setSourceAccount(null);
-                        rescuedStates.computeIfAbsent(kind, k -> new ArrayList<>()).add(item.state());
-                    } else {
-                        item.fact().setEvidence(quote);
-                        item.fact().setEvidenceTier(ADJUDICATED_TIER);
-                        rescuedFacts.add(item.fact());
+            boolean supported = verdict != null && Boolean.TRUE.equals(verdict.getSupported());
+            String quote = supported
+                    ? EvidenceMatch.truncate(verdict.getQuote(), QUOTE_MAX_LENGTH)
+                    : null;
+            if (supported) {
+                // 空白引文 = 没有证据，必须按不支持处理。EvidenceMatch.classify 对空白的契约是
+                // “此处不判定”（返回 EXACT，由调用方保证先校验非空）；这里若不拦，
+                // 模型只要回 {"index":1,"supported":true} 而漏掉 quote，编造事实就会被救回正账本
+                if (StringUtils.isBlank(quote)) {
+                    smuggled++;
+                    log.warn("账本裁决声称有据但未给出可核对引文（按不支持处理），chapterNo: {}, 条目: {}",
+                            summary.getChapterNo(), item.name());
+                } else {
+                    EvidenceMatch.Tier tier = EvidenceMatch.classify(quote, content);
+                    if (tier.isAccepted()) {
+                        if (item.state() != null) {
+                            // 先取来源账本再消费标记：顺序反了会让所有条目都落到角色账本（已由测试守住）
+                            ChapterSummaryEntity.AccountKind kind = accountOf(item.state());
+                            item.state().setEvidence(quote);
+                            item.state().setEvidenceTier(ADJUDICATED_TIER);
+                            item.state().setSourceAccount(null);
+                            rescuedStates.computeIfAbsent(kind, k -> new ArrayList<>()).add(item.state());
+                        } else {
+                            item.fact().setEvidence(quote);
+                            item.fact().setEvidenceTier(ADJUDICATED_TIER);
+                            rescuedFacts.add(item.fact());
+                        }
+                        continue;
                     }
-                    continue;
+                    // 模型声称有据但引文过不了机械校验：这是「裁决层想放水后被门挡住」的信号，必须告警
+                    smuggled++;
+                    log.warn("账本裁决引文未通过机械校验（按不支持处理），chapterNo: {}, 条目: {}",
+                            summary.getChapterNo(), item.name());
                 }
-                // 模型声称有据但引文过不了机械校验：这是「裁决层想放水后被门挡住」的信号，必须告警
-                smuggled++;
-                log.warn("账本裁决引文未通过机械校验（按不支持处理），chapterNo: {}, 条目: {}",
-                        summary.getChapterNo(), item.name());
             }
             if (item.state() != null) {
                 remainStates.add(item.state());

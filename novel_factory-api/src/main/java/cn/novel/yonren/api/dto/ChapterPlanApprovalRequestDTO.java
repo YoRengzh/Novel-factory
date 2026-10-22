@@ -46,5 +46,20 @@ public class ChapterPlanApprovalRequestDTO {
         private String endingHook;
         /** normal / transition / climax / finale；容错解析，未识别值按 normal（不因大小写或拼写中断裁决） */
         private String chapterType;
+
+        // ---- 以下 4 项不在裁决卡上暴露，但必须原样带回 ----
+        // 后端把“非空 chapters”整体视为修改稿并替换原计划；少传即等于把它们清成 null：
+        // 对话承载声明丢失 → 对白坍缩检查降档；时间推进丢失 → 正文失去时序锚；
+        // 悬念档位/主线推进丢失 → 摘要与批末体检的相关指标失真。
+        // 前端从 pendingChapterPlan 的同一章原样回传，不做任何编辑
+
+        /** 本章对话承载声明（逐字取自 keyEvents 的子集） */
+        private List<String> dialogueScenes;
+        /** 本章时间推进声明（时序锚的唯一合法推进通道） */
+        private String timeAdvance;
+        /** 本章结束时核心悬念所处档位（逐字取自阶段蓝图档位表） */
+        private String suspenseBeat;
+        /** 本章落地的主线推进（逐字取自阶段蓝图章级推进） */
+        private String mainLineAdvance;
     }
 }

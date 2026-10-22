@@ -101,6 +101,14 @@ public class StoryJobService {
      * 也让作业状态能读出"这是第几批"，日志与归因不必再去数批次区间。
      */
     public GenerationJob submit(ArmoryCommandEntity command, int batchRound) {
+        // 同一故事的并发作业守卫：审批门挂起时线程已归还，此时再提交一个续写作业，
+        // 两个作业各持一份陈旧 DynamicContext，后完成者会用整表覆盖正文/摘要（静默丢章，
+        // 被覆盖那批的 token 全白烧）。编辑/回滚/删除/打点端点都有同款守卫，唯独提交入口此前没有
+        if (StringUtils.isNotBlank(command.getResumeStoryDir())
+                && jobRegistry.isActiveForStory(command.getResumeStoryDir())) {
+            throw new AppException(ResponseCode.ILLEGAL_PARAMETER.getCode(),
+                    "该故事已有运行中的作业，请等待完成或取消后再提交：" + command.getResumeStoryDir());
+        }
         GenerationJob job = new GenerationJob("job-" + JOB_ID_WORKER.nextId());
         job.setBatchRound(Math.max(1, batchRound));
         // 续写作业提交即知故事目录，先落内存保证崩溃可见性最好

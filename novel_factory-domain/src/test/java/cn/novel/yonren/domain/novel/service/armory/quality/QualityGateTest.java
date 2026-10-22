@@ -748,7 +748,9 @@ class QualityGateTest {
 
         StringBuilder repaired = new StringBuilder();
         for (int i = 0; i < 40; i++) {
-            repaired.append("桌面上只剩习题册和一张报名表复印件，红章露出半截。");
+            // 句中加序号：只为凑篇幅，避免撞“章内整句重复”（修订重扫现在也会跑这项检查）
+            repaired.append("桌面上只剩习题册和一张报名表复印件，红章露出半截，页角写着第")
+                    .append(i).append("行批注。");
         }
         for (int i = 0; i < 20; i++) {
             repaired.append("「嗯。」「知道。」「先放着吧。」");
@@ -825,6 +827,8 @@ class QualityGateTest {
     @Test
     void collapsedRevision_isNotAcceptedAsClosed() {
         audit.setEnforceMinimumChapterLength(true);
+        // 复测的是“坍缩硬底线”，必须按它自己的开关（与 1500 参考线告警是两个独立开关）
+        audit.setEnforceCollapseFloor(true);
         revise.setMaxAttempts(1);
         revise.setEnabled(true);
         when(chapterAuditService.audit(any(), any(), any(), any(), any(), any(), anyInt(), any()))

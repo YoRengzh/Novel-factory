@@ -103,6 +103,11 @@ final class StoryCommandAssembler {
             item.setKeyEvents(chapter.getKeyEvents());
             item.setEndingHook(chapter.getEndingHook());
             item.setChapterType(ChapterTypeVO.of(chapter.getChapterType()));
+            // 裁决卡未展示、但下游消费的字段：原样透传，否则人工改一个字就会把它们清空
+            item.setDialogueScenes(chapter.getDialogueScenes());
+            item.setTimeAdvance(chapter.getTimeAdvance());
+            item.setSuspenseBeat(chapter.getSuspenseBeat());
+            item.setMainLineAdvance(chapter.getMainLineAdvance());
             items.add(item);
         }
         return ChapterPlanAggregate.builder()

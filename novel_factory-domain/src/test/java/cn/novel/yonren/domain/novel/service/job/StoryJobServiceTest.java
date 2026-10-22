@@ -103,6 +103,23 @@ class StoryJobServiceTest {
     }
 
     @Test
+    void submit_rejectsSecondJobForSameStory() throws Exception {
+        // 同一故事并发两个作业：后完成者会用陈旧上下文整表覆盖正文/摘要。
+        // 审批门挂起时线程已归还，这条守卫是唯一能挡住“另一个续写作业插进来”的地方
+        when(storyGenerateService.generate(any(), any(), any())).thenAnswer(inv -> {
+            Thread.sleep(300);   // 让第一个作业在提交第二个时仍在 RUNNING
+            return StoryGenerateResultAggregate.builder().storyDirName("20260903-story-0001").build();
+        });
+        ArmoryCommandEntity command = ArmoryCommandEntity.builder()
+                .resumeStoryDir("20260903-story-0001").build();
+
+        GenerationJob first = storyJobService.submit(command);
+
+        assertThrows(AppException.class, () -> storyJobService.submit(command));
+        awaitTerminal(first);
+    }
+
+    @Test
     void completedBatch_runPlanSaysContinue_submitsNextBatchWithIncrementedRound() throws Exception {
         // 自动续批（阶段六）：本批正常完成 → RunPlan 判定继续 → 再投一个子作业（批序号递增），
         // 直到判定停止为止。这是"无人值守"的核心回路，必须端到端跑通而不是只测决策函数

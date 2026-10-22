@@ -406,11 +406,18 @@ public class QualityGate {
                 // 对白轮次坍缩重算（2026-10-11）：声明了对话场景的章它是 BLOCKING——修订真的把
                 // 对话补进正文即机械闭环；未声明的章是 MINOR。降档项以最终稿重算，口径与上面一致
                 rescan.addAll(dialogueDensityCollapse(item, chapterContent, summaries));
+                // 重复类硬伤重算：整章重写是“以现有 BLOCKING 为靶点”的，可能**新引入**重复台词/
+                // 重复整句；verifyFixes 只验证旧问题是否修好，不重算这两项的话，
+                // 带重复硬伤的终稿会以“newBlocking 为空”闭环放行
+                rescan.addAll(dialogueRepeatIssues(chapterContent, styleStat));
+                rescan.addAll(intraChapterRepeatIssues(chapterContent));
                 // 篇幅坍缩重算（2026-10-13，本次修复的核心）：首审的字数告警发生在重写**之前**，
                 // 而整章重写是"以现有 BLOCKING 为靶点"的——它可能把章写得更短却修好了那几条，
                 // 于是废稿照样闭环。实测第 136 章：首审 87 字 → 整章重写 → 终稿 674 字
                 // 却因"原 BLOCKING 已修复"而放行。修订稿必须重新过篇幅硬底线，才算真闭环。
-                if (storyProperties.getAudit().isEnforceMinimumChapterLength()
+                // 开关必须与首审（见上方 800 字硬底线处）同源：1500 参考线告警与 800 硬底线
+                // 是两个独立开关，共用会让“关掉告警”静默连返工一起关掉
+                if (storyProperties.getAudit().isEnforceCollapseFloor()
                         && ChapterLengthPolicy.isCollapsed(chapterContent.getContent())) {
                     int effective = ChapterLengthPolicy.effectiveCharacterCount(chapterContent.getContent());
                     ChapterIssueEntity stillCollapsed = new ChapterIssueEntity();

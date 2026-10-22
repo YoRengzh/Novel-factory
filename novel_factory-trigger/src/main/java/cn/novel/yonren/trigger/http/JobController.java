@@ -8,6 +8,7 @@ import cn.novel.yonren.domain.novel.model.valobj.properties.StoryProperties;
 import cn.novel.yonren.domain.novel.service.job.GenerationJob;
 import cn.novel.yonren.domain.novel.service.job.StoryJobService;
 import cn.novel.yonren.trigger.http.StoryCommandAssembler;
+import cn.novel.yonren.types.enums.ResponseCode;
 import cn.novel.yonren.types.exception.AppException;
 import jakarta.annotation.Resource;
 import lombok.extern.slf4j.Slf4j;
@@ -48,7 +49,10 @@ public class JobController {
         try {
             job = storyJobService.submit(command);
         } catch (AppException e) {
-            // 队列满：作业已置 FAILED，透出 503 提示稍后重试
+            // 同一故事已有运行中作业（入参类冲突）→ 409；队列满 → 503 提示稍后重试
+            if (ResponseCode.ILLEGAL_PARAMETER.getCode().equals(e.getCode())) {
+                throw new ResponseStatusException(HttpStatus.CONFLICT, e.getInfo());
+            }
             throw new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE, e.getInfo());
         }
         log.info("作业已提交：{}，resumeStoryDir: {}，worldId: {}", job.getJobId(),

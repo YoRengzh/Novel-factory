@@ -105,6 +105,19 @@ class LedgerAdjudicateServiceTest {
     }
 
     @Test
+    @DisplayName("声称有据但漏写引文 → 按不支持处理，不得借空引文入账")
+    void rejectsSupportedWithoutQuote() {
+        ChapterSummaryEntity summary = summaryWithPendingState("character", "phrase-partial");
+        // classify("") 的契约是“不判定”（返回 EXACT，由调用方先校验非空）：
+        // 这里若不拦，模型只要回 {"index":1,"supported":true} 就能把编造事实救回账本
+        stubModel("{\"verdicts\":[{\"index\":1,\"supported\":true}]}");
+
+        assertEquals(0, service.adjudicate(storyVO(), summary, CONTENT));
+        assertNull(summary.getCharacterStates());
+        assertEquals(1, summary.getPendingFacts().size());
+    }
+
+    @Test
     @DisplayName("救回的条目按来源账本回写：物品 → itemStates（不写错账）")
     void routesRescuedItemBackToItsOwnAccount() {
         ChapterSummaryEntity summary = summaryWithPendingState("item", "phrase-partial");

@@ -37,7 +37,11 @@
     // ===== 状态管理 =====
     let currentJobId = null;
     let pollTimer = null;
+    let pollFailures = 0;
     let currentStoryDir = null;
+    // 故事视图的请求序号：连点两个故事时，先发后到的旧响应必须丢弃，
+    // 否则列表属于 A 而 currentStoryDir 已是 B，保存会把 A 的正文写进 B
+    let storyViewToken = 0;
     // 章节计划裁决：待裁决计划的本地快照（用于比对"用户是否改过"）+ 倒计时定时器
     let pendingPlanSnapshot = null;
     let pendingPlanSignature = null;
@@ -162,10 +166,12 @@
      *
      * @returns 实际回填的字段数
      */
-    function applyFormValues(values) {
+    function applyFormValues(values, skipKeys) {
         let applied = 0;
         if (!values) return applied;
+        const skip = skipKeys || [];
         Object.keys(values).forEach(function (key) {
+            if (skip.indexOf(key) >= 0) return;
             const el = form.elements[key];
             // 没有对应控件的键（如前端未开放的金手指字段）直接跳过：续写时它们由后端从 bible 自行恢复
             if (!el) return;
@@ -277,6 +283,7 @@
         if (!currentJobId) return;
         fetchJson('/api/jobs/' + currentJobId)
         .then(function (job) {
+            pollFailures = 0;
             renderJobStatus(job);
             // AWAITING_APPROVAL 刻意不在终态里：挂起期间必须继续轮询，
             // 否则用户裁决完 / 超时放行后，前端不会跟进
@@ -291,7 +298,7 @@
         })
         .catch(function (err) {
             // 作业已不在内存注册表（后端重启）：清掉本地记录并复位，避免永远空转
-            if (String(err.message).indexOf('404') === 0) {
+            if (err && err.status === 404) {
                 stopPolling();
                 clearSavedJobId();
                 currentJobId = null;
@@ -300,6 +307,19 @@
                 progressCard.classList.add('hidden');
                 btnSubmit.disabled = false;
                 btnCancel.disabled = true;
+                return;
+            }
+            // 其他失败（500 / 断网 / 网关返回 HTML）此前被静默吞掉：轮询每 2s 继续、
+            // 按钮永久 disabled、用户看不到任何错误。连续失败 5 次（≈10s）后停轮询并复位
+            pollFailures++;
+            if (pollFailures >= 5) {
+                stopPolling();
+                btnSubmit.disabled = false;
+                btnCancel.disabled = true;
+                statusDetail.innerHTML = '<div class="status-row"><span class="status-label">错误</span><span>'
+                    + esc('作业状态查询持续失败：' + (err && err.message ? err.message : '网络不可达'))
+                    + '</span></div>';
+                showToast('作业状态查询失败，已停止轮询；可刷新页面或点「继续生成」接着写');
             }
         });
     }
@@ -326,7 +346,7 @@
         const lines = [];
         lines.push(row('状态', statusBadge(job.status)));
         if (job.storyDirName) lines.push(row('故事目录', job.storyDirName));
-        if (job.currentStage) lines.push(row('阶段', job.currentStage));
+        if (job.currentStage) lines.push(row('阶段', esc(job.currentStage)));
         if (job.status === 'AWAITING_APPROVAL' && job.awaitingPlanApprovalAtMs) {
             lines.push(row('挂起于', new Date(job.awaitingPlanApprovalAtMs).toLocaleTimeString()));
         }
@@ -448,7 +468,9 @@
         renderResumeHint('正在读取「' + storyDirName + '」的设定…', null);
         return fetchJson('/api/stories/' + encodeURIComponent(storyDirName) + '/resume')
         .then(function (info) {
-            const applied = applyFormValues(info.setting);
+            // chapterCount 不回填：后端固定给 DEFAULT_RESUME_BATCH_SIZE=5（“这次写几章”是用户自己的选择），
+            // 无差别回填会把用户刚改的 20 静默改回 5
+            const applied = applyFormValues(info.setting, ['chapterCount']);
             let message = (info.latestChapterNo
                     ? '已有 ' + info.existingChapterCount + ' 章，将从第 ' + info.nextChapterNo + ' 章接着写'
                     : '该故事还没有落盘章节，将从第 1 章开始')
@@ -1020,7 +1042,13 @@
                 characters: splitBySeparator(row.querySelector('.ap-characters').value),
                 keyEvents: splitLines(row.querySelector('.ap-events').value),
                 endingHook: row.querySelector('.ap-hook').value.trim(),
-                chapterType: row.querySelector('.ap-type').value
+                chapterType: row.querySelector('.ap-type').value,
+                // 裁决卡不展示、但后端会整体替换计划：原样带回，少传即等于清空
+                // （时间锚 / 悬念档位 / 主线推进 / 对白承载声明）
+                dialogueScenes: src.dialogueScenes || [],
+                timeAdvance: src.timeAdvance || null,
+                suspenseBeat: src.suspenseBeat || null,
+                mainLineAdvance: src.mainLineAdvance || null
             };
             if (!isSameChapter(item, src)) changed = true;
             chapters.push(item);
@@ -1230,7 +1258,8 @@
             btnSave.disabled = false;
             btnCancelEdit.disabled = false;
             var warning = normalizeWarning(resp.warning);
-            var savedMsg = resp.summaryUpdated ? '，摘要已更新' : '';
+            var savedMsg = resp.partial ? '，摘要为残缺记忆（账本/伏笔需复核）'
+                    : (resp.summaryUpdated ? '，摘要已更新' : '');
             if (!chapterViewDiv.classList.contains('hidden')) {
                 // 仍在章节页：切回阅读态并展示新正文；保存结果提示保留可见，不再被秒藏
                 chapterViewDiv.classList.remove('editing');
@@ -1381,8 +1410,12 @@
     }
 
     function loadChapters(storyDir) {
+        const token = ++storyViewToken;
         fetchJson('/api/stories/' + encodeURIComponent(storyDir) + '/chapters')
         .then(function (chapters) {
+            if (token !== storyViewToken) return;   // 过期响应：用户已切到别的故事
+            // 与“当前显示”绑定：保存/相邻章导航都读 currentStoryDir，不能只在 click 时赋值
+            currentStoryDir = storyDir;
             chapterSequence = chapters.map(function (chapter) { return chapter.chapterNo; });
             libraryList.classList.add('hidden');
             chapterListDiv.classList.remove('hidden');
@@ -1392,6 +1425,10 @@
             chapterListTitle.textContent = '章节目录';
             if (chapters.length === 0) {
                 chaptersDiv.innerHTML = '<p class="empty-hint">暂无章节</p>';
+                // 不能直接 return：否则上一个故事的概览/账本/检查点留在页面上，
+                // 点“回滚”会回滚到旧故事（按钮闭包仍指向旧 storyDir）。这里也要刷新一次
+                loadWorkbench(storyDir);
+                loadCheckpoints(storyDir);
                 return;
             }
             chaptersDiv.innerHTML = chapters.map(function (c) {
@@ -1579,8 +1616,12 @@
     }
 
     function loadChapter(storyDir, chapterNo) {
+        const token = ++storyViewToken;
         fetchJson('/api/stories/' + encodeURIComponent(storyDir) + '/chapters/' + chapterNo)
         .then(function (ch) {
+            if (token !== storyViewToken) return;   // 过期响应：已切到别的故事/章节
+            // 打开的章属于哪个故事，currentStoryDir 就必须是哪个——保存读写都以它为准
+            currentStoryDir = storyDir;
             chapterViewDiv.classList.remove('editing');
             chapterListDiv.classList.add('hidden');
             workbenchOverview.classList.add('hidden');
@@ -1802,6 +1843,9 @@
     }
 
     // 场景模型矩阵：静态生效值 + 覆盖输入（留空=清除该字段覆盖，整表提交后端全量替换）
+    // 显式清除集合：本行「恢复」点击后，把只有不可见密钥的场景记在这里，
+    // 保存时发送 apiKey 空串命中后端“显式清除”语义；填入任何值即撤销清除意图
+    let sceneKeyClears = {};
     function renderSceneMatrix(data) {
         if (!data.scenes || data.scenes.length === 0) {
             sceneMatrixDiv.innerHTML = '<p class="empty-hint">后端未返回场景配置（StoryProperties.module 未装配）</p>';
@@ -1855,6 +1899,7 @@
         }).join('');
         sceneMatrixDiv.innerHTML = header + rows;
         // 输入值用 property 赋值回填（innerHTML 属性转义不可靠），并绑定行内恢复按钮
+        sceneKeyClears = {};
         data.scenes.forEach(function (s) {
             const rowEl = sceneMatrixDiv.querySelector('[data-scene-key="' + cssEscape(s.key) + '"]');
             if (!rowEl) return;
@@ -1874,6 +1919,16 @@
                 : '留空沿用静态';
             rowEl.querySelector('.scene-clear').addEventListener('click', function () {
                 rowEl.querySelectorAll('.scene-input').forEach(function (inp) { inp.value = ''; });
+                // 该场景只剩一个看不见的密钥覆盖时，输入框本来就是空的——「恢复」此时是
+                // 用户移除它的唯一途径：记入显式清除集合，保存时发 apiKey 空串让后端删掉
+                if (s.overrideHasKey && s.key) {
+                    sceneKeyClears[s.key] = true;
+                    showToast('场景「' + (s.label || s.key) + '」的密钥覆盖将在保存时清除');
+                }
+            });
+            // 用户又动了本行任何一个输入 = 撤销「恢复」的清除意图，按正常编辑提交
+            rowEl.querySelectorAll('.scene-input').forEach(function (inp) {
+                inp.addEventListener('input', function () { delete sceneKeyClears[s.key]; });
             });
         });
     }
@@ -1900,7 +1955,12 @@
             const temperature = rowEl.querySelector('[data-field="temperature"]').value.trim();
             const baseUrl = rowEl.querySelector('[data-field="baseUrl"]').value.trim();
             const apiKey = rowEl.querySelector('[data-field="apiKey"]').value.trim();
-            if (!model && !maxTokens && !temperature && !baseUrl && !apiKey) return; // 整行留空 = 该场景清除覆盖
+            if (!model && !maxTokens && !temperature && !baseUrl && !apiKey) {
+                // 整行留空 = 该场景清除覆盖。但密钥不回显：本行若只剩一个看不见的密钥覆盖，
+                // 必须发 apiKey 空串显式清除（后端对“不在表里”的场景另有不可见字段保护，删不掉它）
+                if (sceneKeyClears[key]) scenes[key] = { apiKey: '' };
+                return;
+            }
             const entry = {};
             if (model) entry.model = model;
             if (maxTokens) entry.maxTokens = parseInt(maxTokens, 10);
@@ -2266,23 +2326,34 @@
     }
 
     // ===== 工具函数 =====
+    /**
+     * HTML 转义。注意 textContent→innerHTML 只转义 & < >，**不转义引号**——
+     * 直接拼进属性值时，书名/模型名里一个 " 就能闭合属性并注入事件处理器。
+     * 正文与属性两个上下文共用本函数，故这里把引号一并转义。
+     */
     function esc(s) {
         const d = document.createElement('div');
-        d.textContent = s;
-        return d.innerHTML;
+        d.textContent = s == null ? '' : String(s);
+        return d.innerHTML.replace(/"/g, '&quot;').replace(/'/g, '&#39;');
     }
 
     // 统一 fetch 封装：响应非 JSON（服务重启中的 HTML 错误页等）给出友好提示
     function fetchJson(url, options) {
         return fetch(API_BASE + url, options).then(function (r) {
             var ct = (r.headers.get('content-type') || '').toLowerCase();
+            // 状态码挂到 Error 上：调用方（轮询/更新检查）按 status 分支，
+            // 不再依赖 "404 " 这样的消息前缀（HTML 错误页会被包装成别的文案，前缀永远匹配不上）
             if (ct.indexOf('application/json') === -1) {
-                throw new Error('服务暂不可用（' + r.status + '），请稍后重试');
+                var notJson = new Error('服务暂不可用（' + r.status + '），请稍后重试');
+                notJson.status = r.status;
+                throw notJson;
             }
             return r.json().then(function (body) {
                 if (!r.ok) {
                     var msg = body && body.message ? body.message : JSON.stringify(body);
-                    throw new Error(r.status + ' ' + msg);
+                    var httpError = new Error(r.status + ' ' + msg);
+                    httpError.status = r.status;
+                    throw httpError;
                 }
                 return body;
             });
@@ -2349,9 +2420,11 @@
             })
             .catch(function (err) {
                 appMetaState = 'unreachable';
-                updateCurrentVersion.textContent = '读取失败';
+                // 后端读不到版本时，壳（Electron）仍知道自己的版本——不能因此让整个
+                // 更新入口退化成"读取失败"，那会把应用内更新的能力一起藏掉
+                updateCurrentVersion.textContent = window.nfUpdater ? '由安装包提供' : '读取失败';
                 updateDownloadLink.href = FALLBACK_RELEASES_URL;
-                if (updateStatus && !updateChecked) {
+                if (updateStatus && !updateChecked && !window.nfUpdater) {
                     updateStatus.textContent = '无法连接本机后端：' + (err && err.message ? err.message : '连接失败')
                         + '。请确认应用仍在运行，或稍后重试。';
                 }
@@ -2393,47 +2466,26 @@
         updateBody.innerHTML = '';
         updateLatestBadge.classList.add('hidden');
         updateDownloadLink.classList.add('hidden');
+        hideInstallButton();
 
         var metaPromise = appMeta ? Promise.resolve(appMeta) : loadAppMeta();
         metaPromise.then(function (meta) {
             if (!meta) {
-                if (appMetaState === 'legacy') {
-                    // 旧版后端：接口不存在。这不是"网络问题"，重试一万次也没用——
-                    // 必须明确告诉用户：你装的是旧版，去下载新版
-                    updateStatus.textContent = '当前安装的版本较旧（后端没有版本接口），无法自动比对。'
-                        + '请点击「打开下载页」获取最新版本。';
+                // 后端不可用/旧版：版本号仍可从壳（Electron）拿到——优先走应用内更新，
+                // 它不依赖 /api/app/version，只依赖安装包自带的 latest.yml；
+                // 壳不支持（浏览器/开发模式）时仍要给出明确结论，不能静默什么都不做
+                return checkViaShell(null).then(function (handled) {
+                    if (handled) return;
+                    updateStatus.textContent = '无法连接本机后端，请确认应用仍在运行后重试；'
+                            + '也可点击「打开下载页」手动检查新版本。';
                     updateDownloadLink.classList.remove('hidden');
                     updateDownloadLink.href = FALLBACK_RELEASES_URL;
-                } else {
-                    updateStatus.textContent = '无法连接本机后端，请确认应用仍在运行后重试。';
-                    updateDownloadLink.classList.remove('hidden');
-                    updateDownloadLink.href = FALLBACK_RELEASES_URL;
-                }
-                return;
+                });
             }
-            return fetch('https://api.github.com/repos/' + (meta.repo || FALLBACK_REPO) + '/releases/latest', {
-                headers: { 'Accept': 'application/vnd.github+json' }
-            }).then(function (r) {
-                if (!r.ok) {
-                    throw new Error(r.status === 404
-                        ? '仓库尚未发布任何 Release'
-                        : 'GitHub 返回 ' + r.status);
-                }
-                return r.json();
-            }).then(function (release) {
-                var latest = String(release.tag_name || '').replace(/^v/i, '');
-                updateChecked = true;
-                if (isNewer(latest, meta.version)) {
-                    updateStatus.textContent = '发现新版本：v' + latest + '（当前 v' + meta.version + '）';
-                    updateLatestBadge.classList.remove('hidden');
-                    updateDownloadLink.classList.remove('hidden');
-                    updateDownloadLink.href = release.html_url || meta.releasesUrl;
-                    updateBody.innerHTML = renderReleaseNotes(release.body);
-                    updateFabDot.classList.add('has-update');
-                } else {
-                    updateStatus.textContent = '已是最新版本（v' + meta.version + '）。';
-                    updateBody.innerHTML = '<p class="empty-hint">当前无需更新。</p>';
-                }
+            return checkViaShell(meta).then(function (handled) {
+                if (handled) return;
+                // 壳不提供更新能力（浏览器访问 / 开发模式）：回退到 GitHub Releases 查询 + 下载页
+                return checkViaGitHub(meta);
             });
         }).catch(function (err) {
             updateStatus.textContent = '检查失败：' + (err && err.message ? err.message : '网络不可达')
@@ -2441,6 +2493,156 @@
             updateDownloadLink.classList.remove('hidden');
         }).finally(function () {
             btnCheckUpdate.disabled = false;
+        });
+    }
+
+    /**
+     * 应用内更新：经 Electron preload 暴露的 nfUpdater 检查/下载/安装。
+     * 返回 true 表示"这条路径已接管"（无论有无新版本），调用方不必再查 GitHub；
+     * 返回 false 表示壳不支持（浏览器直接打开页面、开发模式），调用方回退下载页。
+     */
+    function checkViaShell(meta) {
+        var api = window.nfUpdater;
+        if (!api) return Promise.resolve(false);
+        return api.check().then(function (res) {
+            if (!res || !res.supported) return false;
+            updateChecked = true;
+            // 当前版本以**安装包**为准（后端 app.version 与 electron version 是两处独立维护的，
+            // 只改一处就会让比较基准漂移）；后端版本仅在壳拿不到时兜底
+            var current = res.currentVersion || (meta && meta.version) || '';
+            if (res.error) {
+                // 壳能更新但检查失败（网络/缺少 latest.yml）：如实告知，并保留下载页兜底
+                updateStatus.textContent = '应用内检查失败：' + res.error
+                    + '。可点击「打开下载页」手动下载。';
+                updateDownloadLink.classList.remove('hidden');
+                return true;
+            }
+            if (res.version && isNewer(res.version, current)) {
+                updateStatus.textContent = '发现新版本：v' + res.version + '（当前 v' + current + '）';
+                updateLatestBadge.classList.remove('hidden');
+                showInstallButton('下 载 更 新');
+                updateBody.innerHTML = renderReleaseNotes(
+                    typeof res.releaseNotes === 'string' ? res.releaseNotes : '');
+                updateFabDot.classList.add('has-update');
+            } else {
+                updateStatus.textContent = '已是最新版本（v' + (current || res.currentVersion) + '）。';
+                updateBody.innerHTML = '<p class="empty-hint">当前无需更新。</p>';
+            }
+            return true;
+        }).catch(function () {
+            return false;
+        });
+    }
+
+    /** 浏览器/开发模式路径：查 GitHub Releases 判断版本，提供下载页（无法直接安装） */
+    function checkViaGitHub(meta) {
+        // 后端起不来（meta=null）+ 壳不支持应用内更新时也会走到这里，不能直接解引用
+        meta = meta || { version: '', repo: FALLBACK_REPO, releasesUrl: FALLBACK_RELEASES_URL };
+        var currentVersion = String(meta.version || '').trim();
+        if (!currentVersion) {
+            updateStatus.textContent = '无法确定当前版本（本机后端不可用且安装包未提供版本）。'
+                    + '可点击「打开下载页」手动核对。';
+            updateDownloadLink.classList.remove('hidden');
+            updateDownloadLink.href = meta.releasesUrl || FALLBACK_RELEASES_URL;
+            return Promise.resolve();
+        }
+        return fetch('https://api.github.com/repos/' + (meta.repo || FALLBACK_REPO) + '/releases/latest', {
+            headers: { 'Accept': 'application/vnd.github+json' }
+        }).then(function (r) {
+            if (!r.ok) {
+                throw new Error(r.status === 404
+                    ? '仓库尚未发布任何 Release'
+                    : 'GitHub 返回 ' + r.status);
+            }
+            return r.json();
+        }).then(function (release) {
+            var latest = String(release.tag_name || '').replace(/^v/i, '');
+            updateChecked = true;
+            if (isNewer(latest, meta.version)) {
+                updateStatus.textContent = '发现新版本：v' + latest + '（当前 v' + meta.version + '）'
+                    + '。浏览器打开时无法自动安装，请下载安装包后覆盖安装。';
+                updateLatestBadge.classList.remove('hidden');
+                updateDownloadLink.classList.remove('hidden');
+                updateDownloadLink.href = release.html_url || meta.releasesUrl;
+                updateBody.innerHTML = renderReleaseNotes(release.body);
+                updateFabDot.classList.add('has-update');
+            } else {
+                updateStatus.textContent = '已是最新版本（v' + meta.version + '）。';
+                updateBody.innerHTML = '<p class="empty-hint">当前无需更新。</p>';
+            }
+        });
+    }
+
+    // ===== 应用内更新的下载/安装按钮 =====
+    // 与"打开下载页"并列：前者能一步装完，后者是壳不支持时的兜底。
+    var btnInstall = document.getElementById('btn-install-update');
+    var shellDownloaded = false;
+
+    function showInstallButton(label) {
+        if (!btnInstall) return;
+        btnInstall.textContent = label || '下 载 更 新';
+        btnInstall.classList.remove('hidden');
+        btnInstall.disabled = false;
+    }
+
+    function hideInstallButton() {
+        shellDownloaded = false;
+        if (!btnInstall) return;
+        btnInstall.classList.add('hidden');
+        btnInstall.disabled = false;
+    }
+
+    if (btnInstall && window.nfUpdater) {
+        btnInstall.addEventListener('click', function () {
+            if (shellDownloaded) {
+                btnInstall.disabled = true;
+                updateStatus.textContent = '正在退出并安装，应用会自动重启…';
+                Promise.resolve(window.nfUpdater.install()).then(function (res) {
+                    if (res && res.ok === false) {
+                        btnInstall.disabled = false;
+                        updateStatus.textContent = '安装失败：' + (res.error || '未知错误');
+                    }
+                });
+                return;
+            }
+            btnInstall.disabled = true;
+            updateStatus.textContent = '正在下载更新包…';
+            window.nfUpdater.download().then(function (res) {
+                if (res && res.ok) {
+                    // 进度由 updater:event 的 progress/downloaded 驱动，这里不重复设置
+                    return;
+                }
+                btnInstall.disabled = false;
+                btnInstall.textContent = '下 载 更 新';   // 失败后别把按钮永久留在“下载中 x%”
+                updateStatus.textContent = '下载失败：' + (res && res.error ? res.error : '未知错误')
+                    + '。可点击「打开下载页」手动下载。';
+                updateDownloadLink.classList.remove('hidden');
+            }).catch(function (err) {
+                btnInstall.disabled = false;
+                btnInstall.textContent = '下 载 更 新';
+                updateStatus.textContent = '下载失败：' + (err && err.message ? err.message : '未知错误')
+                    + '。可点击「打开下载页」手动下载。';
+                updateDownloadLink.classList.remove('hidden');
+            });
+        });
+
+        window.nfUpdater.onEvent(function (evt) {
+            if (!evt) return;
+            if (evt.type === 'progress') {
+                updateStatus.textContent = '正在下载更新包… ' + evt.percent + '%';
+                if (btnInstall) btnInstall.textContent = '下 载 中 ' + evt.percent + '%';
+            } else if (evt.type === 'downloaded') {
+                shellDownloaded = true;
+                updateStatus.textContent = '更新包已下载完成（v' + (evt.version || '') + '），点击按钮安装并重启。';
+                showInstallButton('安 装 并 重 启');
+            } else if (evt.type === 'error') {
+                updateStatus.textContent = '更新出错：' + (evt.message || '未知错误')
+                    + '。可点击「打开下载页」手动下载。';
+                updateDownloadLink.classList.remove('hidden');
+                if (btnInstall) btnInstall.disabled = false;
+            } else if (evt.type === 'not-available') {
+                updateStatus.textContent = '已是最新版本。';
+            }
         });
     }
 
@@ -2468,10 +2670,16 @@
     // 用户点开通知面板就能直接看到"当前安装的版本较旧"，而不是等到点检查才报错
     loadAppMeta().then(function (meta) {
         if (!meta && appMetaState === 'legacy' && updateStatus) {
-            updateStatus.textContent = '当前安装的版本较旧（后端没有版本接口），无法自动比对。'
-                + '请点击「打开下载页」获取最新版本。';
-            updateDownloadLink.classList.remove('hidden');
-            updateDownloadLink.href = FALLBACK_RELEASES_URL;
+            if (window.nfUpdater) {
+                // 装了壳：后端旧版不影响应用内更新——版本号由安装包自带，直接查
+                updateStatus.textContent = '本机后端版本较旧，正在检查安装包更新…';
+                checkUpdate();
+            } else {
+                updateStatus.textContent = '当前安装的版本较旧（后端没有版本接口），无法自动比对。'
+                    + '请点击「打开下载页」获取最新版本。';
+                updateDownloadLink.classList.remove('hidden');
+                updateDownloadLink.href = FALLBACK_RELEASES_URL;
+            }
         }
     });
 })();

@@ -104,7 +104,9 @@ class SpringAiEmbeddingGatewayTest {
         StoryVO.Module module = module();
         OpenAiEmbeddingModel model = mock(OpenAiEmbeddingModel.class);
         doReturn(model).when(gateway).embeddingModel(module);
-        EmbeddingResponse ok = new EmbeddingResponse(List.of(new Embedding(new float[8], 0)));
+        // 条数必须与请求一一对应（网关会校验）：2 条输入 → 2 条结果
+        EmbeddingResponse ok = new EmbeddingResponse(List.of(
+                new Embedding(new float[8], 0), new Embedding(new float[8], 1)));
         ArgumentCaptor<List<String>> captor = ArgumentCaptor.forClass(List.class);
         doReturn(ok).when(gateway).callModel(eq(model), eq(module), captor.capture());
 

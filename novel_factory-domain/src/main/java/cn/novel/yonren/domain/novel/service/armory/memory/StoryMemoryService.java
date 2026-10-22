@@ -14,9 +14,11 @@ import cn.novel.yonren.domain.novel.model.valobj.VectorPoint;
 import cn.novel.yonren.domain.novel.model.valobj.properties.StoryMemoryProperties;
 import cn.novel.yonren.types.enums.ResponseCode;
 import cn.novel.yonren.types.exception.AppException;
+import cn.novel.yonren.domain.novel.service.armory.LlmRuntimeConfig;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.lang3.StringUtils;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.ai.retry.TransientAiException;
 import org.springframework.stereotype.Service;
 import org.springframework.web.client.ResourceAccessException;
@@ -63,6 +65,16 @@ public class StoryMemoryService {
 
     private static final int EMBED_BATCH = 16;
     private static final Pattern WORLD_ID_PATTERN = Pattern.compile("^[a-zA-Z0-9][a-zA-Z0-9_-]{0,62}$");
+
+    /**
+     * 运行时嵌入覆盖（设置页「向量检索分区」）：索引签名必须按**生效配置**计算。
+     * 若只读 yml 静态值，用户换 embedding 模型后签名不变 → 重建守卫静默失效：
+     * 维度不同则每章先付费重嵌全量记忆再在 ensureCollection 失败（永久空召回），
+     * 维度相同则把两套不可比的向量空间混进同一集合。
+     * 字段注入而非构造器参数：不改变既有构造签名（大量单测直接 new）。
+     */
+    @Autowired(required = false)
+    private LlmRuntimeConfig llmRuntimeConfig;
 
     /**
      * 检索查询串安全上限（字符）：查询只需主题相关性，不需要全文保真。
@@ -243,8 +255,14 @@ public class StoryMemoryService {
         return !recorded.equals(actual);
     }
 
-    /** 索引签名 = 切分方案版本 + embedding 模型 + 显式维度；任一变化都必须重嵌 */
-    private String indexSignature(StoryVO.Module module) {
+    /** 生效的嵌入配置：叠加设置页运行时覆盖；单测直构（未注入）时原样返回 */
+    private StoryVO.Module effectiveEmbeddingModule(StoryVO.Module module) {
+        return llmRuntimeConfig == null || module == null ? module : llmRuntimeConfig.applyEmbedding(module);
+    }
+
+    /** 索引签名 = 切分方案版本 + 生效 embedding 模型 + 显式维度；任一变化都必须重嵌 */
+    private String indexSignature(StoryVO.Module rawModule) {
+        StoryVO.Module module = effectiveEmbeddingModule(rawModule);
         StoryVO.Module.EmbeddingApi api = module == null ? null : module.getEmbeddingApi();
         return MEMORY_SCHEMA_VERSION + "|" + (api == null ? "" : nullToBlank(api.getModel()))
                 + "|" + (api == null || api.getDimensions() == null ? "" : api.getDimensions());

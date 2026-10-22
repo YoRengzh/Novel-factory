@@ -25,6 +25,23 @@ class ChapterPlanChecksTest {
 
     // ---- 编号校正（自 ParseChapterPlanNode 迁移）----
 
+    // ---- 解析容错（模型多写字段 / 未知章型不得让整批失败）----
+
+    @Test
+    void parseLenient_toleratesUnknownFieldsAndEnums() {
+        String raw = "{\"storyId\":\"s1\",\"chapters\":[{"
+                + "\"chapterNo\":1,\"title\":\"开局\",\"goal\":\"目标\",\"keyEvents\":[\"事件\"],"
+                + "\"chapterType\":\"过渡\",\"notes\":\"模型顺手多写的字段\"}]}";
+
+        ChapterPlanAggregate plan = ChapterPlanChecks.parseLenient(raw);
+
+        assertNotNull(plan);
+        assertEquals(1, plan.getChapters().size());
+        // 未知枚举读成 null，由 ParseChapterPlanNode 归一化为 NORMAL（此前会直接抛异常）
+        assertNull(plan.getChapters().get(0).getChapterType());
+        assertEquals("开局", plan.getChapters().get(0).getTitle());
+    }
+
     @Test
     void normalize_shiftsBatchLocalNumbers() {
         ChapterPlanAggregate aggregate = planOf(1, 2, 3);

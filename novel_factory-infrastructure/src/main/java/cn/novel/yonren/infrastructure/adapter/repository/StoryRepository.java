@@ -58,6 +58,8 @@ public class StoryRepository implements IStoryRepository {
 
     // 故事目录名契约：yyyyMMdd-story-XXXX（createStoryDirectory 生成、续写请求回传）
     private static final Pattern STORY_DIR_PATTERN = Pattern.compile("\\d{8}-story-\\d{4}");
+    /** 检查点目录名：cp-<epochMillis>-<versionNo>（版本号 %04d，超过 9999 会自然变长） */
+    private static final Pattern CHECKPOINT_ID_PATTERN = Pattern.compile("cp-\\d{1,20}-\\d{1,8}");
     private static final Pattern CHAPTER_HEADER_PATTERN = Pattern.compile("^第(\\d+)章\\s?(.*)$");
 
     /** 序号竞争重试上限：连续被抢占 50 次视为异常（单机单用户场景几乎不可能触发） */
@@ -311,7 +313,10 @@ public class StoryRepository implements IStoryRepository {
         withStoryLock(storyDir, () -> {
             for (ChapterContentEntity chapter : chapterContents) {
                 StringBuilder sb = new StringBuilder();
-                sb.append("第").append(chapter.getChapterNo()).append("章 ").append(chapter.getTitle()).append(System.lineSeparator());
+                // 标题可能为空（抢救稿/外部写入）：直接 append(null) 会把字面量 "null" 写进正文首行
+                sb.append("第").append(chapter.getChapterNo()).append("章 ")
+                        .append(chapter.getTitle() == null ? "" : chapter.getTitle())
+                        .append(System.lineSeparator());
                 sb.append(System.lineSeparator());
                 sb.append(chapter.getContent() == null ? "" : chapter.getContent().replace("\\n", "\n"));
                 String fileName = String.format("%s%04d%s", StorageKeys.CHAPTER_FILE_PREFIX, chapter.getChapterNo(), StorageKeys.CHAPTER_FILE_SUFFIX);
@@ -599,8 +604,18 @@ public class StoryRepository implements IStoryRepository {
 
     @Override
     public void writeJobStatus(Path storyDir, GenerationJob job) throws IOException {
+        if (job == null) {
+            return;
+        }
         Path file = storyDir.resolve(StorageKeys.JOB_STATUS_FILE);
-        withStoryLock(storyDir, () -> writeStringAtomic(file, JSON.toJSONString(job)));
+        // 先在同一把对象锁内取快照再写盘：chapterDurations 等由 worker 与 HTTP 线程并发改动，
+        // fastjson 直接遍历可变 HashMap 会撞 ConcurrentModificationException，
+        // 而调用方把写盘失败当 fail-soft 吞掉 → 终态/取消态静默丢失
+        String json;
+        synchronized (job) {
+            json = JSON.toJSONString(job);
+        }
+        withStoryLock(storyDir, () -> writeStringAtomic(file, json));
     }
 
     @Override
@@ -911,7 +926,20 @@ public class StoryRepository implements IStoryRepository {
         Files.createDirectories(file.getParent());
         Path tmp = file.getParent().resolve("." + file.getFileName().toString() + ".tmp");
         try {
-            Files.writeString(tmp, content);
+            // 写完先 force 再 rename：否则掉电时可能“rename 已持久、数据页未落盘”，
+            // 目标文件变成 0 字节——比半截 JSON 更难人工修复（读侧会硬失败阻断续写）
+            byte[] bytes = content.getBytes(java.nio.charset.StandardCharsets.UTF_8);
+            try (java.nio.channels.FileChannel channel = java.nio.channels.FileChannel.open(
+                    tmp,
+                    java.nio.file.StandardOpenOption.CREATE,
+                    java.nio.file.StandardOpenOption.WRITE,
+                    java.nio.file.StandardOpenOption.TRUNCATE_EXISTING)) {
+                java.nio.ByteBuffer buffer = java.nio.ByteBuffer.wrap(bytes);
+                while (buffer.hasRemaining()) {
+                    channel.write(buffer);
+                }
+                channel.force(true);
+            }
             try {
                 Files.move(tmp, file, StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING);
             } catch (AtomicMoveNotSupportedException e) {
@@ -1038,14 +1066,27 @@ public class StoryRepository implements IStoryRepository {
                 throw new AppException(ResponseCode.UN_ERROR.getCode(), "检查点元数据损坏：" + checkpointId);
             }
             Path snapshotRoot = checkpointDirOf(storyDir, checkpointId).resolve(StorageKeys.CHECKPOINT_SNAPSHOT_DIR);
+            Path snapshotBase = snapshotRoot.toAbsolutePath().normalize();
+            Path storyBase = storyDir.toAbsolutePath().normalize();
 
             // 1) 还原 manifest 内全部文件（章节正文 + 摘要/蓝图/质量债/伏笔结算/风格/bible）
-            for (String rel : meta.getFilesManifest()) {
+            List<String> manifest = meta.getFilesManifest();
+            if (manifest == null) {
+                // 旧版/损坏的检查点元数据：空清单会让“回滚成功”变成什么都没还原，必须显式失败
+                throw new AppException(ResponseCode.UN_ERROR.getCode(),
+                        "检查点元数据缺少文件清单，无法回滚：" + checkpointId);
+            }
+            for (String rel : manifest) {
                 if (rel == null || rel.isBlank()) {
                     continue;
                 }
-                Path src = snapshotRoot.resolve(rel);
-                Path dst = storyDir.resolve(rel);
+                Path src = snapshotRoot.resolve(rel).normalize();
+                Path dst = storyBase.resolve(rel).normalize();
+                // 清单是磁盘文件，可能被手工改过：源/目标都必须落在各自根目录内
+                if (!src.startsWith(snapshotBase) || !dst.startsWith(storyBase)) {
+                    throw new AppException(ResponseCode.UN_ERROR.getCode(),
+                            "检查点文件清单包含越界路径，拒绝回滚：" + rel);
+                }
                 if (!Files.isRegularFile(src)) {
                     continue; // 快照后被裁剪的源文件，跳过
                 }
@@ -1083,7 +1124,20 @@ public class StoryRepository implements IStoryRepository {
     }
 
     private Path checkpointDirOf(Path storyDir, String checkpointId) {
-        return checkpointRoot(storyDir).resolve(checkpointId);
+        // 与故事目录同款路径安全：checkpointId 直接来自 URL path，不校验就能用 ../ 越出检查点根，
+        // 再借 manifest 的 Files.copy 控制落点。格式白名单已排除分隔符与点号，
+        // 再做一次 normalize+startsWith 断言防御未来的格式变更
+        if (checkpointId == null || !CHECKPOINT_ID_PATTERN.matcher(checkpointId).matches()) {
+            throw new AppException(ResponseCode.ILLEGAL_PARAMETER.getCode(),
+                    "检查点 ID 格式非法：" + checkpointId);
+        }
+        Path root = checkpointRoot(storyDir).toAbsolutePath().normalize();
+        Path dir = root.resolve(checkpointId).normalize();
+        if (!dir.startsWith(root)) {
+            throw new AppException(ResponseCode.ILLEGAL_PARAMETER.getCode(),
+                    "检查点 ID 越界：" + checkpointId);
+        }
+        return dir;
     }
 
     private int nextVersionNo(Path storyDir) throws IOException {

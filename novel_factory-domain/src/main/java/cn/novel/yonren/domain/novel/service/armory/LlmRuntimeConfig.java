@@ -210,9 +210,16 @@ public class LlmRuntimeConfig {
         if (featureToggles != null) {
             featureToggles.apply(next.getToggles());
         }
-        log.info("LLM 运行时覆盖已保存：{}（场景覆盖 {} 项，场景级 API 开关={}，嵌入覆盖 {}，资料选择模式 {}）", next,
+        // ⚠️ 绝不打印整个 Overlay：Lombok @Data 的 toString 会带出 apiKey / embedApiKey /
+        // 每个场景的 apiKey 明文，而这条 INFO 会落到 data/log/log_info.log（保留 15 天、随排障日志外发）。
+        // view() 特意做了掩码，日志这里必须同口径
+        log.info("LLM 运行时覆盖已保存：baseUrl={}，model={}，maxTokens={}，hasKey={}，authMode={}；"
+                        + "场景覆盖 {} 项（其中 {} 项带 apiKey）；嵌入覆盖 {}；资料选择模式 {}",
+                next.getBaseUrl(), next.getModel(), next.getMaxTokens(),
+                StringUtils.isNotBlank(next.getApiKey()),
+                next.getAuthMode() == null ? AUTH_API_KEY : next.getAuthMode(),
                 next.getScenes() == null ? 0 : next.getScenes().size(),
-                next.sceneApiOn() ? "开" : "关（全部走全局地址密钥）",
+                countSceneApiKeys(next.getScenes()),
                 next.hasEmbeddingOverride() ? "生效" : "无",
                 next.getReferenceMode() == null ? "回退 yml" : next.getReferenceMode());
         return view();
@@ -332,7 +339,34 @@ public class LlmRuntimeConfig {
             so.setApiKey(in.getApiKey() == null
                     ? currentApiKeyOf(current, entry.getKey())
                     : StringUtils.trimToNull(in.getApiKey()));
+            // 显式清除（apiKey 空串）后可能整条变空壳：不丢弃会留下一个全 null 的占位条目，
+            // 表现在矩阵上就是“已覆盖”徽标常亮但什么都不生效
+            if (so.getModel() == null && so.getMaxTokens() == null && so.getTemperature() == null
+                    && so.getBaseUrl() == null && so.getApiKey() == null) {
+                continue;
+            }
             merged.put(entry.getKey(), so);
+        }
+        // 不可见字段保护：apiKey 永不回显，前端“整行留空”就会省略该场景。
+        // 若这条覆盖只剩一个看不见的 apiKey（model/maxTokens/temperature/baseUrl 全空），
+        // 全量替换会把它连同密钥一起删掉——而占位符还写着“已覆盖（sk-***），留空保留”。
+        // 只保留“纯密钥”条目：可见字段一旦有值或全部留空，仍按既有语义（整行=清除）处理
+        if (current != null && current.getScenes() != null) {
+            for (Map.Entry<String, SceneOverlay> entry : current.getScenes().entrySet()) {
+                if (incoming.containsKey(entry.getKey())) {
+                    continue;
+                }
+                SceneOverlay prev = entry.getValue();
+                if (prev == null) {
+                    continue;
+                }
+                boolean onlyInvisibleKey = StringUtils.isBlank(prev.getModel())
+                        && prev.getMaxTokens() == null && prev.getTemperature() == null
+                        && StringUtils.isBlank(prev.getBaseUrl());
+                if (onlyInvisibleKey && StringUtils.isNotBlank(prev.getApiKey())) {
+                    merged.put(entry.getKey(), prev);
+                }
+            }
         }
         return merged.isEmpty() ? null : merged;
     }
@@ -633,6 +667,20 @@ public class LlmRuntimeConfig {
             view.setOverrideDimensions(o.getEmbedDimensions());
         }
         return view;
+    }
+
+    /** 带 apiKey 的场景覆盖数（只用于日志计数，不输出值） */
+    private static int countSceneApiKeys(Map<String, SceneOverlay> scenes) {
+        if (scenes == null || scenes.isEmpty()) {
+            return 0;
+        }
+        int count = 0;
+        for (SceneOverlay scene : scenes.values()) {
+            if (scene != null && StringUtils.isNotBlank(scene.getApiKey())) {
+                count++;
+            }
+        }
+        return count;
     }
 
     private static String mask(String apiKey) {

@@ -28,13 +28,21 @@ public final class ChapterPlanChecks {
     /**
      * 计划输出宽松解析器：Jackson 默认严格模式会拒绝字符串内未转义的控制字符（如真实换行），
      * 模型长文本输出偶发该问题；枚举按小写 code 大小写不敏感匹配，未知值由调用方归一化。
-     * 规划执行器的降级链与 ParseChapterPlanNode 的纵深兜底共用这一个入口
+     * 规划执行器的降级链与 ParseChapterPlanNode 的纵深兜底共用这一个入口。
+     *
+     * <p><b>必须关闭未知字段即失败</b>：模型常在同一 JSON 里顺手多输出 notes/tips 之类的键，
+     * 严格模式会让整份计划解析失败（四级文本修复救不了语义错误），本批直接终止；
+     * 未知枚举读成 null 而不是抛异常，才能让 ParseChapterPlanNode 的
+     * “未知 chapterType 归一化为 NORMAL” 兜底真正执行。与 ChapterSummaryService /
+     * ChapterReviseService 的转换器保持同一口径
      */
     private static final BeanOutputConverter<ChapterPlanAggregate> CHAPTER_PLAN_CONVERTER =
             new BeanOutputConverter<>(ChapterPlanAggregate.class,
                     com.fasterxml.jackson.databind.json.JsonMapper.builder()
                             .enable(com.fasterxml.jackson.core.json.JsonReadFeature.ALLOW_UNESCAPED_CONTROL_CHARS)
                             .enable(com.fasterxml.jackson.databind.MapperFeature.ACCEPT_CASE_INSENSITIVE_ENUMS)
+                            .disable(com.fasterxml.jackson.databind.DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES)
+                            .enable(com.fasterxml.jackson.databind.DeserializationFeature.READ_UNKNOWN_ENUM_VALUES_AS_NULL)
                             .build());
 
     public static ChapterPlanAggregate parseLenient(String raw) {

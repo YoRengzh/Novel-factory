@@ -634,8 +634,19 @@ class StoryRepositoryTest {
         Files.createDirectories(storyDir);
 
         AppException e = assertThrows(AppException.class,
-                () -> repository.restoreCheckpoint(storyDir, "cp-nonexistent"));
+                () -> repository.restoreCheckpoint(storyDir, "cp-1700000000000-0001"));
         assertTrue(e.getInfo().contains("不存在"));
+    }
+
+    @Test
+    void restore_rejectsIllegalCheckpointId() throws Exception {
+        // checkpointId 直接来自 URL：格式白名单挡住 ../ 之类的越界路径
+        Path storyDir = workspace.resolve("20260902-story-0035");
+        Files.createDirectories(storyDir);
+
+        AppException e = assertThrows(AppException.class,
+                () -> repository.restoreCheckpoint(storyDir, "../../etc/checkpoint"));
+        assertTrue(e.getInfo().contains("格式非法") || e.getInfo().contains("越界"));
     }
 
     private void writeChapters(Path storyDir, int chapterNo, String title, String content) throws IOException {

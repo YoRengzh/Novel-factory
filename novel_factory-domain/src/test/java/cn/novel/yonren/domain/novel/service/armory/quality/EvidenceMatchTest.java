@@ -175,6 +175,9 @@ class EvidenceMatchTest {
         assertFalse(EvidenceMatch.contained("苏清平推开房门，面色苍白", normalized));
         assertFalse(EvidenceMatch.contained(null, normalized));
         assertFalse(EvidenceMatch.contained("", normalized));
+        // 纯标点不是证据：任何正文都“包含”它，不能据此判定事实成立
+        assertFalse(EvidenceMatch.contained("。", normalized));
+        assertFalse(EvidenceMatch.contained("……。", normalized));
     }
 
     @Test

@@ -35,12 +35,30 @@ for (const entry of forbiddenEntries) {
 module.exports = {
   appId: 'com.startdrafts.app',
   productName: 'StartDrafts',
+  // 产物文件名必须与 latest.yml 里的 url 逐字一致，否则 electron-updater 按该 url
+  // 去 Release 找资产会 404。默认命名含空格（StartDrafts Setup 1.2.0.exe），
+  // 上传到 GitHub 后又可能被改成点号形式——三处一旦漂移，应用内更新必然失败。
+  // 这里钉死为连字符形式：本地产物、latest.yml、Release 资产三者同名。
+  artifactName: 'StartDrafts-Setup-${version}.${ext}',
   directories: {
     output: '../dist/electron'          // 安装包输出到 dist/electron/
   },
   files: [
     'main.js',
+    'preload.js',
     'package.json'
+  ],
+  // 更新源：electron-builder 据此产出 latest.yml（含 sha512 与安装包文件名），
+  // 客户端 electron-updater 读它比对版本并下载。缺这段配置就不会生成 latest.yml，
+  // 应用内更新在客户端会永远报 "Cannot find latest.yml"。
+  // 用 github provider：无需额外 token，直接走公开 Release 的 HTTPS 下载地址。
+  publish: [
+    {
+      provider: 'github',
+      owner: 'YoRengzh',
+      repo: 'Novel-factory',
+      releaseType: 'release'
+    }
   ],
   // Java app-image 作为额外资源塞进安装包 → 运行时经 process.resourcesPath/sidecar 访问
   // （main.js 的 sidecarCommand() 打包分支就是按这个路径取的）

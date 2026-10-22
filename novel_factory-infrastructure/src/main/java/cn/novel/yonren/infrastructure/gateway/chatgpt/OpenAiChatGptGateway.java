@@ -237,11 +237,17 @@ public class OpenAiChatGptGateway implements ChatGptGateway {
         try {
             HttpResponse<java.io.InputStream> response = http.send(request, HttpResponse.BodyHandlers.ofInputStream());
             if (response.statusCode() / 100 != 2) {
-                String error = new String(response.body().readAllBytes(), StandardCharsets.UTF_8);
+                // 错误体也要显式关闭：不关的响应流会占住连接，反复失败时连接池被耗尽
+                String error;
+                try (java.io.InputStream responseBody = response.body()) {
+                    error = new String(responseBody.readAllBytes(), StandardCharsets.UTF_8);
+                }
                 throw new IllegalStateException("ChatGPT Responses API HTTP " + response.statusCode() + "："
                         + StringUtils.abbreviate(error, 500));
             }
-            return ChatGptSseParser.parse(response.body());
+            try (java.io.InputStream responseBody = response.body()) {
+                return ChatGptSseParser.parse(responseBody);
+            }
         } catch (IOException e) {
             throw new IllegalStateException("ChatGPT Responses API 读取失败：" + e.getMessage(), e);
         } catch (InterruptedException e) {

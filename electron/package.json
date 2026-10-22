@@ -15,5 +15,8 @@
     "electron": "^44.9.0",
     "electron-builder": "^26.15.3"
   },
-  "productName": "StartDrafts"
+  "productName": "StartDrafts",
+  "dependencies": {
+    "electron-updater": "^6.8.9"
+  }
 }

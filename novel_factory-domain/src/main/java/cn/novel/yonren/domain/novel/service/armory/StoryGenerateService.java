@@ -144,6 +144,13 @@ public class StoryGenerateService {
         IStoryRepository.StoryMeta persisted = storyRepository.readStoryMeta(dynamicContext.getStoryDir());
         if (persisted != null) {
             int cap = persisted.maxChapterCount();
+            // 0/负数 = 未固化（手工改过的 story-meta、旧格式或半截写入）：不能当成真实上限，
+            // 否则 enforceChapterLimit 会以“已达总章数上限 0 章，已完结”永久拒写续写
+            if (cap <= 0) {
+                log.warn("story-meta 的完结上限为 {}（非法/未设置），本次按请求值或 yml 兜底，不按已完结处理",
+                        cap);
+                return requestedMax != null ? requestedMax : configuredMax;
+            }
             if (requestedMax != null && requestedMax < cap) {
                 log.info("请求完结上限 {} 低于本书已固化上限 {}，本批按 {} 执行（固化值不可下调其语义不退让）", requestedMax, cap, requestedMax);
                 return requestedMax;

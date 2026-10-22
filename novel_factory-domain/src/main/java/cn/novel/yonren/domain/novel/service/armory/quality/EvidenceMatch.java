@@ -109,6 +109,11 @@ public final class EvidenceMatch {
         if (normalized.isEmpty() || normalizedContent == null) {
             return false;
         }
+        // 纯标点证据（"。" / "……。"）必然“包含”于任何正文：没有可核对的实词就等于没有证据。
+        // 只拦“整条无实词”，不设最小长度——短但真实的引文（如“退婚”）仍按原口径判定
+        if (!hasSubstantiveChar(normalized)) {
+            return false;
+        }
         if (normalizedContent.contains(normalized)) {
             return true;
         }
@@ -122,6 +127,16 @@ public final class EvidenceMatch {
             }
         }
         return true;
+    }
+
+    /** 是否含至少一个实词字符（CJK 汉字在 Java 里属于 letter；纯标点/空白返回 false） */
+    private static boolean hasSubstantiveChar(String normalized) {
+        for (int i = 0; i < normalized.length(); i++) {
+            if (Character.isLetterOrDigit(normalized.charAt(i))) {
+                return true;
+            }
+        }
+        return false;
     }
 
     public static boolean segmentsContained(String evidence, String normalizedContent) {

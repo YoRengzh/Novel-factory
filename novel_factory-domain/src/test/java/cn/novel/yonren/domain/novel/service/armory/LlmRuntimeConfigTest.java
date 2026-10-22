@@ -417,6 +417,51 @@ class LlmRuntimeConfigTest {
         assertNull(afterClear.getApiKey());
     }
 
+    /**
+     * 纯密钥场景（除不可见 apiKey 外全空）的完整生命周期：普通保存不丢密钥（不可见字段保护），
+     * 行内「恢复」→ 前端发 apiKey 空串 → 整条覆盖消失且不留全空壳（矩阵“已覆盖”徽标不常亮）。
+     */
+    @Test
+    void sceneApi_pureKeyOnlyScene_explicitEmptyClearsWholeEntry() {
+        LlmRuntimeConfig config = new LlmRuntimeConfig(tmp.resolve("override.json"));
+        // 场景只剩密钥：模拟“填了密钥、其它字段没动就保存”的结果
+        LlmConfigSaveRequestDTO.SceneOverride pureKey = sceneOverride(null, null, null);
+        pureKey.setApiKey("sk-only-key");
+        config.save(sceneSave("summary", pureKey));
+        StoryVO.Module.ChatModel withKey =
+                config.applyModel(ModelScene.CHAPTER_SUMMARY, staticModule().getChatModel());
+        assertEquals("sk-only-key", withKey.getApiKey());
+
+        // 普通保存（该场景不在表里）：不可见字段保护把它原样保住
+        config.save(sceneSave("audit", sceneOverride("audit-model", null, null)));
+        assertEquals("sk-only-key",
+                config.applyModel(ModelScene.CHAPTER_SUMMARY, staticModule().getChatModel()).getApiKey());
+
+        // 「恢复」后的保存：apiKey 空串 → 清除后整条为空壳，必须丢弃而非落成全 null 条目。
+        // scenes 是全量替换语义（真实前端整表提交）：audit 条目要在同一请求里带上才不丢
+        LlmConfigSaveRequestDTO.SceneOverride clearKey = sceneOverride(null, null, null);
+        clearKey.setApiKey("");
+        LlmConfigSaveRequestDTO clearBoth = sceneSave("summary", clearKey);
+        clearBoth.getScenes().put("audit", sceneOverride("audit-model", null, null));
+        config.save(clearBoth);
+
+        StoryVO.Module.ChatModel afterClear =
+                config.applyModel(ModelScene.CHAPTER_SUMMARY, staticModule().getChatModel());
+        assertNull(afterClear.getApiKey());
+        // 整条覆盖已消失：maxTokens 回退静态值（staticModule 的 chat 配置即 8192），非覆盖残留
+        assertEquals(Long.valueOf(8192L), afterClear.getMaxTokens());
+        // 不留空壳：视图里该场景既无覆盖徽标也无密钥
+        StoryProperties statics = new StoryProperties();
+        statics.setModule(staticModule());
+        LlmConfigDTO.SceneView row = config.view(statics).getScenes().stream()
+                .filter(s -> "summary".equals(s.getKey())).findFirst().orElseThrow();
+        assertFalse(row.isOverridden());
+        assertFalse(row.isOverrideHasKey());
+        // 清掉 summary 不影响其它场景
+        assertEquals("audit-model",
+                config.applyModel(ModelScene.CHAPTER_AUDIT, staticModule().getChatModel()).getModel());
+    }
+
     /** 开关持久化：重启后仍生效 */
     @Test
     void sceneApi_switchSurvivesRelaunch() throws Exception {
