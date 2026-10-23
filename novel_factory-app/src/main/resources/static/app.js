@@ -89,6 +89,35 @@
     const progressCard = document.getElementById('progress-card');
     const progressBarEl = document.getElementById('progress-bar');
     const progressMetaEl = document.getElementById('progress-meta');
+    // 高级（可选）：金手指导通开关与子字段。勾选才提交三件套；不勾选时键缺席（后端按 null
+    // = 未声明处理）。注意后端 DTO 虽是 Boolean（支持显式 false），但 checkbox 不勾选时
+    // FormData 里没有这个键，前端实际只会发出 true / 缺席两态——"明确没有"等价于不勾选
+    const hasCheatMechanismInput = document.getElementById('hasCheatMechanism');
+    const cheatFieldsDiv = document.getElementById('cheat-fields');
+
+    function syncCheatFields() {
+        if (!hasCheatMechanismInput || !cheatFieldsDiv) return;
+        cheatFieldsDiv.classList.toggle('hidden', !hasCheatMechanismInput.checked);
+    }
+
+    /**
+     * 金手指三件套的可编辑性：新建故事时可改（会写进 story-bible 固化）；
+     * 续写时由 bible 决定，这里置为只读——否则“本批改了、下批回退”会让人以为设置丢了。
+     */
+    function setCheatEditingEnabled(enabled) {
+        if (!hasCheatMechanismInput) return;
+        hasCheatMechanismInput.disabled = !enabled;
+        const nameInput = form.elements['cheatMechanismName'];
+        const intervalInput = form.elements['cheatUsageInterval'];
+        if (nameInput) nameInput.disabled = !enabled;
+        if (intervalInput) intervalInput.disabled = !enabled;
+        syncCheatFields();
+    }
+
+    if (hasCheatMechanismInput) {
+        hasCheatMechanismInput.addEventListener('change', syncCheatFields);
+        syncCheatFields();
+    }
 
     /** 字符进度条：26 格，后端在每章开始时更新 currentChapter，轮询到即推进一格 */
     var PROGRESS_WIDTH = 26;
@@ -200,11 +229,22 @@
         const fd = new FormData(form);
         fd.forEach(function (val, key) {
             if (val && val.trim() !== '') {
-                // 后端这两个字段是 Integer，别当字符串发过去（虽然 Jackson 能强转，但别依赖它）
-                data[key] = (key === 'chapterCount' || key === 'maxChapterCount')
-                        ? parseInt(val, 10) : val;
+                // 后端这几项是 Integer/Boolean，别当字符串发过去：
+                // checkbox 的默认值是 "on"，Jackson 按 Boolean 解析会直接 400
+                if (key === 'chapterCount' || key === 'maxChapterCount' || key === 'cheatUsageInterval') {
+                    data[key] = parseInt(val, 10);
+                } else if (key === 'hasCheatMechanism') {
+                    data[key] = true;
+                } else {
+                    data[key] = val;
+                }
             }
         });
+        // 未勾选金手指时，隐藏字段里的残留值不得发出——否则会写出“未声明却有名字”的脏组合
+        if (!hasCheatMechanismInput || !hasCheatMechanismInput.checked) {
+            delete data.cheatMechanismName;
+            delete data.cheatUsageInterval;
+        }
 
         btnSubmit.disabled = true;
         btnCancel.disabled = false;
@@ -469,8 +509,21 @@
         return fetchJson('/api/stories/' + encodeURIComponent(storyDirName) + '/resume')
         .then(function (info) {
             // chapterCount 不回填：后端固定给 DEFAULT_RESUME_BATCH_SIZE=5（“这次写几章”是用户自己的选择），
-            // 无差别回填会把用户刚改的 20 静默改回 5
-            const applied = applyFormValues(info.setting, ['chapterCount']);
+            // 无差别回填会把用户刚改的 20 静默改回 5。
+            // 金手指三件套也不走 applyFormValues：checkbox 只设 value 不设 checked，必须显式回填
+            const setting = info.setting || {};
+            const applied = applyFormValues(setting,
+                    ['chapterCount', 'hasCheatMechanism', 'cheatMechanismName', 'cheatUsageInterval']);
+            if (hasCheatMechanismInput) {
+                hasCheatMechanismInput.checked = Boolean(setting.hasCheatMechanism);
+                const nameInput = form.elements['cheatMechanismName'];
+                const intervalInput = form.elements['cheatUsageInterval'];
+                if (nameInput && setting.cheatMechanismName) nameInput.value = setting.cheatMechanismName;
+                if (intervalInput && setting.cheatUsageInterval != null) {
+                    intervalInput.value = setting.cheatUsageInterval;
+                }
+                setCheatEditingEnabled(false);   // 续写：以 story-bible 固化为准
+            }
             let message = (info.latestChapterNo
                     ? '已有 ' + info.existingChapterCount + ' 章，将从第 ' + info.nextChapterNo + ' 章接着写'
                     : '该故事还没有落盘章节，将从第 1 章开始')
@@ -494,6 +547,7 @@
         const storyDirName = resumeSelect.value;
         if (!storyDirName) {
             renderResumeHint(null);
+            setCheatEditingEnabled(true);   // 切回“新建故事”：金手指三件套恢复可编辑
             return;
         }
         loadResume(storyDirName);
@@ -1684,6 +1738,7 @@
                 + ' · 模型=' + (data.model || '沿用静态') + ' · ' + keyText;
         }
         renderSceneMatrix(data);
+        renderFallback(data);
         renderFeatureToggles(data.toggles);
         renderEmbedding(data.embedding);
         renderReferenceMode(data);
@@ -2010,6 +2065,119 @@
         })
         .finally(function () { btnResetSceneConfig.disabled = false; });
     }
+
+    // ===== 全局兜底模型（所有场景共用一份）=====
+    const inputFallbackModel = document.getElementById('fallback_model');
+    const inputFallbackMaxTokens = document.getElementById('fallback_maxTokens');
+    const inputFallbackTemperature = document.getElementById('fallback_temperature');
+    const inputFallbackBaseUrl = document.getElementById('fallback_baseUrl');
+    const inputFallbackApiKey = document.getElementById('fallback_apiKey');
+    const btnSaveFallback = document.getElementById('btn-save-fallback');
+    const btnResetFallback = document.getElementById('btn-reset-fallback');
+    const fallbackStatusDiv = document.getElementById('fallback-status');
+
+    function fallbackStatus(msg, type) {
+        if (!fallbackStatusDiv) return;
+        fallbackStatusDiv.textContent = msg;
+        fallbackStatusDiv.classList.remove('hidden');
+        fallbackStatusDiv.classList.toggle('has-config', type === 'ok' || type === 'error');
+        fallbackStatusDiv.style.borderColor = type === 'error' ? 'var(--error)' : (type === 'ok' ? 'var(--ok)' : '');
+        fallbackStatusDiv.style.color = type === 'error' ? 'var(--error)' : (type === 'ok' ? 'var(--ok)' : '');
+    }
+
+    /**
+     * 回填兜底模型：生效值优先展示覆盖值，未覆盖时显示 yml 静态值。
+     * 密钥永不回显——只给"已配置"的占位提示，留空提交=保留现有。
+     */
+    function renderFallback(data) {
+        if (!inputFallbackModel) return;
+        const fb = data && data.fallback ? data.fallback : null;
+        if (!fb) {
+            inputFallbackModel.value = '';
+            inputFallbackMaxTokens.value = '';
+            inputFallbackTemperature.value = '';
+            inputFallbackBaseUrl.value = '';
+            inputFallbackApiKey.value = '';
+            return;
+        }
+        inputFallbackModel.value = fb.overrideModel || fb.staticModel || '';
+        // 上限/温度只回显覆盖值：回显静态值会让"留空=沿用"的承诺失真
+        // （用户不动它保存，静态值就落成了覆盖；之后改 yml 静态值也不会生效）
+        inputFallbackMaxTokens.value = fb.overrideMaxTokens != null ? fb.overrideMaxTokens : '';
+        inputFallbackMaxTokens.placeholder = fb.staticMaxTokens != null
+            ? ('静态默认 ' + fb.staticMaxTokens + '，留空沿用主模型') : '留空沿用主模型';
+        inputFallbackTemperature.value = fb.overrideTemperature != null ? fb.overrideTemperature : '';
+        inputFallbackBaseUrl.value = fb.overrideBaseUrl || fb.staticBaseUrl || '';
+        inputFallbackApiKey.value = '';
+        // 密钥不回显：已覆盖时给掩码提示，留空提交 = 保留现有密钥
+        const hasKey = fb.overrideHasKey || fb.staticHasKey;
+        const masked = fb.overrideApiKeyMasked || fb.staticApiKeyMasked || '已掩码';
+        inputFallbackApiKey.placeholder = hasKey
+            ? ('已配置（' + masked + '），留空保留')
+            : '留空沿用主模型';
+        inputFallbackModel.placeholder = fb.effectiveModel
+            ? ('当前生效：' + fb.effectiveModel)
+            : '留空 = 不启用兜底';
+    }
+
+    function saveFallback() {
+        const model = inputFallbackModel.value.trim();
+        const maxTokens = inputFallbackMaxTokens.value.trim();
+        const temperature = inputFallbackTemperature.value.trim();
+        const baseUrl = inputFallbackBaseUrl.value.trim();
+        const apiKey = inputFallbackApiKey.value.trim();
+        // 与场景矩阵同款：整表留空 = 清除兜底覆盖（回退 yml 静态值）
+        if (!model && !maxTokens && !temperature && !baseUrl && !apiKey) {
+            resetFallback();
+            return;
+        }
+        const entry = {};
+        if (model) entry.model = model;
+        if (maxTokens) entry.maxTokens = parseInt(maxTokens, 10);
+        if (temperature !== '') entry.temperature = parseFloat(temperature);
+        if (baseUrl) entry.baseUrl = baseUrl;
+        // 密钥只在真的填了新值时提交（留空=后端保留现有密钥）
+        if (apiKey) entry.apiKey = apiKey;
+
+        btnSaveFallback.disabled = true;
+        fetchJson('/api/config/llm', {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ fallback: entry })
+        })
+        .then(function (data) {
+            renderLlmConfig(data);
+            fallbackStatus('兜底模型已保存并生效：' + (model || '沿用静态配置'), 'ok');
+            showToast('兜底模型已保存');
+        })
+        .catch(function (err) {
+            fallbackStatus('兜底模型保存失败：' + err.message, 'error');
+            showToast('保存失败：' + err.message);
+        })
+        .finally(function () { btnSaveFallback.disabled = false; });
+    }
+
+    function resetFallback() {
+        btnResetFallback.disabled = true;
+        fetchJson('/api/config/llm', {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ resetFallback: true })
+        })
+        .then(function (data) {
+            renderLlmConfig(data);
+            fallbackStatus('兜底模型覆盖已清除，回退到程序内置配置', 'ok');
+            showToast('兜底覆盖已清除');
+        })
+        .catch(function (err) {
+            fallbackStatus('兜底覆盖清除失败：' + err.message, 'error');
+            showToast('清除失败：' + err.message);
+        })
+        .finally(function () { btnResetFallback.disabled = false; });
+    }
+
+    if (btnSaveFallback) btnSaveFallback.addEventListener('click', saveFallback);
+    if (btnResetFallback) btnResetFallback.addEventListener('click', resetFallback);
 
     function loadLlmConfig() {
         fetchJson('/api/config/llm')
@@ -2444,10 +2612,22 @@
         return false;
     }
 
-    /** GitHub Releases 正文是 Markdown：只做最小安全渲染（标题/列表/粗体），其余按纯文本 */
+    /**
+     * Release 正文渲染：只做最小安全渲染（标题/列表），其余按纯文本。
+     *
+     * <p>两个来源的正文形态不同，必须先归一：
+     * <ul>
+     *   <li>GitHub API 的 {@code body}：Markdown 原文（浏览器直连路径）</li>
+     *   <li>electron-updater 的 {@code releaseNotes}：读的是 releases.atom 的 {@code <content>}，
+     *       GitHub 已把正文转成 HTML 并转义（{@code &lt;p&gt;...&lt;/p&gt;}）——XML 解析后就是
+     *       字面量 {@code <p>} 标签。不剥掉的话，页面上会把标签当正文原样显示出来</li>
+     * </ul>
+     * 剥标签只做文本层面处理（不注入 HTML），最后仍然走 esc()，避免 Release 正文成为 XSS 入口。
+     */
     function renderReleaseNotes(md) {
         if (!md) return '<p class="empty-hint">该版本未填写更新说明。</p>';
-        return md.split('\n').map(function (line) {
+        var text = normalizeReleaseHtml(String(md));
+        return text.split('\n').map(function (line) {
             var t = line.trim();
             if (!t) return '';
             if (/^#{1,6}\s/.test(t)) {
@@ -2458,6 +2638,37 @@
             }
             return '<div class="release-p">' + esc(t) + '</div>';
         }).join('');
+    }
+
+    /**
+     * 把 Atom feed 风格的 HTML 片段归一成纯文本行：
+     * 块级标签（p/div/br/li/h1-h6）转成换行，列表项加 "- " 前缀，其余标签剥掉，
+     * 再把 HTML 实体（&lt; &amp; &quot; 等）解码回字符。
+     */
+    function normalizeReleaseHtml(raw) {
+        if (raw.indexOf('<') === -1 && raw.indexOf('&') === -1) {
+            return raw;
+        }
+        var s = raw
+            // 列表项 → Markdown 列表，交给上面的 "- " 分支渲染成圆点
+            .replace(/<li[^>]*>/gi, '\n- ')
+            .replace(/<\/li>/gi, '')
+            // 标题 → Markdown 标题，保留层级信息供 release-h 分支使用
+            .replace(/<h([1-6])[^>]*>/gi, function (_m, n) { return '\n' + '#'.repeat(Number(n)) + ' '; })
+            .replace(/<\/h[1-6]>/gi, '\n\n')
+            // 段落/块级边界给空行：相邻 <p> 之间必须留出分隔，否则多段说明会挤成一片
+            .replace(/<br\s*\/?>/gi, '\n')
+            .replace(/<\/(p|div|ul|ol|blockquote)>/gi, '\n\n')
+            .replace(/<(p|div|ul|ol|blockquote)[^>]*>/gi, '')
+            // 剩余标签一律剥掉（含 code/strong/em 等行内标签）
+            .replace(/<[^>]+>/g, '');
+        // 实体解码：&amp; 必须最后解，否则 &amp;lt; 会被二次解码成 <
+        s = s.replace(/&lt;/g, '<').replace(/&gt;/g, '>')
+            .replace(/&quot;/g, '"').replace(/&#39;/g, "'")
+            .replace(/&nbsp;/g, ' ')
+            .replace(/&amp;/g, '&');
+        // 收敛多余空行：连续空白行压成一行，避免正文之间出现大段空白
+        return s.replace(/[ \t]+\n/g, '\n').replace(/\n{3,}/g, '\n\n').trim();
     }
 
     function checkUpdate() {

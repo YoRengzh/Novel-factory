@@ -75,11 +75,19 @@ public class LlmRuntimeConfig {
          */
         private Map<String, Boolean> toggles;
 
+        /**
+         * 全局兜底模型覆盖（2026-10-23）：所有场景共用这一个兜底，字段级合并
+         * （null=沿用 yml 静态值）。支持独立 base-url / api-key / max-tokens——
+         * 兜底的意义就在于"换一个供应商"，地址密钥必须能跟着变。
+         */
+        private SceneOverlay fallback;
+
         public boolean isEmpty() {
             return !AUTH_CHATGPT.equals(authMode)
                     && StringUtils.isBlank(baseUrl) && StringUtils.isBlank(apiKey)
                     && StringUtils.isBlank(model) && maxTokens == null
                     && (scenes == null || scenes.isEmpty())
+                    && fallback == null
                     && sceneApiEnabled == null
                     && !hasEmbeddingOverride()
                     && StringUtils.isBlank(referenceMode)
@@ -201,6 +209,7 @@ public class LlmRuntimeConfig {
         next.setSceneApiEnabled(request.getSceneApiEnabled() != null
                 ? request.getSceneApiEnabled() : current.getSceneApiEnabled());
         next.setScenes(mergeScenes(current, request));
+        next.setFallback(mergeFallback(current, request));
         mergeEmbedding(current, next, request);
         mergeReferenceMode(current, next, request);
         mergeToggles(current, next, request);
@@ -301,6 +310,34 @@ public class LlmRuntimeConfig {
         next.setEmbedApiKey(in.getApiKey() == null ? current.getEmbedApiKey() : StringUtils.trimToNull(in.getApiKey()));
         next.setEmbedModel(in.getModel() == null ? current.getEmbedModel() : StringUtils.trimToNull(in.getModel()));
         next.setEmbedDimensions(in.getDimensions() != null ? in.getDimensions() : current.getEmbedDimensions());
+    }
+
+    /**
+     * 全局兜底模型覆盖合并（整表替换，与场景矩阵同款语义）：
+     * request.fallback=null → 保持现状（其他保存请求不误伤）；
+     * resetFallback=true → 清空；否则全量替换——**缺席字段=清除该字段覆盖**
+     * （前端兜底表单总是整表提交，若用 null=保留语义，用户清空输入框保存后覆盖不会消失，
+     * 形成界面上看不见的残留状态）。
+     * apiKey 是唯一例外（密钥不回显）：null=保留现有密钥，空串=显式清除。
+     */
+    private static SceneOverlay mergeFallback(Overlay current, LlmConfigSaveRequestDTO request) {
+        if (request.isResetFallback()) {
+            return null;
+        }
+        LlmConfigSaveRequestDTO.SceneOverride in = request.getFallback();
+        if (in == null) {
+            return current.getFallback();
+        }
+        SceneOverlay prev = current.getFallback();
+        SceneOverlay next = new SceneOverlay();
+        next.setModel(StringUtils.trimToNull(in.getModel()));
+        next.setMaxTokens(in.getMaxTokens());
+        next.setTemperature(in.getTemperature() == null ? null
+                : validTemperature("fallback", in.getTemperature()));
+        next.setBaseUrl(StringUtils.trimToNull(in.getBaseUrl()));
+        next.setApiKey(in.getApiKey() == null
+                ? (prev == null ? null : prev.getApiKey()) : StringUtils.trimToNull(in.getApiKey()));
+        return next.isEmpty() ? null : next;
     }
 
     /**
@@ -422,9 +459,9 @@ public class LlmRuntimeConfig {
         copy.setEmbeddingApi(module.getEmbeddingApi());
         copy.setUnifiedModelEnabled(module.getUnifiedModelEnabled());
         copy.setSceneModels(module.getSceneModels());
-        // 场景级模型降级链必须随拷贝走——否则一旦存在运行时覆盖（前端设置面板），
-        // 降级链就被静默丢弃，挂机时的"换模型救调用"能力会无声失效
-        copy.setModelFallbacks(module.getModelFallbacks());
+        // 全局兜底模型必须随拷贝走——否则一旦存在运行时覆盖（前端设置面板），
+        // 兜底配置就被静默丢弃，挂机时的"换模型救调用"能力会无声失效
+        copy.setFallbackModel(module.getFallbackModel());
         return copy;
     }
 
@@ -451,7 +488,7 @@ public class LlmRuntimeConfig {
         copy.setEmbeddingApi(api);
         copy.setUnifiedModelEnabled(module.getUnifiedModelEnabled());
         copy.setSceneModels(module.getSceneModels());
-        copy.setModelFallbacks(module.getModelFallbacks());
+        copy.setFallbackModel(module.getFallbackModel());
         return copy;
     }
 
@@ -481,6 +518,45 @@ public class LlmRuntimeConfig {
         copy.setMaxTokens(selected.getMaxTokens() != null ? selected.getMaxTokens() : o.getMaxTokens());
         copy.setTemperature(selected.getTemperature());
         copy.setEnableThinking(selected.getEnableThinking());
+        return copy;
+    }
+
+    /**
+     * 全局兜底模型覆盖落到 module（独立分区，与场景覆盖互不影响）。
+     *
+     * <p>为什么单独一个方法而不是并进 applyModel：兜底是"所有场景共用的一份配置"，
+     * 与"本次调用是哪个场景"无关——并进场景感知路径会让每个场景各拿一份，
+     * 也就退回了被收敛掉的按场景配置。无覆盖时原样返回。
+     */
+    public StoryVO.Module applyFallback(StoryVO.Module module) {
+        Overlay o = overlay;
+        if (module == null || o == null || o.getFallback() == null || o.getFallback().isEmpty()) {
+            return module;
+        }
+        SceneOverlay fb = o.getFallback();
+        StoryVO.Module.ChatModel staticFallback = module.getFallbackModel();
+        StoryVO.Module.ChatModel merged = new StoryVO.Module.ChatModel();
+        // 字段优先级：运行时覆盖 > yml 静态兜底
+        merged.setModel(StringUtils.isNotBlank(fb.getModel()) ? fb.getModel()
+                : staticFallback == null ? null : staticFallback.getModel());
+        merged.setMaxTokens(fb.getMaxTokens() != null ? fb.getMaxTokens()
+                : staticFallback == null ? null : staticFallback.getMaxTokens());
+        merged.setTemperature(fb.getTemperature() != null ? fb.getTemperature()
+                : staticFallback == null ? null : staticFallback.getTemperature());
+        merged.setEnableThinking(staticFallback == null ? null : staticFallback.getEnableThinking());
+        merged.setBaseUrl(StringUtils.isNotBlank(fb.getBaseUrl()) ? fb.getBaseUrl()
+                : staticFallback == null ? null : staticFallback.getBaseUrl());
+        merged.setApiKey(StringUtils.isNotBlank(fb.getApiKey()) ? fb.getApiKey()
+                : staticFallback == null ? null : staticFallback.getApiKey());
+        merged.setCompletionsPath(staticFallback == null ? null : staticFallback.getCompletionsPath());
+
+        StoryVO.Module copy = new StoryVO.Module();
+        copy.setAiApi(module.getAiApi());
+        copy.setChatModel(module.getChatModel());
+        copy.setEmbeddingApi(module.getEmbeddingApi());
+        copy.setUnifiedModelEnabled(module.getUnifiedModelEnabled());
+        copy.setSceneModels(module.getSceneModels());
+        copy.setFallbackModel(merged);
         return copy;
     }
 
@@ -636,7 +712,41 @@ public class LlmRuntimeConfig {
             rows.add(row);
         }
         dto.setScenes(rows);
+        dto.setFallback(toFallbackView(module));
         return dto;
+    }
+
+    /** 全局兜底模型视图：yml 静态值 + 运行时覆盖 + 生效模型名 */
+    private LlmConfigDTO.FallbackView toFallbackView(StoryVO.Module module) {
+        LlmConfigDTO.FallbackView view = new LlmConfigDTO.FallbackView();
+        StoryVO.Module.ChatModel staticFallback = module.getFallbackModel();
+        if (staticFallback != null) {
+            view.setStaticModel(staticFallback.getModel());
+            view.setStaticMaxTokens(staticFallback.getMaxTokens());
+            view.setStaticBaseUrl(staticFallback.getBaseUrl());
+            if (StringUtils.isNotBlank(staticFallback.getApiKey())) {
+                view.setStaticHasKey(true);
+                view.setStaticApiKeyMasked(mask(staticFallback.getApiKey()));
+            }
+        }
+        Overlay o = overlay;
+        SceneOverlay fb = o == null ? null : o.getFallback();
+        if (fb != null && !fb.isEmpty()) {
+            view.setOverridden(true);
+            view.setOverrideModel(fb.getModel());
+            view.setOverrideMaxTokens(fb.getMaxTokens());
+            view.setOverrideTemperature(fb.getTemperature());
+            view.setOverrideBaseUrl(StringUtils.isNotBlank(fb.getBaseUrl()) ? fb.getBaseUrl() : null);
+            if (StringUtils.isNotBlank(fb.getApiKey())) {
+                view.setOverrideHasKey(true);
+                view.setOverrideApiKeyMasked(mask(fb.getApiKey()));
+            }
+        }
+        // 生效值：运行时覆盖 > yml 静态
+        String effective = fb != null && StringUtils.isNotBlank(fb.getModel())
+                ? fb.getModel() : (staticFallback == null ? null : staticFallback.getModel());
+        view.setEffectiveModel(effective);
+        return view;
     }
 
     private static LlmConfigDTO.ModelView toModelView(StoryVO.Module.ChatModel chatModel) {

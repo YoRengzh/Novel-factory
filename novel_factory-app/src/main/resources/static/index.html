@@ -132,6 +132,35 @@
                                 <label for="chapterGoal" data-page-node-id="YQl4qIMaJorolstli9FRoO">章节目标</label>
                                 <textarea id="chapterGoal" name="chapterGoal" rows="5" placeholder="本章要达成的目标..."></textarea>
                             </div>
+                            <!-- 高级（可选）：导演通道 + 金手指机制门禁。不填 = 与历史行为完全一致 -->
+                            <details class="form-group full-width advanced-options" id="advanced-options">
+                                <summary>高级（可选）：创作要点 / 金手指</summary>
+                                <div class="advanced-body">
+                                    <div>
+                                        <label for="creativeNotes">本批创作要点（导演通道）</label>
+                                        <textarea id="creativeNotes" name="creativeNotes" rows="3" maxlength="2000"
+                                                  placeholder="可选。本批要重点写什么、避开什么；会注入卷/阶段/章节计划三个规划 prompt 的最顶部（与既有约束冲突时以它为准）。留空 = 不注入，最多 2000 字"></textarea>
+                                    </div>
+                                    <label class="cheat-toggle" for="hasCheatMechanism">
+                                        <input type="checkbox" id="hasCheatMechanism" name="hasCheatMechanism" class="toggle-input">
+                                        <span>
+                                            <b>故事存在金手指 / 系统</b>
+                                            <span class="toggle-desc">启用「超期未使用」「原理重复描述」两道机械门禁。不勾选 = 未声明，规则不生效。新建时写入 story-bible 固化；续写时以 bible 为准（此处只读），要改请编辑故事目录下的 story-bible.txt</span>
+                                        </span>
+                                    </label>
+                                    <div id="cheat-fields" class="cheat-fields hidden">
+                                        <div>
+                                            <label for="cheatMechanismName">金手指名称</label>
+                                            <input type="text" id="cheatMechanismName" name="cheatMechanismName" maxlength="40"
+                                                   placeholder="如：签到系统（按正文里的叫法填，门禁识别更准）">
+                                        </div>
+                                        <div>
+                                            <label for="cheatUsageInterval">最多几章不用</label>
+                                            <input type="number" id="cheatUsageInterval" name="cheatUsageInterval" min="1" max="99" value="3">
+                                        </div>
+                                    </div>
+                                </div>
+                            </details>
                         </div>
                         <div class="form-actions" data-page-node-id="rR0u7RywQM6FVyDof8sCyR">
                             <button type="submit" id="btn-submit" class="btn-primary" data-page-node-id="YKkfMILi5tJ4CX4v76kB4t">开 始 生 成</button>
@@ -330,6 +359,46 @@
                     <div class="form-actions" data-page-node-id="Xai7jBk4wpdQMR1DjCQxtC">
                         <button type="button" id="btn-save-scene-config" class="btn-primary" data-page-node-id="oWQEa7oqB7EEGdTFLwSew0">保 存 场 景 覆 盖</button>
                         <button type="button" id="btn-reset-scene-config" class="btn-secondary" data-page-node-id="ev62vZsbh625KunV4opFP3">清 除 场 景 覆 盖</button>
+                    </div>
+                </div>
+
+                <!-- 全局兜底模型：所有场景共用一份，主模型与场景配置都不可用时才启用 -->
+                <div class="content-card" id="fallback-card">
+                    <div class="section-label">FALLBACK</div>
+                    <h2 class="section-title">兜底模型</h2>
+                    <p class="settings-hint">
+                        <b>说明</b>：所有场景共用这一个兜底模型，只有主模型与场景配置都不可用（额度耗尽 / 模型下线 / 参数被拒）时才启用。
+                        兜底的意义是<b>换一个供应商</b>——同供应商的另一个模型常与主模型一起挂，所以这里可以单独填 Base URL 与 API Key；
+                        留空则沿用主模型的地址密钥（同供应商时只写模型名即可）。
+                        <b>输出上限建议显式填写</b>：不同模型族的 token 上限差异很大，沿用主模型的值可能直接 400。
+                        留空模型名 = 不启用兜底。
+                    </p>
+                    <div class="form-grid">
+                        <div class="form-group">
+                            <label for="fallback_model">模型名（model）</label>
+                            <input type="text" id="fallback_model" placeholder="留空 = 不启用兜底" autocomplete="off">
+                        </div>
+                        <div class="form-group">
+                            <label for="fallback_maxTokens">最大输出 Token</label>
+                            <input type="number" id="fallback_maxTokens" min="1" placeholder="留空沿用主模型" autocomplete="off">
+                        </div>
+                        <div class="form-group">
+                            <label for="fallback_temperature">采样温度（0~1）</label>
+                            <input type="number" id="fallback_temperature" min="0" max="1" step="0.1" placeholder="留空沿用主模型" autocomplete="off">
+                        </div>
+                        <div class="form-group full-width">
+                            <label for="fallback_baseUrl">Base URL（留空沿用主模型）</label>
+                            <input type="text" id="fallback_baseUrl" placeholder="留空沿用全局地址" autocomplete="off">
+                        </div>
+                        <div class="form-group full-width">
+                            <label for="fallback_apiKey">API Key（留空沿用主模型 / 保留现有）</label>
+                            <input type="password" id="fallback_apiKey" placeholder="留空保留现有" autocomplete="new-password">
+                        </div>
+                    </div>
+                    <div id="fallback-status" class="config-status hidden"></div>
+                    <div class="form-actions">
+                        <button type="button" id="btn-save-fallback" class="btn-primary">保 存 兜 底 模 型</button>
+                        <button type="button" id="btn-reset-fallback" class="btn-secondary">清 除 兜 底 覆 盖</button>
                     </div>
                 </div>
 

@@ -7,7 +7,7 @@ import cn.novel.yonren.domain.novel.model.entity.ArmoryCommandEntity;
 import cn.novel.yonren.domain.novel.service.armory.StoryGenerateService;
 import cn.novel.yonren.domain.novel.model.valobj.properties.StoryProperties;
 import cn.novel.yonren.domain.novel.service.job.JobRegistry;
-import cn.novel.yonren.trigger.http.StoryCommandAssembler;
+import cn.novel.yonren.trigger.assembler.StoryCommandAssembler;
 import jakarta.annotation.Resource;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.lang3.StringUtils;

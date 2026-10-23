@@ -75,7 +75,7 @@ public class GenerationJob {
     private volatile transient BatchHealthReport lastHealthReport;
 
     /**
-     * 批序号（1 起）。外部首发 = 1；自动续批时父作业 +1（见 {@code StoryJobService.scheduleNextBatchIfNeeded}）。
+     * 批序号（1 起）。外部首发 = 1；自动续批时父作业 +1
      * 用途：run-plan.max-batches 的上限判定，以及让作业状态直接读出"这是第几批"——
      * 此前只能靠人去数 generation-records 里的批次区间（实测 26 次提交 / 20 个唯一区间）。
      */

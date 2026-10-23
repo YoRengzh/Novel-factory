@@ -64,6 +64,25 @@ public class BuildStoryContextNode extends AbstractArmorySupport {
           .append("章节总体目标：").append(ChapterGoalWindowPolicy.window(
                   storyContextEntity.getChapterGoal(), chapterOffset + 1)).append("\n");
 
+        // 金手指/核心机制声明（请求级可选字段）：只有明确声明 true 才渲染。
+        // 为什么必须写进故事设定：名字此前只在“用过一次”之后经一致性索引进入前缀，
+        // 首章与规划阶段的写手拿不到它——门禁按名字判定“是否使用”，名字不在上下文里就会误判超期。
+        // 名字按单行处理并截断：它是请求体里的自由文本，不能让它借换行改写 prompt 结构
+        StoryVO.StoryFeatures features = storyVO == null ? null : storyVO.getFeatures();
+        if (features != null && Boolean.TRUE.equals(features.getHasCheatMechanism())) {
+            String mechanismName = StringUtils.abbreviate(
+                    StringUtils.defaultIfBlank(features.getCheatMechanismName(), "未命名金手指")
+                            .replaceAll("[\\r\\n]+", " ").trim(), 40);
+            int interval = features.getCheatUsageInterval() == null
+                    ? 3 : Math.max(1, features.getCheatUsageInterval());
+            sb.append("核心机制：故事存在金手指/系统「").append(mechanismName).append("」。\n")
+              .append("写作纪律：")
+              .append(interval <= 1
+                      ? "每章至少有一次有意义的使用或提及；"
+                      : "连续 " + interval + " 章内至少有一次有意义的使用或提及（超过该间隔会被质量门禁判 BLOCKING 并触发整章返工）；")
+              .append("全篇对运作原理的大段解释至多 2 次（首次建立或关键升级时），其余章节直接用行动展示过程与结果。\n");
+        }
+
         if (defaults != null) {
             sb.append("语言：").append(defaults.getLanguage()).append("\n");
         }

@@ -1,4 +1,4 @@
-package cn.novel.yonren.trigger.http;
+package cn.novel.yonren.trigger.assembler;
 
 import cn.novel.yonren.api.dto.ChapterPlanApprovalRequestDTO;
 import cn.novel.yonren.api.dto.StoryGenerateRequestDTO;
@@ -17,10 +17,13 @@ import java.util.List;
 import java.util.regex.Pattern;
 
 /**
- * DTO → 领域命令装配（trigger 包内工具）：同步与异步两个 controller 共用，
+ * DTO → 领域命令装配（trigger 层工具）：同步与异步两个 controller 共用，
  * storyVO 未显式传入时用 yml 默认配置补齐；worldId 在此做入口校验（集合名约束）
+ *
+ * <p>无状态、纯函数式（静态方法 + 私有构造），因此不做 Spring Bean，
+ * 避免为一次字段搬运和格式校验引入容器生命周期。
  */
-final class StoryCommandAssembler {
+public final class StoryCommandAssembler {
 
     /** Qdrant 集合名保守白名单：字母数字开头，1-63 位，仅字母数字/下划线/连字符 */
     static final Pattern WORLD_ID_PATTERN = Pattern.compile("^[a-zA-Z0-9][a-zA-Z0-9_-]{0,62}$");
@@ -28,7 +31,7 @@ final class StoryCommandAssembler {
     private StoryCommandAssembler() {
     }
 
-    static ArmoryCommandEntity toCommand(StoryGenerateRequestDTO request, StoryProperties storyProperties) {
+    public static ArmoryCommandEntity toCommand(StoryGenerateRequestDTO request, StoryProperties storyProperties) {
         String worldId = validateWorldId(request.getWorldId());
 
         StoryContextEntity storyContextEntity = StoryContextEntity.builder()
@@ -89,7 +92,7 @@ final class StoryCommandAssembler {
      * <p>{@code chapterType} 用 {@link ChapterTypeVO#of} 容错解析：未识别值降级 NORMAL，
      * 避免前端传 "NORMAL"/"普通" 之类的变体导致整次裁决 400
      */
-    static ChapterPlanAggregate toChapterPlan(ChapterPlanApprovalRequestDTO request) {
+    public static ChapterPlanAggregate toChapterPlan(ChapterPlanApprovalRequestDTO request) {
         if (request == null || request.getChapters() == null || request.getChapters().isEmpty()) {
             return null;
         }

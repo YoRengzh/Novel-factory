@@ -39,16 +39,20 @@ public class StoryVO {
         // 分场景模型：key 为 ModelScene.configKey（如 "chapter-plan"），value 为独立模型/思考模式配置
         private Map<String, ChatModel> sceneModels;
         /**
-         * 场景级模型降级链（2026-09-16 阶段六）：key 为 ModelScene.configKey，value 为备选模型名列表
-         * （按序尝试，仅模型名不同，其余参数沿用该场景主模型）。
+         * 全局兜底模型（2026-10-23，替代此前的按场景 {@code model-fallbacks} 表）。
          *
-         * <p>只在"模型层"失败时启用（额度耗尽 / 模型不存在 / 参数被拒，见
-         * {@code LlmErrorClassifier}）——这些情况下重试同一模型永远失败，换模型才有效；
-         * 超时/网络类瞬时故障走传输层重试，不消耗降级链。
-         *
-         * <p>保留键 {@code default}：任何场景的链尾部都会并入它，供"全局兜底"用。
+         * <p>所有场景共用这一个兜底：主模型与场景配置都不可用时才启用。之所以做成
+         * "单个 + 自带完整配置"而不是"每场景一条链"：
+         * <ul>
+         *   <li><b>兜底的语义就是"原路走不通"</b>——额度耗尽/模型下线常按供应商计量，
+         *       同供应商的另一个模型往往一起挂，所以兜底必须能指向异供应商；</li>
+         *   <li>为此它自带 base-url / api-key（缺省时回落主模型），并能单独设 max-tokens
+         *       （异族模型的上限与主模型常不同，沿用会直接 400）。</li>
+         * </ul>
+         * 17 个场景各配一条链既繁琐又几乎总是填同样的值，维护成本远高于收益。
+         * 留空（model 为空）= 不启用兜底，行为与引入前一致。
          */
-        private Map<String, List<String>> modelFallbacks;
+        private ChatModel fallbackModel;
 
 
         @Data

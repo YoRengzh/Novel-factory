@@ -1,4 +1,4 @@
-package cn.novel.yonren.trigger.http;
+package cn.novel.yonren.trigger.web;
 
 import org.junit.jupiter.api.Test;
 import org.springframework.mock.web.MockFilterChain;

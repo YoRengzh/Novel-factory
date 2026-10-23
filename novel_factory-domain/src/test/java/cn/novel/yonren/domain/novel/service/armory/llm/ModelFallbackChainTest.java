@@ -6,16 +6,20 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
-import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
- * 场景级模型降级链测试。
+ * 全局兜底模型链测试（2026-10-23 由按场景降级链收敛而来）。
  *
- * <p>核心不变量：<b>只替换模型名，其余参数一律沿用主模型</b>——
- * 降级只应改变"用哪个模型"；顺带改了温度或端点，副作用的来源就不可解释了。
+ * <p>核心不变量：
+ * <ul>
+ *   <li>链最长 2 站：主模型 → 全局兜底；</li>
+ *   <li>兜底缺省字段回落主模型，显式填写的字段以兜底为准（跨供应商时地址密钥必须能变）；</li>
+ *   <li>兜底与主模型同名时跳过（同一模型重试只会再失败一次）。</li>
+ * </ul>
  */
 class ModelFallbackChainTest {
 
@@ -31,15 +35,21 @@ class ModelFallbackChainTest {
         return m;
     }
 
-    private static StoryVO.Module module(Map<String, List<String>> fallbacks) {
+    private static StoryVO.Module.ChatModel fallback(String model) {
+        StoryVO.Module.ChatModel m = new StoryVO.Module.ChatModel();
+        m.setModel(model);
+        return m;
+    }
+
+    private static StoryVO.Module module(StoryVO.Module.ChatModel fallbackModel) {
         StoryVO.Module module = new StoryVO.Module();
-        module.setModelFallbacks(fallbacks);
+        module.setFallbackModel(fallbackModel);
         return module;
     }
 
     @Test
-    @DisplayName("无配置时链长为 1（只有主模型），退化为原行为")
-    void noFallbacksKeepsSingleEntry() {
+    @DisplayName("无兜底配置时链长为 1（只有主模型），退化为原行为")
+    void noFallbackKeepsSingleEntry() {
         List<StoryVO.Module.ChatModel> chain = ModelFallbackChain.build(
                 module(null), ModelScene.CHAPTER_PLAN, primary("qwen3.7-max-2026-05-20"));
 
@@ -48,91 +58,102 @@ class ModelFallbackChainTest {
     }
 
     @Test
-    @DisplayName("场景备选接在主模型之后，且只换模型名、其余参数原样沿用")
-    void sceneFallbackPreservesOtherParams() {
+    @DisplayName("兜底只填模型名时，其余参数一律沿用主模型")
+    void fallbackInheritsPrimaryParamsWhenNotSpecified() {
         StoryVO.Module.ChatModel primary = primary("qwen3.7-max-2026-05-20");
         List<StoryVO.Module.ChatModel> chain = ModelFallbackChain.build(
-                module(Map.of("chapter-plan", List.of("qwen3.8-flash"))),
-                ModelScene.CHAPTER_PLAN, primary);
+                module(fallback("qwen3.8-flash")), ModelScene.CHAPTER_PLAN, primary);
 
         assertEquals(2, chain.size());
-        StoryVO.Module.ChatModel fallback = chain.get(1);
-        assertEquals("qwen3.8-flash", fallback.getModel());
-        assertEquals(16384L, fallback.getMaxTokens(), "maxTokens 必须沿用主模型");
-        assertEquals(0.1, fallback.getTemperature(), 1e-9);
-        assertEquals(false, fallback.getEnableThinking());
-        assertEquals(primary.getBaseUrl(), fallback.getBaseUrl());
-        assertEquals(primary.getApiKey(), fallback.getApiKey());
-        assertEquals(primary.getCompletionsPath(), fallback.getCompletionsPath());
+        StoryVO.Module.ChatModel fb = chain.get(1);
+        assertEquals("qwen3.8-flash", fb.getModel());
+        assertEquals(16384L, fb.getMaxTokens(), "maxTokens 未指定时沿用主模型");
+        assertEquals(0.1, fb.getTemperature(), 1e-9);
+        assertEquals(false, fb.getEnableThinking());
+        assertEquals(primary.getBaseUrl(), fb.getBaseUrl());
+        assertEquals(primary.getApiKey(), fb.getApiKey());
+        assertEquals(primary.getCompletionsPath(), fb.getCompletionsPath());
     }
 
     @Test
-    @DisplayName("default 条目接在场景条目之后（场景更具体，优先尝试）")
-    void defaultEntryComesAfterSceneEntry() {
+    @DisplayName("兜底显式填写的地址/密钥/上限覆盖主模型——跨供应商时必须能变")
+    void fallbackExplicitFieldsWin() {
+        StoryVO.Module.ChatModel fb = fallback("deepseek-v4-pro");
+        fb.setBaseUrl("https://api.deepseek.com");
+        fb.setApiKey("sk-deepseek");
+        fb.setMaxTokens(8192L);
+        fb.setTemperature(0.5);
+
         List<StoryVO.Module.ChatModel> chain = ModelFallbackChain.build(
-                module(Map.of(
-                        "revise", List.of("deepseek-v4-flash"),
-                        ModelFallbackChain.DEFAULT_KEY, List.of("qwen3.8-flash"))),
-                ModelScene.CHAPTER_REVISE, primary("qwen3.7-plus-2026-05-26"));
+                module(fb), ModelScene.CHAPTER_PLAN, primary("glm-5.3-flash"));
 
-        assertEquals(3, chain.size());
-        assertEquals("deepseek-v4-flash", chain.get(1).getModel());
-        assertEquals("qwen3.8-flash", chain.get(2).getModel());
+        assertEquals(2, chain.size());
+        StoryVO.Module.ChatModel selected = chain.get(1);
+        assertEquals("deepseek-v4-pro", selected.getModel());
+        assertEquals("https://api.deepseek.com", selected.getBaseUrl());
+        assertEquals("sk-deepseek", selected.getApiKey());
+        assertEquals(8192L, selected.getMaxTokens(), "异族模型上限必须可独立指定");
+        assertEquals(0.5, selected.getTemperature(), 1e-9);
     }
 
     @Test
-    @DisplayName("备选与主模型同名时跳过：换了个名字还是同一个模型，没有任何意义")
+    @DisplayName("兜底与主模型同名时跳过：换了个名字还是同一个模型，没有任何意义")
     void sameAsPrimaryIsSkipped() {
         List<StoryVO.Module.ChatModel> chain = ModelFallbackChain.build(
-                module(Map.of("chapter-content", List.of("qwen3.8-flash"))),
+                module(fallback("qwen3.8-flash")),
                 ModelScene.CHAPTER_CONTENT, primary("qwen3.8-flash"));
 
-        assertEquals(1, chain.size(), "同名备选不得进链");
+        assertEquals(1, chain.size(), "同名兜底不得进链");
     }
 
     @Test
-    @DisplayName("重复备选去重且保持顺序（链是有序语义）")
-    void duplicatesAreDedupedPreservingOrder() {
+    @DisplayName("兜底模型名为空时不启用（视为未配置）")
+    void blankFallbackModelDisables() {
+        StoryVO.Module.ChatModel fb = fallback("   ");
         List<StoryVO.Module.ChatModel> chain = ModelFallbackChain.build(
-                module(Map.of(
-                        "chapter-plan", List.of("qwen3.8-flash", "qwen3.8-max", "qwen3.8-flash"),
-                        ModelFallbackChain.DEFAULT_KEY, List.of("qwen3.8-max", "deepseek-v4-flash"))),
-                ModelScene.CHAPTER_PLAN, primary("qwen3.7-max-2026-05-20"));
+                module(fb), ModelScene.CHAPTER_PLAN, primary("qwen3.8-flash"));
 
-        // 主 + qwen3.8-flash + qwen3.8-max（已到上限 3）
-        assertEquals(ModelFallbackChain.MAX_CHAIN_LENGTH, chain.size());
-        assertEquals("qwen3.8-flash", chain.get(1).getModel());
-        assertEquals("qwen3.8-max", chain.get(2).getModel());
-    }
-
-    @Test
-    @DisplayName("链长有上限：yml 写成长链时截断，避免一次失败烧掉一整串调用的费用")
-    void chainLengthIsCapped() {
-        List<StoryVO.Module.ChatModel> chain = ModelFallbackChain.build(
-                module(Map.of("stage-blueprint", List.of("m1", "m2", "m3", "m4", "m5"))),
-                ModelScene.STAGE_BLUEPRINT, primary("m0"));
-
-        assertEquals(ModelFallbackChain.MAX_CHAIN_LENGTH, chain.size());
+        assertEquals(1, chain.size());
     }
 
     @Test
     @DisplayName("主模型缺失（无可用配置）时返回空链，调用方据此直接失败而不是空跑")
     void missingPrimaryYieldsEmptyChain() {
-        assertTrue(ModelFallbackChain.build(module(Map.of()), ModelScene.CHAPTER_PLAN, null).isEmpty());
+        assertTrue(ModelFallbackChain.build(module(fallback("x")), ModelScene.CHAPTER_PLAN, null).isEmpty());
 
         StoryVO.Module.ChatModel blank = new StoryVO.Module.ChatModel();
-        assertTrue(ModelFallbackChain.build(module(Map.of()), ModelScene.CHAPTER_PLAN, blank).isEmpty());
+        assertTrue(ModelFallbackChain.build(module(fallback("x")), ModelScene.CHAPTER_PLAN, blank).isEmpty());
     }
 
     @Test
-    @DisplayName("场景为 null 时仍能用 default 兜底（统一模型模式下无场景语境）")
-    void nullSceneFallsBackToDefaultOnly() {
-        StoryVO.Module.ChatModel primary = primary("qwen3.8-flash");
+    @DisplayName("场景为 null 时兜底照样生效（统一模型模式下无场景语境）")
+    void nullSceneStillUsesFallback() {
         List<StoryVO.Module.ChatModel> chain = ModelFallbackChain.build(
-                module(Map.of("chapter-plan", List.of("never-used"), ModelFallbackChain.DEFAULT_KEY, List.of("deepseek-v4-flash"))),
-                null, primary);
+                module(fallback("deepseek-v4-flash")), null, primary("qwen3.8-flash"));
 
         assertEquals(2, chain.size());
         assertEquals("deepseek-v4-flash", chain.get(1).getModel());
+    }
+
+    @Test
+    @DisplayName("链长上限为 2：单个兜底不会产生更长的链")
+    void chainLengthIsCappedAtTwo() {
+        assertEquals(2, ModelFallbackChain.MAX_CHAIN_LENGTH);
+    }
+
+    @Test
+    @DisplayName("mergeWithPrimary 对空字段回落、非空字段保留")
+    void mergeWithPrimaryFallsBackFieldByField() {
+        StoryVO.Module.ChatModel fb = new StoryVO.Module.ChatModel();
+        fb.setModel("fallback-model");
+        fb.setApiKey("sk-fb");
+
+        StoryVO.Module.ChatModel merged = ModelFallbackChain.mergeWithPrimary(fb, primary("primary-model"));
+
+        assertEquals("fallback-model", merged.getModel());
+        assertEquals("sk-fb", merged.getApiKey(), "显式密钥以兜底为准");
+        assertEquals("https://dashscope.aliyuncs.com/compatible-mode", merged.getBaseUrl(),
+                "baseUrl 为空时回落主模型");
+        assertEquals(Boolean.FALSE, merged.getEnableThinking(), "兜底未指定时沿用主模型的 false");
     }
 }

@@ -16,6 +16,7 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -39,6 +40,9 @@ class SpringAiLlmGatewayTest {
         LlmCall call = LlmCall.builder().systemPrompt("system").userPrompt("user").build();
         when(runtime.usesChatGptAuth()).thenReturn(true);
         when(runtime.applyApi(module)).thenReturn(module);
+        // 全局兜底重构后，网关在解析主模型前会先应用一次 applyFallback；
+        // mock 默认返回 null 会把 module 变成空设置（生产实现无覆盖时原样返回）
+        when(runtime.applyFallback(any())).thenAnswer(inv -> inv.getArgument(0));
         when(runtime.applyModel(null, model)).thenReturn(model);
         when(chatGpt.complete("gpt-6.1-sol", "system", "user"))
                 .thenReturn(new ChatGptGateway.Completion("{\"ok\":true}", 10, 5, 15));

@@ -32,7 +32,7 @@ public class JobRegistry {
     }
 
     /**
-     * 淘汰超额的终态作业（保留最近 {@value #TERMINAL_RETENTION} 个）。
+     * 淘汰超额的终态作业
      *
      * <p>只淘汰终态（COMPLETED/FAILED/CANCELLED）——运行中、排队中与审批挂起的作业
      * 仍在被 worker/前端引用，淘汰会造成"作业凭空消失"。

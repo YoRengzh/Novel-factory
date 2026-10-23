@@ -191,6 +191,107 @@ class LlmRuntimeConfigTest {
 
     // ===== 分场景覆盖 =====
 
+    // ===== 全局兜底模型覆盖 =====
+
+    /** 整表替换语义：缺席字段=清除覆盖（清空输入框保存后覆盖必须消失，不是残留） */
+    @Test
+    void fallbackSave_isFullReplaceAbsentFieldClearsOverride() {
+        LlmRuntimeConfig config = new LlmRuntimeConfig(tmp.resolve("override.json"));
+        LlmConfigSaveRequestDTO first = new LlmConfigSaveRequestDTO();
+        LlmConfigSaveRequestDTO.SceneOverride fb = sceneOverride("deepseek-v4-pro", 8192L, 0.5);
+        fb.setBaseUrl("https://api.deepseek.com");
+        first.setFallback(fb);
+        config.save(first);
+
+        // 第二次保存只带模型名：maxTokens/baseUrl 覆盖应被清除
+        LlmConfigSaveRequestDTO second = new LlmConfigSaveRequestDTO();
+        second.setFallback(sceneOverride("qwen3.8-flash", null, null));
+        config.save(second);
+
+        StoryVO.Module module = staticModule();
+        StoryVO.Module applied = config.applyFallback(module);
+        assertEquals("qwen3.8-flash", applied.getFallbackModel().getModel());
+        assertNull(applied.getFallbackModel().getMaxTokens(), "缺席字段=清除覆盖");
+        assertNull(applied.getFallbackModel().getBaseUrl(), "缺席字段=清除覆盖");
+        assertNull(applied.getFallbackModel().getTemperature());
+    }
+
+    /** 兜底覆盖落到 module：显式字段以覆盖为准，缺省字段回落 yml 静态兜底 */
+    @Test
+    void fallbackApply_mergesOverStaticFallback() {
+        LlmRuntimeConfig config = new LlmRuntimeConfig(tmp.resolve("override.json"));
+        StoryVO.Module module = staticModule();
+        StoryVO.Module.ChatModel staticFallback = new StoryVO.Module.ChatModel();
+        staticFallback.setModel("static-fb");
+        staticFallback.setMaxTokens(4096L);
+        module.setFallbackModel(staticFallback);
+
+        LlmConfigSaveRequestDTO request = new LlmConfigSaveRequestDTO();
+        LlmConfigSaveRequestDTO.SceneOverride fb = sceneOverride("runtime-fb", 16384L, null);
+        request.setFallback(fb);
+        config.save(request);
+
+        StoryVO.Module applied = config.applyFallback(module);
+        assertEquals("runtime-fb", applied.getFallbackModel().getModel());
+        assertEquals(Long.valueOf(16384L), applied.getFallbackModel().getMaxTokens());
+        assertEquals(Long.valueOf(4096L), staticFallback.getMaxTokens(), "静态对象不被污染");
+    }
+
+    /** resetFallback 只清兜底覆盖，不误伤全局/场景覆盖 */
+    @Test
+    void fallbackReset_doesNotTouchOtherOverrides() {
+        LlmRuntimeConfig config = new LlmRuntimeConfig(tmp.resolve("override.json"));
+        LlmConfigSaveRequestDTO global = new LlmConfigSaveRequestDTO();
+        global.setModel("global-model");
+        config.save(global);
+        config.save(sceneSave("audit", sceneOverride("audit-model", null, null)));
+        config.save(withFallback(sceneOverride("fb-model", null, null)));
+
+        LlmConfigSaveRequestDTO reset = new LlmConfigSaveRequestDTO();
+        reset.setResetFallback(true);
+        config.save(reset);
+
+        assertEquals("global-model", config.view().getModel());
+        assertEquals("audit-model", config.applyModel(
+                ModelScene.CHAPTER_AUDIT, staticModule().getChatModel()).getModel());
+        StoryProperties statics = new StoryProperties();
+        statics.setModule(staticModule());
+        assertNull(config.view(statics).getFallback().getOverrideModel());
+    }
+
+    private LlmConfigSaveRequestDTO withFallback(LlmConfigSaveRequestDTO.SceneOverride fb) {
+        LlmConfigSaveRequestDTO request = new LlmConfigSaveRequestDTO();
+        request.setFallback(fb);
+        return request;
+    }
+
+    /** 兜底覆盖跨重启持久化 */
+    @Test
+    void fallbackPersistence_survivesRelaunch() throws Exception {
+        Path file = tmp.resolve("override.json");
+        LlmRuntimeConfig config = new LlmRuntimeConfig(file);
+        config.save(withFallback(sceneOverride("fb-model", 8192L, 0.3)));
+
+        LlmRuntimeConfig reloaded = new LlmRuntimeConfig(file);
+        StoryVO.Module applied = reloaded.applyFallback(staticModule());
+        assertEquals("fb-model", applied.getFallbackModel().getModel());
+        assertEquals(Long.valueOf(8192L), applied.getFallbackModel().getMaxTokens());
+    }
+
+    /** 其他分区保存请求不带 fallback 字段时不误伤兜底覆盖 */
+    @Test
+    void globalSaveWithoutFallback_keepsFallbackOverride() {
+        LlmRuntimeConfig config = new LlmRuntimeConfig(tmp.resolve("override.json"));
+        config.save(withFallback(sceneOverride("fb-model", null, null)));
+
+        LlmConfigSaveRequestDTO globalOnly = new LlmConfigSaveRequestDTO();
+        globalOnly.setModel("global-model");
+        config.save(globalOnly);
+
+        StoryVO.Module applied = config.applyFallback(staticModule());
+        assertEquals("fb-model", applied.getFallbackModel().getModel());
+    }
+
     private LlmConfigSaveRequestDTO.SceneOverride sceneOverride(String model, Long maxTokens, Double temperature) {
         LlmConfigSaveRequestDTO.SceneOverride so = new LlmConfigSaveRequestDTO.SceneOverride();
         so.setModel(model);

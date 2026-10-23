@@ -21,7 +21,7 @@
 | `novel_factory-api` | 请求/响应 DTO | 无 |
 | `novel_factory-domain` | **全部机制**：管线节点、质量策略、记忆层、提示词装配、作业调度 | types, api |
 | `novel_factory-infrastructure` | 文件仓库、Qdrant 向量库、LLM / Embedding 网关 | domain |
-| `novel_factory-trigger` | HTTP 端点（作业、故事、配置、草稿、指标） | domain, api, types |
+| `novel_factory-trigger` | HTTP 端点 + 请求装配 + Web 守卫 + 异常出口 | domain, api, types |
 | `novel_factory-app` | 装配、配置、启动 | trigger, infrastructure |
 
 domain 通过端口接口对外，infrastructure 提供实现：
@@ -34,6 +34,18 @@ domain 通过端口接口对外，infrastructure 提供实现：
 | `adapter/repository/VectorStore` | `QdrantVectorStore` |
 
 技术栈：Java 17、Spring Boot 3.4.3、Spring AI 1.0（OpenAI 兼容协议）、Qdrant java client 1.14.1（gRPC）。
+
+trigger 内部按角色分包，控制器只做「解析 → 调用 → 返回」：
+
+| 包 | 职责 |
+|---|---|
+| `trigger.http` | `@RestController`：解析请求、调用领域服务、返回 DTO，不含业务规则 |
+| `trigger.assembler` | 请求 DTO ⇄ 领域对象（命令 / 聚合）；纯字段搬运 + 入口格式校验 |
+| `trigger.web` | 与具体端点无关的 Servlet 层组件（跨站写请求守卫） |
+| `trigger.advice` | 统一异常出口：入参类错误码（0002/0003/0004）→ 400，其余 → 500；409/502/503 等端点特有意状态码仍由端点自己抛 |
+
+domain 的每个子包都带 `package-info.java`，写明「这个包放什么、入口类是谁、失败语义如何」。
+读陌生代码时先看包注释，通常能省掉一次从 controller 往下追的搜索。
 
 ## 2. 生成管线
 

@@ -171,7 +171,9 @@ public class SpringAiLlmGateway implements LlmGateway {
     }
 
     private String completeInner(StoryVO.Module module, LlmCall call) {
-        StoryVO.Module effective = llmRuntimeConfig.applyApi(module);
+        // 兜底模型覆盖先落到 module：它是"所有场景共用的一份"，与场景解析无关，
+        // 必须在 ModelFallbackChain.build 之前生效，否则运行时配置的兜底模型读不到
+        StoryVO.Module effective = llmRuntimeConfig.applyFallback(llmRuntimeConfig.applyApi(module));
         // 场景感知覆盖：场景覆盖 > 全局覆盖 > yml 静态（场景条目缺项已由 resolveChatModel 回落统一模型）
         StoryVO.Module.ChatModel primary = llmRuntimeConfig.applyModel(
                 call.getScene(), resolveChatModel(effective, call.getScene()));

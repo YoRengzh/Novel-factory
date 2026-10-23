@@ -152,24 +152,13 @@ class StoryPropertiesBindingTest {
         // 注：ZDR 断言已随 Command Code 回退一并移除——DashScope 不发送 x-cmd-zdr 头
         assertEquals(0.4, sceneModels.get("revise").getTemperature(), 0.001, "修订温度应为 0.4");
 
-        // 模型降级链（阶段六）：key 必须是**真实场景键**——拼错不会报错，只会静默永不生效，
-        // 而"降级链静默失效"恰恰是挂机时最难发现的那类故障
-        var fallbacks = module.getModelFallbacks();
-        assertNotNull(fallbacks, "model-fallbacks 应能绑定到 Module");
-        var sceneKeys = java.util.Arrays.stream(cn.novel.yonren.types.enums.ModelScene.values())
-                .map(cn.novel.yonren.types.enums.ModelScene::getConfigKey)
-                .collect(java.util.stream.Collectors.toSet());
-        for (var entry : fallbacks.entrySet()) {
-            assertTrue(sceneKeys.contains(entry.getKey()) || "default".equals(entry.getKey()),
-                    "model-fallbacks 的 key 必须是真实场景 key 或 default，发现无效键：" + entry.getKey());
-            assertTrue(entry.getValue() != null && !entry.getValue().isEmpty(),
-                    "降级链不得为空列表：" + entry.getKey());
-        }
-        // 链长上限与 ModelFallbackChain 一致，避免 yml 写成长链后一次失败烧掉整串调用
-        for (var entry : fallbacks.entrySet()) {
-            assertTrue(entry.getValue().size() <= cn.novel.yonren.domain.novel.service.armory.llm
-                            .ModelFallbackChain.MAX_CHAIN_LENGTH,
-                    "降级链条数不得超过上限：" + entry.getKey());
-        }
+        // 全局兜底模型（2026-10-23，替代按场景 model-fallbacks 表）：绑定失败不会报错，
+        // 只会静默不启用兜底——"兜底静默失效"恰恰是挂机时最难发现的那类故障
+        var fallback = module.getFallbackModel();
+        assertNotNull(fallback, "story.module.fallback-model 未绑定成功（检查 yml 缩进）");
+        assertTrue(fallback.getModel() != null && !fallback.getModel().isBlank(),
+                "兜底模型名不应为空");
+        // 兜底必须自带输出上限：异族模型的上限与主模型常不同，沿用会直接 400
+        assertNotNull(fallback.getMaxTokens(), "兜底模型应显式配置 max-tokens");
     }
 }

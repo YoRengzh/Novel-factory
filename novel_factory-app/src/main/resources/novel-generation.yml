@@ -114,23 +114,21 @@ story:
         max-tokens: 4096
         temperature: 0.1
         enable-thinking: false
-    # 选型原则：备选**尽量跨模型族**——免费档/上游的拒绝常按模型计量，同族备选可能共享同一份额度而一起失败。
-    model-fallbacks:
-      stage-blueprint: [ qwen3.8-flash ]
-      chapter-plan: [ deepseek-v4-pro, qwen3.8-flash ]
-      chapter-rewrite: [ qwen3.8-flash ]
-      revise: [ deepseek-v4.1-flash ]
-      foreshadow-settlement: [ deepseek-v4-pro ]
-      exit-review: [ deepseek-v4-pro ]
-      finale-review: [ deepseek-v4-pro ]
-      ledger-adjudicate: [ deepseek-v4.1-flash ]
-      quality-review: [ deepseek-v4.1-flash ]
-      chapter-content: [ deepseek-v4.1-flash ]
-      chapter-beats: [ deepseek-v4.1-flash ]
-      audit: [ deepseek-v4.1-flash ]
-      summary: [ qwen3.8-flash ]
-      ref-select: [ deepseek-v4.1-flash ]
-      setting-draft: [ qwen3.8-flash ]
+    # 全局兜底模型（2026-10-23）：所有场景共用这一个，主模型与场景配置都不可用时才启用。
+    # 为什么只留一个：兜底的前提是"原路走不通"——额度耗尽/模型下线常按供应商计量，
+    # 同供应商的另一个模型往往一起挂，所以兜底的价值全在换供应商。此前 17 个场景各配一条链，
+    # 实际填的几乎都是同样的值，维护成本远高于收益。
+    # 自带 base-url / api-key / max-tokens：换供应商时地址密钥与输出上限都必须能跟着变
+    # （异族模型的上限与主模型常不同，沿用会直接 400）。留空 model 即不启用兜底。
+    fallback-model:
+      model: deepseek-v4.1-flash
+      max-tokens: 16384
+      temperature: 0.3
+      enable-thinking: false
+      # base-url / api-key 留空 = 沿用主模型（同供应商时只需写模型名）；
+      # 跨供应商时填这里，例如：
+      # base-url: https://api.deepseek.com
+      # api-key: ${FALLBACK_API_KEY:}
 
     embedding-api:
       base-url: https://dashscope.aliyuncs.com/compatible-mode

@@ -7,7 +7,7 @@ import cn.novel.yonren.domain.novel.model.entity.ArmoryCommandEntity;
 import cn.novel.yonren.domain.novel.model.valobj.properties.StoryProperties;
 import cn.novel.yonren.domain.novel.service.job.GenerationJob;
 import cn.novel.yonren.domain.novel.service.job.StoryJobService;
-import cn.novel.yonren.trigger.http.StoryCommandAssembler;
+import cn.novel.yonren.trigger.assembler.StoryCommandAssembler;
 import cn.novel.yonren.types.enums.ResponseCode;
 import cn.novel.yonren.types.exception.AppException;
 import jakarta.annotation.Resource;
@@ -38,13 +38,8 @@ public class JobController {
 
     @PostMapping
     public JobStatusResponseDTO submit(@RequestBody StoryGenerateRequestDTO request) {
-        ArmoryCommandEntity command;
-        try {
-            command = StoryCommandAssembler.toCommand(request, storyProperties);
-        } catch (AppException e) {
-            // 入参校验失败（如 worldId 格式非法）：装配层抛 ILLEGAL_PARAMETER，透出 400
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, e.getInfo());
-        }
+        // 入参校验失败（如 worldId 格式非法）由 ApiExceptionHandler 统一转 400，此处不再手写 try/catch
+        ArmoryCommandEntity command = StoryCommandAssembler.toCommand(request, storyProperties);
         GenerationJob job;
         try {
             job = storyJobService.submit(command);
@@ -80,24 +75,14 @@ public class JobController {
 
     /**
      * 章节计划裁决：通过（可携带人工修订稿）。
-     *
-     * <p>不需要请求体时（采纳 AI 原版）直接 POST 空 body 即可；携带体则视为人工修订，
-     * 领域层会重新做结构机械校验，不合法返回 400 且作业保持挂起。
-     *
-     * <p>仅对 status=AWAITING_APPROVAL 的作业有效；其余状态（已超时放行/已取消/重复提交）
-     * 返回 409，避免前端把"已经跑过去了"误读成"裁决成功"
      */
     @PostMapping("/{jobId}/chapter-plan/approve")
     public JobStatusResponseDTO approveChapterPlan(@PathVariable("jobId") String jobId,
                                                    @RequestBody(required = false) ChapterPlanApprovalRequestDTO request) {
-        GenerationJob job;
-        try {
-            job = storyJobService.approveChapterPlan(jobId,
-                    StoryCommandAssembler.toChapterPlan(request));
-        } catch (AppException e) {
-            // 修订稿未过机械校验：透出 400，作业仍在挂起态等用户改正后重提
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, e.getInfo());
-        }
+        // 修订稿未过机械校验（0003 参数为空 / 0004 参数重复）由 ApiExceptionHandler 统一转 400，
+        // 作业仍在挂起态等用户改正后重提
+        GenerationJob job = storyJobService.approveChapterPlan(jobId,
+                StoryCommandAssembler.toChapterPlan(request));
         if (job == null) {
             throw new ResponseStatusException(HttpStatus.CONFLICT,
                     "作业不在待裁决状态（可能已超时放行、已取消或已裁决过）：" + jobId);

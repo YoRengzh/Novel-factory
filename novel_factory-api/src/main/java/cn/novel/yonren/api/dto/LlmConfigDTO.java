@@ -39,6 +39,43 @@ public class LlmConfigDTO {
     /** 场景模型矩阵（按 ModelScene 枚举序，含静态生效值与运行时覆盖） */
     private List<SceneView> scenes;
 
+    /**
+     * 全局兜底模型（2026-10-23）：所有场景共用一份，主模型与场景配置都不可用时启用。
+     * 自带地址密钥与输出上限——兜底的意义是换供应商，配置必须能跟着变
+     */
+    private FallbackView fallback;
+
+    /** 全局兜底模型视图：静态值 + 运行时覆盖 + 生效值 */
+    @Data
+    public static class FallbackView {
+        /** yml 静态兜底模型名（null=未配置静态兜底） */
+        private String staticModel;
+        /** yml 静态兜底最大输出 token */
+        private Long staticMaxTokens;
+        /** yml 静态兜底接口地址 */
+        private String staticBaseUrl;
+        /** yml 静态兜底是否已配置 apiKey（原文不回传） */
+        private boolean staticHasKey;
+        /** yml 静态兜底 apiKey 掩码 */
+        private String staticApiKeyMasked;
+        /** 运行时覆盖模型名（未覆盖为 null） */
+        private String overrideModel;
+        /** 运行时覆盖最大输出 token（未覆盖为 null） */
+        private Long overrideMaxTokens;
+        /** 运行时覆盖采样温度（未覆盖为 null；不回显则用户看不见也清不掉已存的覆盖） */
+        private Double overrideTemperature;
+        /** 运行时覆盖接口地址（未覆盖为 null） */
+        private String overrideBaseUrl;
+        /** 运行时覆盖是否已配置 apiKey */
+        private boolean overrideHasKey;
+        /** 运行时覆盖 apiKey 掩码 */
+        private String overrideApiKeyMasked;
+        /** 是否存在运行时覆盖 */
+        private boolean overridden;
+        /** 最终生效的模型名（覆盖 ?? 静态；null=不启用兜底） */
+        private String effectiveModel;
+    }
+
     /** Embedding 向量分区（只读展示：嵌入模型不走运行时覆盖，改 yml 需重启生效） */
     private EmbeddingView embedding;
 

@@ -1467,3 +1467,73 @@ body:not(.light) select {
     .update-fab { bottom: 72px; }
     .update-panel { left: 34px; bottom: 72px; width: calc(100vw - 46px); }
 }
+
+/* ============================================================
+   创建表单 · 高级选项（导演通道 / 金手指）
+   ============================================================ */
+.advanced-options {
+    border: 1px solid var(--line);
+    border-radius: 6px;
+    padding: 12px 16px;
+    background: var(--panel-2);
+}
+
+.advanced-options > summary {
+    cursor: pointer;
+    font-family: var(--mono);
+    font-size: 12px;
+    font-weight: 600;
+    letter-spacing: 1.5px;
+    color: var(--text-secondary);
+    list-style: none;
+    user-select: none;
+}
+
+.advanced-options > summary::-webkit-details-marker { display: none; }
+
+.advanced-options > summary::before {
+    content: '▸ ';
+    color: var(--accent);
+}
+
+.advanced-options[open] > summary::before { content: '▾ '; }
+
+.advanced-body {
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+    margin-top: 14px;
+}
+
+/* 覆盖 .form-group label 的等宽/大写/块级排版：这是一个勾选行，不是字段标签 */
+.advanced-options .cheat-toggle {
+    display: flex;
+    gap: 10px;
+    align-items: flex-start;
+    margin-bottom: 0;
+    cursor: pointer;
+    font-family: inherit;
+    font-size: 14px;
+    font-weight: 400;
+    letter-spacing: 0;
+    text-transform: none;
+    color: var(--text);
+}
+
+.advanced-options .cheat-toggle .toggle-desc {
+    display: block;
+    margin-top: 4px;
+    font-size: 12px;
+    line-height: 1.55;
+    color: var(--text-secondary);
+}
+
+.cheat-fields {
+    display: grid;
+    grid-template-columns: 1fr 170px;
+    gap: 14px;
+}
+
+@media (max-width: 720px) {
+    .cheat-fields { grid-template-columns: 1fr; }
+}

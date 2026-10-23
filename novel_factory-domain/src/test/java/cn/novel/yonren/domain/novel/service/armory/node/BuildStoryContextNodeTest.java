@@ -2,6 +2,7 @@ package cn.novel.yonren.domain.novel.service.armory.node;
 
 import cn.novel.yonren.domain.novel.model.entity.ArmoryCommandEntity;
 import cn.novel.yonren.domain.novel.model.entity.StoryContextEntity;
+import cn.novel.yonren.domain.novel.model.valobj.StoryVO;
 import cn.novel.yonren.domain.novel.service.armory.factory.DefaultArmoryFactory;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -44,6 +45,14 @@ class BuildStoryContextNodeTest {
                 .build();
     }
 
+    private static ArmoryCommandEntity commandWithFeatures(StoryVO.StoryFeatures features) {
+        ArmoryCommandEntity command = commandWith(null);
+        StoryVO storyVO = new StoryVO();
+        storyVO.setFeatures(features);
+        command.setStoryVO(storyVO);
+        return command;
+    }
+
     @Test
     @DisplayName("声明了人物档案：渲染进故事设定，并标注「不得改变」")
     void rendersCharacterProfilesWhenDeclared() throws Exception {
@@ -66,5 +75,33 @@ class BuildStoryContextNodeTest {
 
         assertFalse(ctx.getStoryContext().contains("主要人物"), ctx.getStoryContext());
         assertTrue(ctx.getStoryContext().contains("主人公：角色丙"), "其余字段不受影响");
+    }
+
+    @Test
+    @DisplayName("声明了金手指：名称与使用纪律进故事设定（规划与正文共用，首章就能拿到）")
+    void rendersCheatMechanismWhenDeclared() throws Exception {
+        StoryVO.StoryFeatures features = new StoryVO.StoryFeatures();
+        features.setHasCheatMechanism(true);
+        features.setCheatMechanismName("签到系统");
+        features.setCheatUsageInterval(3);
+        DefaultArmoryFactory.DynamicContext ctx = new DefaultArmoryFactory.DynamicContext();
+
+        node.doApply(commandWithFeatures(features), ctx);
+
+        String storyContext = ctx.getStoryContext();
+        assertTrue(storyContext.contains("核心机制：故事存在金手指/系统「签到系统」"), storyContext);
+        assertTrue(storyContext.contains("连续 3 章内至少有一次有意义的使用或提及"), storyContext);
+    }
+
+    @Test
+    @DisplayName("未声明或明确没有金手指：整段不出现，历史行为不变")
+    void omitsCheatMechanismWhenNotEnabled() throws Exception {
+        StoryVO.StoryFeatures features = new StoryVO.StoryFeatures();
+        features.setHasCheatMechanism(false);
+        DefaultArmoryFactory.DynamicContext ctx = new DefaultArmoryFactory.DynamicContext();
+
+        node.doApply(commandWithFeatures(features), ctx);
+
+        assertFalse(ctx.getStoryContext().contains("核心机制"), ctx.getStoryContext());
     }
 }
