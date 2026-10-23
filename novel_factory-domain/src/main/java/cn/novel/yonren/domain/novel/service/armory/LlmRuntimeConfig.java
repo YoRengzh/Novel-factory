@@ -455,7 +455,16 @@ public class LlmRuntimeConfig {
         return copy;
     }
 
-    /** model/maxTokens 覆盖到已解析的场景模型（unified 或 scene）；无覆盖原样返回 */
+    /**
+     * model/maxTokens 覆盖到已解析的场景模型（unified 或 scene）；无覆盖原样返回。
+     *
+     * <p><b>maxTokens 是兜底而非覆盖</b>（2026-10-23）：selected 已带值（场景 yml 的
+     * max-tokens，或回落的 chat-model.max-tokens）时一律尊重它，全局值只在 selected
+     * 没有上限时补位。此前是全局无条件覆盖，代价实测可见：全局填 16384 会把
+     * chapter-plan 的 32768 腰斩，强制思考模型必然烧穿（completionTokens=16384/16384、
+     * 正文为空 → 判烧穿 → 拉黑 → 降级）；同时把 chapter-judge 的 1024 抬高 16 倍。
+     * 各场景上限是按其输出形态调过的（短判定 vs 长计划），一个数字统一压掉本就是错的。
+     */
     public StoryVO.Module.ChatModel applyModel(StoryVO.Module.ChatModel selected) {
         Overlay o = overlay;
         if (selected == null || o == null || (StringUtils.isBlank(o.getModel()) && o.getMaxTokens() == null)) {
@@ -468,7 +477,8 @@ public class LlmRuntimeConfig {
         copy.setApiKey(selected.getApiKey());
         copy.setCompletionsPath(selected.getCompletionsPath());
         copy.setModel(StringUtils.isNotBlank(o.getModel()) ? o.getModel() : selected.getModel());
-        copy.setMaxTokens(o.getMaxTokens() != null ? o.getMaxTokens() : selected.getMaxTokens());
+        // 兜底语义：selected 已有上限就尊重它，全局值只补空
+        copy.setMaxTokens(selected.getMaxTokens() != null ? selected.getMaxTokens() : o.getMaxTokens());
         copy.setTemperature(selected.getTemperature());
         copy.setEnableThinking(selected.getEnableThinking());
         return copy;

@@ -72,10 +72,25 @@ class LlmRuntimeConfigTest {
 
         StoryVO.Module.ChatModel model = config.applyModel(module.getChatModel());
         assertEquals("runtime-model", model.getModel());
-        assertEquals(Long.valueOf(4096L), model.getMaxTokens());
+        // maxTokens 是兜底语义（2026-10-23）：静态已配 8192 时全局 4096 不得覆盖它，
+        // 否则全局一个数字会压掉各场景按其输出形态调过的上限（chapter-plan 32768 被腰斩即烧穿根因）
+        assertEquals(Long.valueOf(8192L), model.getMaxTokens());
         // 未覆盖字段沿用静态
         assertEquals(Double.valueOf(0.7), model.getTemperature());
         assertEquals(Boolean.FALSE, model.getEnableThinking());
+    }
+
+    /** 兜底语义的另一半：selected 没有上限时，全局值必须补上（否则等于取消了全局配置能力） */
+    @Test
+    void applyModel_globalMaxTokensFillsOnlyWhenSelectedHasNone() {
+        LlmRuntimeConfig config = new LlmRuntimeConfig(tmp.resolve("override.json"));
+        LlmConfigSaveRequestDTO request = new LlmConfigSaveRequestDTO();
+        request.setMaxTokens(4096L);
+        config.save(request);
+
+        StoryVO.Module.ChatModel noLimit = new StoryVO.Module.ChatModel();
+        noLimit.setModel("no-limit-model");
+        assertEquals(Long.valueOf(4096L), config.applyModel(noLimit).getMaxTokens());
     }
 
     @Test
@@ -207,14 +222,27 @@ class LlmRuntimeConfigTest {
         // 配置了覆盖的场景：场景覆盖 > 全局覆盖 > 静态（逐字段）
         StoryVO.Module.ChatModel planned = config.applyModel(ModelScene.CHAPTER_PLAN, chat);
         assertEquals("scene-model", planned.getModel());
-        assertEquals(Long.valueOf(2048L), planned.getMaxTokens());
+        // 场景条目没填 maxTokens → 回落到静态的 8192（全局 2048 不再覆盖已有的静态上限）
+        assertEquals(Long.valueOf(8192L), planned.getMaxTokens());
         assertEquals(Double.valueOf(0.3), planned.getTemperature());
-        // 未配置覆盖的场景：走全局覆盖
+        // 未配置覆盖的场景：走全局覆盖（模型名），maxTokens 仍尊重静态值
         StoryVO.Module.ChatModel content = config.applyModel(ModelScene.CHAPTER_CONTENT, chat);
         assertEquals("global-model", content.getModel());
+        assertEquals(Long.valueOf(8192L), content.getMaxTokens());
         assertEquals(Double.valueOf(0.7), content.getTemperature());
         // 静态对象不被污染
         assertEquals("static-model", chat.getModel());
+    }
+
+    /** 场景条目显式填了 maxTokens 时，场景值必须胜过静态与全局（逐字段优先级的最高层） */
+    @Test
+    void applyModel_sceneMaxTokensOverridesStaticValue() {
+        LlmRuntimeConfig config = new LlmRuntimeConfig(tmp.resolve("override.json"));
+        config.save(sceneSave("chapter-plan", sceneOverride(null, 32768L, null)));
+
+        StoryVO.Module.ChatModel planned = config.applyModel(
+                ModelScene.CHAPTER_PLAN, staticModule().getChatModel());
+        assertEquals(Long.valueOf(32768L), planned.getMaxTokens());
     }
 
     @Test
