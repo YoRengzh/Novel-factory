@@ -75,6 +75,8 @@
             if (btn.dataset.tab === 'library') { loadStories(); }
             // 03 项目模型配置与 04 设置共用同一份配置视图（GET /api/config/llm）：一次拉取，两页同时刷新
             if (btn.dataset.tab === 'models' || btn.dataset.tab === 'settings') { loadLlmConfig(); }
+            // 04 设置进入时同步「我的参考资料 / 文风」两张卡（独立于 llm 配置视图）
+            if (btn.dataset.tab === 'settings') { loadUserAssets(); }
             // 回到生成页时刷新故事列表：刚写完的故事应能立刻被续写
             if (btn.dataset.tab === 'generate') { loadStoryOptions(); loadMetrics(); }
         });
@@ -1720,6 +1722,191 @@
     const btnResetSceneConfig = document.getElementById('btn-reset-scene-config');
     const inputSceneApiEnabled = document.getElementById('scene_api_enabled');
     const sceneApiHint = document.getElementById('scene-api-hint');
+    // 中转站（供应商注册表）：全局下拉选用 + 独立管理卡
+    const inputProvider = document.getElementById('llm_provider');
+    const providerListDiv = document.getElementById('provider-list');
+    const providerStatusDiv = document.getElementById('provider-status');
+    const inputProviderName = document.getElementById('provider_name');
+    const inputProviderBaseUrl = document.getElementById('provider_baseUrl');
+    const inputProviderApiKey = document.getElementById('provider_apiKey');
+    const btnSaveProvider = document.getElementById('btn-save-provider');
+    const btnTestProvider = document.getElementById('btn-test-provider');
+    /** 编辑态：正在改的中转站 id（null=新增） */
+    let editingProviderId = null;
+    /** 已保存的中转站（id → {name, baseUrl, hasKey, apiKeyMasked}），全表提交的底稿 */
+    let savedProviders = [];
+
+    function providerStatus(msg, type) {
+        providerStatusDiv.textContent = msg;
+        providerStatusDiv.classList.remove('hidden');
+        providerStatusDiv.classList.toggle('has-config', type === 'ok' || type === 'error');
+        providerStatusDiv.style.borderColor = type === 'error' ? 'var(--error)' : (type === 'ok' ? 'var(--ok)' : '');
+        providerStatusDiv.style.color = type === 'error' ? 'var(--error)' : (type === 'ok' ? 'var(--ok)' : '');
+    }
+
+    function renderProviders(data) {
+        savedProviders = data.providers || [];
+        // 全局下拉：手动 + 各中转站（后端 providerId 为 null 时显示手动）
+        inputProvider.innerHTML = '<option value="">手动（使用下方地址密钥）</option>'
+            + savedProviders.map(function (p) {
+                return '<option value="' + esc(p.id) + '">' + esc(p.name || p.id) + '（' + esc(p.baseUrl || '') + '）</option>';
+            }).join('');
+        inputProvider.value = data.providerId || '';
+        renderProviderList();
+    }
+
+    function renderProviderList() {
+        if (!providerListDiv) return;
+        if (!savedProviders.length) {
+            providerListDiv.innerHTML = '<p class="empty-hint">还没有登记中转站。填好名称与地址后点「添加 / 更新中转站」。</p>';
+            return;
+        }
+        providerListDiv.innerHTML = savedProviders.map(function (p) {
+            const keyText = p.hasKey ? 'Key：' + (p.apiKeyMasked || '已掩码') : '未配 Key';
+            const selected = inputProvider.value === p.id ? ' <span class="scene-badge scene-badge-on">全局使用中</span>' : '';
+            return '<div class="scene-row asset-row-provider" data-provider-id="' + esc(p.id) + '">'
+                + '<div class="scene-name"><b>' + esc(p.name || p.id) + '</b>'
+                + '<span class="scene-key">' + esc(p.baseUrl || '') + '</span>' + selected + '</div>'
+                + '<div class="scene-static"><span class="mono">' + esc(keyText) + '</span></div>'
+                + '<button type="button" class="btn-secondary scene-clear" data-act="fetch">获取模型</button>'
+                + '<button type="button" class="btn-secondary scene-clear" data-act="edit">编辑</button>'
+                + '<button type="button" class="btn-secondary scene-clear" data-act="delete">删除</button>'
+                + '</div>';
+        }).join('');
+        providerListDiv.querySelectorAll('[data-act]').forEach(function (btn) {
+            btn.addEventListener('click', function () {
+                const row = btn.closest('[data-provider-id]');
+                const id = row.getAttribute('data-provider-id');
+                const act = btn.getAttribute('data-act');
+                if (act === 'fetch') fetchProviderModels(id);
+                if (act === 'edit') startEditProvider(id);
+                if (act === 'delete') deleteProvider(id);
+            });
+        });
+    }
+
+    /** 全表提交注册表：editingProviderId 的条目带表单值（apiKey 留空=保留现有），其余条目原样回传（不带 apiKey=保留） */
+    function saveProvider() {
+        const name = inputProviderName.value.trim();
+        const baseUrl = inputProviderBaseUrl.value.trim();
+        const apiKey = inputProviderApiKey.value.trim();
+        if (!baseUrl) { providerStatus('Base URL 不能为空', 'error'); return; }
+        const id = editingProviderId || ('p-' + Date.now().toString(36));
+        const providers = {};
+        savedProviders.forEach(function (p) {
+            if (p.id === id) return;   // 编辑态：旧条目由下方新值整体顶替
+            providers[p.id] = { name: p.name || p.id, baseUrl: p.baseUrl };
+        });
+        providers[id] = { name: name || id, baseUrl: baseUrl };
+        if (apiKey) providers[id].apiKey = apiKey;
+        btnSaveProvider.disabled = true;
+        fetchJson('/api/config/llm', {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ providers: providers })
+        })
+        .then(function (data) {
+            renderProviders(data);
+            editingProviderId = null;
+            inputProviderName.value = '';
+            inputProviderBaseUrl.value = '';
+            inputProviderApiKey.value = '';
+            btnSaveProvider.textContent = '添加 / 更新中转站';
+            providerStatus('中转站已保存：' + (name || id) + '。到上方「模型接入」的中转站下拉选用它。', 'ok');
+            showToast('中转站已保存');
+        })
+        .catch(function (err) { providerStatus('保存失败：' + err.message, 'error'); })
+        .finally(function () { btnSaveProvider.disabled = false; });
+    }
+
+    function startEditProvider(id) {
+        const p = savedProviders.find(function (x) { return x.id === id; });
+        if (!p) return;
+        editingProviderId = id;
+        inputProviderName.value = p.name || '';
+        inputProviderBaseUrl.value = p.baseUrl || '';
+        inputProviderApiKey.value = '';
+        inputProviderApiKey.placeholder = p.hasKey ? '已配置（' + (p.apiKeyMasked || '已掩码') + '），留空保留' : 'sk-...';
+        btnSaveProvider.textContent = '更新「' + (p.name || id) + '」';
+        providerStatus('正在编辑 ' + (p.name || id) + '，改完点上方按钮保存', 'ok');
+    }
+
+    function deleteProvider(id) {
+        const p = savedProviders.find(function (x) { return x.id === id; });
+        if (!p) return;
+        if (!window.confirm('删除中转站「' + (p.name || id) + '」？它的地址密钥将从本机移除。')) return;
+        const providers = {};
+        savedProviders.forEach(function (x) {
+            if (x.id !== id) providers[x.id] = { name: x.name || x.id, baseUrl: x.baseUrl };
+        });
+        // 被删的正是全局引用：连同引用一起清（后端对缺席条目按全量替换处理，悬空引用会收敛）
+        const body = { providers: providers };
+        if (inputProvider.value === id) body.providerId = '';
+        fetchJson('/api/config/llm', {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(body)
+        })
+        .then(function (data) {
+            renderProviders(data);
+            providerStatus('中转站已删除：' + (p.name || id), 'ok');
+            showToast('中转站已删除');
+        })
+        .catch(function (err) { providerStatus('删除失败：' + err.message, 'error'); });
+    }
+
+    /** 模型下拉选项：中转站获取到的模型名合并进共享 datalist（全局/场景/兜底输入框共用） */
+    function setModelOptions(models) {
+        const existing = {};
+        Array.from(chatGptModelOptions.options).forEach(function (o) { existing[o.value] = true; });
+        (models || []).forEach(function (m) {
+            if (existing[m]) return;
+            const opt = document.createElement('option');
+            opt.value = m;
+            chatGptModelOptions.appendChild(opt);
+            existing[m] = true;
+        });
+    }
+
+    /** 拉取模型列表：providerId 取已保存凭据；也可传显式 baseUrl/apiKey（保存前试连） */
+    function fetchProviderModels(providerId, baseUrl, apiKey) {
+        const body = {};
+        if (providerId) body.providerId = providerId;
+        if (baseUrl) body.baseUrl = baseUrl;
+        if (apiKey) body.apiKey = apiKey;
+        const who = providerId
+            ? ((savedProviders.find(function (x) { return x.id === providerId; }) || {}).name || providerId)
+            : (baseUrl || '当前地址');
+        providerStatus('正在从 ' + who + ' 获取模型列表…');
+        return fetchJson('/api/config/llm/models', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(body)
+        })
+        .then(function (models) {
+            setModelOptions(models);
+            providerStatus('已获取 ' + models.length + ' 个模型（' + who + '），已并入全局/场景/兜底的下拉选项', 'ok');
+            showToast('获取到 ' + models.length + ' 个模型');
+            return models;
+        })
+        .catch(function (err) {
+            providerStatus('获取失败（' + who + '）：' + err.message, 'error');
+            showToast('模型列表获取失败：' + err.message);
+        });
+    }
+
+    if (btnSaveProvider) btnSaveProvider.addEventListener('click', saveProvider);
+    if (btnTestProvider) btnTestProvider.addEventListener('click', function () {
+        const baseUrl = inputProviderBaseUrl.value.trim();
+        if (!baseUrl) { providerStatus('试连前先填 Base URL', 'error'); return; }
+        fetchProviderModels(null, baseUrl, inputProviderApiKey.value.trim());
+    });
+    if (inputProvider) inputProvider.addEventListener('change', function () {
+        if (inputProvider.value) {
+            llmStatusDiv.className = 'config-status';
+            llmStatusDiv.textContent = '已选择中转站，点「保 存 配 置」后全局地址密钥按该站生效';
+        }
+    });
 
     function renderLlmConfig(data) {
         inputAuthMode.value = data.authMode || 'api-key';
@@ -1728,6 +1915,7 @@
         inputModel.value = data.model || '';
         inputMaxTokens.value = data.maxTokens != null ? data.maxTokens : '';
         renderAuthMode();
+        renderProviders(data);
         if (!data.configured) {
             llmStatusDiv.className = 'config-status';
             llmStatusDiv.textContent = '当前无运行时覆盖，调用全部走本地 yml 静态配置';
@@ -1864,6 +2052,7 @@
         inputBaseUrl.disabled = chatGpt;
         inputApiKey.disabled = chatGpt;
         inputMaxTokens.disabled = chatGpt;
+        inputProvider.disabled = chatGpt;
         if (chatGpt) loadChatGptStatus();
     }
 
@@ -1943,7 +2132,7 @@
                 + '</div>'
                 + '<div class="scene-static"><span class="mono">' + esc(staticText) + '</span>'
                 + '<span class="scene-static-meta">' + esc(staticMeta.join(' · ')) + '</span></div>'
-                + '<input type="text" class="scene-input" data-field="model" placeholder="留空回退" autocomplete="off"'
+                + '<input type="text" class="scene-input" data-field="model" list="chatgpt-model-options" placeholder="留空 = 跟随全局" autocomplete="off"'
                 + (thinkingHint ? ' title="' + esc(thinkingHint) + '"' : '') + '>'
                 + '<input type="number" class="scene-input" data-field="maxTokens" min="1" placeholder="留空回退" autocomplete="off">'
                 + '<input type="number" class="scene-input" data-field="temperature" min="0" max="1" step="0.1" placeholder="留空回退" autocomplete="off">'
@@ -2196,6 +2385,8 @@
         if (inputApiKey.value.trim() !== '') body.apiKey = inputApiKey.value.trim();
         if (inputModel.value.trim() !== '') body.model = inputModel.value.trim();
         if (inputMaxTokens.value.trim() !== '') body.maxTokens = parseInt(inputMaxTokens.value, 10);
+        // 中转站引用随全局表单提交：'' = 手动模式（清除引用），选中 id = 地址密钥走该站
+        body.providerId = inputProvider.value;
         btnSaveLlmConfig.disabled = true;
         fetchJson('/api/config/llm', {
             method: 'PUT',
@@ -2263,7 +2454,7 @@
         })
         .then(function (data) {
             renderLlmConfig(data);
-            showToast('运行时覆盖已清除（含场景覆盖），回退 yml 静态配置');
+            showToast('运行时覆盖已清除（含场景覆盖与中转站引用），回退 yml 静态配置');
         })
         .catch(function (err) {
             llmStatusDiv.className = 'config-status';
@@ -2275,6 +2466,232 @@
 
     btnSaveSceneConfig.addEventListener('click', saveSceneOverrides);
     btnResetSceneConfig.addEventListener('click', resetSceneOverrides);
+
+    // ===== 我的参考资料（data/references：与内置 58 份同待遇，进索引被检索）=====
+    const userReferenceListDiv = document.getElementById('user-reference-list');
+    const referenceEditorDiv = document.getElementById('reference-editor');
+    const inputReferenceName = document.getElementById('reference_file_name');
+    const referenceContentEl = document.getElementById('reference_content');
+    const btnNewReference = document.getElementById('btn-new-reference');
+    const btnSaveReference = document.getElementById('btn-save-reference');
+    const btnCancelReference = document.getElementById('btn-cancel-reference');
+    const userReferenceStatusDiv = document.getElementById('user-reference-status');
+
+    function referenceStatus(msg, type) {
+        userReferenceStatusDiv.textContent = msg;
+        userReferenceStatusDiv.classList.remove('hidden');
+        userReferenceStatusDiv.classList.toggle('has-config', type === 'ok' || type === 'error');
+        userReferenceStatusDiv.style.borderColor = type === 'error' ? 'var(--error)' : (type === 'ok' ? 'var(--ok)' : '');
+        userReferenceStatusDiv.style.color = type === 'error' ? 'var(--error)' : (type === 'ok' ? 'var(--ok)' : '');
+    }
+
+    const REFERENCE_GROUP_LABELS = {
+        technique: '写作技法（正文/审校检索）',
+        structure: '结构模板（计划/蓝图检索）',
+        genre: '题材设定（设定集/蓝图检索）'
+    };
+
+    function loadUserReferences() {
+        fetchJson('/api/assets/references')
+        .then(function (list) {
+            if (!list || !list.length) {
+                userReferenceListDiv.innerHTML = '<p class="empty-hint">还没有自备资料。点「新增资料」，把你的范例或题材知识喂给产线。</p>';
+                return;
+            }
+            userReferenceListDiv.innerHTML = list.map(function (r) {
+                const meta = [];
+                if (r.group && REFERENCE_GROUP_LABELS[r.group]) meta.push(REFERENCE_GROUP_LABELS[r.group]);
+                meta.push(Math.round(r.sizeBytes / 1024) + ' KB');
+                return '<div class="scene-row asset-row-reference" data-reference="' + esc(r.fileName) + '">'
+                    + '<div class="scene-name"><b>' + esc(r.title || r.fileName) + '</b>'
+                    + '<span class="scene-key">' + esc(r.fileName) + '</span></div>'
+                    + '<div class="scene-static"><span>' + esc(r.digest || '') + '</span>'
+                    + '<span class="scene-static-meta">' + esc(meta.join(' · ')) + '</span></div>'
+                    + '<button type="button" class="btn-secondary scene-clear" data-act="edit">编辑</button>'
+                    + '<button type="button" class="btn-secondary scene-clear" data-act="delete">删除</button>'
+                    + '</div>';
+            }).join('');
+            userReferenceListDiv.querySelectorAll('[data-act]').forEach(function (btn) {
+                btn.addEventListener('click', function () {
+                    const name = btn.closest('[data-reference]').getAttribute('data-reference');
+                    if (btn.getAttribute('data-act') === 'edit') openReferenceEditor(name);
+                    else deleteReference(name);
+                });
+            });
+        })
+        .catch(function (err) {
+            userReferenceListDiv.innerHTML = '<p class="empty-hint">资料列表读取失败：' + esc(err.message) + '</p>';
+        });
+    }
+
+    function openReferenceEditor(fileName) {
+        referenceEditorDiv.classList.remove('hidden');
+        if (fileName) {
+            inputReferenceName.value = fileName;
+            inputReferenceName.disabled = true;   // 文件名是对外标识，保存后不改名
+            fetchJson('/api/assets/references/' + encodeURIComponent(fileName))
+            .then(function (body) { referenceContentEl.value = body.content || ''; })
+            .catch(function (err) { referenceStatus('读取失败：' + err.message, 'error'); });
+        } else {
+            inputReferenceName.value = '';
+            inputReferenceName.disabled = false;
+            referenceContentEl.value = '';
+        }
+        referenceEditorDiv.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    }
+
+    function saveReference() {
+        const name = inputReferenceName.value.trim();
+        if (!name) { referenceStatus('资料名不能为空（小写字母/数字/连字符）', 'error'); return; }
+        const content = referenceContentEl.value;
+        if (!content.trim()) { referenceStatus('内容不能为空', 'error'); return; }
+        btnSaveReference.disabled = true;
+        fetchJson('/api/assets/references/' + encodeURIComponent(name), {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ content: content })
+        })
+        .then(function () {
+            referenceStatus('资料「' + name + '」已保存，下一批作业生效（检索/向量索引自动纳入）', 'ok');
+            showToast('参考资料已保存');
+            referenceEditorDiv.classList.add('hidden');
+            loadUserReferences();
+        })
+        .catch(function (err) { referenceStatus('保存失败：' + err.message, 'error'); })
+        .finally(function () { btnSaveReference.disabled = false; });
+    }
+
+    function deleteReference(name) {
+        if (!window.confirm('删除资料「' + name + '」？它将不再被检索注入。')) return;
+        fetchJson('/api/assets/references/' + encodeURIComponent(name), { method: 'DELETE' })
+        .then(function () {
+            referenceStatus('资料「' + name + '」已删除', 'ok');
+            showToast('参考资料已删除');
+            loadUserReferences();
+        })
+        .catch(function (err) { referenceStatus('删除失败：' + err.message, 'error'); });
+    }
+
+    if (btnNewReference) btnNewReference.addEventListener('click', function () { openReferenceEditor(null); });
+    if (btnSaveReference) btnSaveReference.addEventListener('click', saveReference);
+    if (btnCancelReference) btnCancelReference.addEventListener('click', function () {
+        referenceEditorDiv.classList.add('hidden');
+    });
+
+    // ===== 文风（data/styles 覆盖内置 styles/{genre}.md）=====
+    const styleListDiv = document.getElementById('style-list');
+    const styleEditorDiv = document.getElementById('style-editor');
+    const styleEditorTitle = document.getElementById('style_editor_title');
+    const styleContentEl = document.getElementById('style_content');
+    const btnSaveStyle = document.getElementById('btn-save-style');
+    const btnResetStyle = document.getElementById('btn-reset-style');
+    const btnCancelStyle = document.getElementById('btn-cancel-style');
+    const styleStatusDiv = document.getElementById('style-status');
+    /** 编辑态覆盖标记：恢复内置按钮只在已有覆盖时可用 */
+    let editingStyleHasOverride = false;
+
+    const GENRE_LABELS = {
+        fantasy: '玄幻 / 奇幻 / 修仙', ability: '都市异能', suspense: '悬疑 / 推理 / 刑侦',
+        romance: '言情 / 情感', scifi: '科幻 / 星际', apocalypse: '末世 / 废土',
+        'infinite-flow': '无限流 / 副本', urban: '都市现实 / 重生 / 年代', default: '通用（未命中题材时）'
+    };
+
+    function styleStatus(msg, type) {
+        styleStatusDiv.textContent = msg;
+        styleStatusDiv.classList.remove('hidden');
+        styleStatusDiv.classList.toggle('has-config', type === 'ok' || type === 'error');
+        styleStatusDiv.style.borderColor = type === 'error' ? 'var(--error)' : (type === 'ok' ? 'var(--ok)' : '');
+        styleStatusDiv.style.color = type === 'error' ? 'var(--error)' : (type === 'ok' ? 'var(--ok)' : '');
+    }
+
+    function loadStyles() {
+        fetchJson('/api/assets/styles')
+        .then(function (list) {
+            styleListDiv.innerHTML = list.map(function (s) {
+                const label = GENRE_LABELS[s.code] || s.code;
+                let badge;
+                if (s.hasOverride) badge = '<span class="scene-badge scene-badge-on">自定义生效中</span>';
+                else if (s.hasBuiltin) badge = '<span class="scene-badge">内置</span>';
+                else badge = '<span class="scene-badge">无专属（回落通用）</span>';
+                return '<div class="scene-row asset-row-style" data-style="' + esc(s.code) + '">'
+                    + '<div class="scene-name"><b>' + esc(label) + '</b>'
+                    + '<span class="scene-key">' + esc(s.code) + '</span>' + badge + '</div>'
+                    + '<button type="button" class="btn-secondary scene-clear" data-act="edit">编辑</button>'
+                    + '</div>';
+            }).join('');
+            styleListDiv.querySelectorAll('[data-act]').forEach(function (btn) {
+                btn.addEventListener('click', function () {
+                    openStyleEditor(btn.closest('[data-style]').getAttribute('data-style'));
+                });
+            });
+        })
+        .catch(function (err) {
+            styleListDiv.innerHTML = '<p class="empty-hint">文风列表读取失败：' + esc(err.message) + '</p>';
+        });
+    }
+
+    function openStyleEditor(code) {
+        styleEditorDiv.classList.remove('hidden');
+        styleEditorDiv.setAttribute('data-editing-code', code);   // 保存/恢复内置按它寻址
+        styleEditorTitle.value = (GENRE_LABELS[code] || code) + '（' + code + '）';
+        fetchJson('/api/assets/styles/' + encodeURIComponent(code))
+        .then(function (body) {
+            styleContentEl.value = body.content || '';
+            editingStyleHasOverride = !!body.overridden;
+            btnResetStyle.classList.toggle('hidden', !editingStyleHasOverride && !body.builtin);
+            btnResetStyle.disabled = !editingStyleHasOverride;
+            if (!body.builtin && !body.overridden) {
+                styleContentEl.placeholder = '该题材还没有专属文风。写一篇，保存后即拥有专属文风（不再回落通用版）。';
+            }
+        })
+        .catch(function (err) { styleStatus('读取失败：' + err.message, 'error'); });
+        styleEditorDiv.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    }
+
+    if (btnSaveStyle) btnSaveStyle.addEventListener('click', function () {
+        // 题材码从编辑器容器取：标题输入框里是「中文名（code）」混排不可靠
+        const target = styleEditorDiv.getAttribute('data-editing-code');
+        if (!target) { styleStatus('请先从列表选择要编辑的题材', 'error'); return; }
+        const content = styleContentEl.value;
+        if (!content.trim()) { styleStatus('文风内容不能为空', 'error'); return; }
+        btnSaveStyle.disabled = true;
+        fetchJson('/api/assets/styles/' + encodeURIComponent(target), {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ content: content })
+        })
+        .then(function () {
+            styleStatus('「' + target + '」文风已保存，下次生成即用新版', 'ok');
+            showToast('文风已保存');
+            styleEditorDiv.classList.add('hidden');
+            loadStyles();
+        })
+        .catch(function (err) { styleStatus('保存失败：' + err.message, 'error'); })
+        .finally(function () { btnSaveStyle.disabled = false; });
+    });
+
+    if (btnResetStyle) btnResetStyle.addEventListener('click', function () {
+        const target = styleEditorDiv.getAttribute('data-editing-code');
+        if (!target) return;
+        if (!window.confirm('恢复「' + target + '」的内置文风？你的自定义版本将被删除。')) return;
+        fetchJson('/api/assets/styles/' + encodeURIComponent(target), { method: 'DELETE' })
+        .then(function () {
+            styleStatus('已恢复内置文风（' + target + '）', 'ok');
+            showToast('已恢复内置文风');
+            styleEditorDiv.classList.add('hidden');
+            loadStyles();
+        })
+        .catch(function (err) { styleStatus('恢复失败：' + err.message, 'error'); });
+    });
+
+    if (btnCancelStyle) btnCancelStyle.addEventListener('click', function () {
+        styleEditorDiv.classList.add('hidden');
+    });
+
+    function loadUserAssets() {
+        loadUserReferences();
+        loadStyles();
+    }
 
     // 场景级 API 开关：勾选/取消即保存（独立于"保存场景覆盖"，开关本身就是一条运行时覆盖）
     inputSceneApiEnabled.addEventListener('change', function () {

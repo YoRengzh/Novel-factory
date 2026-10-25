@@ -1537,3 +1537,13 @@ body:not(.light) select {
 @media (max-width: 720px) {
     .cheat-fields { grid-template-columns: 1fr; }
 }
+
+/* 中转站/我的资料/文风管理列表：沿用 scene-row 视觉与悬停，但列数按各自内容重排
+   （scene-row 原是场景矩阵的 8 列网格，直接复用会把操作按钮挤进窄列） */
+.scene-row.asset-row-provider { grid-template-columns: 1.7fr 1.2fr auto auto auto; }
+.scene-row.asset-row-reference { grid-template-columns: 1.7fr 1.5fr auto auto; }
+.scene-row.asset-row-style { grid-template-columns: 1.7fr auto; }
+@media (max-width: 720px) {
+    .scene-row.asset-row-provider,
+    .scene-row.asset-row-reference { grid-template-columns: 1fr 1fr; }
+}

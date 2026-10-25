@@ -12,7 +12,7 @@ spring:
 # 应用元信息：前端「通知」面板显示当前版本并与 GitHub Releases 比对。
 # 发版时与 electron/package.json 的 version 同步修改（tools/build-release.sh 会校验）
 app:
-  version: 1.2.5
+  version: 1.2.6
 
 novel:
   llm:

@@ -23,7 +23,10 @@ story:
     scene-models:
       stage-blueprint:
         model: deepseek-v4-pro
-        max-tokens: 16384
+        # 设置页的全局模型覆盖会把本场景切成 glm-5.3-flash（强制思考）：旧上限 16384 低于它的思考量，
+        # 2026-10-25 实测两次都是 completionTokens=16384/16384、正文 0 字符，只靠 fail-soft 用了旧蓝图。
+        # 上限只是天花板、不改变实际输出量，抬到 65536 给思考留余量。
+        max-tokens: 65536
         temperature: 0.7 # 非推理模型，沿用常规采样温度（>0 保证方向分支有差异）；kimi-k3 才是必须 1.0
         enable-thinking: false
       chapter-plan:
@@ -32,7 +35,11 @@ story:
         # 连烧 3 次共 96k token、44 分钟零产出——强制思考模型（enable-thinking 无法关闭）一律
         # 不要放进 chapter-plan 这类每批必调、对延迟敏感的场景；应急开关见 novel.llm.on-budget-burn。
         model: qwen3.8-max
-        max-tokens: 32768
+        # 上限必须高于该模型的思考量，否则思考吃满预算、正文一个字都写不出来（2026-10-25 复现：
+        # 32768 上限下 glm-5.3-flash 思考 32188/32273 token、正文 0 字符，两次全烧，解析层报"章数校验失败"）。
+        # 取 100000：留足思考余量后仍有约 7 万 token 写计划；qwen3.8-max 自身 max-output 32000，
+        # 超过会被供应商按模型上限裁决（实测不报 400），所以这个值对两个模型都安全。
+        max-tokens: 100000
         temperature: 1.0 # 必须 1.0，理由见上方说明
         enable-thinking: true
       chapter-beats:

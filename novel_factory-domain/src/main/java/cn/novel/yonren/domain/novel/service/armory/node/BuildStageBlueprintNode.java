@@ -209,23 +209,17 @@ public class BuildStageBlueprintNode extends AbstractArmorySupport {
         mergeUnmetExitConditions(previous, blueprint);
         // 结转任务机械兜底：模型漏掉的"进行中"任务原样补回（与上一条同款思路——
         // 提示词已渲染上一版结转清单，但仍不把可靠性押在一次服从上）。
-        // 实测：第 14 阶段注入的"附加赛必须完成"在第 15 阶段 carriedTasks 中消失，
-        // 系统侧无法察觉，任务就此蒸发——此处补齐。
         mergeMissingCarriedTasks(previous, blueprint);
         // 结转债务上限：跨段滚动的未完成任务超过硬上限的部分降级为背景清偿
         capCarriedTasks(blueprint);
-        // 冻结线越权机械观测（2026-10-13，只告警不拦截）：prompt 已加"冻结线红线"（见
+        // 冻结线越权机械观测：prompt 已加"冻结线红线"（见
         // RollingOutlineService 第 3.1 条），此处兜底观测模型是否仍把冻结线排进了 tasks/exitConditions。
-        // 实测第 16 阶段：结转清单明写虹镇静默期"严禁新实物/新追查"，模型仍在 tasks 安排
-        // "角色甲透露虹镇旧事的新信息碎片"，第 140 章据此凭空造出地窖账册，与既有定案冲突。
-        // 为什么不拦截：冻结线的措辞是自由文本，机械判定"哪个 task 越了哪条线"会误伤；
-        // 故只留痕供人工复盘（该情形必然在正文侧表现为"新事实凭空出现"，体检的伏笔/一致性指标可见）。
         warnFrozenLineViolations(previous, blueprint);
 
         // 悬念档位表补采：档位表是"主线推进闸门"的唯一标尺，但在完整蓝图 prompt 里
         // 它只是第 11 条要求——实测模型会在长 prompt 里**静默省略**这两个字段。缺了它，锚块不注入、
         // 校验直接跳过、指标不出：整条推进链路会一声不响地空转。
-        // ⇒ 不把可靠性押在一次服从上：缺了就**只问这两个字段**再补一次（短 prompt 服从率高），
+        //  不把可靠性押在一次服从上：缺了就**只问这两个字段**再补一次（短 prompt 服从率高），
         //    仍拿不到才告警——绝不静默放过。
         if (!SuspenseLadderPolicy.usable(blueprint.getSuspenseLadder())) {
             repairSuspenseLadder(requestParameter, dynamicContext, storyContext, promptContext, blueprint);
@@ -247,7 +241,7 @@ public class BuildStageBlueprintNode extends AbstractArmorySupport {
                 blueprint.getStageNo(), blueprint.getStartChapter(), blueprint.getEndChapter(),
                 blueprint.getTasks() == null ? 0 : blueprint.getTasks().size(),
                 blueprint.getCarriedTasks() == null ? 0 : blueprint.getCarriedTasks().size());
-        // stageEnd 机械校验+回填：12.1 要求模型从【进度对齐·大纲路标】
+        // stageEnd 机械校验+回填
         // 声明 stageEndYear/Age，但实测会胡写（写出早于故事开局的年份）——
         // 不信任声明，以重锚预算为准校验回填（零成本、确定性，与卷区间的机械钳制同款思路）
         repairStageEndFromOutline(requestParameter, storyContext, dynamicContext.getChapterSummaries(),
@@ -286,17 +280,12 @@ public class BuildStageBlueprintNode extends AbstractArmorySupport {
     /**
      * stageEnd 机械校验+回填：12.1 要求模型从【进度对齐·大纲路标】声明
      * stageEndYear/stageEndAge，但实测会胡写（写出早于故事开局的年份）。
-     * 下限 = **重锚预算**（2026-10-11 方案 A）：大纲段时间预算按正文实际锚点整体平移后取值，
+     * 下限 = **重锚预算**：大纲段时间预算按正文实际锚点整体平移后取值，
      * 而非大纲原预算——学校线里程碑保留顺序、随实际时间滑动，硬追原日历只会让蓝图声明
      * 永远跑到正文前面（实测第 111-120 段：原机制回填出 2011/14 岁，正文实际 2010/12 岁）。
      * 校验规则：stageEndYear 必须含 4 位年份且 ≥ 重锚预算、≥ 上一阶段声明（单调递增）；
      * stageEndAge 同理。任一不合格即按重锚预算回填——无锚点/大纲段无数值标记时保持声明原样，不编造。
      *
-     * <p><b>回填值同样受下限钳制（2026-10-13）</b>：重锚预算是"平移后的段末"，可能<em>低于</em>
-     * 上一阶段声明（段预算滞后于正文实际推进）。原实现只把下限用于"判不合格"、回填时直接写预算值，
-     * 于是 2011 → 2010 倒退被写进蓝图，而倒退值又成为下一阶段的单调下限基准——年份链与年龄链
-     * 越漂越小（实测 stage13/14 声明 2011/13 岁，stage15/16 回填 2010/12 岁）。
-     * 现在回填取 {@code max(预算值, 下限)}，两条链都严格单调。
      */
     private void repairStageEndFromOutline(ArmoryCommandEntity requestParameter,
                                            StoryContextEntity storyContext,
@@ -337,9 +326,6 @@ public class BuildStageBlueprintNode extends AbstractArmorySupport {
         }
         if (declaredYear == null || declaredYear < floorYear) {
             // 回填值必须钳到下限：重锚预算是"平移后的段末年份"，它可能**低于上一阶段声明**
-            // （段预算滞后于正文实际推进时）。原实现直接写预算值，于是 2011 → 2010 倒退，
-            // 而该倒退值又成为下一阶段的单调下限基准，年份链越漂越小（实测 stage13/14=2011
-            // → stage15/16=2010）。日志里下限 2011 与回填 2010 并列出现即是此症。
             Integer budgetYear = slid.yearEnd() != null ? slid.yearEnd() : slid.yearStart();
             int backfilledYear = Math.max(budgetYear == null ? floorYear : budgetYear, floorYear);
             String backfill = backfilledYear + "年";
@@ -368,10 +354,6 @@ public class BuildStageBlueprintNode extends AbstractArmorySupport {
         }
     }
 
-    /**
-     * 从模型声明里取年份。走 {@link StoryPacing#parseYear} 统一口径——
-     * 模型写"二〇〇九年"这类中文数字也必须认，否则 stageEnd 判定会误以为"声明无效"而反复回填
-     */
     private static Integer extractYear(String text) {
         return StoryPacing.parseYear(text);
     }
@@ -396,7 +378,7 @@ public class BuildStageBlueprintNode extends AbstractArmorySupport {
     }
 
     /**
-     * **伏笔兑现排期表补采**（2026-10-02，P2b）：主 prompt 遗漏时补问一次，只问这一项。
+     * **伏笔兑现排期表补采**：主 prompt 遗漏时补问一次，只问这一项。
      *
      * <p>三步：①聚焦补采拿到本阶段新排期 → ②与上一版结转的活线条目**机械合并去重**
      * （模型看不见上一版全貌，必然重复排）→ ③追加进 {@code dynamicContext.foreshadowSchedules} 并落盘。
@@ -502,7 +484,7 @@ public class BuildStageBlueprintNode extends AbstractArmorySupport {
     }
 
     /**
-     * **章级主线推进补采**（2026-10-02）：主 prompt 遗漏 {@code mainLineByChapter} 时补问一次，且只问这一项。
+     * **章级主线推进补采**：主 prompt 遗漏 {@code mainLineByChapter} 时补问一次，且只问这一项。
      *
      * <p>与 {@link #repairSuspenseLadder} 同一套理由与形态：长 prompt 里的逐章数组会被静默省略，
      * 短聚焦 prompt 服从率高得多。**缺了两者的后果不同但同样静默**——
@@ -557,7 +539,7 @@ public class BuildStageBlueprintNode extends AbstractArmorySupport {
     }
 
     /**
-     * **章级推进线别纪律**（2026-10-11）：对补采产出的章级主线推进做机械校验——
+     * **章级推进线别纪律** ：对补采产出的章级主线推进做机械校验——
      * 每条须带剧情线标签、悬疑暗线不得超半数/连续两章（规则与话术见
      * {@code RollingOutlineService#mainLineDisciplineIssues}）。
      * 违规走聚焦补采同款"带反馈重问一次"：按原补采 prompt 追加驳回反馈重取，
@@ -707,23 +689,6 @@ public class BuildStageBlueprintNode extends AbstractArmorySupport {
                 decisions.size() - recoverCount - doneCount - parkedCount, recoverCount);
     }
 
-    /**
-     * 未达成退出条件的机械化结转 + <b>退场规则</b>。
-     *
-     * <p>原实现只把未达成条件写进 carriedTasks（任务层），而下一阶段核验的是
-     * <em>本阶段新生成的 exitConditions</em>（核验层）⇒ 旧条件<strong>永不被重验、永不退场</strong>：
-     * 实测它只能一路结转（超出上限的条目被静默丢弃，账目就此失真），
-     * 同时模型每阶段重新表述该条件并越写越长（单句 → 多个分句），单调不可达。
-     *
-     * <p>新规则（每个未达成条件最多重验一次后必然退场，累积量有上界）：
-     * <ol>
-     *   <li>未达成且<em>非本阶段继承</em> → 把条件<strong>原样注入</strong>本阶段 exitConditions
-     *       （在 parse 之后机械追加，模型无从改写措辞），并记 carriedTask「进行中」；
-     *       同时记入 {@code inheritedExitConditions} 供下一轮判断"是否已重验过一次"</li>
-     *   <li>未达成且<em>本阶段继承而来</em> → 已重验一次仍不达成 ⇒ <strong>强制出账</strong>：
-     *       不再注入，记 carriedTask「放弃」并注明机械出账原因，交人工复盘裁定</li>
-     * </ol>
-     */
     private void mergeUnmetExitConditions(StageBlueprintEntity previous, StageBlueprintEntity blueprint) {
         if (previous == null || previous.getExitResults() == null || blueprint == null) {
             return;
@@ -790,7 +755,7 @@ public class BuildStageBlueprintNode extends AbstractArmorySupport {
     /**
      * 去重比较用的归一化：剥离引号/书名号类包裹字符并去掉空白。
      *
-     * <p><b>治什么</b>（2026-10-13 实测）：同一条约束的两份文本仅差一对引号——
+     * <p><b>治什么</b>：同一条约束的两份文本仅差一对引号——
      * 模型写了「…必须是已封存状态余波…」，机械兜底的原文本是「…必须是『已封存』状态余波…」，
      * 双向包含在引号处断开 ⇒ 同一约束被登记两次（静默期条目在 stage16 就重复了一对）。
      * 引号是模型对同一概念的排版噪声，不承载语义差异，比较前剥离即可；
@@ -854,7 +819,7 @@ public class BuildStageBlueprintNode extends AbstractArmorySupport {
     private static final List<String> FROZEN_LINE_MARKERS = List.of("静默期", "冻结", "禁止", "不得推进");
 
     /**
-     * 冻结线越权观测（2026-10-13，<b>只告警不拦截</b>）。
+     * 冻结线越权观测
      *
      * <p>prompt 第 3.1 条已明令"含静默/冻结字样的结转条目不得排进 tasks/exitConditions/档位/章级推进"，
      * 此处机械兜底观测模型是否仍越权。判定口径刻意宽松（关键词命中即报），因为它的产物是
@@ -929,18 +894,6 @@ public class BuildStageBlueprintNode extends AbstractArmorySupport {
 
     /**
      * 结转条件重定基：把条件里引用的**旧章号区间**改写为本阶段区间。
-     *
-     * <p><b>治什么</b>：上一阶段未达成的出口条件常写成「第76-80章中至少有一章可观察到…」。
-     * 原样结转后，阶段末校验只拿**本批（如第81-85章）的记忆**去核验——条件要求证明的是
-     * 第76-80章的事，结构上永远不可能达成。于是它每阶段被判未达成、无限结转，
-     * 同时每批都拉低「出口条件达成率」（实测第5阶段 11 条中 3 条如此，备注明写
-     * 「所给记忆仅包含第81-85章，无第76-80章内容，无法判定」）。
-     *
-     * <p><b>为什么只改章号而不丢弃条件</b>：条件描述的是**要达成的叙事状态**（如"独立房间布置完毕"），
-     * 状态本身可能仍未达成、仍值得追（搬进新居后房间确实要在后续章节交代）。丢弃=丢失叙事承诺；
-     * 只重写章号区间，语义就从"在旧章里找证据"变成"在本阶段继续把它写出来"，既可核验又可执行。
-     *
-     * <p>无章号引用（多数条件本就如此）时原样返回，零副作用。
      */
     private static String rebaseConditionChapterRefs(String condition, Integer startChapter, Integer endChapter) {
         if (StringUtils.isBlank(condition) || startChapter == null || endChapter == null) {

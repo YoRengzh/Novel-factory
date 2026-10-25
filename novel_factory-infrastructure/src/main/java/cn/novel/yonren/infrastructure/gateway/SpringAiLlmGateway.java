@@ -227,6 +227,9 @@ public class SpringAiLlmGateway implements LlmGateway {
                 Usage usage = response.getMetadata().getUsage();
                 long completionTokens = usage == null || usage.getCompletionTokens() == null
                         ? 0L : usage.getCompletionTokens();
+                // 上限可能为空（场景显式留空 = 不下发 max_tokens，由供应商按模型上限裁决）。
+                // 判据①②④都以它为基准，为空时全部失效，只剩判据③（正文为空）可判——
+                // 这是"不设上限"的代价，故日志与文档都引导用户优先填具体值。
                 Long effectiveMaxTokens = call.getMaxTokens() != null
                         ? call.getMaxTokens().longValue() : selected.getMaxTokens();
                 // 烧穿判据（满足其一即判"烧穿式失败"）：
@@ -410,9 +413,16 @@ public class SpringAiLlmGateway implements LlmGateway {
         }
         OpenAiChatOptions.Builder optionBuilder = OpenAiChatOptions.builder()
                 .model(selected.getModel())
-                .maxTokens(selected.getMaxTokens().intValue())
                 // JSON Mode：强制模型输出合法 JSON，治正文/摘要等场景的"输出截断/不闭合"格式翻车（零 token 成本）
                 .responseFormat(ResponseFormat.builder().type(ResponseFormat.Type.JSON_OBJECT).build());
+        // 输出上限留空 = 不显式下发 max_tokens，由供应商按模型自身上限裁决（旧代码直接 intValue()，
+        // 留空即 NPE，所以"留空=不限"这条路径从来没真正可用）。不设上限**不等于无限输出**：
+        // 每个模型都有硬性 max-output（glm-5.3-flash 131072、deepseek-v4-pro 128000），到点必被截断。
+        // 注意代价：没有显式上限时烧穿判据①（撞 90% 上限）与④（思考占 80%）都失去基准，
+        // 只剩"正文为空"能识别——所以优先给场景配一个接近天花板的具体值，留空只作最后手段。
+        if (selected.getMaxTokens() != null) {
+            optionBuilder.maxTokens(selected.getMaxTokens().intValue());
+        }
         // 采样温度：配置显式给定时写入默认选项；null 则走供应商默认
         if (selected.getTemperature() != null) {
             optionBuilder.temperature(selected.getTemperature());

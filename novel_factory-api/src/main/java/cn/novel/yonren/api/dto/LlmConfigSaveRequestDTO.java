@@ -95,4 +95,30 @@ public class LlmConfigSaveRequestDTO {
 
     /** true=仅清空兜底模型覆盖（不动全局/场景/嵌入覆盖），回退 yml 静态值 */
     private boolean resetFallback;
+
+    /**
+     * 全局中转站引用（null=本次不改动；空串=清除引用回退手动地址密钥；值须为 providers 里的 id）。
+     * 选中后全局 baseUrl/apiKey 按字段优先取中转站的值，下方手动输入仍可逐字段压过（高级逃生口）
+     */
+    private String providerId;
+
+    /**
+     * 中转站注册表全量替换（null=本次不触碰；resetProviders=true 或空表=清空）。
+     * key=供应商 id（前端生成，[a-z0-9-]），apiKey 与场景矩阵同款：null=保留现有密钥，空串=显式清除
+     */
+    private Map<String, ProviderSave> providers;
+
+    /** true=仅清空中转站注册表（不动其它覆盖）；若全局 providerId 指向被清掉的条目则一并清除引用 */
+    private boolean resetProviders;
+
+    /** 中转站条目：name 仅供前端展示，baseUrl 为 OpenAI 兼容地址（不带 /v1 也行，取模型时自动适配） */
+    @Data
+    public static class ProviderSave {
+        /** 显示名（如：硅基流动、本地 one-api） */
+        private String name;
+        /** OpenAI 兼容 Base URL */
+        private String baseUrl;
+        /** 新密钥；null=保留现有值（密钥不回显），空串=显式清除 */
+        private String apiKey;
+    }
 }

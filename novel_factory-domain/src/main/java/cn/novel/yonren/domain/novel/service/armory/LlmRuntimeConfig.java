@@ -82,6 +82,15 @@ public class LlmRuntimeConfig {
          */
         private SceneOverlay fallback;
 
+        /**
+         * 中转站注册表（OpenAI 兼容供应商）：key=id（前端生成），值含显示名/地址/密钥。
+         * 注册表本身不直接生效——生效路径是全局 providerId 引用（见 applyApi）
+         */
+        private Map<String, ProviderOverlay> providers;
+
+        /** 全局选中的中转站 id；null/空=手动模式（沿用 baseUrl/apiKey 覆盖字段与 yml 静态值） */
+        private String providerId;
+
         public boolean isEmpty() {
             return !AUTH_CHATGPT.equals(authMode)
                     && StringUtils.isBlank(baseUrl) && StringUtils.isBlank(apiKey)
@@ -91,7 +100,8 @@ public class LlmRuntimeConfig {
                     && sceneApiEnabled == null
                     && !hasEmbeddingOverride()
                     && StringUtils.isBlank(referenceMode)
-                    && (toggles == null || toggles.isEmpty());
+                    && (toggles == null || toggles.isEmpty())
+                    && (providers == null || providers.isEmpty());
         }
 
         /** 场景级 API 开关是否打开（null 视为未设置，按 true 处理=保持旧行为） */
@@ -136,8 +146,20 @@ public class LlmRuntimeConfig {
         }
     }
 
+    /** 中转站条目：密钥与全局覆盖同款"null=保留现状"合并语义（见 mergeProviders） */
+    @Data
+    public static class ProviderOverlay {
+        /** 显示名（前端展示用） */
+        private String name;
+        /** OpenAI 兼容 Base URL（可带可不带 /v1，取模型列表时自动适配路径） */
+        private String baseUrl;
+        private String apiKey;
+    }
+
     private final Path file;
     private volatile Overlay overlay;
+    /** 同名兜底告警只发一次：applyFallback 在每次 LLM 调用都执行，不设防会逐条刷 WARN */
+    private volatile boolean sameNameFallbackWarned;
 
     /**
      * 功能开关注册表（可选注入）：负责把覆盖值写回各配置 bean。
@@ -210,10 +232,14 @@ public class LlmRuntimeConfig {
                 ? request.getSceneApiEnabled() : current.getSceneApiEnabled());
         next.setScenes(mergeScenes(current, request));
         next.setFallback(mergeFallback(current, request));
+        next.setProviders(mergeProviders(current, request));
+        next.setProviderId(mergeProviderId(current, next, request));
         mergeEmbedding(current, next, request);
         mergeReferenceMode(current, next, request);
         mergeToggles(current, next, request);
         overlay = next;
+        // 新一轮保存后重置同名兜底告警：再次配错时还能提醒一次
+        sameNameFallbackWarned = false;
         persist(next);
         // 开关覆盖要落到各配置 bean 上：服务层直接读 bean，这是唯一能让改动生效的路径
         if (featureToggles != null) {
@@ -223,12 +249,15 @@ public class LlmRuntimeConfig {
         // 每个场景的 apiKey 明文，而这条 INFO 会落到 data/log/log_info.log（保留 15 天、随排障日志外发）。
         // view() 特意做了掩码，日志这里必须同口径
         log.info("LLM 运行时覆盖已保存：baseUrl={}，model={}，maxTokens={}，hasKey={}，authMode={}；"
-                        + "场景覆盖 {} 项（其中 {} 项带 apiKey）；嵌入覆盖 {}；资料选择模式 {}",
+                        + "场景覆盖 {} 项（其中 {} 项带 apiKey）；中转站 {} 个（全局引用 {}）；"
+                        + "嵌入覆盖 {}；资料选择模式 {}",
                 next.getBaseUrl(), next.getModel(), next.getMaxTokens(),
                 StringUtils.isNotBlank(next.getApiKey()),
                 next.getAuthMode() == null ? AUTH_API_KEY : next.getAuthMode(),
                 next.getScenes() == null ? 0 : next.getScenes().size(),
                 countSceneApiKeys(next.getScenes()),
+                next.getProviders() == null ? 0 : next.getProviders().size(),
+                StringUtils.isBlank(next.getProviderId()) ? "手动模式" : next.getProviderId(),
                 next.hasEmbeddingOverride() ? "生效" : "无",
                 next.getReferenceMode() == null ? "回退 yml" : next.getReferenceMode());
         return view();
@@ -341,6 +370,84 @@ public class LlmRuntimeConfig {
     }
 
     /**
+     * 中转站注册表合并（全量替换，与场景矩阵同款语义）：request.providers=null → 保持现状
+     * （其它保存请求不误伤）；resetProviders=true 或空表 → 清空；否则全量替换。
+     * apiKey 同款不可见字段保护：null=保留现有密钥，空串=显式清除。
+     * id 只收 [a-z0-9-]（前端生成 slug）：它是 JSON 键与 providerId 引用的锚点，
+     * 放宽命名会连带把引用校验、URL 安全问题引进来
+     */
+    private static Map<String, ProviderOverlay> mergeProviders(Overlay current, LlmConfigSaveRequestDTO request) {
+        if (request.isResetProviders()) {
+            return null;
+        }
+        Map<String, LlmConfigSaveRequestDTO.ProviderSave> incoming = request.getProviders();
+        if (incoming == null) {
+            return current.getProviders();
+        }
+        Map<String, ProviderOverlay> merged = new LinkedHashMap<>();
+        for (Map.Entry<String, LlmConfigSaveRequestDTO.ProviderSave> entry : incoming.entrySet()) {
+            String id = entry.getKey() == null ? null : entry.getKey().trim().toLowerCase();
+            if (id == null || !id.matches("[a-z0-9][a-z0-9-]{0,63}")) {
+                log.warn("中转站 id 不合法（仅小写字母/数字/连字符）：{}，已丢弃", entry.getKey());
+                continue;
+            }
+            LlmConfigSaveRequestDTO.ProviderSave in = entry.getValue();
+            if (in == null || StringUtils.isBlank(in.getBaseUrl())) {
+                log.warn("中转站 {} 缺少 Base URL，已丢弃", id);
+                continue;
+            }
+            ProviderOverlay prev = current.getProviders() == null ? null : current.getProviders().get(id);
+            ProviderOverlay po = new ProviderOverlay();
+            po.setName(StringUtils.trimToNull(in.getName()));
+            po.setBaseUrl(in.getBaseUrl().trim());
+            // 密钥不回显：null=沿用该 id 现有密钥，空串=显式清除
+            po.setApiKey(in.getApiKey() == null
+                    ? (prev == null ? null : prev.getApiKey())
+                    : StringUtils.trimToNull(in.getApiKey()));
+            merged.put(id, po);
+        }
+        return merged.isEmpty() ? null : merged;
+    }
+
+    /**
+     * 全局中转站引用合并：null=保持现状；空串=清除（回手动模式）；值必须存在于合并后的
+     * 注册表（不存在=引用悬空，等于没选中转站却看不到——直接拒绝比静默清除诚实）
+     */
+    private static String mergeProviderId(Overlay current, Overlay next, LlmConfigSaveRequestDTO request) {
+        String in = request.getProviderId();
+        String candidate;
+        if (in == null) {
+            candidate = current.getProviderId();
+        } else {
+            candidate = StringUtils.trimToNull(in);
+        }
+        if (candidate == null) {
+            return null;
+        }
+        // resetProviders 把注册表清空后引用必然悬空：按"手动模式"收敛而不是报错
+        boolean known = next.getProviders() != null && next.getProviders().containsKey(candidate);
+        if (!known) {
+            if (in != null && !in.isBlank() && next.getProviders() != null) {
+                throw new IllegalArgumentException("全局中转站引用不存在：" + candidate + "（请先在注册表中保存它）");
+            }
+            return null;
+        }
+        return candidate;
+    }
+
+    /**
+     * 中转站接入点（供模型列表拉取）：返回该 id 的地址与密钥；不存在返回 null。
+     * 密钥仅在进程内传递，绝不进日志与任何 DTO
+     */
+    public ProviderOverlay providerOf(String id) {
+        Overlay o = overlay;
+        if (o == null || o.getProviders() == null || StringUtils.isBlank(id)) {
+            return null;
+        }
+        return o.getProviders().get(id.trim());
+    }
+
+    /**
      * 场景覆盖合并：resetScenes=true 或 request.scenes 为空表 → 清空；
      * request.scenes=null → 保持现状（全局字段保存请求不带 scenes，不误伤场景覆盖）；
      * 否则全量替换（前端矩阵整表提交，条目内空字段=清除该字段覆盖）。
@@ -439,16 +546,26 @@ public class LlmRuntimeConfig {
         return temperature;
     }
 
-    /** apiKey 覆盖落到 module（baseUrl + apiKey）；无覆盖原样返回 */
+    /**
+     * apiKey 覆盖落到 module（baseUrl + apiKey）；无覆盖原样返回。
+     * 字段优先级：全局中转站 &gt; 手动覆盖（baseUrl/apiKey 字段）&gt; yml 静态——
+     * 选中中转站后地址密钥立即跟着走；手动字段保留为"中转站没配某字段时的补位"高级逃生口
+     */
     public StoryVO.Module applyApi(StoryVO.Module module) {
         Overlay o = overlay;
-        if (module == null || o == null || (StringUtils.isBlank(o.getBaseUrl()) && StringUtils.isBlank(o.getApiKey()))) {
+        ProviderOverlay provider = providerOf(o == null ? null : o.getProviderId());
+        boolean providerHasApi = provider != null
+                && (StringUtils.isNotBlank(provider.getBaseUrl()) || StringUtils.isNotBlank(provider.getApiKey()));
+        if (module == null || o == null
+                || (!providerHasApi && StringUtils.isBlank(o.getBaseUrl()) && StringUtils.isBlank(o.getApiKey()))) {
             return module;
         }
         StoryVO.Module.AiApi original = module.getAiApi();
         StoryVO.Module.AiApi aiApi = new StoryVO.Module.AiApi();
-        aiApi.setBaseUrl(StringUtils.isNotBlank(o.getBaseUrl()) ? o.getBaseUrl() : original == null ? null : original.getBaseUrl());
-        aiApi.setApiKey(StringUtils.isNotBlank(o.getApiKey()) ? o.getApiKey() : original == null ? null : original.getApiKey());
+        aiApi.setBaseUrl(firstNonBlank(provider == null ? null : provider.getBaseUrl(), o.getBaseUrl(),
+                original == null ? null : original.getBaseUrl()));
+        aiApi.setApiKey(firstNonBlank(provider == null ? null : provider.getApiKey(), o.getApiKey(),
+                original == null ? null : original.getApiKey()));
         if (original != null) {
             aiApi.setCompletionsPath(original.getCompletionsPath());
             aiApi.setZeroDataRetention(original.getZeroDataRetention());
@@ -537,9 +654,34 @@ public class LlmRuntimeConfig {
         StoryVO.Module.ChatModel staticFallback = module.getFallbackModel();
         StoryVO.Module.ChatModel merged = new StoryVO.Module.ChatModel();
         // 字段优先级：运行时覆盖 > yml 静态兜底
-        merged.setModel(StringUtils.isNotBlank(fb.getModel()) ? fb.getModel()
+        String overrideModel = StringUtils.isNotBlank(fb.getModel()) ? fb.getModel() : null;
+        // 兜底与全局主模型同名 = 无效兜底（ModelFallbackChain 见同名直接返回单元素链，
+        // 烧穿保护进不了降级分支，空正文被记成 success，故障最终伪装成"解析失败"）。
+        // 2026-10-25 实测：设置页把兜底填成与主模型相同的 glm-5.3-flash，chapter-plan
+        // 连烧两次空正文，报错却指向章数校验。这里整条覆盖作废、回落 yml 静态兜底（异族模型）。
+        // 注意只兜住"与全局覆盖主模型同名"这一种形态：无全局覆盖时各场景主模型不同，
+        // 静态兜底恰好与某场景同名属正常配置（ModelFallbackChain 本就按场景判同名）。
+        String resolvedModel = overrideModel;
+        boolean droppedSameName = false;
+        if (overrideModel != null
+                && overrideModel.trim().equals(StringUtils.trimToEmpty(o.getModel()))
+                && staticFallback != null && StringUtils.isNotBlank(staticFallback.getModel())
+                && !staticFallback.getModel().equals(overrideModel)) {
+            droppedSameName = true;
+            resolvedModel = null;
+            if (!sameNameFallbackWarned) {
+                sameNameFallbackWarned = true;
+                log.warn("兜底模型与全局主模型同名（{}），降级链会塌缩为单站、烧穿保护失效；"
+                        + "已改用 yml 静态兜底 {}。请在设置页把兜底换成异族模型", overrideModel,
+                        staticFallback.getModel());
+            }
+        }
+        merged.setModel(resolvedModel != null ? resolvedModel
                 : staticFallback == null ? null : staticFallback.getModel());
-        merged.setMaxTokens(fb.getMaxTokens() != null ? fb.getMaxTokens()
+        // 上限仍按字段级覆盖走：只有守卫触发（整条覆盖作废）才回落静态值；
+        // "只填上限不填模型名"的覆盖必须继续生效，不能因为模型名为空被吞掉
+        Long maxTokensOverride = droppedSameName ? null : fb.getMaxTokens();
+        merged.setMaxTokens(maxTokensOverride != null ? maxTokensOverride
                 : staticFallback == null ? null : staticFallback.getMaxTokens());
         merged.setTemperature(fb.getTemperature() != null ? fb.getTemperature()
                 : staticFallback == null ? null : staticFallback.getTemperature());
@@ -640,6 +782,22 @@ public class LlmRuntimeConfig {
         dto.setBaseUrl(o.getBaseUrl());
         dto.setModel(o.getModel());
         dto.setMaxTokens(o.getMaxTokens());
+        dto.setProviderId(StringUtils.trimToNull(o.getProviderId()));
+        if (o.getProviders() != null && !o.getProviders().isEmpty()) {
+            List<LlmConfigDTO.ProviderView> providers = new ArrayList<>();
+            for (Map.Entry<String, ProviderOverlay> entry : o.getProviders().entrySet()) {
+                LlmConfigDTO.ProviderView pv = new LlmConfigDTO.ProviderView();
+                pv.setId(entry.getKey());
+                pv.setName(entry.getValue() == null ? entry.getKey() : entry.getValue().getName());
+                pv.setBaseUrl(entry.getValue() == null ? null : entry.getValue().getBaseUrl());
+                if (entry.getValue() != null && StringUtils.isNotBlank(entry.getValue().getApiKey())) {
+                    pv.setHasKey(true);
+                    pv.setApiKeyMasked(mask(entry.getValue().getApiKey()));
+                }
+                providers.add(pv);
+            }
+            dto.setProviders(providers);
+        }
         if (StringUtils.isNotBlank(o.getApiKey())) {
             dto.setHasKey(true);
             dto.setApiKeyMasked(mask(o.getApiKey()));
@@ -808,6 +966,15 @@ public class LlmRuntimeConfig {
             return "***";
         }
         return apiKey.substring(0, 4) + "***" + apiKey.substring(apiKey.length() - 4);
+    }
+
+    private static String firstNonBlank(String... values) {
+        for (String value : values) {
+            if (StringUtils.isNotBlank(value)) {
+                return value;
+            }
+        }
+        return null;
     }
 
     private void persist(Overlay o) {

@@ -14,6 +14,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
@@ -112,5 +113,67 @@ class LlmConfigControllerTest {
         when(llmRuntimeConfig.view(same(storyProperties), eq("vector"))).thenReturn(dto);
 
         assertSame(dto, controller.get());
+    }
+
+    // ===== 模型列表拉取端点（providers/models）=====
+
+    @Mock
+    private cn.novel.yonren.domain.novel.adapter.llm.ModelCatalogPort modelCatalogPort;
+
+    @Test
+    void fetchModels_byProviderId_usesStoredCredentials() {
+        LlmRuntimeConfig.ProviderOverlay provider = new LlmRuntimeConfig.ProviderOverlay();
+        provider.setBaseUrl("https://relay.example.com");
+        provider.setApiKey("sk-relay");
+        when(llmRuntimeConfig.providerOf("relay-a")).thenReturn(provider);
+        when(modelCatalogPort.fetchModels("https://relay.example.com", "sk-relay"))
+                .thenReturn(java.util.List.of("m1", "m2"));
+
+        java.util.List<String> result = controller.fetchModels(fetchRequest("relay-a", null, null));
+
+        assertEquals(2, result.size());
+        assertEquals("m1", result.get(0));
+    }
+
+    @Test
+    void fetchModels_explicitBaseUrlWinsWithProviderKey() {
+        LlmRuntimeConfig.ProviderOverlay provider = new LlmRuntimeConfig.ProviderOverlay();
+        provider.setBaseUrl("https://relay.example.com");
+        provider.setApiKey("sk-relay");
+        when(llmRuntimeConfig.providerOf("relay-a")).thenReturn(provider);
+        when(modelCatalogPort.fetchModels("https://manual.example.com", "sk-relay"))
+                .thenReturn(java.util.List.of("m"));
+
+        // 试连语义：显式地址 + 中转站存的密钥（保存前用表单当前值探测）
+        java.util.List<String> result = controller.fetchModels(fetchRequest("relay-a", "https://manual.example.com", null));
+
+        assertEquals(1, result.size());
+    }
+
+    @Test
+    void fetchModels_unknownProvider_404() {
+        when(llmRuntimeConfig.providerOf("missing")).thenReturn(null);
+
+        org.springframework.web.server.ResponseStatusException ex = assertThrows(
+                org.springframework.web.server.ResponseStatusException.class,
+                () -> controller.fetchModels(fetchRequest("missing", null, null)));
+        assertEquals(org.springframework.http.HttpStatus.NOT_FOUND, ex.getStatusCode());
+    }
+
+    @Test
+    void fetchModels_withoutBaseUrl_400() {
+        org.springframework.web.server.ResponseStatusException ex = assertThrows(
+                org.springframework.web.server.ResponseStatusException.class,
+                () -> controller.fetchModels(fetchRequest(null, "  ", null)));
+        assertEquals(org.springframework.http.HttpStatus.BAD_REQUEST, ex.getStatusCode());
+    }
+
+    private static cn.novel.yonren.api.dto.ModelFetchRequestDTO fetchRequest(
+            String providerId, String baseUrl, String apiKey) {
+        cn.novel.yonren.api.dto.ModelFetchRequestDTO req = new cn.novel.yonren.api.dto.ModelFetchRequestDTO();
+        req.setProviderId(providerId);
+        req.setBaseUrl(baseUrl);
+        req.setApiKey(apiKey);
+        return req;
     }
 }

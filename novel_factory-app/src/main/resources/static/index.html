@@ -376,7 +376,7 @@
                     <div class="form-grid">
                         <div class="form-group">
                             <label for="fallback_model">模型名（model）</label>
-                            <input type="text" id="fallback_model" placeholder="留空 = 不启用兜底" autocomplete="off">
+                            <input type="text" id="fallback_model" list="chatgpt-model-options" placeholder="留空 = 不启用兜底" autocomplete="off">
                         </div>
                         <div class="form-group">
                             <label for="fallback_maxTokens">最大输出 Token</label>
@@ -432,6 +432,12 @@
                                 <p class="settings-hint">ChatGPT 模式使用官方 Responses API；模型列表来自当前账号。该授权不包含 Embedding，向量检索仍使用下方独立 API Key。</p>
                             </div>
                             <div class="form-group full-width" data-page-node-id="ehUJpYpS5rRkcXOGWR04wL">
+                                <label for="llm_provider">中转站（API 供应商）</label>
+                                <select id="llm_provider">
+                                    <option value="">手动（使用下方地址密钥）</option>
+                                </select>
+                            </div>
+                            <div class="form-group full-width" data-page-node-id="ehUJpYpS5rRkcXOGWR04wL">
                                 <label for="llm_baseUrl" data-page-node-id="EUMPpI57BrjHvKp5FetCky">Base URL（接口地址）</label>
                                 <input type="text" id="llm_baseUrl" placeholder="https://dashscope.aliyuncs.com/compatible-mode" autocomplete="off" data-page-node-id="Y4pKmSBIqmyJIeEOcgzNtA">
                             </div>
@@ -455,6 +461,37 @@
                             <button type="button" id="btn-reset-llm-config" class="btn-secondary" data-page-node-id="RDgNUqOIer0GGWUe19tVGk">清 除 覆 盖</button>
                         </div>
                     </form>
+                </div>
+
+                <!-- 中转站管理：OpenAI 兼容供应商注册表，保存后可在上方「中转站」下拉选用 -->
+                <div class="content-card" id="provider-card">
+                    <div class="section-label">PROVIDERS</div>
+                    <h2 class="section-title">中转站管理</h2>
+                    <p class="settings-hint">
+                        在这里登记多个 OpenAI 兼容供应商（中转站），保存后到上方「模型接入」的中转站下拉选用；
+                        「获取模型」一键拉取该站可用模型名，全局/场景/兜底的模型输入框都会变成可选的下拉。
+                        地址带不带 <b>/v1</b> 都可以，程序自动适配。密钥只保存在本机，界面只显示掩码。
+                    </p>
+                    <div class="form-grid">
+                        <div class="form-group">
+                            <label for="provider_name">名称（便于辨认）</label>
+                            <input type="text" id="provider_name" placeholder="如：硅基流动 / 本地 one-api" autocomplete="off">
+                        </div>
+                        <div class="form-group full-width">
+                            <label for="provider_baseUrl">Base URL</label>
+                            <input type="text" id="provider_baseUrl" placeholder="https://api.example.com（带不带 /v1 均可）" autocomplete="off">
+                        </div>
+                        <div class="form-group full-width">
+                            <label for="provider_apiKey">API Key（编辑已有条目时留空 = 保留现有）</label>
+                            <input type="password" id="provider_apiKey" placeholder="sk-..." autocomplete="new-password">
+                        </div>
+                    </div>
+                    <div class="form-actions">
+                        <button type="button" id="btn-save-provider" class="btn-primary">添加 / 更新中转站</button>
+                        <button type="button" id="btn-test-provider" class="btn-secondary">试连并获取模型（不必先保存）</button>
+                    </div>
+                    <div id="provider-list"></div>
+                    <div id="provider-status" class="config-status hidden"></div>
                 </div>
 
                 <div class="content-card">
@@ -516,6 +553,65 @@
                             <button type="submit" id="btn-save-reference-mode" class="btn-primary">保 存 检 索 方 式</button>
                         </div>
                     </form>
+                </div>
+
+                <!-- 我的参考资料：data/references 下的用户自备资料，进向量索引与选择器 -->
+                <div class="content-card" id="user-references-card">
+                    <div class="section-label">MY REFERENCES</div>
+                    <h2 class="section-title">我的参考资料</h2>
+                    <p class="settings-hint">
+                        把你自己的写作范例、题材知识喂给产线：新资料与内置 58 份同等待遇——进向量索引、被按需检索注入对应场景，<b>保存后下一批作业即生效</b>。
+                        <br>格式要求：<b>首行写「# 标题」</b>，随后一段一句话简介（这两行决定资料在目录里怎么被选中）；正文随意，纯 Markdown，建议不超过 3 万字。
+                        <br>命名规则：小写字母/数字/连字符（如 <span class="mono">my-battle-exemplar</span>）。
+                        名字前缀决定资料被哪些场景检索到：<span class="mono">plot-structure-</span> 开头归「结构模板」（计划/蓝图场景），<span class="mono">seed-</span> 开头归「题材设定」（设定集场景），其余归「写作技法」（正文/审校场景）。
+                    </p>
+                    <div class="form-actions">
+                        <button type="button" id="btn-new-reference" class="btn-primary">新 增 资 料</button>
+                    </div>
+                    <div id="user-reference-list"></div>
+                    <div id="reference-editor" class="hidden">
+                        <div class="form-group">
+                            <label for="reference_file_name">资料名（小写字母/数字/连字符，保存后不可改名）</label>
+                            <input type="text" id="reference_file_name" placeholder="my-battle-exemplar" autocomplete="off">
+                        </div>
+                        <div class="form-group">
+                            <label for="reference_content">内容（Markdown：首行 # 标题，次段一句话简介）</label>
+                            <textarea id="reference_content" rows="14" placeholder="# 我的大战范例&#10;&#10;一段话简介：用地形与生理弱点设计打斗。&#10;&#10;（正文）"></textarea>
+                        </div>
+                        <div class="form-actions">
+                            <button type="button" id="btn-save-reference" class="btn-primary">保 存 资 料</button>
+                            <button type="button" id="btn-cancel-reference" class="btn-secondary">取 消</button>
+                        </div>
+                    </div>
+                    <div id="user-reference-status" class="config-status hidden"></div>
+                </div>
+
+                <!-- 文风覆盖：data/styles 覆盖内置 styles/{genre}.md -->
+                <div class="content-card" id="styles-card">
+                    <div class="section-label">STYLES</div>
+                    <h2 class="section-title">文风（写作风格）</h2>
+                    <p class="settings-hint">
+                        每个题材对应一篇文风文件，写作时整篇注入。内置四篇（通用/玄幻/言情/悬疑）可查看；
+                        「编辑」即创建<b>你自己的覆盖版</b>——故事命中该题材时用你的版本，<b>恢复内置</b>一键回退。
+                        没有内置文风的题材（科幻/末世/无限流/都市现实/异能）编辑后即第一次拥有专属文风，不再回落通用版。
+                    </p>
+                    <div id="style-list"></div>
+                    <div id="style-editor" class="hidden">
+                        <div class="form-group">
+                            <label for="style_editor_title">正在编辑</label>
+                            <input type="text" id="style_editor_title" disabled>
+                        </div>
+                        <div class="form-group">
+                            <label for="style_content">文风内容（Markdown，保存即覆盖内置）</label>
+                            <textarea id="style_content" rows="14"></textarea>
+                        </div>
+                        <div class="form-actions">
+                            <button type="button" id="btn-save-style" class="btn-primary">保 存 文 风</button>
+                            <button type="button" id="btn-reset-style" class="btn-secondary">恢复内置</button>
+                            <button type="button" id="btn-cancel-style" class="btn-secondary">取 消</button>
+                        </div>
+                    </div>
+                    <div id="style-status" class="config-status hidden"></div>
                 </div>
 
                             </section>

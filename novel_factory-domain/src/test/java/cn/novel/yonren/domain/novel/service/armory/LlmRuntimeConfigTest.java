@@ -237,6 +237,76 @@ class LlmRuntimeConfigTest {
         assertEquals(Long.valueOf(4096L), staticFallback.getMaxTokens(), "静态对象不被污染");
     }
 
+    /**
+     * 兜底与全局主模型同名时必须回落到静态兜底：同名会让降级链塌缩成单站
+     * （ModelFallbackChain 见同名直接返回单元素链），烧穿保护失去降级目标，
+     * 故障在调用方表现为"解析失败"——2026-10-25 chapter-plan 连烧两次空正文即此因。
+     */
+    @Test
+    void fallbackApply_sameNameAsPrimary_fallsBackToStaticToKeepChainAlive() {
+        LlmRuntimeConfig config = new LlmRuntimeConfig(tmp.resolve("override.json"));
+        StoryVO.Module module = staticModule();
+        StoryVO.Module.ChatModel staticFallback = new StoryVO.Module.ChatModel();
+        staticFallback.setModel("deepseek-v4.1-flash");
+        staticFallback.setMaxTokens(16384L);
+        module.setFallbackModel(staticFallback);
+
+        // 全局主模型与兜底都填 glm-5.3-flash
+        LlmConfigSaveRequestDTO request = new LlmConfigSaveRequestDTO();
+        request.setModel("glm-5.3-flash");
+        request.setFallback(sceneOverride("glm-5.3-flash", 100000L, null));
+        config.save(request);
+
+        StoryVO.Module applied = config.applyFallback(module);
+        assertEquals("deepseek-v4.1-flash", applied.getFallbackModel().getModel(),
+                "同名兜底无效，应回落静态兜底保住降级链");
+        assertEquals(Long.valueOf(16384L), applied.getFallbackModel().getMaxTokens(),
+                "回落时上限也取静态兜底的值");
+    }
+
+    /** 兜底与主模型不同名时保持覆盖语义（不能因为新加的守卫误伤正常配置） */
+    @Test
+    void fallbackApply_distinctName_keepsRuntimeOverride() {
+        LlmRuntimeConfig config = new LlmRuntimeConfig(tmp.resolve("override.json"));
+        StoryVO.Module module = staticModule();
+        StoryVO.Module.ChatModel staticFallback = new StoryVO.Module.ChatModel();
+        staticFallback.setModel("static-fb");
+        staticFallback.setMaxTokens(4096L);
+        module.setFallbackModel(staticFallback);
+
+        LlmConfigSaveRequestDTO request = new LlmConfigSaveRequestDTO();
+        request.setModel("glm-5.3-flash");
+        request.setFallback(sceneOverride("deepseek-v4.1-flash", 100000L, null));
+        config.save(request);
+
+        StoryVO.Module applied = config.applyFallback(module);
+        assertEquals("deepseek-v4.1-flash", applied.getFallbackModel().getModel());
+        assertEquals(Long.valueOf(100000L), applied.getFallbackModel().getMaxTokens());
+    }
+
+    /**
+     * 只填兜底上限、不填模型名的覆盖必须继续生效（字段级覆盖语义）。
+     * 守卫初版曾把上限覆盖错误地绑定在"覆盖模型名非空"上，这种只见上限的覆盖被静默吞掉。
+     */
+    @Test
+    void fallbackApply_maxTokensOnlyOverride_stillApplies() {
+        LlmRuntimeConfig config = new LlmRuntimeConfig(tmp.resolve("override.json"));
+        StoryVO.Module module = staticModule();
+        StoryVO.Module.ChatModel staticFallback = new StoryVO.Module.ChatModel();
+        staticFallback.setModel("static-fb");
+        staticFallback.setMaxTokens(4096L);
+        module.setFallbackModel(staticFallback);
+
+        LlmConfigSaveRequestDTO request = new LlmConfigSaveRequestDTO();
+        request.setFallback(sceneOverride(null, 65536L, null));
+        config.save(request);
+
+        StoryVO.Module applied = config.applyFallback(module);
+        assertEquals("static-fb", applied.getFallbackModel().getModel(), "模型名留空=沿用静态兜底");
+        assertEquals(Long.valueOf(65536L), applied.getFallbackModel().getMaxTokens(),
+                "只填上限的覆盖不得被守卫吞掉");
+    }
+
     /** resetFallback 只清兜底覆盖，不误伤全局/场景覆盖 */
     @Test
     void fallbackReset_doesNotTouchOtherOverrides() {

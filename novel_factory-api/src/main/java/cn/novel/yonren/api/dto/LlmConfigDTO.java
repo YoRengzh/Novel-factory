@@ -88,6 +88,27 @@ public class LlmConfigDTO {
     /** 资料检索方式当前生效值（覆盖优先，未覆盖= yml 静态值）：前端下拉直接回显它 */
     private String effectiveReferenceMode;
 
+    /** 全局中转站引用（null=手动地址密钥模式）；选中时全局 baseUrl/apiKey 优先取该供应商的值 */
+    private String providerId;
+
+    /** 中转站注册表视图（密钥只给掩码） */
+    private List<ProviderView> providers;
+
+    /** 单个中转站视图 */
+    @Data
+    public static class ProviderView {
+        /** 供应商 id（前端生成，提交时原样回传） */
+        private String id;
+        /** 显示名 */
+        private String name;
+        /** OpenAI 兼容 Base URL（非机密，原文返回便于核对指向） */
+        private String baseUrl;
+        /** 是否已配置 apiKey（原文不回传） */
+        private boolean hasKey;
+        /** apiKey 掩码，未设置为 null */
+        private String apiKeyMasked;
+    }
+
     /**
      * 功能开关（质量/速度档）：每条的静态值（yml）、运行时覆盖（null=未覆盖）与生效值。
      * 这些开关决定每章额外跑几次模型调用，是单章耗时的主要变量
