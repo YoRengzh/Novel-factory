@@ -92,6 +92,42 @@ class UserAssetStoreTest {
         assertThrows(IllegalArgumentException.class, () -> store.deleteReference("no-such-file"));
     }
 
+    // ===== 文件路径导入 =====
+
+    @Test
+    void importReference_copiesSourceContent() throws Exception {
+        Path source = tmp.resolve("我的打斗范例.md");
+        java.nio.file.Files.writeString(source, "# 打斗范例\n\n用地形与弱点设计打斗。\n\n正文。", java.nio.charset.StandardCharsets.UTF_8);
+
+        store.importReference("imported-battle", source);
+
+        assertEquals("# 打斗范例\n\n用地形与弱点设计打斗。\n\n正文。",
+                store.readReference("imported-battle"), "导入是复制语义：内容与源一致");
+        // 源文件删除后资料仍在
+        java.nio.file.Files.delete(source);
+        assertEquals(1, store.listReferences().size());
+    }
+
+    @Test
+    void importReference_rejectsMissingAndNonUtf8AndOversize() throws Exception {
+        assertThrows(IllegalArgumentException.class,
+                () -> store.importReference("x-1", tmp.resolve("no-such.md")), "源文件不存在");
+        // GBK 字节流：UTF-8 解码必须失败并给面向用户的提示
+        Path gbk = tmp.resolve("gbk.md");
+        java.nio.file.Files.write(gbk, "中文内容".getBytes("GBK"));
+        assertThrows(IllegalArgumentException.class, () -> store.importReference("x-2", gbk), "非 UTF-8");
+        // 2MB+ 文件拒绝
+        Path big = tmp.resolve("big.md");
+        byte[] chunk = new byte[1024 * 1024];
+        try (var out = java.nio.file.Files.newOutputStream(big)) {
+            out.write(chunk);
+            out.write(chunk);
+            out.write(chunk);
+        }
+        assertThrows(IllegalArgumentException.class, () -> store.importReference("x-3", big), "超大小上限");
+        assertTrue(store.listReferences().isEmpty(), "失败的导入不得留下半成品");
+    }
+
     // ===== 文风 =====
 
     @Test

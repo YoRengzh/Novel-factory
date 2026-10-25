@@ -29,8 +29,12 @@
                         <span class="tab-no" data-page-node-id="1rS3kA1RSg2IVFm8dQjTZY">03</span>
                         <span data-page-node-id="dlByrlRiW95MEuUKxjAaoE">项目模型配置</span>
                     </button>
+                    <button class="nav-tab" data-tab="assets" data-page-node-id="AssetsTabBox">
+                        <span class="tab-no" data-page-node-id="AssetsTabNo">04</span>
+                        <span data-page-node-id="AssetsTabLabel">资料设置</span>
+                    </button>
                     <button class="nav-tab" data-tab="settings" data-page-node-id="SetTabNo04Box">
-                        <span class="tab-no" data-page-node-id="SetTabNo04">04</span>
+                        <span class="tab-no" data-page-node-id="SetTabNo04">05</span>
                         <span data-page-node-id="SetTabLabel04">设置</span>
                     </button>
                 </nav>
@@ -339,7 +343,7 @@
                     <div class="section-label" data-page-node-id="sSR1Tmu4uw419PZ0mJdSw5">SCENE MODELS</div>
                     <h2 class="section-title" data-page-node-id="m1nbxq44CG3VtAfwuNTpcf">场景模型</h2>
                     <p class="settings-hint" data-page-node-id="bZref5VnUGT8zfPHK2oAmJ">
-                        <b>说明</b>：每个生成场景可独立指定模型 / 输出上限 / 采样温度。优先级：场景覆盖 &gt; 全局覆盖（04 设置里的接入配置）&gt; 程序内置配置（场景条目缺项回落统一模型）。覆盖输入留空 = 清除该字段覆盖、回退下一层。保存即生效、跨重启保留。
+                        <b>说明</b>：每个生成场景可独立指定模型 / 输出上限 / 采样温度。优先级：场景覆盖 &gt; 全局覆盖（05 设置里的接入配置）&gt; 程序内置配置（场景条目缺项回落统一模型）。覆盖输入留空 = 清除该字段覆盖、回退下一层。保存即生效、跨重启保留。
                     </p>
                     <div class="scene-api-switch" data-page-node-id="ScApiSwitchRow1">
                         <label class="switch-label" for="scene_api_enabled">
@@ -347,7 +351,7 @@
                             <span>启用场景级 API（每个场景可独立配置 Base URL 与 API Key）</span>
                         </label>
                         <span class="settings-hint scene-api-hint" id="scene-api-hint">
-                            关闭时：所有场景强制走 04 设置里「模型接入」的全局地址与密钥，场景自带地址密钥一律不生效；
+                            关闭时：所有场景强制走 05 设置里「模型接入」的全局地址与密钥，场景自带地址密钥一律不生效；
                             打开时：每个场景可自配地址密钥，并在下方各行编辑（留空 = 沿用全局 / yml 静态）。
                         </span>
                     </div>
@@ -403,9 +407,8 @@
                 </div>
 
             </section>
-            </section>
 
-            <!-- 04 设置：模型接入 / 嵌入 / 资料检索方式 -->
+            <!-- 05 设置：模型接入 / 中转站 / 嵌入 -->
             <section id="tab-settings" class="tab-content">
 <div class="content-card" data-page-node-id="5Av8rDPYjFthtcITvetBGG">
                     <div class="section-label" data-page-node-id="JfIEFhnRZGoL2mJbUImJKU">SETTINGS</div>
@@ -487,7 +490,8 @@
                         </div>
                     </div>
                     <div class="form-actions">
-                        <button type="button" id="btn-save-provider" class="btn-primary">添加 / 更新中转站</button>
+                        <button type="button" id="btn-save-provider" class="btn-primary">添加中转站</button>
+                        <button type="button" id="btn-cancel-provider" class="btn-secondary hidden">取消编辑</button>
                         <button type="button" id="btn-test-provider" class="btn-secondary">试连并获取模型（不必先保存）</button>
                     </div>
                     <div id="provider-list"></div>
@@ -529,6 +533,10 @@
                     </form>
                 </div>
 
+            </section>
+
+            <!-- 04 资料设置：资料检索方式 / 我的参考资料 / 文风（写作提示词资料的自留地）-->
+            <section id="tab-assets" class="tab-content">
                 <div class="content-card">
                     <div class="section-label">REFERENCE MODE</div>
                     <h2 class="section-title">资料检索方式</h2>
@@ -565,8 +573,20 @@
                         <br>命名规则：小写字母/数字/连字符（如 <span class="mono">my-battle-exemplar</span>）。
                         名字前缀决定资料被哪些场景检索到：<span class="mono">plot-structure-</span> 开头归「结构模板」（计划/蓝图场景），<span class="mono">seed-</span> 开头归「题材设定」（设定集场景），其余归「写作技法」（正文/审校场景）。
                     </p>
+                    <!-- 从本地文件导入（推荐）：填路径即可，不用复制粘贴 -->
+                    <div class="form-grid">
+                        <div class="form-group full-width">
+                            <label for="reference_import_path">从本地文件导入（推荐）：md / txt 文件的完整路径</label>
+                            <input type="text" id="reference_import_path" placeholder="D:\我的资料\打斗范例.md" autocomplete="off">
+                        </div>
+                        <div class="form-group">
+                            <label for="reference_import_name">资料名（留空 = 按文件名自动生成）</label>
+                            <input type="text" id="reference_import_name" placeholder="my-battle-exemplar" autocomplete="off">
+                        </div>
+                    </div>
                     <div class="form-actions">
-                        <button type="button" id="btn-new-reference" class="btn-primary">新 增 资 料</button>
+                        <button type="button" id="btn-import-reference" class="btn-primary">导 入 文 件</button>
+                        <button type="button" id="btn-new-reference" class="btn-secondary">手动编写新资料</button>
                     </div>
                     <div id="user-reference-list"></div>
                     <div id="reference-editor" class="hidden">

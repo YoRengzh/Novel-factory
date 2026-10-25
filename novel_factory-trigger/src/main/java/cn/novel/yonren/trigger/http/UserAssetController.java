@@ -62,6 +62,22 @@ public class UserAssetController {
         }
     }
 
+    /** 从本地文件导入资料（复制全文，源文件之后移动/删除不受影响） */
+    @org.springframework.web.bind.annotation.PostMapping("/references/{fileName}/import")
+    public List<UserReferenceDTO> importReference(@PathVariable("fileName") String fileName,
+                                                  @RequestBody cn.novel.yonren.api.dto.ReferenceImportRequestDTO body) {
+        try {
+            String sourcePath = body == null ? null : body.getSourcePath();
+            userAssetStore.importReference(fileName, sourcePath == null ? null : java.nio.file.Path.of(sourcePath));
+            return userAssetStore.listReferences();
+        } catch (IllegalArgumentException e) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, e.getMessage());
+        } catch (Exception e) {
+            log.error("用户参考资料导入失败：{} <- {}", fileName, body == null ? "?" : body.getSourcePath(), e);
+            throw new ResponseStatusException(HttpStatus.INTERNAL_SERVER_ERROR, e.getMessage());
+        }
+    }
+
     @DeleteMapping("/references/{fileName}")
     public List<UserReferenceDTO> deleteReference(@PathVariable("fileName") String fileName) {
         try {

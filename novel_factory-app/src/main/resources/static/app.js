@@ -73,10 +73,10 @@
             btn.classList.add('active');
             document.getElementById('tab-' + btn.dataset.tab).classList.add('active');
             if (btn.dataset.tab === 'library') { loadStories(); }
-            // 03 项目模型配置与 04 设置共用同一份配置视图（GET /api/config/llm）：一次拉取，两页同时刷新
+            // 03 项目模型配置与 05 设置共用同一份配置视图（GET /api/config/llm）：一次拉取，两页同时刷新
             if (btn.dataset.tab === 'models' || btn.dataset.tab === 'settings') { loadLlmConfig(); }
-            // 04 设置进入时同步「我的参考资料 / 文风」两张卡（独立于 llm 配置视图）
-            if (btn.dataset.tab === 'settings') { loadUserAssets(); }
+            // 04 资料设置进入时同步「我的参考资料 / 文风 / 资料检索方式」卡片
+            if (btn.dataset.tab === 'assets') { loadLlmConfig(); loadUserAssets(); }
             // 回到生成页时刷新故事列表：刚写完的故事应能立刻被续写
             if (btn.dataset.tab === 'generate') { loadStoryOptions(); loadMetrics(); }
         });
@@ -1730,6 +1730,7 @@
     const inputProviderBaseUrl = document.getElementById('provider_baseUrl');
     const inputProviderApiKey = document.getElementById('provider_apiKey');
     const btnSaveProvider = document.getElementById('btn-save-provider');
+    const btnProviderCancel = document.getElementById('btn-cancel-provider');
     const btnTestProvider = document.getElementById('btn-test-provider');
     /** 编辑态：正在改的中转站 id（null=新增） */
     let editingProviderId = null;
@@ -1807,16 +1808,23 @@
         })
         .then(function (data) {
             renderProviders(data);
-            editingProviderId = null;
-            inputProviderName.value = '';
-            inputProviderBaseUrl.value = '';
-            inputProviderApiKey.value = '';
-            btnSaveProvider.textContent = '添加 / 更新中转站';
+            exitProviderEditing();
             providerStatus('中转站已保存：' + (name || id) + '。到上方「模型接入」的中转站下拉选用它。', 'ok');
             showToast('中转站已保存');
         })
         .catch(function (err) { providerStatus('保存失败：' + err.message, 'error'); })
         .finally(function () { btnSaveProvider.disabled = false; });
+    }
+
+    /** 退出编辑态回「新增」模式：清表单、复位按钮、隐藏取消。保存成功与取消编辑共用 */
+    function exitProviderEditing() {
+        editingProviderId = null;
+        inputProviderName.value = '';
+        inputProviderBaseUrl.value = '';
+        inputProviderApiKey.value = '';
+        inputProviderApiKey.placeholder = 'sk-...';
+        btnSaveProvider.textContent = '添加中转站';
+        btnProviderCancel.classList.add('hidden');
     }
 
     function startEditProvider(id) {
@@ -1827,8 +1835,11 @@
         inputProviderBaseUrl.value = p.baseUrl || '';
         inputProviderApiKey.value = '';
         inputProviderApiKey.placeholder = p.hasKey ? '已配置（' + (p.apiKeyMasked || '已掩码') + '），留空保留' : 'sk-...';
-        btnSaveProvider.textContent = '更新「' + (p.name || id) + '」';
-        providerStatus('正在编辑 ' + (p.name || id) + '，改完点上方按钮保存', 'ok');
+        // 编辑态显式化：保存按钮只管改这一条，想加新站先「取消编辑」——
+        // 否则"以为是添加、实际顶掉了被编辑条目"，列表看起来就像不能同时存多个中转站
+        btnSaveProvider.textContent = '保存修改（' + (p.name || id) + '）';
+        btnProviderCancel.classList.remove('hidden');
+        providerStatus('正在编辑 ' + (p.name || id) + '：改完点「保存修改」。要添加新中转站请先点「取消编辑」。', 'ok');
     }
 
     function deleteProvider(id) {
@@ -1896,6 +1907,10 @@
     }
 
     if (btnSaveProvider) btnSaveProvider.addEventListener('click', saveProvider);
+    if (btnProviderCancel) btnProviderCancel.addEventListener('click', function () {
+        exitProviderEditing();
+        providerStatus('已取消编辑，回到新增模式', 'ok');
+    });
     if (btnTestProvider) btnTestProvider.addEventListener('click', function () {
         const baseUrl = inputProviderBaseUrl.value.trim();
         if (!baseUrl) { providerStatus('试连前先填 Base URL', 'error'); return; }
@@ -2476,6 +2491,9 @@
     const btnSaveReference = document.getElementById('btn-save-reference');
     const btnCancelReference = document.getElementById('btn-cancel-reference');
     const userReferenceStatusDiv = document.getElementById('user-reference-status');
+    const inputImportPath = document.getElementById('reference_import_path');
+    const inputImportName = document.getElementById('reference_import_name');
+    const btnImportReference = document.getElementById('btn-import-reference');
 
     function referenceStatus(msg, type) {
         userReferenceStatusDiv.textContent = msg;
@@ -2576,6 +2594,51 @@
     if (btnSaveReference) btnSaveReference.addEventListener('click', saveReference);
     if (btnCancelReference) btnCancelReference.addEventListener('click', function () {
         referenceEditorDiv.classList.add('hidden');
+    });
+
+    /** 从文件路径推资料名：去扩展名 → 小写 → 非法字符压成连字符 → 去首尾连字符 */
+    function referenceNameFromPath(path) {
+        const base = String(path).split(/[\\/]/).pop() || '';
+        const stem = base.replace(/\.[^.]*$/, '');
+        const slug = stem.toLowerCase().replace(/[^a-z0-9-]+/g, '-').replace(/^-+|-+$/g, '');
+        return slug;
+    }
+
+    /** 从本地文件导入资料：后端读全文复制进 data/references，源文件之后移动/删除不受影响 */
+    function importReference() {
+        const path = inputImportPath.value.trim();
+        if (!path) { referenceStatus('先填本地文件路径（md / txt）', 'error'); return; }
+        let name = inputImportName.value.trim() || referenceNameFromPath(path);
+        if (!name) {
+            referenceStatus('文件名无法转成合法资料名（需含字母或数字），请在「资料名」里手动填写', 'error');
+            return;
+        }
+        btnImportReference.disabled = true;
+        fetchJson('/api/assets/references/' + encodeURIComponent(name) + '/import', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ sourcePath: path })
+        })
+        .then(function (list) {
+            const title = (list || []).filter(function (r) { return r.fileName === name; })[0];
+            referenceStatus('已导入「' + (title ? title.title : name) + '」（' + name
+                + '），下一批作业生效（检索/向量索引自动纳入）', 'ok');
+            showToast('资料已导入');
+            inputImportPath.value = '';
+            inputImportName.value = '';
+            loadUserReferences();
+        })
+        .catch(function (err) { referenceStatus('导入失败：' + err.message, 'error'); })
+        .finally(function () { btnImportReference.disabled = false; });
+    }
+
+    if (btnImportReference) btnImportReference.addEventListener('click', importReference);
+    if (inputImportPath) inputImportPath.addEventListener('change', function () {
+        // 填了路径且没手动指定资料名时，实时预览自动生成的名字
+        if (!inputImportName.value.trim()) {
+            const slug = referenceNameFromPath(inputImportPath.value);
+            inputImportName.placeholder = slug || '文件名无法自动生成，请手动填写';
+        }
     });
 
     // ===== 文风（data/styles 覆盖内置 styles/{genre}.md）=====

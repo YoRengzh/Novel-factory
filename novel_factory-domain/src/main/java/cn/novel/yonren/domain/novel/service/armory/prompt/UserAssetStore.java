@@ -98,6 +98,46 @@ public class UserAssetStore {
                     + "（内置资料不开放覆盖，请换个名字；想改风格请用「文风」区）");
         }
         String body = validatedContent(content, "参考资料");
+        persistReference(name, body);
+    }
+
+    /**
+     * 从本地文件导入资料：读入源文件全文存为 data/references/{fileName}.md。
+     * 是**复制**而非引用——源文件之后被移动/删除不影响已导入的资料。
+     * 源文件须为 UTF-8 文本（md/txt）；非文本或超限给面向用户的错误
+     */
+    public void importReference(String fileName, Path sourcePath) {
+        if (sourcePath == null || StringUtils.isBlank(sourcePath.toString())) {
+            throw new IllegalArgumentException("源文件路径不能为空");
+        }
+        Path src = sourcePath.toAbsolutePath().normalize();
+        if (!Files.isRegularFile(src)) {
+            throw new IllegalArgumentException("源文件不存在（或不是常规文件）：" + sourcePath);
+        }
+        // 导入上限比手写宽一档（原样收整篇长文），但仍是 2MB 硬顶：资料注入预算只有数千字，
+        // 更长的文件进索引只是浪费——提示拆分比默默截断诚实
+        final long MAX_IMPORT_BYTES = 2L * 1024 * 1024;
+        try {
+            if (Files.size(src) > MAX_IMPORT_BYTES) {
+                throw new IllegalArgumentException("源文件超过 2MB 上限（当前 "
+                        + Files.size(src) / 1024 + " KB），请拆分后再导入");
+            }
+        } catch (IOException e) {
+            throw new IllegalStateException("源文件读取失败：" + e.getMessage(), e);
+        }
+        String content;
+        try {
+            content = Files.readString(src, StandardCharsets.UTF_8);
+        } catch (IOException e) {
+            // 中文 Windows 下记事本存的 GBK 文件会走到这里：UTF-8 解码失败
+            throw new IllegalArgumentException("源文件不是 UTF-8 文本（请用编辑器另存为 UTF-8 后重试）："
+                    + e.getMessage());
+        }
+        writeReference(fileName, content);
+    }
+
+    /** 落盘 + 缓存/索引逐出：write 与 import 共用的最后一步 */
+    private void persistReference(String name, String body) {
         try {
             Files.createDirectories(referenceDir());
             atomicWrite(referenceDir().resolve(name + ".md"), body);
