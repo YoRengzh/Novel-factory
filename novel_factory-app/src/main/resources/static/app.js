@@ -1728,7 +1728,9 @@
     const providerStatusDiv = document.getElementById('provider-status');
     const inputProviderName = document.getElementById('provider_name');
     const inputProviderBaseUrl = document.getElementById('provider_baseUrl');
+    const inputProviderProtocol = document.getElementById('provider_protocol');
     const inputProviderApiKey = document.getElementById('provider_apiKey');
+    const inputProtocol = document.getElementById('llm_protocol');
     const btnSaveProvider = document.getElementById('btn-save-provider');
     const btnProviderCancel = document.getElementById('btn-cancel-provider');
     const btnTestProvider = document.getElementById('btn-test-provider');
@@ -1736,6 +1738,8 @@
     let editingProviderId = null;
     /** 已保存的中转站（id → {name, baseUrl, hasKey, apiKeyMasked}），全表提交的底稿 */
     let savedProviders = [];
+    /** 模型名（小写）→ 提供它的中转站名列表：场景矩阵「站名·模型」标注的数据源 */
+    let providerModelOwners = {};
 
     function providerStatus(msg, type) {
         providerStatusDiv.textContent = msg;
@@ -1747,13 +1751,38 @@
 
     function renderProviders(data) {
         savedProviders = data.providers || [];
-        // 全局下拉：手动 + 各中转站（后端 providerId 为 null 时显示手动）
+        // 模型归属映射：哪个模型在哪几家中转站可用（来自各站「获取模型」的缓存）
+        providerModelOwners = {};
+        savedProviders.forEach(function (p) {
+            (p.models || []).forEach(function (m) {
+                const key = String(m).toLowerCase();
+                (providerModelOwners[key] = providerModelOwners[key] || []).push(p.name || p.id);
+            });
+        });
+        // 全局下拉：手动 + 各中转站（后端 providerId 为 null 时显示手动）；
+        // 非 openai 协议的站在名称上带标记，避免同站名不同协议时选错
         inputProvider.innerHTML = '<option value="">手动（使用下方地址密钥）</option>'
             + savedProviders.map(function (p) {
-                return '<option value="' + esc(p.id) + '">' + esc(p.name || p.id) + '（' + esc(p.baseUrl || '') + '）</option>';
+                const tag = p.protocol && p.protocol !== 'openai' ? ' [' + esc(p.protocol) + ']' : '';
+                return '<option value="' + esc(p.id) + '">' + esc(p.name || p.id) + tag + '（' + esc(p.baseUrl || '') + '）</option>';
             }).join('');
         inputProvider.value = data.providerId || '';
         renderProviderList();
+    }
+
+    /** 模型的供应商标注：唯一站 →「站名·」前缀；多站 →「多家·」+悬停列名；未获取过 → 空串 */
+    function providerOwnerPrefix(modelName) {
+        if (!modelName) return '';
+        const owners = providerModelOwners[String(modelName).toLowerCase()];
+        if (!owners || !owners.length) return '';
+        if (owners.length === 1) return owners[0] + '·';
+        return '多家·';
+    }
+
+    function providerOwnerTitle(modelName) {
+        if (!modelName) return '';
+        const owners = providerModelOwners[String(modelName).toLowerCase()];
+        return owners && owners.length > 1 ? '以下中转站都提供此模型：' + owners.join('、') : '';
     }
 
     function renderProviderList() {
@@ -1765,8 +1794,10 @@
         providerListDiv.innerHTML = savedProviders.map(function (p) {
             const keyText = p.hasKey ? 'Key：' + (p.apiKeyMasked || '已掩码') : '未配 Key';
             const selected = inputProvider.value === p.id ? ' <span class="scene-badge scene-badge-on">全局使用中</span>' : '';
+            const protocol = p.protocol && p.protocol !== 'openai'
+                ? ' <span class="scene-badge">' + esc(p.protocol) + '</span>' : '';
             return '<div class="scene-row asset-row-provider" data-provider-id="' + esc(p.id) + '">'
-                + '<div class="scene-name"><b>' + esc(p.name || p.id) + '</b>'
+                + '<div class="scene-name"><b>' + esc(p.name || p.id) + '</b>' + protocol
                 + '<span class="scene-key">' + esc(p.baseUrl || '') + '</span>' + selected + '</div>'
                 + '<div class="scene-static"><span class="mono">' + esc(keyText) + '</span></div>'
                 + '<button type="button" class="btn-secondary scene-clear" data-act="fetch">获取模型</button>'
@@ -1796,9 +1827,9 @@
         const providers = {};
         savedProviders.forEach(function (p) {
             if (p.id === id) return;   // 编辑态：旧条目由下方新值整体顶替
-            providers[p.id] = { name: p.name || p.id, baseUrl: p.baseUrl };
+            providers[p.id] = { name: p.name || p.id, baseUrl: p.baseUrl, protocol: p.protocol || 'openai' };
         });
-        providers[id] = { name: name || id, baseUrl: baseUrl };
+        providers[id] = { name: name || id, baseUrl: baseUrl, protocol: inputProviderProtocol.value || 'openai' };
         if (apiKey) providers[id].apiKey = apiKey;
         btnSaveProvider.disabled = true;
         fetchJson('/api/config/llm', {
@@ -1821,6 +1852,7 @@
         editingProviderId = null;
         inputProviderName.value = '';
         inputProviderBaseUrl.value = '';
+        if (inputProviderProtocol) inputProviderProtocol.value = 'openai';
         inputProviderApiKey.value = '';
         inputProviderApiKey.placeholder = 'sk-...';
         btnSaveProvider.textContent = '添加中转站';
@@ -1833,6 +1865,7 @@
         editingProviderId = id;
         inputProviderName.value = p.name || '';
         inputProviderBaseUrl.value = p.baseUrl || '';
+        if (inputProviderProtocol) inputProviderProtocol.value = p.protocol || 'openai';
         inputProviderApiKey.value = '';
         inputProviderApiKey.placeholder = p.hasKey ? '已配置（' + (p.apiKeyMasked || '已掩码') + '），留空保留' : 'sk-...';
         // 编辑态显式化：保存按钮只管改这一条，想加新站先「取消编辑」——
@@ -1848,7 +1881,7 @@
         if (!window.confirm('删除中转站「' + (p.name || id) + '」？它的地址密钥将从本机移除。')) return;
         const providers = {};
         savedProviders.forEach(function (x) {
-            if (x.id !== id) providers[x.id] = { name: x.name || x.id, baseUrl: x.baseUrl };
+            if (x.id !== id) providers[x.id] = { name: x.name || x.id, baseUrl: x.baseUrl, protocol: x.protocol || 'openai' };
         });
         // 被删的正是全局引用：连同引用一起清（后端对缺席条目按全量替换处理，悬空引用会收敛）
         const body = { providers: providers };
@@ -1879,12 +1912,13 @@
         });
     }
 
-    /** 拉取模型列表：providerId 取已保存凭据；也可传显式 baseUrl/apiKey（保存前试连） */
-    function fetchProviderModels(providerId, baseUrl, apiKey) {
+    /** 拉取模型列表：providerId 取已保存凭据；也可传显式 baseUrl/apiKey/protocol（保存前试连） */
+    function fetchProviderModels(providerId, baseUrl, apiKey, protocol) {
         const body = {};
         if (providerId) body.providerId = providerId;
         if (baseUrl) body.baseUrl = baseUrl;
         if (apiKey) body.apiKey = apiKey;
+        if (protocol) body.protocol = protocol;
         const who = providerId
             ? ((savedProviders.find(function (x) { return x.id === providerId; }) || {}).name || providerId)
             : (baseUrl || '当前地址');
@@ -1896,8 +1930,11 @@
         })
         .then(function (models) {
             setModelOptions(models);
-            providerStatus('已获取 ' + models.length + ' 个模型（' + who + '），已并入全局/场景/兜底的下拉选项', 'ok');
+            providerStatus('已获取 ' + models.length + ' 个模型（' + who + '），已并入全局/场景/兜底的下拉选项；'
+                + (providerId ? '场景矩阵的「站名·模型」标注同步更新' : ''), 'ok');
             showToast('获取到 ' + models.length + ' 个模型');
+            // 按站缓存已落盘：重拉配置视图，场景矩阵的模型归属标注随之出现
+            fetchJson('/api/config/llm').then(renderLlmConfig).catch(function () { });
             return models;
         })
         .catch(function (err) {
@@ -1914,7 +1951,7 @@
     if (btnTestProvider) btnTestProvider.addEventListener('click', function () {
         const baseUrl = inputProviderBaseUrl.value.trim();
         if (!baseUrl) { providerStatus('试连前先填 Base URL', 'error'); return; }
-        fetchProviderModels(null, baseUrl, inputProviderApiKey.value.trim());
+        fetchProviderModels(null, baseUrl, inputProviderApiKey.value.trim(), inputProviderProtocol.value);
     });
     if (inputProvider) inputProvider.addEventListener('change', function () {
         if (inputProvider.value) {
@@ -1926,6 +1963,7 @@
     function renderLlmConfig(data) {
         inputAuthMode.value = data.authMode || 'api-key';
         inputBaseUrl.value = data.baseUrl || '';
+        if (inputProtocol) inputProtocol.value = data.protocol || 'openai';
         inputApiKey.value = '';
         inputModel.value = data.model || '';
         inputMaxTokens.value = data.maxTokens != null ? data.maxTokens : '';
@@ -2068,6 +2106,7 @@
         inputApiKey.disabled = chatGpt;
         inputMaxTokens.disabled = chatGpt;
         inputProvider.disabled = chatGpt;
+        if (inputProtocol) inputProtocol.disabled = chatGpt;
         if (chatGpt) loadChatGptStatus();
     }
 
@@ -2132,6 +2171,9 @@
             // 同一张表里大小写不一致会被误读成"两个不同的模型"；供应商侧模型名不区分大小写，
             // 覆盖输入框同样不收窄写（用户填什么存什么）
             const staticText = s.staticModel ? String(s.staticModel).toLowerCase() : '未配置';
+            // 供应商标注：模型来自哪家中转站（依据各站「获取模型」的缓存，没获取过就不标）
+            const ownerPrefix = providerOwnerPrefix(s.staticModel);
+            const ownerTitle = providerOwnerTitle(s.staticModel);
             const staticMeta = [];
             if (s.staticMaxTokens != null) staticMeta.push(String(s.staticMaxTokens) + 'tk');
             if (s.staticTemperature != null) staticMeta.push('t=' + s.staticTemperature);
@@ -2145,7 +2187,8 @@
                 + '<span class="scene-key">' + esc(s.key) + '</span>' + badges
                 + (thinkingHint ? '<span class="scene-hint">' + esc(thinkingHint) + '</span>' : '')
                 + '</div>'
-                + '<div class="scene-static"><span class="mono">' + esc(staticText) + '</span>'
+                + '<div class="scene-static"><span class="mono"' + (ownerTitle ? ' title="' + esc(ownerTitle) + '"' : '')
+                + '>' + esc(ownerPrefix) + esc(staticText) + '</span>'
                 + '<span class="scene-static-meta">' + esc(staticMeta.join(' · ')) + '</span></div>'
                 + '<input type="text" class="scene-input" data-field="model" list="chatgpt-model-options" placeholder="留空 = 跟随全局" autocomplete="off"'
                 + (thinkingHint ? ' title="' + esc(thinkingHint) + '"' : '') + '>'
@@ -2400,7 +2443,9 @@
         if (inputApiKey.value.trim() !== '') body.apiKey = inputApiKey.value.trim();
         if (inputModel.value.trim() !== '') body.model = inputModel.value.trim();
         if (inputMaxTokens.value.trim() !== '') body.maxTokens = parseInt(inputMaxTokens.value, 10);
-        // 中转站引用随全局表单提交：'' = 手动模式（清除引用），选中 id = 地址密钥走该站
+        // 手动模式协议随全局表单提交（openai 是缺省值，显式提交保证与界面所见一致）
+        if (inputProtocol) body.protocol = inputProtocol.value;
+        // 中转站引用随全局表单提交：'' = 手动模式（清除引用），选中 id = 地址密钥协议走该站
         body.providerId = inputProvider.value;
         btnSaveLlmConfig.disabled = true;
         fetchJson('/api/config/llm', {

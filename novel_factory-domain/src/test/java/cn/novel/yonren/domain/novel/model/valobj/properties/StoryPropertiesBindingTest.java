@@ -123,9 +123,11 @@ class StoryPropertiesBindingTest {
                             + "然后把名字加进本测试的 callable 集合；若是拼错了就改 yml。");
         }
 
-        // 抽查：节拍为小输出任务，maxTokens 收敛到 2048（高频调用，不跟随计划涨）
+        // 抽查：节拍上限必须高于思考量。原为 2048（"小输出任务"），但 2026-10-26 实测：上限低于
+        // 约 8192 时代理会给固定 10000 预算，思考吃光后正文为 0（completionTokens=7188/2048），
+        // 每次都靠降级救回。上限只是天花板、不改变实际输出量，故抬到 16384。
         StoryVO.Module.ChatModel beats = sceneModels.get("chapter-beats");
-        assertEquals(2048L, beats.getMaxTokens().longValue(), "节拍为小输出任务，maxTokens 应为 2048");
+        assertEquals(16384L, beats.getMaxTokens().longValue(), "节拍上限需高于思考量，避免烧穿后降级");
 
         // 抽查：正文温度 0.5（降温压套话随机变体）
         assertEquals(0.5, sceneModels.get("chapter-content").getTemperature(), 0.001, "正文温度应为 0.5");

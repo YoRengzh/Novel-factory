@@ -26,8 +26,11 @@ import org.springframework.boot.context.properties.EnableConfigurationProperties
 @EnableConfigurationProperties(StoryProperties.class)
 public class Application {
 
-    public static void main(String[] args){
-        SpringApplication.run(Application.class);
+    public static void main(String[] args) {
+        // args 必须透传：命令行参数是 Spring 优先级最高的属性源，丢参数等于所有
+        // --server.port / --nf.cds-training 之类的覆盖全部失效（打包脚本的 CDS 训练
+        // 退出口就靠 --nf.cds-training=true 触发，不传则训练运行永不退出）
+        SpringApplication.run(Application.class, args);
     }
 
 }

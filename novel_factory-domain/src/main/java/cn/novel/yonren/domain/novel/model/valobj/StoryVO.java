@@ -63,6 +63,11 @@ public class StoryVO {
             private String completionsPath;
             // Command Code Provider 零数据保留：true 时发送 x-cmd-zdr: 1；无 ZDR 上游时服务端明确失败，不静默降级
             private Boolean zeroDataRetention;
+            /**
+             * 接口协议（LlmProtocol.code）：openai（默认，缺省即升级前行为）/ anthropic / responses。
+             * 协议属 API 层属性——同一地址族下全部场景共用；场景级/兜底模型的独立 baseUrl 仍走本协议
+             */
+            private String protocol;
         }
 
         @Data

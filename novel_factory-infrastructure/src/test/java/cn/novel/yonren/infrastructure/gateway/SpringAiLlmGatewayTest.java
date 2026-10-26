@@ -14,6 +14,9 @@ import java.util.List;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
@@ -77,6 +80,13 @@ class SpringAiLlmGatewayTest {
         zdrApi.setZeroDataRetention(true);
         assertNotEquals(SpringAiLlmGateway.chatModelCacheKey(api, summary),
                 SpringAiLlmGateway.chatModelCacheKey(zdrApi, summary));
+
+        // 协议决定走哪套传输实现（Chat Completions / Messages / Responses），
+        // 同地址同模型不同协议必须是不同客户端——否则切协议后仍复用旧协议实例
+        StoryVO.Module.AiApi anthropicApi = api();
+        anthropicApi.setProtocol("anthropic");
+        assertNotEquals(SpringAiLlmGateway.chatModelCacheKey(api, summary),
+                SpringAiLlmGateway.chatModelCacheKey(anthropicApi, summary));
     }
 
     @Test
@@ -143,6 +153,119 @@ class SpringAiLlmGatewayTest {
         assertTrue(e.getMessage().contains("glm-5.3"));
         assertTrue(e.getMessage().contains("32000/16384"));
         assertTrue(e.getMessage().contains("resume"), "必须提示已落盘章节可续写");
+    }
+
+    // ===== Anthropic 每调用级 options：思考/温度按本次生效上限整体裁决 =====
+    // 回归锚点：runtime options 合并规则是"非空字段压过 default"，思考若固化在默认里，
+    // 小参数调用会拼出 max_tokens < budget_tokens 的非法组合被 400（见 anthropicCallOptions 注释）
+
+    @Test
+    void anthropicCallOptions_thinkingBudgetFollowsEffectiveMax() {
+        StoryVO.Module.ChatModel thinking = chatModel("claude-4-5-sonnet", 16384L, 0.7);
+        thinking.setEnableThinking(true);
+
+        org.springframework.ai.anthropic.AnthropicChatOptions normal =
+                SpringAiLlmGateway.anthropicCallOptions(thinking, null);
+        assertEquals(16384, normal.getMaxTokens().intValue(), "max_tokens 必填，每次都带");
+        assertNotNull(normal.getThinking(), "预算充足时按配置开思考");
+        assertEquals(8192, normal.getThinking().budgetTokens().intValue(), "budget=上限一半");
+        assertTrue(normal.getThinking().budgetTokens() < normal.getMaxTokens(),
+                "不变式：budget 必须 < max_tokens（否则 API 400）");
+        assertEquals(1.0, normal.getTemperature(), "思考态唯一允许温度，压过配置的 0.7");
+    }
+
+    @Test
+    void anthropicCallOptions_smallCallDropsThinkingInsteadOfIllegalBudget() {
+        StoryVO.Module.ChatModel thinking = chatModel("claude-4-5-sonnet", 16384L, 0.7);
+        thinking.setEnableThinking(true);
+
+        // 选择器类小调用 maxTokens=1024：开思考不可能合法（budget≥1024 需 max>2048）→ 本次不开
+        LlmCall small = LlmCall.builder().maxTokens(1024).build();
+        org.springframework.ai.anthropic.AnthropicChatOptions options =
+                SpringAiLlmGateway.anthropicCallOptions(thinking, small);
+        assertEquals(1024, options.getMaxTokens().intValue());
+        assertNull(options.getThinking(), "预算不足的调用不开思考，而不是拼非法 budget");
+        assertEquals(0.7, options.getTemperature(), "无思考时温度按配置");
+    }
+
+    @Test
+    void anthropicCallOptions_thinkingBeatsCallLevelTemperature() {
+        StoryVO.Module.ChatModel thinking = chatModel("claude-4-5-sonnet", 16384L, null);
+        thinking.setEnableThinking(true);
+
+        // 调用级温度 0.3 + 思考开启：0.3 与 thinking 组合必被 400，思考约束优先
+        LlmCall temp = LlmCall.builder().maxTokens(4096).temperature(0.3).build();
+        org.springframework.ai.anthropic.AnthropicChatOptions options =
+                SpringAiLlmGateway.anthropicCallOptions(thinking, temp);
+        assertEquals(1.0, options.getTemperature());
+        assertNotNull(options.getThinking());
+        assertEquals(2048, options.getThinking().budgetTokens().intValue(), "budget 跟随本次上限 4096");
+    }
+
+    @Test
+    void anthropicCallOptions_plainModelDefaults() {
+        // 非思考模型：maxTokens 兜底必填值，温度 调用级 ?? 配置级，无思考
+        StoryVO.Module.ChatModel plain = chatModel("claude-4-5-haiku", null, null);
+        org.springframework.ai.anthropic.AnthropicChatOptions options =
+                SpringAiLlmGateway.anthropicCallOptions(plain, null);
+        assertEquals(8192, options.getMaxTokens().intValue(), "配置留空给 Messages API 必填兜底");
+        assertNull(options.getThinking());
+        assertNull(options.getTemperature());
+
+        LlmCall temp = LlmCall.builder().temperature(0.3).build();
+        assertEquals(0.3, SpringAiLlmGateway.anthropicCallOptions(plain, temp).getTemperature().doubleValue());
+    }
+
+    // ===== Anthropic 思考块剥离（真机实证：Spring AI 1.0.0 把 thinking 块也包装成 Generation =====
+    // 且排在首位，网关 getResult() 会把思考文本当正文——必须在拦截器里重写 content
+
+    @Test
+    void stripAnthropicThinking_removesThinkingAndKeepsCleanText() throws Exception {
+        String body = "{\"id\":\"m1\",\"content\":["
+                + "{\"type\":\"thinking\",\"thinking\":\"先想想怎么答\",\"signature\":\"sig\"},"
+                + "{\"type\":\"text\",\"text\":\"正文回答\"}"
+                + "],\"usage\":{\"input_tokens\":10,\"output_tokens\":20}}";
+        SpringAiLlmGateway.ReasoningCapture.clearAll();
+        byte[] stripped = SpringAiLlmGateway.stripAnthropicThinking(body.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+
+        String json = new String(stripped, java.nio.charset.StandardCharsets.UTF_8);
+        assertTrue(json.contains("正文回答"), "正文保留");
+        assertFalse(json.contains("先想想怎么答"), "思考文本必须剥离，否则 getResult() 拿到的是思考");
+        assertFalse(json.contains("thinking"), "thinking 块整体删除");
+        var snapshot = SpringAiLlmGateway.ReasoningCapture.take();
+        assertEquals(6, snapshot.chars(), "思考字符数计入观测信号");
+        assertNull(snapshot.tokens(), "Anthropic 不上报思考 token");
+        SpringAiLlmGateway.ReasoningCapture.clearAll();
+    }
+
+    @Test
+    void stripAnthropicThinking_pureThinkingBecomesEmptyContent() throws Exception {
+        // 思考吃光预算（烧穿形态）：无 text 块 → content 置空，网关按"空回复"换站/fail-soft
+        String body = "{\"content\":[{\"type\":\"thinking\",\"thinking\":\"想了很久\"}]}";
+        byte[] stripped = SpringAiLlmGateway.stripAnthropicThinking(body.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+        var root = new com.fasterxml.jackson.databind.ObjectMapper().readTree(stripped);
+        assertTrue(root.get("content").isArray() && root.get("content").isEmpty(),
+                "纯思考响应的 content 必须置空数组");
+    }
+
+    @Test
+    void stripAnthropicThinking_noThinkingReturnsBodyUnchanged() throws Exception {
+        String body = "{\"content\":[{\"type\":\"text\",\"text\":\"普通回答\"}],\"usage\":{\"input_tokens\":1,\"output_tokens\":2}}";
+        byte[] bytes = body.getBytes(java.nio.charset.StandardCharsets.UTF_8);
+        assertSame(bytes, SpringAiLlmGateway.stripAnthropicThinking(bytes),
+                "无思考块零改写原样返回（绝大多数调用）");
+    }
+
+    @Test
+    void stripAnthropicThinking_mergesMultipleTextBlocks() throws Exception {
+        // Spring AI 每个 text 块一个 Generation，网关只取首个——多块必须合并否则静默丢正文
+        String body = "{\"content\":["
+                + "{\"type\":\"thinking\",\"thinking\":\"t\"},"
+                + "{\"type\":\"text\",\"text\":\"上半段\"},{\"type\":\"text\",\"text\":\"下半段\"}]}";
+        byte[] stripped = SpringAiLlmGateway.stripAnthropicThinking(body.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+        var root = new com.fasterxml.jackson.databind.ObjectMapper().readTree(stripped);
+        assertEquals(1, root.get("content").size(), "多 text 块合并为单块");
+        assertEquals("上半段下半段", root.get("content").get(0).get("text").asText());
     }
 
     private StoryVO.Module.AiApi api() {

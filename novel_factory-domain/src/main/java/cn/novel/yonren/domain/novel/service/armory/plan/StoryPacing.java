@@ -320,4 +320,71 @@ public final class StoryPacing {
                 seg.ageEnd() == null ? null : seg.ageEnd() - ageShift,
                 shiftYears);
     }
+
+    // ==================== 阶段窗口的时间预算（2026-10-26） ====================
+
+    /**
+     * 阶段窗口的时间预算 = **正文锚点 + 本窗口章号区间在大纲里自身跨过的时间**。
+     *
+     * <p><b>为什么不能直接继承"某一段的段末"</b>：大纲里存在**快进段**——
+     * {@code 231-240章 2013年秋至2016年夏} 用 10 章覆盖 3 年，{@code 241-250章 2016年秋}
+     * 直接从 2016 起。5 章的小阶段只要尾章落进快进段，预算就被抬到数年之后：
+     * 实测某阶段（5 章，跨过卷界）被回填成 2015 年，而正文实际只有 2012 年；
+     * 该值又成为下一阶段的单调下限，年份链**单向棘轮**，再也回不到正文实际时间。
+     *
+     * <p><b>口径</b>：只取大纲时间在窗口起止章之间的**增量**，加在正文锚点上。段内按章号线性
+     * 插值（单一年份的段视为常数）。于是 5 章的窗口若只从 2015 走到 2016（增量 1 年）→ 2013；
+     * 而完整覆盖快进段的窗口（10 章）增量 3 年，快进授权不受影响。
+     * 关键性质：**只看窗口自身**，既不提前继承后段段末，也不把上一阶段虚高的声明传给下一阶段。
+     *
+     * <p><b>预算不设上限</b>：本方法不限制"故事能走多远"——正文真推进了锚点随之前移；
+     * 大纲若给本窗口安排了十年跨度，增量就是十年，照常放行。
+     *
+     * @param anchor       正文实际锚点（年份或年龄）；为 null 时返回 null（调用方退回旧口径）
+     * @param ageDimension true=年龄维度，false=年份维度
+     */
+    public static Integer pacedBudget(OutlineSegmentParser.Outline outline, Integer startChapter,
+                                      Integer endChapter, Integer anchor, boolean ageDimension) {
+        if (outline == null || anchor == null || startChapter == null || endChapter == null) {
+            return null;
+        }
+        Integer atStart = outlineTimeAt(outline, startChapter, ageDimension);
+        Integer atEnd = outlineTimeAt(outline, endChapter, ageDimension);
+        if (atStart == null || atEnd == null) {
+            return null;
+        }
+        return anchor + Math.max(0, atEnd - atStart);
+    }
+
+    /**
+     * 大纲在指定章号处的时间值：段内按章号线性插值，单一年份的段为常数。
+     * 章号超出大纲覆盖时取最近的一段（末段/首段），与 {@code segmentFor} 的 fail-soft 口径一致。
+     */
+    public static Integer outlineTimeAt(OutlineSegmentParser.Outline outline, int chapterNo, boolean ageDimension) {
+        if (outline == null || outline.segments().isEmpty()) {
+            return null;
+        }
+        List<OutlineSegmentParser.OutlineSegment> segments = outline.segments();
+        OutlineSegmentParser.OutlineSegment seg = outline.segmentFor(chapterNo);
+        if (seg == null) {
+            int lastEnd = segments.get(segments.size() - 1).endChapter();
+            seg = chapterNo > lastEnd ? segments.get(segments.size() - 1) : segments.get(0);
+        }
+        Integer start = ageDimension ? seg.ageStart() : seg.yearStart();
+        Integer end = ageDimension ? seg.ageEnd() : seg.yearEnd();
+        if (start == null) {
+            return end;
+        }
+        if (end == null || end.equals(start)) {
+            return start;
+        }
+        int span = Math.max(1, seg.endChapter() - seg.startChapter() + 1);
+        if (span == 1) {
+            return start;
+        }
+        int offset = Math.min(Math.max(chapterNo, seg.startChapter()), seg.endChapter()) - seg.startChapter();
+        // 分母取 span-1：段首章 = yearStart、**段末章 = yearEnd**。用 span 作分母时末章只到
+        // start + (span-1)/span 的进度，段末年永远差一点——快进段（10 章跨 3 年）会少算 0.3 年
+        return start + (int) Math.round((double) offset * (end - start) / (span - 1));
+    }
 }

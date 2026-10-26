@@ -10,6 +10,7 @@ import cn.novel.yonren.domain.novel.service.armory.llm.ModelFallbackChain;
 import cn.novel.yonren.domain.novel.service.job.GenerationJob;
 import cn.novel.yonren.domain.novel.service.job.JobRegistry;
 import cn.novel.yonren.domain.novel.service.job.LlmBudgetFuse;
+import cn.novel.yonren.types.enums.LlmProtocol;
 import cn.novel.yonren.types.enums.ModelScene;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
@@ -17,11 +18,16 @@ import org.apache.commons.lang3.StringUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.slf4j.MDC;
+import org.springframework.ai.anthropic.AnthropicChatModel;
+import org.springframework.ai.anthropic.AnthropicChatOptions;
+import org.springframework.ai.anthropic.api.AnthropicApi;
 import org.springframework.ai.chat.messages.Message;
 import org.springframework.ai.chat.messages.SystemMessage;
 import org.springframework.ai.chat.messages.UserMessage;
 import org.springframework.ai.chat.metadata.Usage;
+import org.springframework.ai.chat.model.ChatModel;
 import org.springframework.ai.chat.model.ChatResponse;
+import org.springframework.ai.chat.prompt.ChatOptions;
 import org.springframework.ai.chat.prompt.Prompt;
 import org.springframework.ai.openai.OpenAiChatModel;
 import org.springframework.ai.openai.OpenAiChatOptions;
@@ -49,8 +55,10 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
- * LLM 网关的 Spring AI 适配实现：OpenAI 客户端构建、消息组装、参数覆盖
- * 等供应商细节全部收敛于此，领域层只依赖 LlmGateway 端口。
+ * LLM 网关的 Spring AI 适配实现：客户端构建、消息组装、参数覆盖等供应商细节全部收敛于此，
+ * 领域层只依赖 LlmGateway 端口。按 ai-api.protocol 分派三套传输实现：
+ * openai（Chat Completions，默认）/ anthropic（Messages）/ responses（Responses API），
+ * 烧穿判定、降级链、usage 记账对三协议通用（全部构建在 ChatResponse/Usage 抽象上）。
  * 模型客户端按供应商配置缓存复用（单例化），usage 以 JSONL 记账（覆盖全部调用方）。
  */
 @Component
@@ -63,12 +71,18 @@ public class SpringAiLlmGateway implements LlmGateway {
     private static final ObjectMapper JSON = new ObjectMapper();
     private static final Object USAGE_LOCK = new Object();
 
+    /**
+     * Anthropic 协议 max_tokens 缺省值：Messages API 必填该参数，配置留空时兜底。
+     * 8192 是 Claude 3.5 Sonnet 及以后模型的通用安全输出上限
+     */
+    private static final int ANTHROPIC_DEFAULT_MAX_TOKENS = 8192;
+
     /** 传输层最大尝试次数（默认 1，即不重试；5xx 重试收权到业务层，避免 token 白烧） */
     private final int maxAttempts;
     private final RetryTemplate retryTemplate;
 
-    /** 模型客户端缓存：baseUrl|apiKey|model|maxTokens -> OpenAiChatModel */
-    private final ConcurrentHashMap<String, OpenAiChatModel> chatModelCache = new ConcurrentHashMap<>();
+    /** 模型客户端缓存：protocol|baseUrl|apiKey|model|maxTokens -> ChatModel（三协议共用同一缓存） */
+    private final ConcurrentHashMap<String, ChatModel> chatModelCache = new ConcurrentHashMap<>();
 
     /**
      * 出网请求工厂（连接/读取超时）：RestClient.builder() 与 JDK HttpClient 默认均<b>不设超时</b>，
@@ -286,9 +300,19 @@ public class SpringAiLlmGateway implements LlmGateway {
                 }
                 if (burnLike) {
                     // skip 模式链尾：无备选可换，保持旧行为返回空串交调用方 fail-soft
-                    // （各调用点只处理过"空串"这一类软失败，不引入它们没处理过的异常）
+                    // （各调用点只处理过"空串"这一类软失败，不引入它们没处理过的异常）。
+                    //
+                    // 但记账必须记失败：空正文/烧穿对调用方毫无价值，记 success=true 会让
+                    // 预算熔断看不见真实空烧，也让排障者以为模型"成功返回了空"。
+                    // 2026-10-26 实测：chapter-content 两次 responseChars=0、completionTokens=16384
+                    // 全被记成 success=true，单作业烧掉 32.7 万 token 而账面无一条失败。
+                    // 返回值不变（仍是 content 空串），只修记账口径——success 字段无消费方。
                     recordUsage(effective, selected, call, content, System.currentTimeMillis() - start,
-                            response.getMetadata().getUsage(), null);
+                            response.getMetadata().getUsage(),
+                            new IllegalStateException("模型返回空内容或思考吃穿输出预算（链尾无可降级）：scene="
+                                    + call.getScene() + ", model=" + selected.getModel()
+                                    + ", completionTokens=" + completionTokens + "/" + effectiveMaxTokens
+                                    + ", contentChars=" + contentChars));
                     return content;
                 }
                 recordUsage(effective, selected, call, content, System.currentTimeMillis() - start,
@@ -332,16 +356,17 @@ public class SpringAiLlmGateway implements LlmGateway {
         }
     }
 
-    /** 单次真实调用：消息组装 + 每调用级 runtime options 合并 */
+    /** 单次真实调用：消息组装 + 每调用级 runtime options 合并（按协议选择 options 类型） */
     private ChatResponse callOnce(StoryVO.Module effective, StoryVO.Module.ChatModel selected, LlmCall call) {
-        OpenAiChatModel chatModel = chatModel(effective, selected);
+        ChatModel chatModel = chatModel(effective, selected);
         List<Message> messages = new ArrayList<>();
         if (StringUtils.isNotBlank(call.getSystemPrompt())) {
             messages.add(new SystemMessage(call.getSystemPrompt()));
         }
         messages.add(new UserMessage(call.getUserPrompt()));
-        // 每调用级覆盖项走 Prompt 的 runtime options，与模型默认参数合并
-        return chatModel.call(new Prompt(messages, callOptions(call)));
+        // 每调用级覆盖项走 Prompt 的 runtime options，与模型默认参数合并。
+        // Responses 客户端按 ChatOptions 接口读取，复用 OpenAiChatOptions 载体即可
+        return chatModel.call(new Prompt(messages, callOptions(effective, selected, call)));
     }
 
     /**
@@ -365,14 +390,14 @@ public class SpringAiLlmGateway implements LlmGateway {
 
     /** 异常记账路径的模型解析已并入降级链循环（selected 恒非空），此处不再需要单独兜底 */
 
-    private OpenAiChatModel chatModel(StoryVO.Module module, StoryVO.Module.ChatModel selected) {
+    private ChatModel chatModel(StoryVO.Module module, StoryVO.Module.ChatModel selected) {
         StoryVO.Module.AiApi api = effectiveApi(module, selected);
         return chatModelCache.computeIfAbsent(chatModelCacheKey(api, selected), k -> buildChatModel(api, selected));
     }
 
 
     static String chatModelCacheKey(StoryVO.Module.AiApi api, StoryVO.Module.ChatModel selected) {
-        return api.getBaseUrl() + "|" + api.getApiKey() + "|" + api.getZeroDataRetention()
+        return api.getProtocol() + "|" + api.getBaseUrl() + "|" + api.getApiKey() + "|" + api.getZeroDataRetention()
                 + "|" + selected.getModel() + "|" + selected.getMaxTokens()
                 + "|" + selected.getEnableThinking() + "|" + selected.getTemperature();
     }
@@ -392,10 +417,24 @@ public class SpringAiLlmGateway implements LlmGateway {
                 ? selected.getApiKey() : fallback.getApiKey());
         api.setCompletionsPath(hasScenePath ? selected.getCompletionsPath() : fallback.getCompletionsPath());
         api.setZeroDataRetention(fallback.getZeroDataRetention());
+        // 协议始终继承 module 级：场景级第二模型族暂不支持独立协议（v1 边界，见 buildChatModel 注释）
+        api.setProtocol(fallback.getProtocol());
         return api;
     }
 
-    private OpenAiChatModel buildChatModel(StoryVO.Module.AiApi api, StoryVO.Module.ChatModel selected) {
+    /**
+     * 按协议构建模型客户端。三协议共用网关的烧穿判定/降级链/记账——它们只依赖
+     * ChatResponse/Usage 抽象，协议差异全部隔离在各 build 方法内部。
+     */
+    private ChatModel buildChatModel(StoryVO.Module.AiApi api, StoryVO.Module.ChatModel selected) {
+        return switch (LlmProtocol.parse(api.getProtocol())) {
+            case ANTHROPIC -> buildAnthropicChatModel(api, selected);
+            case RESPONSES -> new ResponsesApiChatModel(api, selected, requestFactory, retryTemplate);
+            case OPENAI -> buildOpenAiChatModel(api, selected);
+        };
+    }
+
+    private OpenAiChatModel buildOpenAiChatModel(StoryVO.Module.AiApi api, StoryVO.Module.ChatModel selected) {
         OpenAiApi.Builder apiBuilder = OpenAiApi.builder()
                 .baseUrl(api.getBaseUrl())
                 .apiKey(api.getApiKey());
@@ -431,6 +470,61 @@ public class SpringAiLlmGateway implements LlmGateway {
         return OpenAiChatModel.builder()
                 .openAiApi(apiBuilder.build())
                 .defaultOptions(options)
+                .retryTemplate(retryTemplate)
+                .build();
+    }
+
+    /**
+     * Anthropic Messages 协议（/v1/messages）客户端。与 OpenAI 路径的协议差异：
+     * <ul>
+     *   <li>max_tokens 是<b>必填</b>参数——配置留空时给 {@link #ANTHROPIC_DEFAULT_MAX_TOKENS}，
+     *       没法像 OpenAI 那样"留空=不下发"；</li>
+     *   <li>无 response_format JSON mode（JSON 场景靠 prompt 约束，本就是项目的基线手段）；</li>
+     *   <li>enable_thinking / x-cmd-zdr / DashScope 注入是 OpenAI 路径专属，此处不适用。
+     *       思考改由原生 ThinkingConfig 表达，且<b>必须在每次调用时裁决</b>（见
+     *       {@link #anthropicCallOptions}）：Spring AI 的 runtime options 合并规则是
+     *       "非空字段覆盖默认"，若思考固化在 defaultOptions，带小 maxTokens 的调用
+     *       （选择器/摘要）合并后会出现 max_tokens &lt; budget_tokens 的非法组合被 400；</li>
+     *   <li>温度上限 1.0 的全局校验与 Anthropic 官方一致，无需特判。</li>
+     * </ul>
+     */
+    private AnthropicChatModel buildAnthropicChatModel(StoryVO.Module.AiApi api, StoryVO.Module.ChatModel selected) {
+        String baseUrl = StringUtils.defaultString(api.getBaseUrl());
+        // apiKey 空串兜底：Builder.build() 断言非 null（本地无鉴权中转允许不填 key，
+        // 官方端点空 key 会得到清晰的 401 而不是构建期异常）
+        AnthropicApi.Builder apiBuilder = AnthropicApi.builder()
+                .baseUrl(baseUrl)
+                .apiKey(StringUtils.defaultString(api.getApiKey()));
+        // completionsPath 是 OpenAI 语义的字段（如智谱用户 yml 里的 /chat/completions）：
+        // 切到 anthropic 协议后若原样沿用会拼出错误端点、404 难排查——只接受含 messages 的路径
+        String customPath = StringUtils.trimToNull(api.getCompletionsPath());
+        if (customPath != null) {
+            if (customPath.toLowerCase().contains("messages")) {
+                apiBuilder.completionsPath(customPath.startsWith("/") ? customPath : "/" + customPath);
+            } else {
+                log.warn("completionsPath={} 不像 Anthropic Messages 路径，已忽略（anthropic 协议按默认 /v1/messages 拼接）",
+                        customPath);
+            }
+        } else if (baseUrl.endsWith("/v1")) {
+            // AnthropicApi 是 baseUrl+completionsPath 直接拼接：base 带 /v1 会拼出 /v1/v1/messages。
+            // 与模型列表/Responses 端点"带不带 /v1 均可"的适配承诺保持同款行为
+            apiBuilder.completionsPath("/messages");
+        }
+        // 超时必须注入（与 OpenAI 路径同款）；思考提取拦截器按 /messages 响应形态解析
+        apiBuilder.restClientBuilder(anthropicRestClientBuilder());
+        AnthropicChatOptions.Builder optionBuilder = AnthropicChatOptions.builder()
+                .model(selected.getModel());
+        // defaultOptions 只固化 model + maxTokens 兜底：思考/温度随每次调用生效上限动态裁决
+        optionBuilder.maxTokens(selected.getMaxTokens() != null
+                ? selected.getMaxTokens().intValue() : ANTHROPIC_DEFAULT_MAX_TOKENS);
+        if (Boolean.TRUE.equals(selected.getEnableThinking()) && (selected.getMaxTokens() == null
+                || selected.getMaxTokens() < 2048)) {
+            log.warn("Anthropic 协议 maxTokens={} 不足以为思考分配预算（需 ≥2048），思考仅在预算充足的具体调用上开启：model={}",
+                    selected.getMaxTokens(), selected.getModel());
+        }
+        return AnthropicChatModel.builder()
+                .anthropicApi(apiBuilder.build())
+                .defaultOptions(optionBuilder.build())
                 .retryTemplate(retryTemplate)
                 .build();
     }
@@ -599,7 +693,7 @@ public class SpringAiLlmGateway implements LlmGateway {
             if (!chatPath) {
                 return response;
             }
-            return bufferAndExtractReasoning(response);
+            return bufferAndExtractReasoning(response, false);
         };
         return baseRestClientBuilder().requestInterceptor(interceptor);
     }
@@ -611,11 +705,12 @@ public class SpringAiLlmGateway implements LlmGateway {
      * 没有 {@code reasoning_content} 字段，供应商返回的思考内容会被 Jackson 静默丢弃——正文不受污染，
      * 但调用方也拿不到任何思考信号（长度、占用 token），烧穿判定只能靠 usage 反推。
      * 在这一层提取，既补上观测信号，又能剥掉混进 content 的思考标记。
+     * anthropicShape=true 时按 /messages 的 content[] thinking 块解析（见 extractAnthropicReasoning）。
      *
      * <p><b>代价</b>：响应体全量读入内存。项目全部调用都是非流式（chatModel.call），
      * 单章正文量级几十 KB，可接受；若将来引入流式必须改成增量扫描。
      */
-    private ClientHttpResponse bufferAndExtractReasoning(ClientHttpResponse response) {
+    private ClientHttpResponse bufferAndExtractReasoning(ClientHttpResponse response, boolean anthropicShape) {
         byte[] body;
         try (java.io.InputStream in = response.getBody()) {
             body = in.readAllBytes();
@@ -624,7 +719,11 @@ public class SpringAiLlmGateway implements LlmGateway {
             return response;
         }
         try {
-            extractReasoning(body);
+            if (anthropicShape) {
+                body = stripAnthropicThinking(body);
+            } else {
+                extractReasoning(body);
+            }
         } catch (Exception e) {
             // 提取是增强能力，失败绝不影响正常解析
             log.debug("思考内容提取失败（不影响调用）：{}", e.getMessage());
@@ -670,6 +769,63 @@ public class SpringAiLlmGateway implements LlmGateway {
         if (chars > 0 || reasoningTokens != null) {
             ReasoningCapture.set(chars, reasoningTokens);
         }
+    }
+
+    /**
+     * Anthropic /messages 响应的思考剥离与提取（真机联调实证的必要性，2026-10-26）：
+     * Spring AI 1.0.0 的 {@code AnthropicChatModel.toChatResponse} 会把 content[] 里的
+     * thinking 块<b>也包装成一个 Generation</b>（AssistantMessage 的正文取 thinking 字段），
+     * 且思考块排在首位——网关 {@code response.getResult()} 取第一个结果，拿到的将是
+     * <b>思考文本而非正文</b>（实测 deepseek-v4.1-flash 经 anthropic 中转：正文=思考自言自语，
+     * responseChars 与 reasoningChars 完全相等）。因此在拦截器里重写 content：
+     * <ul>
+     *   <li>丢弃 thinking / redacted_thinking 块（思考字符数先记入 ReasoningCapture 供观测与记账）；</li>
+     *   <li>多个 text 块合并为单块（Spring AI 每块一个 Generation，网关只取首个，多块会静默丢正文）；</li>
+     *   <li>纯思考响应（无 text 块）→ content 置空数组，交给网关按"空回复"走换站/fail-soft。</li>
+     * </ul>
+     * 与 OpenAI 路径同款哲学："交给 Spring AI 的永远是干净正文"。
+     * Anthropic 的 usage 只报 input/output tokens，不单独上报思考 token——判据④（思考占比）
+     * 对该协议天然缺失，烧穿判定退回判据①③（撞上限/空正文）仍可用
+     */
+    static byte[] stripAnthropicThinking(byte[] body) throws Exception {
+        if (body == null || body.length == 0) {
+            return body;
+        }
+        var root = JSON.readTree(body);
+        var content = root.get("content");
+        if (content == null || !content.isArray() || content.isEmpty()) {
+            return body;
+        }
+        long thinkingChars = 0;
+        StringBuilder text = new StringBuilder();
+        boolean hasThinking = false;
+        for (var block : content) {
+            if (block == null) {
+                continue;
+            }
+            String type = block.path("type").asText();
+            if ("thinking".equals(type) || "redacted_thinking".equals(type)) {
+                hasThinking = true;
+                thinkingChars += block.path("thinking").asText("").length();
+            } else if ("text".equals(type)) {
+                text.append(block.path("text").asText(""));
+            }
+        }
+        if (thinkingChars > 0) {
+            ReasoningCapture.set(thinkingChars, null);
+        }
+        if (!hasThinking) {
+            // 无思考块的响应（大多数调用）零成本原样返回
+            return body;
+        }
+        com.fasterxml.jackson.databind.node.ArrayNode replaced = JSON.createArrayNode();
+        if (text.length() > 0) {
+            ObjectNode textBlock = replaced.addObject();
+            textBlock.put("type", "text");
+            textBlock.put("text", text.toString());
+        }
+        ((ObjectNode) root).set("content", replaced);
+        return JSON.writeValueAsBytes(root);
     }
 
     /** 线程级思考捕获：拦截器写入，complete() 取用后即清（同一 worker 线程同步调用） */
@@ -753,14 +909,67 @@ public class SpringAiLlmGateway implements LlmGateway {
         return RestClient.builder().requestFactory(requestFactory);
     }
 
-    /** LlmCall 中非空字段作为每调用级覆盖（选择器/摘要等小调用用小参数） */
-    private OpenAiChatOptions callOptions(LlmCall call) {
+    /**
+     * Anthropic 路径的出网拦截器：只做超时（基座自带）与 /messages 响应的思考提取。
+     * enable_thinking 注入 / x-cmd-zdr / 4xx 自愈都是 OpenAI 路径专属，此处不挂
+     */
+    private RestClient.Builder anthropicRestClientBuilder() {
+        ClientHttpRequestInterceptor interceptor = (request, body, execution) -> {
+            ClientHttpResponse response = execution.execute(request, body);
+            String path = request.getURI() == null ? null : request.getURI().getPath();
+            if (path == null || !path.endsWith("/messages")) {
+                return response;
+            }
+            return bufferAndExtractReasoning(response, true);
+        };
+        return baseRestClientBuilder().requestInterceptor(interceptor);
+    }
+
+    /** LlmCall 中非空字段作为每调用级覆盖（选择器/摘要等小调用用小参数）；按协议选择 options 载体 */
+    private ChatOptions callOptions(StoryVO.Module effective, StoryVO.Module.ChatModel selected, LlmCall call) {
+        if (LlmProtocol.parse(effective.getAiApi().getProtocol()) == LlmProtocol.ANTHROPIC) {
+            return anthropicCallOptions(selected, call);
+        }
+        // openai 与 responses 共用 OpenAiChatOptions 载体（responses 客户端按 ChatOptions 接口读取）
         OpenAiChatOptions.Builder builder = OpenAiChatOptions.builder();
         if (call.getMaxTokens() != null) {
             builder.maxTokens(call.getMaxTokens());
         }
         if (call.getTemperature() != null) {
             builder.temperature(call.getTemperature());
+        }
+        return builder.build();
+    }
+
+    /**
+     * Anthropic 的每调用级 options：思考与温度必须按<b>本次生效的上限</b>整体裁决，
+     * 不能拆开覆盖——Spring AI 合并规则是"runtime 非空字段压过 defaultOptions"，
+     * 任何只覆盖一半的组合都可能拼出 API 拒绝的请求：
+     * <ul>
+     *   <li>thinking budget ≥1024 且必须 &lt; max_tokens：budget 取本次生效上限的一半，
+     *       上限不足 2048 的调用（选择器/摘要）直接不开思考；</li>
+     *   <li>思考开启时 temperature 只允许 1.0：显式写 1.0 压过配置温度，
+     *       否则 defaultOptions 里的温度（若固化）与思考组合必 400；</li>
+     *   <li>maxTokens 每次都带：Messages API 必填，且 budget 依赖它保持一致。</li>
+     * </ul>
+     */
+    static AnthropicChatOptions anthropicCallOptions(StoryVO.Module.ChatModel selected, LlmCall call) {
+        int effectiveMax = call != null && call.getMaxTokens() != null ? call.getMaxTokens()
+                : selected.getMaxTokens() != null ? selected.getMaxTokens().intValue() : ANTHROPIC_DEFAULT_MAX_TOKENS;
+        AnthropicChatOptions.Builder builder = AnthropicChatOptions.builder()
+                .maxTokens(effectiveMax);
+        boolean thinkingWanted = Boolean.TRUE.equals(selected.getEnableThinking());
+        if (thinkingWanted && effectiveMax >= 2048) {
+            builder.thinking(new AnthropicApi.ChatCompletionRequest.ThinkingConfig(
+                    AnthropicApi.ThinkingType.ENABLED, Math.max(1024, effectiveMax / 2)));
+            // 思考态唯一允许的温度值：显式 1.0 压过调用级/配置级温度（0.x + thinking 会被 400）
+            builder.temperature(1.0);
+        } else {
+            Double temperature = call != null && call.getTemperature() != null
+                    ? call.getTemperature() : selected.getTemperature();
+            if (temperature != null) {
+                builder.temperature(temperature);
+            }
         }
         return builder.build();
     }

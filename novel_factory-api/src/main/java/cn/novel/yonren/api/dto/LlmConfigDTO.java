@@ -16,6 +16,11 @@ public class LlmConfigDTO {
     private String authMode;
     /** 接口地址（非机密，原文返回便于表单回显） */
     private String baseUrl;
+    /**
+     * 手动模式的接口协议覆盖（openai/anthropic/responses）；null=未设置（沿用 yml 静态值）。
+     * 全局选中中转站时以该站协议优先，此字段不参与
+     */
+    private String protocol;
     /** 是否存在 apiKey 覆盖（区别于空值） */
     private boolean hasKey;
     /** apiKey 掩码（如 sk-***abcd），未设置时为 null */
@@ -103,10 +108,14 @@ public class LlmConfigDTO {
         private String name;
         /** OpenAI 兼容 Base URL（非机密，原文返回便于核对指向） */
         private String baseUrl;
+        /** 接口协议（openai/anthropic/responses）；null=未设置按 openai 处理 */
+        private String protocol;
         /** 是否已配置 apiKey（原文不回传） */
         private boolean hasKey;
         /** apiKey 掩码，未设置为 null */
         private String apiKeyMasked;
+        /** 最近一次「获取模型」缓存到的模型名（空表=还没获取过）；场景矩阵据此反查模型归属 */
+        private java.util.List<String> models;
     }
 
     /**

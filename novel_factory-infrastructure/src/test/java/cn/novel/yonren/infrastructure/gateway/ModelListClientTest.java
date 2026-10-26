@@ -26,6 +26,8 @@ class ModelListClientTest {
     private ModelListClient client;
     private final AtomicInteger hits = new AtomicInteger();
     private final AtomicReference<String> authHeader = new AtomicReference<>();
+    private final AtomicReference<String> apiKeyHeader = new AtomicReference<>();
+    private final AtomicReference<String> anthropicVersionHeader = new AtomicReference<>();
     /** handler 按 path 返回：null = 404 */
     private volatile java.util.function.Function<String, String> responder;
 
@@ -36,6 +38,8 @@ class ModelListClientTest {
         server.createContext("/", exchange -> {
             hits.incrementAndGet();
             authHeader.set(exchange.getRequestHeaders().getFirst("Authorization"));
+            apiKeyHeader.set(exchange.getRequestHeaders().getFirst("x-api-key"));
+            anthropicVersionHeader.set(exchange.getRequestHeaders().getFirst("anthropic-version"));
             String body = responder.apply(exchange.getRequestURI().getPath());
             int status = body == null ? 404 : 200;
             byte[] bytes = body == null ? new byte[0] : body.getBytes(StandardCharsets.UTF_8);
@@ -103,5 +107,39 @@ class ModelListClientTest {
     void unreachableUrl_throwsWithReason() {
         assertThrows(IllegalStateException.class,
                 () -> client.fetchModels("http://127.0.0.1:1", null));
+    }
+
+    @Test
+    void anthropicProtocol_usesAnthropicAuthHeaders() {
+        // anthropic 协议站（Claude 官方/协议中转）：x-api-key + anthropic-version，不发 Bearer；
+        // 响应格式与 OpenAI 同构（{"data":[{"id":...}]}），解析器复用
+        responder = path -> "/v1/models".equals(path)
+                ? "{\"data\":[{\"id\":\"claude-4-5-sonnet\"}]}" : null;
+
+        List<String> models = client.fetchModels(base(), "sk-ant-key", "anthropic");
+
+        assertEquals(List.of("claude-4-5-sonnet"), models);
+        assertEquals("sk-ant-key", apiKeyHeader.get(), "anthropic 协议密钥走 x-api-key 头");
+        assertEquals("2023-06-01", anthropicVersionHeader.get(), "必须带 anthropic-version 头");
+        assertEquals(null, authHeader.get(), "anthropic 协议不发 Authorization Bearer");
+    }
+
+    @Test
+    void responsesProtocol_keepsBearerAuth() {
+        // responses 协议站与 openai 同为 Bearer 鉴权
+        responder = path -> "/v1/models".equals(path)
+                ? "{\"data\":[{\"id\":\"gpt-5.1\"}]}" : null;
+
+        List<String> models = client.fetchModels(base(), "sk-key", "responses");
+
+        assertEquals(List.of("gpt-5.1"), models);
+        assertEquals("Bearer sk-key", authHeader.get());
+        assertEquals(null, apiKeyHeader.get(), "responses 协议不用 x-api-key");
+    }
+
+    @Test
+    void unknownProtocol_rejected() {
+        assertThrows(IllegalArgumentException.class,
+                () -> client.fetchModels(base(), null, "websocket"));
     }
 }

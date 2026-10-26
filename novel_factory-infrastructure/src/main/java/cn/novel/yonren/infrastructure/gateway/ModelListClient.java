@@ -1,6 +1,7 @@
 package cn.novel.yonren.infrastructure.gateway;
 
 import cn.novel.yonren.domain.novel.adapter.llm.ModelCatalogPort;
+import cn.novel.yonren.types.enums.LlmProtocol;
 import com.alibaba.fastjson2.JSON;
 import com.alibaba.fastjson2.JSONArray;
 import com.alibaba.fastjson2.JSONObject;
@@ -18,15 +19,18 @@ import java.util.ArrayList;
 import java.util.List;
 
 /**
- * OpenAI 兼容供应商的模型列表拉取（GET /v1/models）：设置页添加中转站后一键取回模型名，
+ * 供应商的模型列表拉取（GET /v1/models）：设置页添加中转站后一键取回模型名，
  * 供模型下拉框使用。地址适配两种习惯：带 /v1 与不带 /v1 的 Base URL 都能命中
  * （先按用户写法推断主路径，404 时再试另一路径——one-api/new-api 类中转两种挂法都常见）。
+ * 鉴权头按协议分派：openai/responses 走 Authorization Bearer；anthropic 走
+ * x-api-key + anthropic-version（路径与响应格式同构，无需单独解析器）
  */
 @Slf4j
 @Component
 public class ModelListClient implements ModelCatalogPort {
 
     private static final Duration TIMEOUT = Duration.ofSeconds(15);
+    private static final String ANTHROPIC_VERSION = "2023-06-01";
 
     private final HttpClient http = HttpClient.newBuilder()
             .connectTimeout(Duration.ofSeconds(10))
@@ -35,14 +39,16 @@ public class ModelListClient implements ModelCatalogPort {
     /**
      * 拉取模型 id 列表（已排序）。失败抛 IllegalStateException，消息面向设置页展示（含 HTTP 状态）。
      *
-     * @param baseUrl OpenAI 兼容地址（带或不带 /v1 均可）
-     * @param apiKey  Bearer 密钥；null/空 = 匿名请求（个别本地中转允许无鉴权）
+     * @param baseUrl  供应商地址（带或不带 /v1 均可）
+     * @param apiKey   密钥；null/空 = 匿名请求（个别本地中转允许无鉴权）
+     * @param protocol 接口协议（LlmProtocol.code）；null/空 = openai
      */
     @Override
-    public List<String> fetchModels(String baseUrl, String apiKey) {
+    public List<String> fetchModels(String baseUrl, String apiKey, String protocol) {
         if (StringUtils.isBlank(baseUrl)) {
             throw new IllegalArgumentException("Base URL 为空，无法拉取模型列表");
         }
+        boolean anthropic = LlmProtocol.parse(protocol) == LlmProtocol.ANTHROPIC;
         String base = baseUrl.trim();
         while (base.endsWith("/")) {
             base = base.substring(0, base.length() - 1);
@@ -57,7 +63,7 @@ public class ModelListClient implements ModelCatalogPort {
         IllegalStateException last = null;
         for (String endpoint : new String[]{primary, alternate}) {
             try {
-                return get(endpoint, apiKey);
+                return get(endpoint, apiKey, anthropic);
             } catch (IllegalStateException e) {
                 last = e;
                 log.info("模型列表路径未命中（{}）：{}", endpoint, e.getMessage());
@@ -66,13 +72,20 @@ public class ModelListClient implements ModelCatalogPort {
         throw last == null ? new IllegalStateException("模型列表拉取失败") : last;
     }
 
-    private List<String> get(String endpoint, String apiKey) {
+    private List<String> get(String endpoint, String apiKey, boolean anthropic) {
         HttpRequest.Builder builder = HttpRequest.newBuilder(URI.create(endpoint))
                 .timeout(TIMEOUT)
                 .header("Accept", "application/json")
                 .GET();
         if (StringUtils.isNotBlank(apiKey)) {
-            builder.header("Authorization", "Bearer " + apiKey.trim());
+            if (anthropic) {
+                // Anthropic 官方与协议中转站的鉴权头：x-api-key + 版本号（Bearer 也被官方接受，
+                // 但中转站实现参差，按协议规范头最稳）
+                builder.header("x-api-key", apiKey.trim());
+                builder.header("anthropic-version", ANTHROPIC_VERSION);
+            } else {
+                builder.header("Authorization", "Bearer " + apiKey.trim());
+            }
         }
         HttpResponse<String> response;
         try {

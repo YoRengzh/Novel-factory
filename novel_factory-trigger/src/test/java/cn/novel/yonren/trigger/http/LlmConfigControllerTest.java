@@ -126,13 +126,44 @@ class LlmConfigControllerTest {
         provider.setBaseUrl("https://relay.example.com");
         provider.setApiKey("sk-relay");
         when(llmRuntimeConfig.providerOf("relay-a")).thenReturn(provider);
-        when(modelCatalogPort.fetchModels("https://relay.example.com", "sk-relay"))
+        when(modelCatalogPort.fetchModels("https://relay.example.com", "sk-relay", null))
                 .thenReturn(java.util.List.of("m1", "m2"));
 
-        java.util.List<String> result = controller.fetchModels(fetchRequest("relay-a", null, null));
+        java.util.List<String> result = controller.fetchModels(fetchRequest("relay-a", null, null, null));
 
         assertEquals(2, result.size());
         assertEquals("m1", result.get(0));
+        // 拉取成功必须回写按站缓存（场景矩阵的「站名·模型」标注数据源）
+        verify(llmRuntimeConfig).cacheProviderModels("relay-a", java.util.List.of("m1", "m2"));
+    }
+
+    @Test
+    void fetchModels_providerProtocolPassedThrough_explicitWins() {
+        LlmRuntimeConfig.ProviderOverlay provider = new LlmRuntimeConfig.ProviderOverlay();
+        provider.setBaseUrl("https://claude.example.com");
+        provider.setApiKey("sk-relay");
+        provider.setProtocol("anthropic");
+        when(llmRuntimeConfig.providerOf("claude-relay")).thenReturn(provider);
+        // 未显式给协议：回退中转站存的 anthropic（决定 ModelListClient 用哪套鉴权头）
+        when(modelCatalogPort.fetchModels("https://claude.example.com", "sk-relay", "anthropic"))
+                .thenReturn(java.util.List.of("claude-4"));
+        assertEquals(1, controller.fetchModels(fetchRequest("claude-relay", null, null, null)).size());
+
+        // 显式协议（试连表单当前值）压过中转站存的
+        when(modelCatalogPort.fetchModels("https://claude.example.com", "sk-relay", "responses"))
+                .thenReturn(java.util.List.of("gpt-5"));
+        assertEquals(1, controller.fetchModels(fetchRequest("claude-relay", null, null, "responses")).size());
+    }
+
+    @Test
+    void fetchModels_manualTestWithoutProvider_doesNotCache() {
+        when(modelCatalogPort.fetchModels("https://manual.example.com", null, null))
+                .thenReturn(java.util.List.of("m"));
+
+        controller.fetchModels(fetchRequest(null, "https://manual.example.com", null, null));
+
+        verify(llmRuntimeConfig, org.mockito.Mockito.never()).cacheProviderModels(
+                org.mockito.ArgumentMatchers.anyString(), org.mockito.ArgumentMatchers.anyList());
     }
 
     @Test
@@ -141,11 +172,12 @@ class LlmConfigControllerTest {
         provider.setBaseUrl("https://relay.example.com");
         provider.setApiKey("sk-relay");
         when(llmRuntimeConfig.providerOf("relay-a")).thenReturn(provider);
-        when(modelCatalogPort.fetchModels("https://manual.example.com", "sk-relay"))
+        when(modelCatalogPort.fetchModels("https://manual.example.com", "sk-relay", null))
                 .thenReturn(java.util.List.of("m"));
 
         // 试连语义：显式地址 + 中转站存的密钥（保存前用表单当前值探测）
-        java.util.List<String> result = controller.fetchModels(fetchRequest("relay-a", "https://manual.example.com", null));
+        java.util.List<String> result = controller.fetchModels(
+                fetchRequest("relay-a", "https://manual.example.com", null, null));
 
         assertEquals(1, result.size());
     }
@@ -156,7 +188,7 @@ class LlmConfigControllerTest {
 
         org.springframework.web.server.ResponseStatusException ex = assertThrows(
                 org.springframework.web.server.ResponseStatusException.class,
-                () -> controller.fetchModels(fetchRequest("missing", null, null)));
+                () -> controller.fetchModels(fetchRequest("missing", null, null, null)));
         assertEquals(org.springframework.http.HttpStatus.NOT_FOUND, ex.getStatusCode());
     }
 
@@ -164,16 +196,17 @@ class LlmConfigControllerTest {
     void fetchModels_withoutBaseUrl_400() {
         org.springframework.web.server.ResponseStatusException ex = assertThrows(
                 org.springframework.web.server.ResponseStatusException.class,
-                () -> controller.fetchModels(fetchRequest(null, "  ", null)));
+                () -> controller.fetchModels(fetchRequest(null, "  ", null, null)));
         assertEquals(org.springframework.http.HttpStatus.BAD_REQUEST, ex.getStatusCode());
     }
 
     private static cn.novel.yonren.api.dto.ModelFetchRequestDTO fetchRequest(
-            String providerId, String baseUrl, String apiKey) {
+            String providerId, String baseUrl, String apiKey, String protocol) {
         cn.novel.yonren.api.dto.ModelFetchRequestDTO req = new cn.novel.yonren.api.dto.ModelFetchRequestDTO();
         req.setProviderId(providerId);
         req.setBaseUrl(baseUrl);
         req.setApiKey(apiKey);
+        req.setProtocol(protocol);
         return req;
     }
 }

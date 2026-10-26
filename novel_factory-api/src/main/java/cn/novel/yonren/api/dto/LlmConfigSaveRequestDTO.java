@@ -18,6 +18,11 @@ public class LlmConfigSaveRequestDTO {
     private String authMode;
     /** 接口地址覆盖；留空/空白=保留现有值 */
     private String baseUrl;
+    /**
+     * 手动模式接口协议覆盖（openai/anthropic/responses）；null=保持现状，空串=清除回 openai。
+     * 全局选中中转站时以该站协议优先，本字段只管手动地址模式
+     */
+    private String protocol;
     /** 新密钥；留空/空白=保留现有值（原文不回显，避免被误清空） */
     private String apiKey;
     /** 模型名覆盖；留空/空白=保留现有值 */
@@ -118,6 +123,8 @@ public class LlmConfigSaveRequestDTO {
         private String name;
         /** OpenAI 兼容 Base URL */
         private String baseUrl;
+        /** 接口协议（openai/anthropic/responses）；null/空=按 openai 处理 */
+        private String protocol;
         /** 新密钥；null=保留现有值（密钥不回显），空串=显式清除 */
         private String apiKey;
     }

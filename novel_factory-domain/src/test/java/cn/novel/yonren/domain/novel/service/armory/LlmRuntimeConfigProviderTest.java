@@ -172,4 +172,131 @@ class LlmRuntimeConfigProviderTest {
         assertFalse(String.valueOf(view.getProviders().get(0).getApiKeyMasked()).contains("secret"),
                 "密钥掩码不得泄露中段");
     }
+
+    @Test
+    void cacheProviderModels_persistedAndKeptAcrossRegistrySave() {
+        LlmRuntimeConfig config = new LlmRuntimeConfig(tmp.resolve("override.json"));
+        Map<String, LlmConfigSaveRequestDTO.ProviderSave> providers = new LinkedHashMap<>();
+        providers.put("relay-a", provider("https://relay.example.com", null));
+        config.save(saveWith(providers, null));
+
+        config.cacheProviderModels("relay-a", java.util.List.of("glm-5.2", "qwen3.8-max"));
+        assertEquals(java.util.List.of("glm-5.2", "qwen3.8-max"),
+                config.view().getProviders().get(0).getModels(), "拉取后缓存立即可见");
+
+        // 再保存注册表（前端不带 models）：模型缓存必须保留，否则标注与重启下拉都丢
+        Map<String, LlmConfigSaveRequestDTO.ProviderSave> again = new LinkedHashMap<>();
+        LlmConfigSaveRequestDTO.ProviderSave updated = provider("https://relay2.example.com", "sk-new");
+        again.put("relay-a", updated);
+        LlmConfigDTO view = config.save(saveWith(again, null));
+
+        assertEquals("https://relay2.example.com", view.getProviders().get(0).getBaseUrl());
+        assertEquals(java.util.List.of("glm-5.2", "qwen3.8-max"),
+                view.getProviders().get(0).getModels(), "保存注册表不得清掉模型缓存");
+
+        // 重建实例（模拟重启）：缓存从磁盘恢复
+        LlmRuntimeConfig reloaded = new LlmRuntimeConfig(tmp.resolve("override.json"));
+        assertEquals(java.util.List.of("glm-5.2", "qwen3.8-max"),
+                reloaded.view().getProviders().get(0).getModels(), "模型缓存随覆盖文件持久化");
+
+        // 未知 id 静默忽略（防御：不得注册出幽灵条目）
+        config.cacheProviderModels("ghost", java.util.List.of("m"));
+        assertEquals(1, config.view().getProviders().size());
+    }
+
+    // ===== 接口协议（protocol）=====
+
+    private static LlmConfigSaveRequestDTO.ProviderSave providerWithProtocol(
+            String baseUrl, String apiKey, String protocol) {
+        LlmConfigSaveRequestDTO.ProviderSave p = provider(baseUrl, apiKey);
+        p.setProtocol(protocol);
+        return p;
+    }
+
+    @Test
+    void providers_protocolRoundTrip_andUnknownRejected() {
+        LlmRuntimeConfig config = new LlmRuntimeConfig(tmp.resolve("override.json"));
+        Map<String, LlmConfigSaveRequestDTO.ProviderSave> providers = new LinkedHashMap<>();
+        providers.put("claude-relay", providerWithProtocol("https://c.example.com", "sk-c", "anthropic"));
+        providers.put("gpt-relay", providerWithProtocol("https://g.example.com", "sk-g", "responses"));
+        providers.put("plain", providerWithProtocol("https://p.example.com", "sk-p", null));
+        LlmConfigDTO view = config.save(saveWith(providers, null));
+
+        assertEquals("anthropic", view.getProviders().get(0).getProtocol());
+        assertEquals("responses", view.getProviders().get(1).getProtocol());
+        assertNull(view.getProviders().get(2).getProtocol(), "未填协议 = null（网关按 openai 处理）");
+
+        // 未知协议值丢弃该条而非炸整次保存：注册表是整表提交（一条坏数据不得殃及全表，
+        // 否则用户其他字段的修改一起丢失）；好条目必须照常落库
+        Map<String, LlmConfigSaveRequestDTO.ProviderSave> mixed = new LinkedHashMap<>();
+        mixed.put("good", providerWithProtocol("https://ok.example.com", null, "anthropic"));
+        mixed.put("bad", providerWithProtocol("https://x.example.com", null, "websocket"));
+        LlmConfigDTO mixedView = config.save(saveWith(mixed, null));
+        assertEquals(1, mixedView.getProviders().size(), "未知协议条目被丢弃");
+        assertEquals("anthropic", mixedView.getProviders().get(0).getProtocol(), "合法条目不受坏数据影响");
+    }
+
+    @Test
+    void applyApi_protocolResolution_providerOverManualOverStatic() {
+        LlmRuntimeConfig config = new LlmRuntimeConfig(tmp.resolve("override.json"));
+        LlmConfigSaveRequestDTO request = new LlmConfigSaveRequestDTO();
+        request.setBaseUrl("https://manual.example.com");
+        request.setProtocol("responses");
+        Map<String, LlmConfigSaveRequestDTO.ProviderSave> providers = new LinkedHashMap<>();
+        providers.put("claude-relay", providerWithProtocol("https://c.example.com", "sk-c", "anthropic"));
+        request.setProviders(providers);
+        request.setProviderId("claude-relay");
+        config.save(request);
+
+        StoryVO.Module module = staticModule();
+        module.getAiApi().setProtocol("openai");
+        StoryVO.Module effective = config.applyApi(module);
+        assertEquals("anthropic", effective.getAiApi().getProtocol(), "选中中转站：协议跟着站走");
+
+        // 切回手动模式：手动覆盖（responses）压过 yml 静态（openai）
+        LlmConfigSaveRequestDTO backToManual = new LlmConfigSaveRequestDTO();
+        backToManual.setProviderId("");
+        config.save(backToManual);
+        assertEquals("responses", config.applyApi(module).getAiApi().getProtocol());
+
+        // 清除手动协议覆盖：回退 yml 静态
+        LlmConfigSaveRequestDTO clear = new LlmConfigSaveRequestDTO();
+        clear.setProtocol("");
+        config.save(clear);
+        assertEquals("openai", config.applyApi(module).getAiApi().getProtocol());
+    }
+
+    @Test
+    void applyApi_protocolOnlyOverride_appliesWithoutAddress() {
+        // 只有协议覆盖（无地址密钥覆盖）也必须生效：yml 地址不动、只换协议是合法用法
+        LlmRuntimeConfig config = new LlmRuntimeConfig(tmp.resolve("override.json"));
+        LlmConfigSaveRequestDTO request = new LlmConfigSaveRequestDTO();
+        request.setProtocol("anthropic");
+        config.save(request);
+
+        StoryVO.Module module = staticModule();
+        module.getAiApi().setProtocol("openai");
+        StoryVO.Module effective = config.applyApi(module);
+        assertEquals("anthropic", effective.getAiApi().getProtocol(), "协议覆盖独立于地址覆盖生效");
+        assertEquals("https://static.example.com/compatible-mode", effective.getAiApi().getBaseUrl(),
+                "无地址覆盖时沿用 yml 静态地址");
+    }
+
+    @Test
+    void save_manualProtocol_mergeSemantics() {
+        LlmRuntimeConfig config = new LlmRuntimeConfig(tmp.resolve("override.json"));
+        LlmConfigSaveRequestDTO set = new LlmConfigSaveRequestDTO();
+        set.setProtocol("anthropic");
+        assertEquals("anthropic", config.save(set).getProtocol());
+
+        // 其他保存请求不带 protocol：不误伤已存协议
+        LlmConfigSaveRequestDTO untouched = new LlmConfigSaveRequestDTO();
+        untouched.setModel("some-model");
+        assertEquals("anthropic", config.save(untouched).getProtocol(), "null=保持现状");
+
+        // 空串=显式清除
+        LlmConfigSaveRequestDTO clear = new LlmConfigSaveRequestDTO();
+        clear.setProtocol("");
+        assertNull(config.save(clear).getProtocol());
+    }
 }

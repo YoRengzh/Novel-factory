@@ -69,13 +69,15 @@ public class LlmConfigController {
     }
 
     /**
-     * 拉取供应商模型列表（OpenAI 兼容 /v1/models）：设置页"获取模型"按钮。
-     * 显式地址密钥优先于 providerId（保存前可试连）；密钥只在后端拼请求头，不进日志
+     * 拉取供应商模型列表：设置页"获取模型"按钮。
+     * 显式地址密钥优先于 providerId（保存前可试连）；协议同款回退（显式 > 中转站存的 > openai）；
+     * 密钥只在后端拼请求头，不进日志
      */
     @PostMapping("/models")
     public List<String> fetchModels(@RequestBody ModelFetchRequestDTO request) {
         String baseUrl = StringUtils.trimToNull(request.getBaseUrl());
         String apiKey = StringUtils.trimToNull(request.getApiKey());
+        String protocol = StringUtils.trimToNull(request.getProtocol());
         String providerId = StringUtils.trimToNull(request.getProviderId());
         if (providerId != null) {
             LlmRuntimeConfig.ProviderOverlay provider = llmRuntimeConfig.providerOf(providerId);
@@ -88,12 +90,21 @@ public class LlmConfigController {
             if (apiKey == null) {
                 apiKey = provider.getApiKey();
             }
+            if (protocol == null) {
+                protocol = provider.getProtocol();
+            }
         }
         if (baseUrl == null) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "缺少 Base URL（填显式地址或指定中转站 id）");
         }
         try {
-            return modelCatalogPort.fetchModels(baseUrl, apiKey);
+            List<String> models = modelCatalogPort.fetchModels(baseUrl, apiKey, protocol);
+            // 按站缓存模型名：场景矩阵的「站名·模型」标注与重启后的下拉选项都吃这份缓存。
+            // 手动试连（无 providerId）不缓存——没有归属主体，存了也无处展示
+            if (providerId != null) {
+                llmRuntimeConfig.cacheProviderModels(providerId, models);
+            }
+            return models;
         } catch (Exception e) {
             // 上游不可达/鉴权失败是用户可自行修复的问题：502 + 原因，密钥不在任何消息里
             throw new ResponseStatusException(HttpStatus.BAD_GATEWAY, "模型列表拉取失败：" + e.getMessage());

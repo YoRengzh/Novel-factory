@@ -7,6 +7,9 @@ story:
     ai-api:
       base-url: ${LLM_BASE_URL:https://dashscope.aliyuncs.com/compatible-mode}
       api-key: ${LLM_API_KEY:}
+      # 接口协议：openai（默认，Chat Completions）/ anthropic（Claude Messages）/ responses（OpenAI Responses）。
+      # 设置页选中中转站时按该站协议走；留空 = openai（升级前行为）
+      # protocol: openai
     chat-model:
       model: qwen3.8-flash
       max-tokens: 16384
@@ -44,12 +47,19 @@ story:
         enable-thinking: true
       chapter-beats:
         model: deepseek-v4.1-flash
-        max-tokens: 2048
+        # 原 2048：低于 8192 的上限在本项目代理上会被放大成固定 10000 预算，思考吃光后正文为 0
+        # （2026-10-26 实测 completionTokens=7188/2048、contentChars=1818，每次都靠降级救回）。
+        # 抬到 16384 让思考有独立空间，省掉一次降级调用；上限只是天花板，不改变实际输出量。
+        max-tokens: 16384
         temperature: 0.3
         enable-thinking: false
       chapter-content:
         model: glm-5.2
-        max-tokens: 16384
+        # 正文是核心交付物，必须给足预算：2026-10-26 实测 16384 上限下 glm-5.3-flash（全局覆盖后）
+        # 与 deepseek-v4.1-flash 双双烧穿，正文 0 字符、各烧 16384 token，整批失败。
+        # 该场景输入前缀约 2.8 万字符（含完整章节计划与对话场景要求），思考量随输入水涨船高。
+        # 取 100000：与 chapter-plan 同口径，留足思考余量后仍有 7 万 token 写正文。
+        max-tokens: 100000
         temperature: 0.5
         enable-thinking: false
       chapter-rewrite:
@@ -129,7 +139,10 @@ story:
     # （异族模型的上限与主模型常不同，沿用会直接 400）。留空 model 即不启用兜底。
     fallback-model:
       model: deepseek-v4.1-flash
-      max-tokens: 16384
+      # 兜底上限必须够用：原 16384 时，主模型（chapter-content 100000）降级到本兜底反而把
+      # 预算砍到 1.6 万，2026-10-26 实测 deepseek-v4.1-flash 在 16384 上同样烧穿、正文 0 字符。
+      # 上限只是天花板、不改变实际输出量，取 100000 与主模型同口径，避免"降级后预算变小"。
+      max-tokens: 100000
       temperature: 0.3
       enable-thinking: false
       # base-url / api-key 留空 = 沿用主模型（同供应商时只需写模型名）；

@@ -27,6 +27,33 @@ class ChapterMemoryServiceTest {
 
     private final ChapterMemoryService service = new ChapterMemoryService(new ForeshadowPriorityService());
 
+    /**
+     * 时间欠账前缀的两处常量必须同值（2026-10-26）：{@code ChapterWorker#TIME_ARREARS_PREFIX} 注入、
+     * {@code ChapterMemoryService#TIME_ARREARS_CONFLICT_PREFIX} 分组——它们是刻意解耦的字符串常量
+     * （避免跨服务编译期依赖），同值约束没有任何编译器兜底，只能由本测试锁定。
+     * 值不一致的后果是欠账条目被当成账本冲突渲染，写手收到"以账本为准"的错误修正指令。
+     */
+    @Test
+    void timeArrearsPrefix_constantsMustMatchAcrossServices() {
+        assertEquals(cn.novel.yonren.domain.novel.service.armory.worker.ChapterWorker.TIME_ARREARS_PREFIX,
+                ChapterMemoryService.TIME_ARREARS_CONFLICT_PREFIX,
+                "两处前缀不同值会让欠账条目落进账本冲突导语，修正指令自相矛盾");
+    }
+
+    /** 欠账条目与账本冲突分开导语：前缀条目进【时间目标未达成】，其余进【上章偏差警示】 */
+    @Test
+    void conflicts_timeArrearsRenderUnderOwnHeader() {
+        List<ChapterSummaryEntity> summaries = List.of(summary(1, states(state("小陈", "重伤"))));
+
+        String prefix = service.buildMemoryPrefix(summaries, null,
+                List.of("【时间欠账】上一章时间推进未达标，本章必须补足时间过渡"), null);
+
+        assertTrue(prefix.contains("【时间目标未达成】"), "前缀条目必须走独立导语");
+        assertTrue(prefix.contains("时间的基准是【时序锚】"), "欠账的修正基准是时序锚而非账本");
+        assertFalse(prefix.contains("上一章正文存在与账本冲突的描述"),
+                "只有欠账时不得渲染账本冲突导语（避免错误指令：以账本为准）");
+    }
+
     @Test
     void ledger_mergesByChapterOrderAndOverwrites() {
         List<ChapterSummaryEntity> summaries = List.of(

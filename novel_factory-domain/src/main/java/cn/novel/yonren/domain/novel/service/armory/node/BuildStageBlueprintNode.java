@@ -247,11 +247,107 @@ public class BuildStageBlueprintNode extends AbstractArmorySupport {
         repairStageEndFromOutline(requestParameter, storyContext, dynamicContext.getChapterSummaries(),
                 blueprint, previous);
 
-        // 追进度机制（时间跳跃任务 + 结转重定基 + 跳接 fail-closed）已于 2026-10-11 退役（进度治理方案 A）：
-        // 它连续多批未能把日历追回来，且与重锚方向相反——重锚后蓝图预算 = 正文实际时间 + 段时长，
-        // "滞后"不再存在，跳跃无从谈起。段计划侧的跳接校验（ChapterPlanSegmentPlanner）保留为通用能力：
-        // 仅当蓝图声明 pacing 字段时才触发，如今无人注入，自然休眠。
+        // 追进度字段接线（2026-10-26）：这三个 transient 字段此前**没有任何一处赋值**——
+        // 注释写着"由 BuildStageBlueprintNode 计算、ChapterPlanSegmentPlanner 消费"，
+        // 但消费端的 jumpRequired 依赖它们，于是恒为 false，设计好的"跳接段 fail-closed"从未生效。
+        // 这里补上赋值：滞后 = 大纲在本阶段窗口内自身要走的时间 − 正文实际已走的时间。
+        // 注意"重锚"并不取消滞后——重锚只是把预算平移，若正文连平移后的预算都追不上，滞后依然存在。
+        // 滞后 ≥ 硬跳阈值（2 年）才要求强制跳接，小滞后由章后欠账回灌逐章追讨。
+        wirePacingFields(storyContext, dynamicContext.getChapterSummaries(), blueprint);
+
         return blueprint;
+    }
+
+    /**
+     * 强制跳接的滞后阈值（年）：只有 ≥ 此值才置 {@code jumpRequired}，触发段计划的 fail-closed 强制跳接。
+     *
+     * <p><b>为什么是 2 而不是 1</b>：fail-closed 的代价是**整批终止**（段计划两次重规划仍不合格即抛异常）。
+     * 1 年的滞后在快进段里很常见（大纲用 5 章覆盖 1 年），要求"末章 timeAdvance 必须含预算年"会硬停批次；
+     * 而这类小幅滞后完全可以用章后欠账回灌逐章追讨。只有 ≥2 年的结构性滞后
+     * （真正的跨年快进段）才值得动用硬闸门。
+     */
+    private static final int PACING_HARD_JUMP_YEARS = 2;
+
+    /**
+     * 计算并写入追进度字段（transient，不落盘，每批重建）。
+     *
+     * <p><b>滞后口径</b>：{@code 本阶段窗口自身要走的时间} − {@code 正文实际已走的时间}。
+     * 前项走 {@link StoryPacing#pacedBudget} 的同一把尺子（只看窗口增量，不继承段末），
+     * 后项取"阶段起点之前的年份锚"与"当前锚"之差。两者相减得年数，≥{@link #PACING_HARD_JUMP_YEARS}
+     * 才置 {@code jumpRequired}——一年以内的滞后交给章后欠账回灌逐章追讨，
+     * 不必动用 fail-closed 的强制跳接（那会卡批）。
+     *
+     * <p>任一侧取不到数值（无锚点/大纲无年份/境界纪年）时全部置 null，消费端自然休眠，
+     * 与引入前行为一致——不臆造滞后。
+     */
+    private void wirePacingFields(StoryContextEntity storyContext,
+                                  List<ChapterSummaryEntity> summaries,
+                                  StageBlueprintEntity blueprint) {
+        if (blueprint == null || storyContext == null
+                || StringUtils.isBlank(storyContext.getChapterGoal())) {
+            return;
+        }
+        OutlineSegmentParser.Outline outline = OutlineSegmentParser.parse(storyContext.getChapterGoal());
+        if (outline.isEmpty()) {
+            return;
+        }
+        Integer anchorYear = StoryPacing.latestAnchorYear(summaries);
+        if (anchorYear == null) {
+            return;
+        }
+        Integer budgetYear = StoryPacing.pacedBudget(outline, blueprint.getStartChapter(),
+                blueprint.getEndChapter(), anchorYear, false);
+        if (budgetYear == null) {
+            return;
+        }
+        // 本阶段窗口自身要走多少年：从窗口起点处的大纲时间到窗口终点处的大纲时间
+        Integer atStart = StoryPacing.outlineTimeAt(outline,
+                blueprint.getStartChapter() == null ? 0 : blueprint.getStartChapter(), false);
+        Integer atEnd = StoryPacing.outlineTimeAt(outline,
+                blueprint.getEndChapter() == null ? 0 : blueprint.getEndChapter(), false);
+        int windowYears = (atStart == null || atEnd == null) ? 0 : Math.max(0, atEnd - atStart);
+
+        // 滞后 = 本阶段应走的年数 − 正文在本阶段**实际已走**的年数。
+        // 已走年数取"阶段起点处的年份锚"与"当前锚"之差：阶段尚未开始时已走 = 0（本批要从头走完整个窗口）。
+        // 不能用 stageEndYear 反推（那是计划值，会自我印证——计划写多少就认为走了多少，滞后永远为 0）。
+        Integer yearAtStart = latestYearBefore(summaries, blueprint.getStartChapter());
+        int walkedYears = yearAtStart == null ? 0 : Math.max(0, anchorYear - yearAtStart);
+        int lag = Math.max(0, windowYears - walkedYears);
+
+        blueprint.setPacingAnchorYear(anchorYear);
+        blueprint.setPacingBudgetStartYear(budgetYear);
+        blueprint.setPacingLagYears(lag);
+        if (lag >= PACING_HARD_JUMP_YEARS) {
+            log.info("阶段蓝图追进度：第{}阶段窗口应走 {} 年、正文已走 {} 年 → 滞后 {} 年，"
+                            + "触发强制跳接校验（锚点 {}，预算 {}）",
+                    blueprint.getStageNo(), windowYears, walkedYears, lag, anchorYear, budgetYear);
+        } else if (lag > 0) {
+            log.info("阶段蓝图追进度：第{}阶段滞后 {} 年（< 硬跳阈值 {}），交由章后欠账回灌逐章追讨",
+                    blueprint.getStageNo(), lag, PACING_HARD_JUMP_YEARS);
+        }
+    }
+
+    /**
+     * 取指定章号**之前**（不含）最近一章的年份锚。
+     *
+     * <p>用于计算"本阶段已经走了多久"：阶段起点之前的最后一章，其年份就是阶段开始时的故事时间。
+     * 阶段尚未开始（起点之前没有章节）时返回 null，调用方按"已走 0 年"处理。
+     */
+    private static Integer latestYearBefore(List<ChapterSummaryEntity> summaries, Integer chapterNo) {
+        if (summaries == null || chapterNo == null) {
+            return null;
+        }
+        for (int i = summaries.size() - 1; i >= 0; i--) {
+            ChapterSummaryEntity s = summaries.get(i);
+            if (s == null || s.getChapterNo() == null || s.getChapterNo() >= chapterNo) {
+                continue;
+            }
+            Integer year = StoryPacing.parseYear(s.getTimePoint());
+            if (year != null) {
+                return year;
+            }
+        }
+        return null;
     }
 
     /** 结转债务硬上限：跨段滚动的未完成任务超过硬上限的部分降级为背景清偿，不再逼规划层专门造场景 */
@@ -286,6 +382,19 @@ public class BuildStageBlueprintNode extends AbstractArmorySupport {
      * 校验规则：stageEndYear 必须含 4 位年份且 ≥ 重锚预算、≥ 上一阶段声明（单调递增）；
      * stageEndAge 同理。任一不合格即按重锚预算回填——无锚点/大纲段无数值标记时保持声明原样，不编造。
      *
+     * <p><b>跨段预算继承的连续性格挡（2026-10-26）</b>：预算基准取"阶段终点所在段"时，窗口一旦
+     * 跨过大纲段边界，就会把下一段的**整段**预算提前拉进本阶段。大纲里存在"快进段"（如
+     * {@code 231-240章 2013年秋至2016年夏}、{@code 241-250章 2016年秋}）——它们用少数章节覆盖数年，
+     * 于是 5 章的小阶段只要尾章落进下一段，下限就被抬到数年之后。
+     *
+     * <p><b>单调下限改为取正文实际锚点（2026-10-26）</b>：声明是计划、不是事实。上一阶段把终点
+     * 声明到某年而正文没走到时，若拿该声明当永久下限，后续每个阶段都会被钳在它以上，
+     * 年份链就此**单向棘轮**，再也回不到正文实际时间。锚点来自摘要 timePoint，是已发生的事实，
+     * 用它做下限既能防倒退（正文真走到了，下限自然是那年），又不会把"没走到的计划"固化成下限。
+     * 无锚点（老数据/摘要缺年份）时才退回上一阶段声明兜底，避免失去倒退保护。
+     *
+     * <p><b>预算计价只看窗口自身增量</b>：见 {@link StoryPacing#pacedBudget}——不继承任何一段的
+     * 段末，故快进段的段末不会被提前记进本阶段；预算无上限，正文真走过去就照常放行。
      */
     private void repairStageEndFromOutline(ArmoryCommandEntity requestParameter,
                                            StoryContextEntity storyContext,
@@ -303,7 +412,8 @@ public class BuildStageBlueprintNode extends AbstractArmorySupport {
         // 重锚平移量从段首所在段计算（与蓝图 prompt 的进度对齐块同口径）；无锚点时 shift=null → 不平移
         OutlineSegmentParser.OutlineSegment primary = outline.segmentFor(
                 blueprint.getStartChapter() == null ? 0 : blueprint.getStartChapter());
-        Integer shiftYears = StoryPacing.calendarShiftYears(primary, StoryPacing.latestAnchorYear(summaries));
+        Integer anchorYear = StoryPacing.latestAnchorYear(summaries);
+        Integer shiftYears = StoryPacing.calendarShiftYears(primary, anchorYear);
         Integer anchorAge = StoryPacing.latestAnchorAge(summaries);
         Integer shiftAges = (primary != null && primary.ageStart() != null && anchorAge != null)
                 ? primary.ageStart() - anchorAge : null;
@@ -316,17 +426,39 @@ public class BuildStageBlueprintNode extends AbstractArmorySupport {
         if (seg == null || (seg.yearStart() == null && seg.ageStart() == null)) {
             return; // 大纲段无数值时间标记（境界纪年等）——不编造，保持模型声明
         }
-        StoryPacing.SlidBudget slid = StoryPacing.slideSegment(seg, shiftYears, shiftAges);
+        // 计价基准段：下限（floor）取**起点段**的平移后起始年；无起点段时退回终点段。
+        // 注意预算末年不取段末，而是由 pacedBudget 按本阶段自身窗口的增量计价——
+        // 跨进快进段不等于本阶段该跳到段末，跳跃必须由段计划的 timeAdvance 显式安排。
+        OutlineSegmentParser.OutlineSegment budgetSeg =
+                primary != null && (primary.yearStart() != null || primary.ageStart() != null) ? primary : seg;
+        StoryPacing.SlidBudget slid = StoryPacing.slideSegment(budgetSeg, shiftYears, shiftAges);
         Integer declaredYear = extractYear(blueprint.getStageEndYear());
         int floorYear = slid.yearStart() == null ? 0 : slid.yearStart();
-        Integer prevYear = previous == null || StringUtils.isBlank(previous.getStageEndYear())
-                ? null : extractYear(previous.getStageEndYear());
-        if (prevYear != null && prevYear > floorYear) {
-            floorYear = prevYear; // 相邻阶段单调递增下限
+        // 声明是计划、不是事实：下限取正文实际锚点，而非上一阶段声明（理由见方法注释）
+        if (anchorYear != null && anchorYear > floorYear) {
+            floorYear = anchorYear;
+        } else if (anchorYear == null) {
+            Integer prevYear = previous == null || StringUtils.isBlank(previous.getStageEndYear())
+                    ? null : extractYear(previous.getStageEndYear());
+            if (prevYear != null && prevYear > floorYear) {
+                floorYear = prevYear;
+            }
+        }
+        if (declaredYear != null && previous != null && anchorYear != null) {
+            Integer prevYear = StringUtils.isBlank(previous.getStageEndYear())
+                    ? null : extractYear(previous.getStageEndYear());
+            if (prevYear != null && declaredYear < prevYear) {
+                // 不再强制回填（那正是棘轮的来源），但必须留痕：时间账出现"计划高于正文"的缺口时，
+                // 观测层要看得见，否则只能靠批末体检的进度对齐指标事后发现
+                log.warn("阶段蓝图 stageEndYear 低于上一阶段声明（{} < {}），按正文实际锚点 {} 与重锚预算取值——"
+                        + "上一阶段声明未由正文兑现，不作为本阶段下限", declaredYear, prevYear, anchorYear);
+            }
         }
         if (declaredYear == null || declaredYear < floorYear) {
-            // 回填值必须钳到下限：重锚预算是"平移后的段末年份"，它可能**低于上一阶段声明**
-            Integer budgetYear = slid.yearEnd() != null ? slid.yearEnd() : slid.yearStart();
+            // 预算按**本阶段自己的章号区间在大纲里跨过的时间增量**计价，加在正文锚点上——
+            // 不继承任何一段的绝对日历，故快进段的段末不会被提前记进本阶段
+            Integer budgetYear = pacedBudget(outline, blueprint.getStartChapter(), blueprint.getEndChapter(),
+                    anchorYear, false);
             int backfilledYear = Math.max(budgetYear == null ? floorYear : budgetYear, floorYear);
             String backfill = backfilledYear + "年";
             log.info("阶段蓝图 stageEndYear 不合格（声明 {}，重锚下限 {}），已按重锚预算回填为 {}",
@@ -336,15 +468,19 @@ public class BuildStageBlueprintNode extends AbstractArmorySupport {
         if (slid.ageStart() != null) {
             Integer declaredAge = extractAge(blueprint.getStageEndAge());
             int floorAge = slid.ageStart();
-            // 年龄与年份同款单调下限：原实现只看段预算，不看上一阶段声明，
-            // 于是 13 岁 → 12 岁同样能写进去（实测 stage13/14=13岁 → stage15/16=12岁）
-            Integer prevAge = previous == null || StringUtils.isBlank(previous.getStageEndAge())
-                    ? null : extractAge(previous.getStageEndAge());
-            if (prevAge != null && prevAge > floorAge) {
-                floorAge = prevAge;
+            // 年龄同款：下限取正文实际年龄锚点，而非上一阶段声明（理由同年份）
+            if (anchorAge != null && anchorAge > floorAge) {
+                floorAge = anchorAge;
+            } else if (anchorAge == null) {
+                Integer prevAge = previous == null || StringUtils.isBlank(previous.getStageEndAge())
+                        ? null : extractAge(previous.getStageEndAge());
+                if (prevAge != null && prevAge > floorAge) {
+                    floorAge = prevAge;
+                }
             }
             if (declaredAge == null || declaredAge < floorAge) {
-                Integer budgetAge = slid.ageEnd() != null ? slid.ageEnd() : slid.ageStart();
+                Integer budgetAge = pacedBudget(outline, blueprint.getStartChapter(), blueprint.getEndChapter(),
+                        anchorAge, true);
                 int backfilledAge = Math.max(budgetAge == null ? floorAge : budgetAge, floorAge);
                 String backfill = backfilledAge + "岁";
                 log.info("阶段蓝图 stageEndAge 不合格（声明 {}，重锚下限 {}），已按重锚预算回填为 {}",
@@ -352,6 +488,16 @@ public class BuildStageBlueprintNode extends AbstractArmorySupport {
                 blueprint.setStageEndAge(backfill);
             }
         }
+    }
+
+    /**
+     * 阶段时间预算：委托 {@link StoryPacing#pacedBudget}——蓝图 prompt 的【进度对齐】块
+     * 与回填校验必须共用同一把尺子，否则 prompt 报"预算某年"、校验算"另一年"，
+     * 模型照着 prompt 声明就能绕过下限（口径分裂）。
+     */
+    private static Integer pacedBudget(OutlineSegmentParser.Outline outline, Integer stageStart,
+                                       Integer stageEnd, Integer anchor, boolean ageDimension) {
+        return StoryPacing.pacedBudget(outline, stageStart, stageEnd, anchor, ageDimension);
     }
 
     private static Integer extractYear(String text) {

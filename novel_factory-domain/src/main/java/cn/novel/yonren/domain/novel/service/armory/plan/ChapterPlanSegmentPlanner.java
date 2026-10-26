@@ -145,6 +145,14 @@ public class ChapterPlanSegmentPlanner {
         String ladderIssue = ChapterPlanChecks.validateSuspenseAdvance(parsed.plan().getChapters(), suspenseLadder);
         String mainLineIssue = ChapterPlanChecks.validateMainLineAdvance(parsed.plan().getChapters(), mainLine);
         String timeAdvanceIssue = ChapterPlanChecks.validateTimeAdvance(parsed.plan().getChapters());
+        // 时间推进单调性（2026-10-26）：这条规则此前只写在提示词里（"全段 timeAdvance 必须单调递增"），
+        // 没有任何执行通道——与"跳月吞线""伏笔净增"两闸门引入前的状态相同：写在 prompt 里的规则
+        // 不校验就等于没有。实测某段 5 章计划合计推进 59 天、正文只走 16 天，即靠这条缺口放行。
+        String timeOrderIssue = TimeAdvanceChecks.validateMonotonic(parsed.plan().getChapters());
+        if (timeOrderIssue != null) {
+            timeAdvanceIssue = timeAdvanceIssue == null
+                    ? timeOrderIssue : timeAdvanceIssue + "；" + timeOrderIssue;
+        }
         // 跨章场景重演：与前两项正交——那两项管"推进说得对不对"，本项管"同一件事是不是被说了两遍"。
         // 实测逃逸：相隔两章的同一场景（第96/99章）、以及在共用原文后追加一句子项（第98/99章，
         // 而"档位原文之后附本章独有子项"恰是本项目 prompt 自己建议的写法）
@@ -203,6 +211,12 @@ public class ChapterPlanSegmentPlanner {
         if (timeAdvanceIssue != null) {
             feedback.append(ChapterPlanChecks.timeAdvanceFeedback(timeAdvanceIssue));
         }
+        // 单调性违规走自己的修正指令（差异化反馈，而非复用"缺声明"的模板）：
+        // 两类问题的修法不同——缺 timeAdvance 要"补声明"，倒退要"改日期/写法"，
+        // 混用模板会让模型对着错误指令改
+        if (timeOrderIssue != null) {
+            feedback.append(TimeAdvanceChecks.monotonicFeedback(timeOrderIssue));
+        }
         if (pacingIssue != null) {
             feedback.append(ChapterPlanChecks.timeAdvancePacingFeedback(pacingBudgetYear));
         }
@@ -232,6 +246,11 @@ public class ChapterPlanSegmentPlanner {
         String stillBadLadder = ChapterPlanChecks.validateSuspenseAdvance(retry.plan().getChapters(), suspenseLadder);
         String stillBadMainLine = ChapterPlanChecks.validateMainLineAdvance(retry.plan().getChapters(), mainLine);
         String stillBadTimeAdvance = ChapterPlanChecks.validateTimeAdvance(retry.plan().getChapters());
+        String stillBadTimeOrder = TimeAdvanceChecks.validateMonotonic(retry.plan().getChapters());
+        if (stillBadTimeOrder != null) {
+            stillBadTimeAdvance = stillBadTimeAdvance == null
+                    ? stillBadTimeOrder : stillBadTimeAdvance + "；" + stillBadTimeOrder;
+        }
         String stillBadSceneReplay = ChapterPlanChecks.validateSceneReplay(retry.plan().getChapters(), suspenseLadder);
         String stillBadDialogue = ChapterPlanChecks.validateDialogueCarriage(retry.plan().getChapters(), rosterNames);
         String stillBadPacing = jumpRequired
@@ -276,6 +295,9 @@ public class ChapterPlanSegmentPlanner {
             }
             if (stillBadTimeAdvance != null) {
                 residual.append(ChapterPlanChecks.timeAdvanceFeedback(stillBadTimeAdvance));
+            }
+            if (stillBadTimeOrder != null) {
+                residual.append(TimeAdvanceChecks.monotonicFeedback(stillBadTimeOrder));
             }
             if (stillBadSceneReplay != null) {
                 residual.append(ChapterPlanChecks.sceneReplayFeedback(stillBadSceneReplay));

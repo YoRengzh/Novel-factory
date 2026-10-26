@@ -38,6 +38,7 @@ import cn.novel.yonren.domain.novel.service.armory.memory.StyleStatService;
 import cn.novel.yonren.domain.novel.service.armory.memory.ConsistencyIndexService;
 import cn.novel.yonren.domain.novel.service.armory.plan.ChapterPlanPromptService;
 import cn.novel.yonren.domain.novel.service.armory.plan.ChapterPlanSegmentPlanner;
+import cn.novel.yonren.domain.novel.service.armory.plan.TimeAdvanceChecks;
 import cn.novel.yonren.domain.novel.service.armory.prompt.PromptBudgetGuard;
 import cn.novel.yonren.domain.novel.service.armory.prompt.PromptBudgetGuard.PrefixBlock;
 import cn.novel.yonren.domain.novel.service.armory.prompt.valobj.PromptContext;
@@ -556,6 +557,25 @@ public class ChapterWorker {
             // 此处不再单独记债——否则同一问题会既被修订又被记债，重复计数
             pendingConflicts = summary.getContinuityConflicts();
 
+            // 时间欠账回灌（2026-10-26）：把"计划要推进多少天 vs 正文实际走到哪天"的缺口
+            // 注入下一章的【偏差警示】块。复用 pendingConflicts 这条现成通道——
+            // 它本来就是"上一章的问题，下一章必须修正"的传递载体（语义与账本冲突一致）。
+            //
+            // <p>为什么必须**章后立刻**回灌，而不是等批末体检：体检只能报警，来不及修正；
+            // 而时间欠账是会**累积**的（实测某段 5 章：计划 59 天、正文 16 天，四章连续欠 87 天），
+            // 越晚发现越难追回。逐章回灌让写手在下一章就补，欠账不会滚成雪球。
+            String timeArrears = timeAdvanceArrears(item, summaries, globalNo);
+            if (StringUtils.isNotBlank(timeArrears)) {
+                // 前缀区分来源：偏差警示块的导语是"以账本为准修正"，那对时间欠账不适用——
+                // 时间的基准是【时序锚 + 本章时间目标】，不是账本。带前缀的条目在渲染层
+                // 走独立导语（见 ChapterMemoryService 偏差警示块的组装处），避免"以账本为准"
+                // 与"必须推进到 X"两条指令互相打架。
+                pendingConflicts = new java.util.ArrayList<>(
+                        pendingConflicts == null ? java.util.List.of() : pendingConflicts);
+                pendingConflicts.add(TIME_ARREARS_PREFIX + timeArrears);
+                log.warn("第{}章时间欠账：{}（已注入下一章偏差警示）", globalNo, timeArrears);
+            }
+
             // 阶段收束钩子（阶段末章）：机械节奏报告写回蓝图 + 退出条件外部审计 + 卷末清账
             //（清账结果：VOID 出账、RECOVER 随结算文件注入下一段规划 prompt）
             StageBlueprintEntity stageBlueprint = currentStageBlueprint(dynamicContext.getStageBlueprints(), globalNo);
@@ -966,6 +986,37 @@ public class ChapterWorker {
                         && chapterNo >= b.getStartChapter() && chapterNo <= b.getEndChapter())
                 .findFirst()
                 .orElse(blueprints.get(blueprints.size() - 1));
+    }
+
+    /**
+     * 时间欠账条目在偏差警示列表里的来源前缀：渲染层据此把它与账本冲突分开导语。
+     * 偏差警示的默认导语是"以账本为准修正"——对时间欠账不适用（时间的基准是时序锚，
+     * 不是账本），混在同一导语下会让写手收到两条互相矛盾的指令。
+     */
+    public static final String TIME_ARREARS_PREFIX = "【时间欠账】";
+
+    /**
+     * 本章的时间欠账（计划声明的目标日期 vs 摘要记录的实到日期）。
+     *
+     * <p>只针对**刚写完的这一章**做比较，产出可直接注入下一章【偏差警示】的文案；
+     * 无欠账或日期无法定位时返回 null（不臆造）。
+     *
+     * <p>为什么逐章比对而不是整段扫：欠账会累积，逐章回灌才能让写手在下一章就补；
+     * 整段扫只能在段末发现，那时已无法修正。
+     */
+    private String timeAdvanceArrears(ChapterPlanItemEntity item, List<ChapterSummaryEntity> summaries, int globalNo) {
+        if (item == null || StringUtils.isBlank(item.getTimeAdvance()) || summaries == null || summaries.isEmpty()) {
+            return null;
+        }
+        List<TimeAdvanceChecks.Arrears> arrears = TimeAdvanceChecks.findArrears(List.of(item), summaries);
+        if (arrears.isEmpty()) {
+            return null;
+        }
+        TimeAdvanceChecks.Arrears a = arrears.get(0);
+        return "第" + globalNo + "章时间推进未达标：计划要求到 " + a.target()
+                + "，正文实际停在 " + a.actual() + "（欠 " + a.behindDays() + " 天）。"
+                + "本章必须在章末补足时间过渡（过夜/赶路/开学/节气更替等），把时间推进到不早于 "
+                + a.target() + "，不得再停在同日。";
     }
 
     /**

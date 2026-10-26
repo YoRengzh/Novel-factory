@@ -538,4 +538,260 @@ class BuildStageBlueprintNodeTest {
         verify(llmInvokeService, times(2)).invoke(any(), eq(PromptScene.STAGE_BLUEPRINT), any(), promptCaptor.capture(), any());
         assertTrue(!promptCaptor.getAllValues().get(0).contains("【所属卷方向锚】"));
     }
+
+    // ===== stageEnd 重锚回填（2026-10-11 修正 + 2026-10-26 下限口径改造）=====
+
+    /**
+     * 夹具时间账：大纲第 8-12 章预算 2012-2013 年（14-15 岁），
+     * 正文实际锚 2010 年/12 岁 ⇒ 平移 2 年，重锚下限 = 2010 年/12 岁。
+     */
+    private static final String REANCHOR_GOAL =
+            "【卷一·试炼】(1-20章)：1-7章 2009年（11岁） 起点；"
+                    + "8-12章 2012-2013年（14-15岁） 初三至中考；13-20章 2014年（16岁） 高中起步。";
+
+    private void invokeRepair(StageBlueprintEntity blueprint, StageBlueprintEntity previous) throws Exception {
+        ChapterSummaryEntity anchor = ChapterSummaryEntity.builder().chapterNo(12).build();
+        anchor.setTimePoint("2010年冬");
+        anchor.setConsistencyFacts(List.of(new ChapterSummaryEntity.ConsistencyFact(
+                "NUMBER", "主角年龄", "12岁", null, "正文原句")));
+        var m = BuildStageBlueprintNode.class.getDeclaredMethod("repairStageEndFromOutline",
+                ArmoryCommandEntity.class, StoryContextEntity.class, List.class,
+                StageBlueprintEntity.class, StageBlueprintEntity.class);
+        m.setAccessible(true);
+        m.invoke(node, null,
+                StoryContextEntity.builder().chapterGoal(REANCHOR_GOAL).build(),
+                List.of(anchor), blueprint, previous);
+    }
+
+    /** 无正文锚点（老数据/摘要缺年份）时走无锚路径：用上一阶段声明兜底 */
+    private void invokeRepairNoAnchor(StageBlueprintEntity blueprint, StageBlueprintEntity previous)
+            throws Exception {
+        ChapterSummaryEntity anchor = ChapterSummaryEntity.builder().chapterNo(12).build();
+        anchor.setTimePoint("当日傍晚六点过后"); // 无年份 → 无锚
+        anchor.setConsistencyFacts(List.of(new ChapterSummaryEntity.ConsistencyFact(
+                "NUMBER", "修为", "炼气三层", null, "正文原句"))); // 无年龄事实 → 无年龄锚
+        var m = BuildStageBlueprintNode.class.getDeclaredMethod("repairStageEndFromOutline",
+                ArmoryCommandEntity.class, StoryContextEntity.class, List.class,
+                StageBlueprintEntity.class, StageBlueprintEntity.class);
+        m.setAccessible(true);
+        m.invoke(node, null,
+                StoryContextEntity.builder().chapterGoal(REANCHOR_GOAL).build(),
+                List.of(anchor), blueprint, previous);
+    }
+
+    private StageBlueprintEntity blueprint12(String stageEndYear, String stageEndAge) {
+        return StageBlueprintEntity.builder().stageNo(2).startChapter(8).endChapter(12)
+                .stageEndYear(stageEndYear).stageEndAge(stageEndAge).build();
+    }
+
+    /** 中文年龄声明必须被认作有效并保留："十四岁"不得被判无效后覆写 */
+    @Test
+    void repairStageEnd_keepsChineseNumeralAgeDeclaration() throws Exception {
+        StageBlueprintEntity blueprint = blueprint12("2011年", "十四岁");
+
+        invokeRepair(blueprint, null);
+
+        assertEquals("十四岁", blueprint.getStageEndAge(), "14 ≥ 重锚下限 12，有效声明不得覆写");
+        assertEquals("2011年", blueprint.getStageEndYear());
+    }
+
+    /** 年份也可写中文数字（extractYear 统一走 StoryPacing） */
+    @Test
+    void repairStageEnd_keepsChineseNumeralYearDeclaration() throws Exception {
+        StageBlueprintEntity blueprint = blueprint12("二〇一一年", "13岁");
+
+        invokeRepair(blueprint, null);
+
+        assertEquals("二〇一一年", blueprint.getStageEndYear(), "2011 ≥ 重锚下限 2010，不得覆写");
+        assertEquals("13岁", blueprint.getStageEndAge());
+    }
+
+    /** 附加语境（"13岁（初三）"）走搜索兜底 */
+    @Test
+    void repairStageEnd_acceptsAgeWithInlineAnnotation() throws Exception {
+        StageBlueprintEntity blueprint = blueprint12("2011年", "13岁（初三）");
+
+        invokeRepair(blueprint, null);
+
+        assertEquals("13岁（初三）", blueprint.getStageEndAge());
+    }
+
+    /** 低于重锚下限的中文声明照样回填（修正只扩"认得"，不放松校验） */
+    @Test
+    void repairStageEnd_backfillsChineseAgeBelowFloor() throws Exception {
+        StageBlueprintEntity blueprint = blueprint12("2011年", "十一岁");
+
+        invokeRepair(blueprint, null);
+
+        assertEquals("13岁", blueprint.getStageEndAge(), "11 < 下限 12 → 回填段末重锚预算 13");
+    }
+
+    /** 裸数字声明整串口径也认 */
+    @Test
+    void repairStageEnd_acceptsBareNumberAge() throws Exception {
+        StageBlueprintEntity blueprint = blueprint12("2011年", "14");
+
+        invokeRepair(blueprint, null);
+
+        assertEquals("14", blueprint.getStageEndAge(), "14 ≥ 下限 12，裸数字有效声明保留");
+    }
+
+    /**
+     * 单调下限取**正文实际锚点**，不取上一阶段声明（2026-10-26 修正）。
+     *
+     * <p>旧口径用上一阶段声明做下限：上一阶段声明 2013/15 而正文只走到 2010/12 时，
+     * 本阶段被钳到 2013/15，声明值又成为下一阶段的下限——年份链**单向棘轮**，
+     * 再也回不到正文实际时间。
+     *
+     * <p>新口径：下限 = max(重锚预算, 正文实际锚点)。锚点是已发生的事实，既能防倒退，
+     * 又不会把"没走到的计划"固化成永久下限。上一阶段声明只在**无锚点**时兜底。
+     */
+    @Test
+    void repairStageEnd_ignoresPreviousDeclarationWhenAnchorAvailable() throws Exception {
+        StageBlueprintEntity blueprint = blueprint12(null, null);
+        StageBlueprintEntity previous = blueprint12("2013年", "15岁");
+
+        invokeRepair(blueprint, previous);
+
+        assertEquals("2011年", blueprint.getStageEndYear(),
+                "下限取正文锚点 2010 而非上一阶段声明 2013——声明未被正文兑现，不作为本阶段下限");
+        assertEquals("13岁", blueprint.getStageEndAge(), "年龄同款：以实际锚点 12 岁为下限");
+    }
+
+    /** 无锚点时退回旧口径：用上一阶段声明兜底，避免失去倒退保护（老数据/摘要缺年份） */
+    @Test
+    void repairStageEnd_fallsBackToPreviousDeclarationWithoutAnchor() throws Exception {
+        StageBlueprintEntity blueprint = blueprint12(null, null);
+        StageBlueprintEntity previous = blueprint12("2013年", "15岁");
+
+        invokeRepairNoAnchor(blueprint, previous);
+
+        assertEquals("2013年", blueprint.getStageEndYear(), "无锚点时以上一阶段声明为下限，防倒退");
+        assertEquals("15岁", blueprint.getStageEndAge());
+    }
+
+    /** 钳制只抬不降：预算高于前值时仍按预算回填，前值不参与放大 */
+    @Test
+    void repairStageEnd_backfillsBudgetWhenAbovePrevious() throws Exception {
+        StageBlueprintEntity blueprint = blueprint12(null, null);
+        StageBlueprintEntity previous = blueprint12("2009年", "11岁");
+
+        invokeRepair(blueprint, previous);
+
+        assertEquals("2011年", blueprint.getStageEndYear(), "预算 2011 高于前值 2009，取预算");
+        assertEquals("13岁", blueprint.getStageEndAge(), "预算 13 高于前值 11，取预算");
+    }
+
+    /**
+     * 大纲含**快进段**：231-240 章用 10 章覆盖 2013→2016 三年，241-250 章从 2016 年起。
+     * 生产实测某阶段（5 章，跨过卷界）终点段取到 241-250 的 2016 年，
+     * 平移后回填成 2015 年——而正文实际只有 2012 年。回填值又成为下一阶段下限，
+     * 年份链就此单向棘轮。
+     */
+    private static final String FAST_FORWARD_GOAL =
+            "【卷二·测试】(131-240章)：221-230章 2012年冬至2013年（14岁） 初三与中考；"
+                    + "231-240章 2013年秋至2016年夏（14-17岁） 高中三年（快进段）；"
+                    + "【卷三·测试】(241-420章)：241-250章 2016年秋（17岁） 大一新生报到。";
+
+    private StageBlueprintEntity lastRepaired;
+
+    private void invokeRepairOn(String goal, int startChapter, int endChapter,
+                                StageBlueprintEntity previous, Integer anchorYear, Integer anchorAge)
+            throws Exception {
+        ChapterSummaryEntity anchor = ChapterSummaryEntity.builder().chapterNo(startChapter - 1).build();
+        if (anchorYear != null) {
+            anchor.setTimePoint(anchorYear + "年夏");
+        }
+        if (anchorAge != null) {
+            anchor.setConsistencyFacts(List.of(new ChapterSummaryEntity.ConsistencyFact(
+                    "NUMBER", "主角年龄", anchorAge + "岁", null, "正文原句")));
+        }
+        StageBlueprintEntity blueprint = StageBlueprintEntity.builder()
+                .stageNo(36).startChapter(startChapter).endChapter(endChapter).build();
+        var m = BuildStageBlueprintNode.class.getDeclaredMethod("repairStageEndFromOutline",
+                ArmoryCommandEntity.class, StoryContextEntity.class, List.class,
+                StageBlueprintEntity.class, StageBlueprintEntity.class);
+        m.setAccessible(true);
+        m.invoke(node, null, StoryContextEntity.builder().chapterGoal(goal).build(),
+                List.of(anchor), blueprint, previous);
+        this.lastRepaired = blueprint;
+    }
+
+    /** 窗口跨进快进段时不得继承下一段预算——按窗口内增量计价，而非终点段的段末 */
+    @Test
+    void repairStageEnd_doesNotInheritFastForwardSegmentBudget() throws Exception {
+        StageBlueprintEntity previous = StageBlueprintEntity.builder()
+                .stageNo(35).startChapter(233).endChapter(237).stageEndYear("2013年").stageEndAge("14岁").build();
+
+        invokeRepairOn(FAST_FORWARD_GOAL, 238, 242, previous, 2012, 12);
+
+        assertEquals("2013年", lastRepaired.getStageEndYear(),
+                "窗口 238-242 只按增量计 1 年（锚点 2012 + 1），不得把快进段末 2016 提前继承");
+    }
+
+    /** 终点段与起点段时间连续（次年接续）时，正常按增量推进 */
+    @Test
+    void repairStageEnd_inheritsContiguousSegmentBudget() throws Exception {
+        String goal = "【卷一·测试】(1-90章)：1-10章 2009年（11岁） 开局；"
+                + "11-20章 2010年（12岁） 六年级；";
+        invokeRepairOn(goal, 8, 12, null, 2009, 11);
+
+        assertEquals("2010年", lastRepaired.getStageEndYear(), "2010 ≤ 2009+1，属自然延续，增量 1 年照常计入");
+    }
+
+    // ===== 追进度字段接线（2026-10-26，此前是死代码）=====
+
+    /**
+     * 三个 {@code transient} pacing 字段此前**没有任何一处赋值**——注释写着"由 BuildStageBlueprintNode
+     * 计算、ChapterPlanSegmentPlanner 消费"，而消费端 {@code jumpRequired} 依赖它们，
+     * 于是恒为 false，设计好的"跳接段 fail-closed"从未生效。本测试锁定"必须被赋值"。
+     */
+    private StageBlueprintEntity invokeWirePacing(String goal, int start, int end, Integer anchorYear)
+            throws Exception {
+        ChapterSummaryEntity anchor = ChapterSummaryEntity.builder().chapterNo(start - 1).build();
+        if (anchorYear != null) {
+            anchor.setTimePoint(anchorYear + "年夏");
+        }
+        StageBlueprintEntity blueprint = StageBlueprintEntity.builder()
+                .stageNo(36).startChapter(start).endChapter(end).build();
+        var m = BuildStageBlueprintNode.class.getDeclaredMethod("wirePacingFields",
+                StoryContextEntity.class, List.class, StageBlueprintEntity.class);
+        m.setAccessible(true);
+        m.invoke(node, StoryContextEntity.builder().chapterGoal(goal).build(),
+                List.of(anchor), blueprint);
+        return blueprint;
+    }
+
+    /** 阶段未开始：整窗口都要走 → 滞后 = 窗口年数（快进段 3 年） */
+    @Test
+    void wirePacing_setsLagForUnstartedFastForwardStage() throws Exception {
+        StageBlueprintEntity bp = invokeWirePacing(FAST_FORWARD_GOAL, 231, 240, 2012);
+
+        assertEquals(2012, bp.getPacingAnchorYear(), "锚点取最新摘要年份");
+        assertEquals(2015, bp.getPacingBudgetStartYear(), "预算 = 锚点 + 窗口增量 3 年");
+        assertEquals(3, bp.getPacingLagYears(), "阶段未开始 → 滞后 = 整个窗口年数");
+    }
+
+    /**
+     * 短窗口：增量 1 年 → 滞后 1 年，**低于硬跳阈值 2**，不触发 fail-closed 强制跳接
+     * （那会整批终止），交由章后欠账回灌逐章追讨。字段仍写入，供观测与诊断。
+     */
+    @Test
+    void wirePacing_shortWindowDoesNotTriggerHardJump() throws Exception {
+        StageBlueprintEntity bp = invokeWirePacing(FAST_FORWARD_GOAL, 238, 242, 2012);
+
+        assertEquals(2013, bp.getPacingBudgetStartYear());
+        assertEquals(1, bp.getPacingLagYears(), "滞后 1 年记录在案");
+        assertTrue(bp.getPacingLagYears() < 2, "低于硬跳阈值 → 消费端 jumpRequired=false，不硬停批次");
+    }
+
+    /** 无年份锚时不臆造：全部字段保持 null，消费端自然休眠（与引入前行为一致） */
+    @Test
+    void wirePacing_skipsWithoutYearAnchor() throws Exception {
+        StageBlueprintEntity bp = invokeWirePacing(FAST_FORWARD_GOAL, 231, 240, null);
+
+        assertNull(bp.getPacingAnchorYear());
+        assertNull(bp.getPacingBudgetStartYear());
+        assertNull(bp.getPacingLagYears());
+    }
 }

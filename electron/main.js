@@ -121,9 +121,27 @@ if (!gotLock) {
   })
 
   app.whenReady().then(async () => {
+    // 启动闪屏：Electron 就绪立刻给反馈——后端要数秒才就绪，期间"零窗口死等"的体感最差。
+    // 窗口尺寸与 splash.html 内容匹配；失败分支必须关掉它再弹窗，否则弹窗压在闪屏后面
+    const splash = new BrowserWindow({
+      width: 460,
+      height: 300,
+      frame: false,
+      resizable: false,
+      minimizable: false,
+      maximizable: false,
+      alwaysOnTop: true,
+      skipTaskbar: true,
+      center: true,
+      show: true,
+      webPreferences: { contextIsolation: true, nodeIntegration: false }
+    })
+    splash.loadFile(path.join(__dirname, 'splash.html'))
+
     if (!DEV) {
       // 先探端口：已被占用（残留进程/其他应用）比启动失败更常见——给出明确提示而非傻等
       if (await isPortReady(PORT)) {
+        splash.close()
         dialog.showErrorBox('端口被占用', '端口 8080 已被占用。\n'
           + '可能是上次未完全退出的 Novel Factory（任务管理器结束 java 进程后重试）。')
         app.quit()
@@ -133,6 +151,7 @@ if (!gotLock) {
     }
     const ready = await waitBackendReady()
     if (!ready) {
+      splash.close()
       dialog.showErrorBox('后端启动失败', '60 秒内后端服务未就绪。\n请查看日志目录 data/log/ 排查。')
       app.quit()
       return
@@ -140,6 +159,7 @@ if (!gotLock) {
     const win = new BrowserWindow({
       width: 1400,
       height: 900,
+      show: false,                  // 先隐藏，首屏渲染完（ready-to-show）再亮——避免白屏一闪
       title: 'StartDrafts',
       icon: path.join(__dirname, 'icon-256x256.png'),   // PNG 直指：排除 ico 解析/缓存干扰；打包仍用 icon.ico
       autoHideMenuBar: true,         // 隐藏默认菜单栏（File/Edit 那排没用的）
@@ -153,6 +173,17 @@ if (!gotLock) {
     })
     // 页面 <title> 会覆盖窗口标题——拦截之，标题恒定为产品名
     win.on('page-title-updated', (e) => e.preventDefault())
+    // 首屏渲染完成才换屏：闪屏关、主窗亮，中间不露白
+    win.once('ready-to-show', () => {
+      win.show()
+      splash.close()
+    })
+    // 首屏加载失败（后端刚就绪就抖没了等极端情况）也不能永远停在闪屏：
+    // did-fail-load 兜底亮出主窗，让页面自己的重试逻辑接手
+    win.webContents.once('did-fail-load', () => {
+      win.show()
+      splash.close()
+    })
     win.loadURL(APP_ORIGIN)
     // 主窗口只允许停留在本机 UI：XSS 一旦把窗口导航到外部站点，那个页面同样持有 preload；
     // 外部链接改交系统浏览器打开

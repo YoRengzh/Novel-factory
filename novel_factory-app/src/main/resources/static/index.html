@@ -444,7 +444,15 @@
                                 <label for="llm_baseUrl" data-page-node-id="EUMPpI57BrjHvKp5FetCky">Base URL（接口地址）</label>
                                 <input type="text" id="llm_baseUrl" placeholder="https://dashscope.aliyuncs.com/compatible-mode" autocomplete="off" data-page-node-id="Y4pKmSBIqmyJIeEOcgzNtA">
                             </div>
-                            <div class="form-group full-width" data-page-node-id="z6SAfw3qKuzZEfEVFasqww">
+                            <div class="form-group" data-page-node-id="F3AWguuOGKwqoUr58Qsssx">
+                                <label for="llm_protocol" data-page-node-id="AqK3LlmProtocolSelect01">接口协议（手动模式）</label>
+                                <select id="llm_protocol" data-page-node-id="AqK3LlmProtocolSelect02">
+                                    <option value="openai">OpenAI（Chat Completions）</option>
+                                    <option value="anthropic">Anthropic（Messages）</option>
+                                    <option value="responses">OpenAI Responses</option>
+                                </select>
+                            </div>
+                            <div class="form-group" data-page-node-id="z6SAfw3qKuzZEfEVFasqww">
                                 <label for="llm_apiKey" data-page-node-id="wH42ezUEAHcZjGgm4JArCn">API Key / Token</label>
                                 <input type="password" id="llm_apiKey" placeholder="留空则保留现有 Key" autocomplete="new-password" data-page-node-id="nAqph92MKDzXRalpIhex2c">
                             </div>
@@ -466,13 +474,15 @@
                     </form>
                 </div>
 
-                <!-- 中转站管理：OpenAI 兼容供应商注册表，保存后可在上方「中转站」下拉选用 -->
+                <!-- 中转站管理：多协议供应商注册表，保存后可在上方「中转站」下拉选用 -->
                 <div class="content-card" id="provider-card">
                     <div class="section-label">PROVIDERS</div>
                     <h2 class="section-title">中转站管理</h2>
                     <p class="settings-hint">
-                        在这里登记多个 OpenAI 兼容供应商（中转站），保存后到上方「模型接入」的中转站下拉选用；
+                        在这里登记多个供应商（中转站），保存后到上方「模型接入」的中转站下拉选用；
                         「获取模型」一键拉取该站可用模型名，全局/场景/兜底的模型输入框都会变成可选的下拉。
+                        按站点选择接口协议：OpenAI 兼容站选 OpenAI，Claude 官方或 Anthropic 协议中转选 Anthropic，
+                        gpt-5 系 Responses 中转选 OpenAI Responses。
                         地址带不带 <b>/v1</b> 都可以，程序自动适配。密钥只保存在本机，界面只显示掩码。
                     </p>
                     <div class="form-grid">
@@ -483,6 +493,14 @@
                         <div class="form-group full-width">
                             <label for="provider_baseUrl">Base URL</label>
                             <input type="text" id="provider_baseUrl" placeholder="https://api.example.com（带不带 /v1 均可）" autocomplete="off">
+                        </div>
+                        <div class="form-group">
+                            <label for="provider_protocol">接口协议</label>
+                            <select id="provider_protocol">
+                                <option value="openai">OpenAI（Chat Completions）</option>
+                                <option value="anthropic">Anthropic（Messages）</option>
+                                <option value="responses">OpenAI Responses</option>
+                            </select>
                         </div>
                         <div class="form-group full-width">
                             <label for="provider_apiKey">API Key（编辑已有条目时留空 = 保留现有）</label>

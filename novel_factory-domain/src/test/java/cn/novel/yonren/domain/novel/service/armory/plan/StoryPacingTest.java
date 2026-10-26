@@ -289,4 +289,81 @@ class StoryPacingTest {
         return new OutlineSegmentParser.OutlineSegment(start, end, 1, timeLabel,
                 yearStart, yearEnd, ageStart, ageEnd, "里程碑");
     }
+
+    // ===== 阶段窗口预算 pacedBudget（2026-10-26，治年份单向棘轮）=====
+
+    /**
+     * 夹具大纲：231-240 章是**快进段**（10 章覆盖 2013→2016 三年），241-250 章从 2016 起。
+     * 旧实现取"终点章所在段的段末"，5 章的小阶段只要尾章落进快进段就被抬到 2016，
+     * 而正文实际只有 2012 年；该值又成为下一阶段的单调下限，年份链再也回不到正文实际时间。
+     */
+    private static final String FAST_FORWARD_GOAL =
+            "【卷一·测试】(1-240章)：221-230章 2012年冬至2013年（14岁） 初三；"
+                    + "231-240章 2013年秋至2016年夏（14-17岁） 高中三年快进；"
+                    + "241-250章 2016年秋（17岁） 大一报到。";
+
+    private static OutlineSegmentParser.Outline ffOutline() {
+        return OutlineSegmentParser.parse(FAST_FORWARD_GOAL);
+    }
+
+    /** 跨进快进段不提前继承段末：短窗口只按窗口内增量计 1 年 */
+    @Test
+    void pacedBudget_doesNotInheritFastForwardSegmentEnd() {
+        // 窗口 238-242：大纲从 2015（231-240 段内插值）走到 2016（241-250 段）= 增量 1 年
+        assertEquals(2013, StoryPacing.pacedBudget(ffOutline(), 238, 242, 2012, false),
+                "只计窗口内增量 1 年，不得把快进段末 2016 记进本阶段");
+    }
+
+    /** 完整覆盖快进段的窗口仍拿到完整跳跃——快进授权不受影响 */
+    @Test
+    void pacedBudget_fullFastForwardWindowGetsFullJump() {
+        // 窗口 231-240：大纲从 2013 走到 2016 = 增量 3 年
+        assertEquals(2015, StoryPacing.pacedBudget(ffOutline(), 231, 240, 2012, false),
+                "完整覆盖快进段 → 增量 3 年照常放行");
+    }
+
+    /** 预算无上限：大纲给十年跨度就放行十年（本方法只拦提前继承，不拦真实推进） */
+    @Test
+    void pacedBudget_hasNoUpperCap() {
+        // 窗口 11-20 自身跨 2000→2010（十年）；锚点 2000 → 预算 2010，不设上限
+        String goal = "【卷一·测试】(1-20章)：1-10章 1995年（5岁） 开局；11-20章 2000年至2010年（10-20岁） 十年跨度。";
+        OutlineSegmentParser.Outline outline = OutlineSegmentParser.parse(goal);
+
+        assertEquals(2010, StoryPacing.pacedBudget(outline, 11, 20, 2000, false),
+                "十年跨度照常计入，预算不设上限");
+    }
+
+    /** 单一年份的段视为常数：窗口内不自然跨年 */
+    @Test
+    void pacedBudget_singleYearSegmentStaysFlat() {
+        String goal = "【卷一·测试】(1-20章)：1-10章 2005年（9岁） 开局；11-20章 2006年（10岁） 次年。";
+        OutlineSegmentParser.Outline outline = OutlineSegmentParser.parse(goal);
+
+        assertEquals(2005, StoryPacing.pacedBudget(outline, 1, 5, 2005, false));
+    }
+
+    /** 无锚点/无大纲时返回 null，调用方据此退回旧口径（不臆造） */
+    @Test
+    void pacedBudget_returnsNullWithoutAnchorOrOutline() {
+        assertNull(StoryPacing.pacedBudget(ffOutline(), 238, 242, null, false));
+        assertNull(StoryPacing.pacedBudget(null, 238, 242, 2012, false));
+        assertNull(StoryPacing.pacedBudget(ffOutline(), null, 242, 2012, false));
+    }
+
+    /** 年龄维度独立计价（生日在年内漂移，与年份不同源） */
+    @Test
+    void pacedBudget_ageDimension() {
+        // 238-242：年龄从 16（231-240 段内插值）走到 17 = 增量 1 岁
+        assertEquals(13, StoryPacing.pacedBudget(ffOutline(), 238, 242, 12, true));
+    }
+
+    /** outlineTimeAt：段内按章号线性插值，段首=起始值、段末=结束值 */
+    @Test
+    void outlineTimeAt_interpolatesWithinSegment() {
+        OutlineSegmentParser.Outline outline = ffOutline();
+
+        assertEquals(2013, StoryPacing.outlineTimeAt(outline, 231, false), "段首");
+        assertEquals(2014, StoryPacing.outlineTimeAt(outline, 235, false), "段内 1/3 处");
+        assertEquals(2016, StoryPacing.outlineTimeAt(outline, 240, false), "段末");
+    }
 }

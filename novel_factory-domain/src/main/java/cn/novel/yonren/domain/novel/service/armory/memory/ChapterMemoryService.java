@@ -75,6 +75,13 @@ public class ChapterMemoryService {
     /** 记忆子块间分隔符（与 PromptBudgetGuard 的块间分隔符同口径） */
     private static final String SECTION_SEPARATOR = "\n\n";
 
+    /**
+     * 时间欠账条目的来源前缀（与 {@code ChapterWorker#TIME_ARREARS_PREFIX} 同值）：
+     * 偏差警示渲染层据此把时间欠账与账本冲突分开导语。字符串常量而非引用，
+     * 避免跨服务形成编译期耦合——两处同值的约束由测试锁定。
+     */
+    static final String TIME_ARREARS_CONFLICT_PREFIX = "【时间欠账】";
+
     private final ForeshadowPriorityService priorityService;
 
     public ChapterMemoryService(ForeshadowPriorityService priorityService) {
@@ -427,10 +434,21 @@ public class ChapterMemoryService {
             // 时序锚 v2境界式）：年龄/时间升级为锁定值——禁止擅自增减，
             // 唯一合法推进通道是计划声明的 timeAdvance（与【主角境界锁定】同一数据流）。
             // 45 章时间冻结（2002 年 7 月走了 2-3 周）的根因就是旧锚只"描述推算"、无推进通道
-            String locked = timeAnchor + "\n【时间锁】年龄/故事时间以上述值为准，禁止在正文中擅自增长、倒退或跳跃；"
+            //
+            // **2026-10-26 措辞由「许可」改为「义务」**：原文案是"本章计划允许推进至 X"
+            // （缺声明时更硬："本章无推进额度，故事时间保持不变"）。实测某段 5 章：
+            // 计划合计推进 59 天，正文只走 16 天（缺口 73%）——写手读完四个关键事件，
+            // 发现一个下午装得下，就没有任何理由加时间过渡。**许可可以不行使，义务不行**。
+            // 现在写成"必须到达"，并明确"不得停在上一章同日"，把推进从可选项变成交付项。
+            String locked = timeAnchor + "\n【时间锁】年龄/故事时间以上述值为准，禁止在正文中擅自增长、倒退或跳跃。\n"
                     + (StringUtils.isNotBlank(timeAdvance)
-                            ? "本章计划允许推进至：" + timeAdvance + "（唯一合法推进通道，须有场景交代过夜/生日/学期跨越）。"
-                            : "本章无推进额度，故事时间保持不变。");
+                            ? "【本章时间目标·必须到达】本章结束时，故事时间**必须**推进到：" + timeAdvance
+                                    + "。若本章事件装不下这段时间，**必须在章末写时间过渡**"
+                                    + "（过夜、赶路、开学、节气更替等）交代流逝，不得停在上一章同日、不得省略时间推进；"
+                                    + "这是时间推进的唯一合法通道，也是本章的交付项而非可选项。"
+                            : "【本章时间目标·必须到达】本章计划未声明推进额度，故事时间应保持在上述时点之后"
+                                    + "（同日内推进即可），但**不得倒退**；若剧情需要跨越更长时间，"
+                                    + "必须在章末写明过渡，不能无声跳过。");
             blocks.add(section("时序锚", MEMORY_PRIORITY_REALM_LOCK, false, new StringBuilder(locked)));
         }
 
@@ -482,12 +500,36 @@ public class ChapterMemoryService {
         renderForeshadowing(foreshadow, ordered);
         blocks.add(section(FORESHADOW_BLOCK_LABEL, MEMORY_PRIORITY_LEDGER, true, foreshadow));
 
-        // 上一章一致性偏差警示（软校验结果回灌，本章以账本为准修正）
+        // 上一章一致性偏差警示（软校验结果回灌，本章以账本为准修正）。
+        // 时间欠账条目（带【时间欠账】前缀，ChapterWorker 注入）单独成组：它的修正是
+        // "推进到目标时间"而非"以账本为准"——两种语义混在同一导语下会互相打架。
         StringBuilder conflicts = new StringBuilder();
         if (pendingConflicts != null && !pendingConflicts.isEmpty()) {
-            conflicts.append("【上章偏差警示】上一章正文存在与账本冲突的描述，本章必须以账本为准，不得延续错误：\n");
+            List<String> ledgerConflicts = new ArrayList<>();
+            List<String> timeArrears = new ArrayList<>();
             for (String conflict : pendingConflicts) {
-                conflicts.append("- ").append(conflict).append("\n");
+                if (conflict == null) {
+                    continue;
+                }
+                if (conflict.startsWith(TIME_ARREARS_CONFLICT_PREFIX)) {
+                    timeArrears.add(conflict.substring(TIME_ARREARS_CONFLICT_PREFIX.length()));
+                } else {
+                    ledgerConflicts.add(conflict);
+                }
+            }
+            if (!ledgerConflicts.isEmpty()) {
+                conflicts.append("【上章偏差警示】上一章正文存在与账本冲突的描述，本章必须以账本为准，不得延续错误：\n");
+                for (String conflict : ledgerConflicts) {
+                    conflicts.append("- ").append(conflict).append("\n");
+                }
+            }
+            if (!timeArrears.isEmpty()) {
+                conflicts.append("【时间目标未达成】上一章未推进到计划要求的时间，本章**必须补足**：\n");
+                for (String arrears : timeArrears) {
+                    conflicts.append("- ").append(arrears).append("\n");
+                }
+                conflicts.append("时间的基准是【时序锚】与本章时间目标（不是账本）；补足方式是写时间过渡，"
+                        + "不是改账本或改时间声明。\n");
             }
         }
         blocks.add(section("偏差警示", MEMORY_PRIORITY_RECENT, true, conflicts));

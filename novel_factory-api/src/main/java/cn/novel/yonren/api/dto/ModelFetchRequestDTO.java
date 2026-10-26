@@ -15,4 +15,6 @@ public class ModelFetchRequestDTO {
     private String baseUrl;
     /** 显式 API Key；null 时回退 providerId 对应密钥 */
     private String apiKey;
+    /** 接口协议（openai/anthropic/responses）；null 时回退 providerId 对应协议，最终缺省 openai */
+    private String protocol;
 }

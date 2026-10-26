@@ -18,6 +18,9 @@ story:
     ai-api:
       base-url: https://dashscope.aliyuncs.com/compatible-mode
       api-key: sk-替换成你的密钥      # ← 三项必改里唯一需要动的一行
+      # 接口协议（可选）：openai（默认）/ anthropic / responses——
+      # 换 Claude 官方或 Anthropic 协议中转时填 anthropic，gpt-5 系 Responses 中转填 responses
+      # protocol: openai
 
     # ↓↓↓ 以下各项默认值与 novel-generation.yml 一致，需要时去掉注释启用 ↓↓↓
 

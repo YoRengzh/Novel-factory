@@ -4,6 +4,7 @@ import cn.novel.yonren.api.dto.LlmConfigDTO;
 import cn.novel.yonren.api.dto.LlmConfigSaveRequestDTO;
 import cn.novel.yonren.domain.novel.model.valobj.StoryVO;
 import cn.novel.yonren.domain.novel.model.valobj.properties.StoryProperties;
+import cn.novel.yonren.types.enums.LlmProtocol;
 import cn.novel.yonren.types.enums.ModelScene;
 import com.alibaba.fastjson2.JSON;
 import jakarta.annotation.PostConstruct;
@@ -41,6 +42,11 @@ public class LlmRuntimeConfig {
     public static class Overlay {
         private String authMode;
         private String baseUrl;
+        /**
+         * 手动模式接口协议覆盖（LlmProtocol.code：openai/anthropic/responses）：
+         * null=不覆盖（回退 yml 静态 ai-api.protocol）；全局选中中转站时以该站协议优先
+         */
+        private String protocol;
         private String apiKey;
         private String model;
         private Long maxTokens;
@@ -93,7 +99,8 @@ public class LlmRuntimeConfig {
 
         public boolean isEmpty() {
             return !AUTH_CHATGPT.equals(authMode)
-                    && StringUtils.isBlank(baseUrl) && StringUtils.isBlank(apiKey)
+                    && StringUtils.isBlank(baseUrl) && StringUtils.isBlank(protocol)
+                    && StringUtils.isBlank(apiKey)
                     && StringUtils.isBlank(model) && maxTokens == null
                     && (scenes == null || scenes.isEmpty())
                     && fallback == null
@@ -153,7 +160,14 @@ public class LlmRuntimeConfig {
         private String name;
         /** OpenAI 兼容 Base URL（可带可不带 /v1，取模型列表时自动适配路径） */
         private String baseUrl;
+        /** 接口协议（LlmProtocol.code）：null/blank = openai；决定网关走哪套传输实现 */
+        private String protocol;
         private String apiKey;
+        /**
+         * 最近一次「获取模型」拉到的模型名（服务端缓存）：场景矩阵据此反查
+         * 「这个模型在哪家中转站可用」。前端保存注册表不带它 → 合并时沿用旧值
+         */
+        private List<String> models;
     }
 
     private final Path file;
@@ -215,6 +229,14 @@ public class LlmRuntimeConfig {
             next.setBaseUrl(request.getBaseUrl().trim());
         } else {
             next.setBaseUrl(current.getBaseUrl());
+        }
+        // 协议覆盖：null=保持现状（其他保存请求不带该字段，不误伤）；空串=清除回 openai；
+        // 值本身交给 LlmProtocol.parse 校验（未知值 400 给前端，不静默落到错误协议）
+        if (request.getProtocol() != null) {
+            String trimmed = StringUtils.trimToNull(request.getProtocol());
+            next.setProtocol(trimmed == null ? null : LlmProtocol.parse(trimmed).getCode());
+        } else {
+            next.setProtocol(current.getProtocol());
         }
         if (StringUtils.isNotBlank(request.getApiKey())) {
             next.setApiKey(request.getApiKey().trim());
@@ -396,14 +418,27 @@ public class LlmRuntimeConfig {
                 log.warn("中转站 {} 缺少 Base URL，已丢弃", id);
                 continue;
             }
+            // 协议未知 = 丢弃该条而非炸整次保存：注册表是整表提交，一条坏数据殃及
+            // 全表会让用户其他字段的修改一起丢失（对比：全局 protocol 覆盖是单字段输入，
+            // 抛异常给出精确反馈才合理）。丢弃语义与"id 不合法已丢弃"同款
+            if (in.getProtocol() != null && LlmProtocol.parseOrNull(in.getProtocol().trim()) == null) {
+                log.warn("中转站 {} 的协议值不合法（{}，仅 openai/anthropic/responses），已丢弃该条",
+                        id, in.getProtocol());
+                continue;
+            }
             ProviderOverlay prev = current.getProviders() == null ? null : current.getProviders().get(id);
             ProviderOverlay po = new ProviderOverlay();
             po.setName(StringUtils.trimToNull(in.getName()));
             po.setBaseUrl(in.getBaseUrl().trim());
+            po.setProtocol(in.getProtocol() == null ? null
+                    : LlmProtocol.parse(in.getProtocol().trim()).getCode());
             // 密钥不回显：null=沿用该 id 现有密钥，空串=显式清除
             po.setApiKey(in.getApiKey() == null
                     ? (prev == null ? null : prev.getApiKey())
                     : StringUtils.trimToNull(in.getApiKey()));
+            // 模型缓存与密钥同款保留语义：前端提交不带 models，丢掉会让场景矩阵的
+            // 「站名·模型」标注与下拉选项在每次保存注册表后消失，还得重新获取
+            po.setModels(prev == null ? null : prev.getModels());
             merged.put(id, po);
         }
         return merged.isEmpty() ? null : merged;
@@ -445,6 +480,71 @@ public class LlmRuntimeConfig {
             return null;
         }
         return o.getProviders().get(id.trim());
+    }
+
+    /**
+     * 更新中转站的模型名缓存（「获取模型」成功后由 controller 回写）并落盘。
+     * 只认已存在的 id——拉取端点在调用前已用 providerOf 校验过，此处防御静默注册
+     */
+    public synchronized void cacheProviderModels(String id, List<String> models) {
+        Overlay o = overlay;
+        if (o == null || o.getProviders() == null || StringUtils.isBlank(id)
+                || !o.getProviders().containsKey(id) || models == null || models.isEmpty()) {
+            return;
+        }
+        Overlay next = cloneOverlay(o);
+        ProviderOverlay po = next.getProviders().get(id);
+        po.setModels(new ArrayList<>(models));
+        overlay = next;
+        persist(next);
+    }
+
+    /** 浅拷贝覆盖（providers 条目逐个复制，杜绝 cache 与并发 save 共享可变条目） */
+    private static Overlay cloneOverlay(Overlay source) {
+        Overlay copy = new Overlay();
+        copy.setAuthMode(source.getAuthMode());
+        copy.setBaseUrl(source.getBaseUrl());
+        copy.setProtocol(source.getProtocol());
+        copy.setApiKey(source.getApiKey());
+        copy.setModel(source.getModel());
+        copy.setMaxTokens(source.getMaxTokens());
+        copy.setSceneApiEnabled(source.getSceneApiEnabled());
+        copy.setEmbedBaseUrl(source.getEmbedBaseUrl());
+        copy.setEmbedApiKey(source.getEmbedApiKey());
+        copy.setEmbedModel(source.getEmbedModel());
+        copy.setEmbedDimensions(source.getEmbedDimensions());
+        copy.setReferenceMode(source.getReferenceMode());
+        copy.setToggles(source.getToggles() == null ? null : new LinkedHashMap<>(source.getToggles()));
+        copy.setScenes(source.getScenes() == null ? null
+                : source.getScenes().entrySet().stream()
+                        .collect(java.util.stream.Collectors.toMap(Map.Entry::getKey, Map.Entry::getValue,
+                                (a, b) -> a, LinkedHashMap::new)));
+        if (source.getFallback() != null) {
+            SceneOverlay fb = new SceneOverlay();
+            fb.setModel(source.getFallback().getModel());
+            fb.setMaxTokens(source.getFallback().getMaxTokens());
+            fb.setTemperature(source.getFallback().getTemperature());
+            fb.setBaseUrl(source.getFallback().getBaseUrl());
+            fb.setApiKey(source.getFallback().getApiKey());
+            copy.setFallback(fb);
+        }
+        if (source.getProviders() != null) {
+            Map<String, ProviderOverlay> providers = new LinkedHashMap<>();
+            for (Map.Entry<String, ProviderOverlay> e : source.getProviders().entrySet()) {
+                ProviderOverlay p = new ProviderOverlay();
+                if (e.getValue() != null) {
+                    p.setName(e.getValue().getName());
+                    p.setBaseUrl(e.getValue().getBaseUrl());
+                    p.setProtocol(e.getValue().getProtocol());
+                    p.setApiKey(e.getValue().getApiKey());
+                    p.setModels(e.getValue().getModels());
+                }
+                providers.put(e.getKey(), p);
+            }
+            copy.setProviders(providers);
+        }
+        copy.setProviderId(source.getProviderId());
+        return copy;
     }
 
     /**
@@ -547,9 +647,9 @@ public class LlmRuntimeConfig {
     }
 
     /**
-     * apiKey 覆盖落到 module（baseUrl + apiKey）；无覆盖原样返回。
-     * 字段优先级：全局中转站 &gt; 手动覆盖（baseUrl/apiKey 字段）&gt; yml 静态——
-     * 选中中转站后地址密钥立即跟着走；手动字段保留为"中转站没配某字段时的补位"高级逃生口
+     * apiKey 覆盖落到 module（baseUrl + apiKey + protocol）；无覆盖原样返回。
+     * 字段优先级：全局中转站 &gt; 手动覆盖（baseUrl/protocol/apiKey 字段）&gt; yml 静态——
+     * 选中中转站后地址密钥协议立即跟着走；手动字段保留为"中转站没配某字段时的补位"高级逃生口
      */
     public StoryVO.Module applyApi(StoryVO.Module module) {
         Overlay o = overlay;
@@ -557,7 +657,8 @@ public class LlmRuntimeConfig {
         boolean providerHasApi = provider != null
                 && (StringUtils.isNotBlank(provider.getBaseUrl()) || StringUtils.isNotBlank(provider.getApiKey()));
         if (module == null || o == null
-                || (!providerHasApi && StringUtils.isBlank(o.getBaseUrl()) && StringUtils.isBlank(o.getApiKey()))) {
+                || (!providerHasApi && StringUtils.isBlank(o.getBaseUrl()) && StringUtils.isBlank(o.getApiKey())
+                    && StringUtils.isBlank(o.getProtocol()))) {
             return module;
         }
         StoryVO.Module.AiApi original = module.getAiApi();
@@ -566,6 +667,8 @@ public class LlmRuntimeConfig {
                 original == null ? null : original.getBaseUrl()));
         aiApi.setApiKey(firstNonBlank(provider == null ? null : provider.getApiKey(), o.getApiKey(),
                 original == null ? null : original.getApiKey()));
+        aiApi.setProtocol(firstNonBlank(provider == null ? null : provider.getProtocol(), o.getProtocol(),
+                original == null ? null : original.getProtocol()));
         if (original != null) {
             aiApi.setCompletionsPath(original.getCompletionsPath());
             aiApi.setZeroDataRetention(original.getZeroDataRetention());
@@ -663,10 +766,7 @@ public class LlmRuntimeConfig {
         // 静态兜底恰好与某场景同名属正常配置（ModelFallbackChain 本就按场景判同名）。
         String resolvedModel = overrideModel;
         boolean droppedSameName = false;
-        if (overrideModel != null
-                && overrideModel.trim().equals(StringUtils.trimToEmpty(o.getModel()))
-                && staticFallback != null && StringUtils.isNotBlank(staticFallback.getModel())
-                && !staticFallback.getModel().equals(overrideModel)) {
+        if (sameNameFallbackDropped(fb, staticFallback)) {
             droppedSameName = true;
             resolvedModel = null;
             if (!sameNameFallbackWarned) {
@@ -780,6 +880,7 @@ public class LlmRuntimeConfig {
         }
         dto.setConfigured(true);
         dto.setBaseUrl(o.getBaseUrl());
+        dto.setProtocol(o.getProtocol());
         dto.setModel(o.getModel());
         dto.setMaxTokens(o.getMaxTokens());
         dto.setProviderId(StringUtils.trimToNull(o.getProviderId()));
@@ -790,10 +891,13 @@ public class LlmRuntimeConfig {
                 pv.setId(entry.getKey());
                 pv.setName(entry.getValue() == null ? entry.getKey() : entry.getValue().getName());
                 pv.setBaseUrl(entry.getValue() == null ? null : entry.getValue().getBaseUrl());
+                pv.setProtocol(entry.getValue() == null ? null : entry.getValue().getProtocol());
                 if (entry.getValue() != null && StringUtils.isNotBlank(entry.getValue().getApiKey())) {
                     pv.setHasKey(true);
                     pv.setApiKeyMasked(mask(entry.getValue().getApiKey()));
                 }
+                pv.setModels(entry.getValue() == null || entry.getValue().getModels() == null
+                        ? List.of() : entry.getValue().getModels());
                 providers.add(pv);
             }
             dto.setProviders(providers);
@@ -900,11 +1004,31 @@ public class LlmRuntimeConfig {
                 view.setOverrideApiKeyMasked(mask(fb.getApiKey()));
             }
         }
-        // 生效值：运行时覆盖 > yml 静态
-        String effective = fb != null && StringUtils.isNotBlank(fb.getModel())
-                ? fb.getModel() : (staticFallback == null ? null : staticFallback.getModel());
+        // 生效值：运行时覆盖 > yml 静态；与 applyFallback 同口径——同名兜底会被守卫作废，
+        // 这里必须显示真实生效的模型，否则设置页显示"已覆盖 glm-5.3-flash"而实际跑的是静态兜底
+        String effective = sameNameFallbackDropped(fb, staticFallback)
+                ? (staticFallback == null ? null : staticFallback.getModel())
+                : fb != null && StringUtils.isNotBlank(fb.getModel())
+                        ? fb.getModel() : (staticFallback == null ? null : staticFallback.getModel());
         view.setEffectiveModel(effective);
         return view;
+    }
+
+    /**
+     * 运行时兜底是否为"与全局主模型同名"的无效配置（applyFallback 与 toFallbackView 共用）。
+     *
+     * <p>同名会让 ModelFallbackChain 直接返回单元素链，烧穿保护失去降级目标；同时静态兜底
+     * 存在且是异族模型时才有回落价值，否则不如保持原样（避免把兜底清空）。
+     */
+    private boolean sameNameFallbackDropped(SceneOverlay fb, StoryVO.Module.ChatModel staticFallback) {
+        if (fb == null || StringUtils.isBlank(fb.getModel())) {
+            return false;
+        }
+        Overlay o = overlay;
+        return o != null
+                && fb.getModel().trim().equals(StringUtils.trimToEmpty(o.getModel()))
+                && staticFallback != null && StringUtils.isNotBlank(staticFallback.getModel())
+                && !staticFallback.getModel().equals(fb.getModel());
     }
 
     private static LlmConfigDTO.ModelView toModelView(StoryVO.Module.ChatModel chatModel) {

@@ -33,7 +33,7 @@ domain 通过端口接口对外，infrastructure 提供实现：
 | `adapter/repository/IStoryRepository` | `StoryRepository`（文件仓库） |
 | `adapter/repository/VectorStore` | `QdrantVectorStore` |
 
-技术栈：Java 17、Spring Boot 3.4.3、Spring AI 1.0（OpenAI 兼容协议）、Qdrant java client 1.14.1（gRPC）。
+技术栈：Java 17、Spring Boot 3.4.3、Spring AI 1.0（OpenAI Chat Completions / Anthropic Messages / OpenAI Responses 三协议，网关按 ai-api.protocol 分派）、Qdrant java client 1.14.1（gRPC）。
 
 trigger 内部按角色分包，控制器只做「解析 → 调用 → 返回」：
 

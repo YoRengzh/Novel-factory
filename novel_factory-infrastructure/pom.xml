@@ -27,6 +27,11 @@
             <groupId>org.springframework.ai</groupId>
             <artifactId>spring-ai-openai</artifactId>
         </dependency>
+        <!-- Anthropic Messages 协议（/v1/messages）：Claude 官方与 anthropic 协议中转站 -->
+        <dependency>
+            <groupId>org.springframework.ai</groupId>
+            <artifactId>spring-ai-anthropic</artifactId>
+        </dependency>
 
         <!-- 向量库客户端（Qdrant gRPC；client POM 的 grpc 依赖为 runtime 作用域，编译期需显式引入） -->
         <dependency>
