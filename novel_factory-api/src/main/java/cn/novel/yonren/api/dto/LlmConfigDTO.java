@@ -69,6 +69,8 @@ public class LlmConfigDTO {
         private Long overrideMaxTokens;
         /** 运行时覆盖采样温度（未覆盖为 null；不回显则用户看不见也清不掉已存的覆盖） */
         private Double overrideTemperature;
+        /** 运行时覆盖的中转站引用（未覆盖为 null）：前端据此回显选中的站 */
+        private String overrideProviderId;
         /** 运行时覆盖接口地址（未覆盖为 null） */
         private String overrideBaseUrl;
         /** 运行时覆盖是否已配置 apiKey */
@@ -183,6 +185,8 @@ public class LlmConfigDTO {
         private Long overrideMaxTokens;
         /** 运行时覆盖的采样温度（未覆盖为 null） */
         private Double overrideTemperature;
+        /** 运行时覆盖的场景级中转站引用（未覆盖为 null）：前端据此回显选中的站 */
+        private String overrideProviderId;
         /** 运行时覆盖的场景级接口地址（未覆盖为 null；密钥类字段只回掩码） */
         private String overrideBaseUrl;
         /** 该场景是否已覆盖 apiKey（原文不回传） */

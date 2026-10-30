@@ -79,14 +79,16 @@ public class LlmConfigSaveRequestDTO {
         private Long maxTokens;
         /** 场景采样温度覆盖；null=清除该字段覆盖 */
         private Double temperature;
-        /** 场景级接口地址覆盖；null/空=清除该字段覆盖（回退场景 yml / 全局地址） */
+        /** 场景级中转站引用（推荐）：该站的地址/密钥/协议接管本场景；null/空=不引用 */
+        private String providerId;
+        /** 场景级接口地址覆盖（高级逃生口）；null/空=清除该字段覆盖（回退场景 yml / 全局地址） */
         private String baseUrl;
         /** 场景级新密钥；null=保留该场景现有密钥覆盖（密钥不回显，避免被静默清空），空串=显式清除 */
         private String apiKey;
 
         public boolean isEmpty() {
             return model == null && maxTokens == null && temperature == null
-                    && baseUrl == null && apiKey == null;
+                    && providerId == null && baseUrl == null && apiKey == null;
         }
     }
 
@@ -115,6 +117,13 @@ public class LlmConfigSaveRequestDTO {
 
     /** true=仅清空中转站注册表（不动其它覆盖）；若全局 providerId 指向被清掉的条目则一并清除引用 */
     private boolean resetProviders;
+
+    /**
+     * 删除站点时定点解除引用（全局/场景/兜底）：只清 providerId 与其旧地址密钥，
+     * 保留模型、Tokens、温度等其它覆盖。用于替代"删除站点时整表重提场景覆盖"，
+     * 避免误伤同表里其它场景的配置。null=不做定点解除。
+     */
+    private String detachProviderId;
 
     /** 中转站条目：name 仅供前端展示，baseUrl 为 OpenAI 兼容地址（不带 /v1 也行，取模型时自动适配） */
     @Data

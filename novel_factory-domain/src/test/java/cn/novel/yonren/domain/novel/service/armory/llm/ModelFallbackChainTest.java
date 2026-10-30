@@ -97,13 +97,46 @@ class ModelFallbackChainTest {
     }
 
     @Test
-    @DisplayName("兜底与主模型同名时跳过：换了个名字还是同一个模型，没有任何意义")
+    @DisplayName("兜底与主模型同名且同端点时跳过：换了个名字还是同一个模型，没有任何意义")
     void sameAsPrimaryIsSkipped() {
+        StoryVO.Module.ChatModel fb = fallback("qwen3.8-flash");
+        // fallback() 默认不带地址密钥 = 继承主模型端点（mergeWithPrimary 语义）
         List<StoryVO.Module.ChatModel> chain = ModelFallbackChain.build(
-                module(fallback("qwen3.8-flash")),
+                module(fb),
                 ModelScene.CHAPTER_CONTENT, primary("qwen3.8-flash"));
 
-        assertEquals(1, chain.size(), "同名兜底不得进链");
+        assertEquals(1, chain.size(), "同名同端点兜底不得进链");
+    }
+
+    @Test
+    @DisplayName("同名异站仍进入降级链：换供应商不是同一模型重复调用")
+    void sameModelDifferentProviderIsKept() {
+        StoryVO.Module.ChatModel fb = fallback("qwen3.8-flash");
+        fb.setBaseUrl("https://relay.example.com");
+        fb.setApiKey("sk-relay");
+        fb.setProtocol("anthropic");
+
+        List<StoryVO.Module.ChatModel> chain = ModelFallbackChain.build(
+                module(fb), ModelScene.CHAPTER_CONTENT, primary("qwen3.8-flash"));
+
+        assertEquals(2, chain.size(), "同名异站必须保留兜底");
+        assertEquals("https://relay.example.com", chain.get(1).getBaseUrl());
+        assertEquals("anthropic", chain.get(1).getProtocol());
+    }
+
+    @Test
+    @DisplayName("同名同地址但不同密钥仍进入降级链（账号额度/限流可独立）")
+    void sameModelSameUrlDifferentKeyIsKept() {
+        StoryVO.Module.ChatModel primary = primary("qwen3.8-flash");
+        StoryVO.Module.ChatModel fb = fallback("qwen3.8-flash");
+        fb.setBaseUrl(primary.getBaseUrl());
+        fb.setApiKey("sk-other-account");
+
+        List<StoryVO.Module.ChatModel> chain = ModelFallbackChain.build(
+                module(fb), ModelScene.CHAPTER_CONTENT, primary);
+
+        assertEquals(2, chain.size());
+        assertEquals("sk-other-account", chain.get(1).getApiKey());
     }
 
     @Test

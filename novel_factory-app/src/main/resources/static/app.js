@@ -1724,6 +1724,8 @@
     const sceneApiHint = document.getElementById('scene-api-hint');
     // 中转站（供应商注册表）：全局下拉选用 + 独立管理卡
     const inputProvider = document.getElementById('llm_provider');
+    const inputManualToggle = document.getElementById('llm_manual_toggle');
+    const manualPanel = document.getElementById('llm-manual-panel');
     const providerListDiv = document.getElementById('provider-list');
     const providerStatusDiv = document.getElementById('provider-status');
     const inputProviderName = document.getElementById('provider_name');
@@ -1759,15 +1761,40 @@
                 (providerModelOwners[key] = providerModelOwners[key] || []).push(p.name || p.id);
             });
         });
-        // 全局下拉：手动 + 各中转站（后端 providerId 为 null 时显示手动）；
+        // 全局下拉：只列中转站（手动地址收进折叠区，选中"手动模式"开关时才用）；
         // 非 openai 协议的站在名称上带标记，避免同站名不同协议时选错
-        inputProvider.innerHTML = '<option value="">手动（使用下方地址密钥）</option>'
+        inputProvider.innerHTML = (savedProviders.length
+            ? ''
+            : '<option value="">— 请先在中转站管理里添加 —</option>')
             + savedProviders.map(function (p) {
                 const tag = p.protocol && p.protocol !== 'openai' ? ' [' + esc(p.protocol) + ']' : '';
                 return '<option value="' + esc(p.id) + '">' + esc(p.name || p.id) + tag + '（' + esc(p.baseUrl || '') + '）</option>';
             }).join('');
         inputProvider.value = data.providerId || '';
         renderProviderList();
+    }
+
+    /**
+     * 手动模式开关：默认收起地址密钥输入。中转站已选中时打开手动模式无意义
+     * （优先级低于站，填了也不生效），故切到手动模式时把站选择清空并提示
+     */
+    function syncManualMode() {
+        const manual = inputManualToggle.checked;
+        manualPanel.classList.toggle('hidden', !manual);
+        // 手动模式下中转站选择无意义（两套地址只能二选一）；ChatGPT 模式下全部禁用
+        inputProvider.disabled = manual || inputAuthMode.value === 'chatgpt';
+        if (manual) {
+            inputProvider.value = '';
+        }
+        return manual;
+    }
+
+    /** 用户主动切回中转站模式时清掉手动地址（渲染回显时不调用，否则会把刚填的值清掉） */
+    function clearManualFieldsOnLeavingManualMode() {
+        if (!inputManualToggle.checked) {
+            inputBaseUrl.value = '';
+            inputApiKey.value = '';
+        }
     }
 
     /** 模型的供应商标注：唯一站 →「站名·」前缀；多站 →「多家·」+悬停列名；未获取过 → 空串 */
@@ -1878,39 +1905,188 @@
     function deleteProvider(id) {
         const p = savedProviders.find(function (x) { return x.id === id; });
         if (!p) return;
-        if (!window.confirm('删除中转站「' + (p.name || id) + '」？它的地址密钥将从本机移除。')) return;
+        // 该站被场景/兜底引用时，删除必须连同引用一起清：否则后端会拒绝保存
+        // （悬空引用会让界面显示"已选站"、实际走别的端点）
+        const affectedScenes = scenesReferencing(id);
+        const affectedFallback = fallbackReferences(id);
+        let warn = '删除中转站「' + (p.name || id) + '」？它的地址密钥将从本机移除。';
+        if (affectedScenes.length) {
+            warn += '\n\n以下场景正在使用它，将被重置为「跟随全局」：\n· '
+                + affectedScenes.map(function (s) { return s.label; }).join('\n· ');
+        }
+        if (affectedFallback) warn += '\n\n兜底模型也引用了它，将重置为「跟随主模型」。';
+        if (!window.confirm(warn)) return;
+
         const providers = {};
         savedProviders.forEach(function (x) {
             if (x.id !== id) providers[x.id] = { name: x.name || x.id, baseUrl: x.baseUrl, protocol: x.protocol || 'openai' };
         });
-        // 被删的正是全局引用：连同引用一起清（后端对缺席条目按全量替换处理，悬空引用会收敛）
         const body = { providers: providers };
         if (inputProvider.value === id) body.providerId = '';
+        // 定点解除该站在全局/场景/兜底的引用，后端保留其它所有覆盖字段。
+        // 不能在这里重提 body.scenes：后端对非空 scenes 是全量替换，只提交受影响行
+        // 会连带清空其它场景的模型/Tokens/温度覆盖（实测此形态）
+        if (affectedScenes.length || affectedFallback) body.detachProviderId = id;
         fetchJson('/api/config/llm', {
             method: 'PUT',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(body)
         })
         .then(function (data) {
-            renderProviders(data);
-            providerStatus('中转站已删除：' + (p.name || id), 'ok');
+            renderLlmConfig(data);
+            providerStatus('中转站已删除：' + (p.name || id)
+                + (affectedScenes.length ? '（' + affectedScenes.length + ' 个场景已重置为跟随全局）' : ''), 'ok');
             showToast('中转站已删除');
         })
         .catch(function (err) { providerStatus('删除失败：' + err.message, 'error'); });
     }
 
-    /** 模型下拉选项：中转站获取到的模型名合并进共享 datalist（全局/场景/兜底输入框共用） */
+    /** 当前矩阵里引用了该站的场景（仅用于删除前的影响范围提示） */
+    function scenesReferencing(providerId) {
+        const out = [];
+        sceneMatrixDiv.querySelectorAll('.scene-row[data-scene-key]').forEach(function (rowEl) {
+            const select = rowEl.querySelector('[data-field="providerId"]');
+            if (!select || select.value !== providerId) return;
+            const key = rowEl.getAttribute('data-scene-key');
+            const labelEl = rowEl.querySelector('.scene-name b');
+            out.push({ key: key, label: labelEl ? labelEl.textContent : key });
+        });
+        return out;
+    }
+
+    /** 兜底是否引用了该站（仅用于删除前的影响范围提示） */
+    function fallbackReferences(providerId) {
+        return inputFallbackProvider && inputFallbackProvider.value === providerId;
+    }
+
+    /** 模型下拉选项：中转站获取到的模型名合并进共享下拉容器（全局/场景/兜底输入框共用） */
     function setModelOptions(models) {
-        const existing = {};
-        Array.from(chatGptModelOptions.options).forEach(function (o) { existing[o.value] = true; });
+        // 用 Set 去重，保留已有模型（跨站合并）
+        const existing = new Set();
+        Array.from(chatGptModelOptions.querySelectorAll('.model-option')).forEach(function (el) {
+            existing.add(el.dataset.value);
+        });
         (models || []).forEach(function (m) {
-            if (existing[m]) return;
-            const opt = document.createElement('option');
-            opt.value = m;
+            if (existing.has(m)) return;
+            const opt = document.createElement('div');
+            opt.className = 'model-option';
+            opt.dataset.value = m;
+            opt.textContent = m;
+            // 点击选中：填入当前聚焦的输入框并关闭下拉
+            opt.addEventListener('click', function () {
+                if (currentModelInput) {
+                    currentModelInput.value = m;
+                    currentModelInput.dispatchEvent(new Event('input', { bubbles: true }));
+                }
+                hideModelDropdown();
+            });
             chatGptModelOptions.appendChild(opt);
-            existing[m] = true;
+            existing.add(m);
         });
     }
+
+    // ===== 自定义模型下拉：显示/隐藏/过滤/键盘导航 =====
+    let currentModelInput = null;   // 当前聚焦的模型输入框
+    let modelDropdownVisible = false;
+
+    function showModelDropdown(input) {
+        currentModelInput = input;
+        // 用 fixed + getBoundingClientRect 定位：基准恒定是视口，与祖先是否 relative 无关，
+        // 因此不必改动任何父容器的 position（避免污染全站表单组）。
+        const rect = input.getBoundingClientRect();
+        chatGptModelOptions.style.left = rect.left + 'px';
+        chatGptModelOptions.style.top = (rect.bottom + 4) + 'px';
+        chatGptModelOptions.style.width = Math.max(rect.width, 260) + 'px';
+        chatGptModelOptions.classList.add('visible');
+        modelDropdownVisible = true;
+        filterModelOptions(input.value);
+    }
+
+    function hideModelDropdown() {
+        chatGptModelOptions.classList.remove('visible');
+        modelDropdownVisible = false;
+        currentModelInput = null;
+    }
+
+    function filterModelOptions(query) {
+        const q = (query || '').toLowerCase();
+        Array.from(chatGptModelOptions.querySelectorAll('.model-option')).forEach(function (el) {
+            const match = !q || el.dataset.value.toLowerCase().includes(q);
+            el.style.display = match ? '' : 'none';
+        });
+    }
+
+    // 输入框聚焦/输入时显示并过滤
+    function bindModelInput(input) {
+        if (!input || input._modelBound) return;
+        input._modelBound = true;
+        input.addEventListener('focus', function () { showModelDropdown(input); });
+        input.addEventListener('input', function () {
+            if (!modelDropdownVisible) showModelDropdown(input);
+            filterModelOptions(input.value);
+        });
+        // 键盘导航：上下选择、回车确认、ESC 关闭
+        input.addEventListener('keydown', function (e) {
+            if (!modelDropdownVisible) return;
+            const options = Array.from(chatGptModelOptions.querySelectorAll('.model-option'))
+                .filter(function (el) { return el.style.display !== 'none'; });
+            if (!options.length) return;
+            let activeIdx = options.findIndex(function (el) { return el.classList.contains('active'); });
+            if (e.key === 'ArrowDown') {
+                e.preventDefault();
+                activeIdx = Math.min(activeIdx + 1, options.length - 1);
+                options.forEach(function (el, i) { el.classList.toggle('active', i === activeIdx); });
+                options[activeIdx].scrollIntoView({ block: 'nearest' });
+            } else if (e.key === 'ArrowUp') {
+                e.preventDefault();
+                activeIdx = Math.max(activeIdx - 1, 0);
+                options.forEach(function (el, i) { el.classList.toggle('active', i === activeIdx); });
+                options[activeIdx].scrollIntoView({ block: 'nearest' });
+            } else if (e.key === 'Enter' && activeIdx >= 0) {
+                e.preventDefault();
+                options[activeIdx].click();
+            } else if (e.key === 'Escape') {
+                hideModelDropdown();
+            }
+        });
+    }
+
+    // 点击页面其他区域时关闭下拉
+    document.addEventListener('click', function (e) {
+        if (modelDropdownVisible && !chatGptModelOptions.contains(e.target)
+            && e.target !== currentModelInput) {
+            hideModelDropdown();
+        }
+    });
+
+    // fixed 定位的下拉不随文档滚动：滚动或缩放时重算位置，输入框滚出视口则关闭。
+    function repositionOrHideDropdown() {
+        if (!modelDropdownVisible || !currentModelInput) {
+            return;
+        }
+        const rect = currentModelInput.getBoundingClientRect();
+        if (rect.bottom < 0 || rect.top > window.innerHeight) {
+            hideModelDropdown();
+            return;
+        }
+        chatGptModelOptions.style.left = rect.left + 'px';
+        chatGptModelOptions.style.top = (rect.bottom + 4) + 'px';
+    }
+    window.addEventListener('scroll', repositionOrHideDropdown, true);
+    window.addEventListener('resize', repositionOrHideDropdown);
+
+    // 绑定所有模型输入框（全局/兜底/场景矩阵动态生成的也要覆盖）
+    function bindAllModelInputs() {
+        bindModelInput(document.getElementById('llm_model'));
+        bindModelInput(document.getElementById('fallback_model'));
+        // 场景矩阵的输入框是动态生成的，用 MutationObserver 监听新增
+        document.querySelectorAll('.scene-input[data-field="model"]').forEach(bindModelInput);
+    }
+    // 初始绑定 + 监听场景矩阵的动态新增
+    bindAllModelInputs();
+    const sceneMatrixObserver = new MutationObserver(bindAllModelInputs);
+    const sceneMatrixEl = document.getElementById('scene-matrix');
+    if (sceneMatrixEl) sceneMatrixObserver.observe(sceneMatrixEl, { childList: true, subtree: true });
 
     /** 拉取模型列表：providerId 取已保存凭据；也可传显式 baseUrl/apiKey/protocol（保存前试连） */
     function fetchProviderModels(providerId, baseUrl, apiKey, protocol) {
@@ -1955,9 +2131,20 @@
     });
     if (inputProvider) inputProvider.addEventListener('change', function () {
         if (inputProvider.value) {
+            const p = savedProviders.find(function (x) { return x.id === inputProvider.value; });
             llmStatusDiv.className = 'config-status';
-            llmStatusDiv.textContent = '已选择中转站，点「保 存 配 置」后全局地址密钥按该站生效';
+            llmStatusDiv.textContent = '已选择中转站「' + ((p && p.name) || inputProvider.value)
+                + '」，点「保 存 配 置」后生效；地址密钥协议由该站提供';
         }
+    });
+    if (inputManualToggle) inputManualToggle.addEventListener('change', function () {
+        const manual = syncManualMode();
+        if (!manual) clearManualFieldsOnLeavingManualMode();
+        renderAuthMode();
+        llmStatusDiv.className = 'config-status';
+        llmStatusDiv.textContent = manual
+            ? '手动模式：直接填下方地址与密钥（保存后不使用中转站）'
+            : '已切回中转站模式：地址密钥由选中的站提供';
     });
 
     function renderLlmConfig(data) {
@@ -1967,15 +2154,25 @@
         inputApiKey.value = '';
         inputModel.value = data.model || '';
         inputMaxTokens.value = data.maxTokens != null ? data.maxTokens : '';
+        // 手动模式判定：后端没引用中转站、却存着手动地址/密钥 → 这是升级前的老配置或用户主动填的，
+        // 自动展开折叠区让用户看得见（否则会以为配置丢了）
+        inputManualToggle.checked = !data.providerId
+            && (!!data.baseUrl || !!data.hasKey);
         renderAuthMode();
         renderProviders(data);
         if (!data.configured) {
             llmStatusDiv.className = 'config-status';
             llmStatusDiv.textContent = '当前无运行时覆盖，调用全部走本地 yml 静态配置';
+        } else if (data.providerId) {
+            const p = savedProviders.find(function (x) { return x.id === data.providerId; });
+            llmStatusDiv.className = 'config-status has-config';
+            llmStatusDiv.textContent = '运行时覆盖已生效：中转站='
+                + ((p && p.name) || data.providerId)
+                + ' · 模型=' + (data.model || '沿用静态');
         } else {
             llmStatusDiv.className = 'config-status has-config';
             const keyText = data.hasKey ? 'Key 已配置（' + (data.apiKeyMasked || '已掩码') + '）' : 'Key 未单独覆盖（沿用静态配置）';
-            llmStatusDiv.textContent = '运行时覆盖已生效：Base URL=' + (data.baseUrl || '沿用静态')
+            llmStatusDiv.textContent = '运行时覆盖已生效（手动模式）：Base URL=' + (data.baseUrl || '沿用静态')
                 + ' · 模型=' + (data.model || '沿用静态') + ' · ' + keyText;
         }
         renderSceneMatrix(data);
@@ -2102,11 +2299,21 @@
     function renderAuthMode() {
         const chatGpt = inputAuthMode.value === 'chatgpt';
         chatGptPanel.classList.toggle('hidden', !chatGpt);
-        inputBaseUrl.disabled = chatGpt;
-        inputApiKey.disabled = chatGpt;
         inputMaxTokens.disabled = chatGpt;
-        inputProvider.disabled = chatGpt;
-        if (inputProtocol) inputProtocol.disabled = chatGpt;
+        // 手动模式与中转站是二选一：手动模式下站选择禁用，反之地址密钥收起
+        syncManualMode();
+        if (chatGpt) {
+            inputManualToggle.disabled = true;
+            inputBaseUrl.disabled = true;
+            inputApiKey.disabled = true;
+            if (inputProtocol) inputProtocol.disabled = true;
+        } else {
+            inputManualToggle.disabled = false;
+            const manual = inputManualToggle.checked;
+            inputBaseUrl.disabled = !manual;
+            inputApiKey.disabled = !manual;
+            if (inputProtocol) inputProtocol.disabled = !manual;
+        }
         if (chatGpt) loadChatGptStatus();
     }
 
@@ -2163,8 +2370,8 @@
         }
         const header = '<div class="scene-row scene-head">'
             + '<span>场景</span><span>当前生效</span><span>覆盖 · 模型</span>'
-            + '<span>Tokens</span><span>温度</span><span>Base URL</span>'
-            + '<span>API Key</span><span></span>'
+            + '<span>Tokens</span><span>温度</span><span>中转站</span>'
+            + '<span></span>'
             + '</div>';
         const rows = data.scenes.map(function (s) {
             // 静态模型统一小写展示：yml 里混有 DeepSeek-V4-Pro / qwen3.8-flash 两种写法，
@@ -2190,12 +2397,17 @@
                 + '<div class="scene-static"><span class="mono"' + (ownerTitle ? ' title="' + esc(ownerTitle) + '"' : '')
                 + '>' + esc(ownerPrefix) + esc(staticText) + '</span>'
                 + '<span class="scene-static-meta">' + esc(staticMeta.join(' · ')) + '</span></div>'
-                + '<input type="text" class="scene-input" data-field="model" list="chatgpt-model-options" placeholder="留空 = 跟随全局" autocomplete="off"'
+                + '<input type="text" class="scene-input" data-field="model" placeholder="留空 = 跟随全局" autocomplete="off"'
                 + (thinkingHint ? ' title="' + esc(thinkingHint) + '"' : '') + '>'
                 + '<input type="number" class="scene-input" data-field="maxTokens" min="1" placeholder="留空回退" autocomplete="off">'
                 + '<input type="number" class="scene-input" data-field="temperature" min="0" max="1" step="0.1" placeholder="留空回退" autocomplete="off">'
-                + '<input type="text" class="scene-input" data-field="baseUrl" placeholder="留空回退" autocomplete="off"' + disabledAttr + '>'
-                + '<input type="password" class="scene-input" data-field="apiKey" placeholder="留空保留" autocomplete="new-password"' + disabledAttr + '>'
+                // 场景级中转站：选站即接管该场景的地址/密钥/协议（替代原先手填 Base URL/API Key）
+                + '<select class="scene-input" data-field="providerId"' + disabledAttr + '>'
+                + '<option value="">跟随全局</option>'
+                + savedProviders.map(function (p) {
+                    return '<option value="' + esc(p.id) + '">' + esc(p.name || p.id) + '</option>';
+                }).join('')
+                + '</select>'
                 + '<button type="button" class="btn-secondary scene-clear" title="清空本行覆盖输入">恢复</button>'
                 + '</div>';
         }).join('');
@@ -2208,29 +2420,31 @@
             rowEl.querySelector('[data-field="model"]').value = s.overrideModel || '';
             rowEl.querySelector('[data-field="maxTokens"]').value = s.overrideMaxTokens != null ? s.overrideMaxTokens : '';
             rowEl.querySelector('[data-field="temperature"]').value = s.overrideTemperature != null ? s.overrideTemperature : '';
-            const baseInput = rowEl.querySelector('[data-field="baseUrl"]');
-            const keyInput = rowEl.querySelector('[data-field="apiKey"]');
-            baseInput.value = s.overrideBaseUrl || '';
-            baseInput.placeholder = apiOn
-                ? ('留空沿用静态：' + (s.independentApi ? '本场景 yml 独立地址' : '全局地址'))
-                : '开关关闭：强制全局地址';
-            keyInput.value = '';
-            // 密钥不回显：已配置时以占位提示（再次提交留空=保留现有覆盖）
-            keyInput.placeholder = s.overrideHasKey
-                ? ('已覆盖（' + (s.overrideApiKeyMasked || '已掩码') + '），留空保留')
-                : '留空沿用静态';
+            // 场景级中转站回显：未覆盖=跟随全局
+            const providerSelect = rowEl.querySelector('[data-field="providerId"]');
+            providerSelect.value = s.overrideProviderId || '';
+            // 历史遗留的「纯手动地址」覆盖（升级前的配置）仍保留提示，避免用户以为配置丢了
+            if (!s.overrideProviderId && (s.overrideBaseUrl || s.overrideHasKey)) {
+                const legacy = document.createElement('option');
+                legacy.value = '__legacy__';
+                legacy.textContent = '旧版手动地址（建议改选中转站）';
+                providerSelect.appendChild(legacy);
+                providerSelect.value = '__legacy__';
+            }
             rowEl.querySelector('.scene-clear').addEventListener('click', function () {
                 rowEl.querySelectorAll('.scene-input').forEach(function (inp) { inp.value = ''; });
-                // 该场景只剩一个看不见的密钥覆盖时，输入框本来就是空的——「恢复」此时是
+                providerSelect.value = '';
+                // 该场景只剩一个看不见的密钥覆盖时，下拉本来就是空的——「恢复」此时是
                 // 用户移除它的唯一途径：记入显式清除集合，保存时发 apiKey 空串让后端删掉
                 if (s.overrideHasKey && s.key) {
                     sceneKeyClears[s.key] = true;
-                    showToast('场景「' + (s.label || s.key) + '」的密钥覆盖将在保存时清除');
+                    showToast('场景「' + (s.label || s.key) + '」的旧版密钥覆盖将在保存时清除');
                 }
             });
             // 用户又动了本行任何一个输入 = 撤销「恢复」的清除意图，按正常编辑提交
             rowEl.querySelectorAll('.scene-input').forEach(function (inp) {
                 inp.addEventListener('input', function () { delete sceneKeyClears[s.key]; });
+                inp.addEventListener('change', function () { delete sceneKeyClears[s.key]; });
             });
         });
     }
@@ -2255,11 +2469,12 @@
             const model = rowEl.querySelector('[data-field="model"]').value.trim();
             const maxTokens = rowEl.querySelector('[data-field="maxTokens"]').value.trim();
             const temperature = rowEl.querySelector('[data-field="temperature"]').value.trim();
-            const baseUrl = rowEl.querySelector('[data-field="baseUrl"]').value.trim();
-            const apiKey = rowEl.querySelector('[data-field="apiKey"]').value.trim();
-            if (!model && !maxTokens && !temperature && !baseUrl && !apiKey) {
-                // 整行留空 = 该场景清除覆盖。但密钥不回显：本行若只剩一个看不见的密钥覆盖，
-                // 必须发 apiKey 空串显式清除（后端对“不在表里”的场景另有不可见字段保护，删不掉它）
+            // 中转站：空=跟随全局；__legacy__=保留旧版手动地址覆盖（不提交该字段，后端原样保留）
+            const providerRaw = rowEl.querySelector('[data-field="providerId"]').value;
+            const providerId = providerRaw === '__legacy__' ? null : providerRaw;
+            if (!model && !maxTokens && !temperature && !providerId) {
+                // 整行留空 = 该场景清除覆盖。但旧版密钥不回显：本行若只剩一个看不见的密钥覆盖，
+                // 必须发 apiKey 空串显式清除（后端对"不在表里"的场景另有不可见字段保护，删不掉它）
                 if (sceneKeyClears[key]) scenes[key] = { apiKey: '' };
                 return;
             }
@@ -2267,9 +2482,7 @@
             if (model) entry.model = model;
             if (maxTokens) entry.maxTokens = parseInt(maxTokens, 10);
             if (temperature !== '') entry.temperature = parseFloat(temperature);
-            if (baseUrl) entry.baseUrl = baseUrl;
-            // 密钥只在用户真的填了新值时提交（留空=后端保留该场景现有密钥覆盖，不回显也不清空）
-            if (apiKey) entry.apiKey = apiKey;
+            if (providerId) entry.providerId = providerId;
             scenes[key] = entry;
         });
         btnSaveSceneConfig.disabled = true;
@@ -2283,7 +2496,7 @@
         .then(function (data) {
             renderLlmConfig(data);
             const count = Object.keys(scenes).length;
-            sceneStatus('场景覆盖已保存：' + count + ' 个场景生效覆盖，其余回退下层配置；场景级 API='
+            sceneStatus('场景覆盖已保存：' + count + ' 个场景生效覆盖，其余回退下层配置；场景级选站='
                 + (inputSceneApiEnabled.checked ? '开' : '关（全部走全局地址密钥）'), 'ok');
             showToast('场景模型覆盖已保存并生效');
         })
@@ -2319,6 +2532,9 @@
     const inputFallbackTemperature = document.getElementById('fallback_temperature');
     const inputFallbackBaseUrl = document.getElementById('fallback_baseUrl');
     const inputFallbackApiKey = document.getElementById('fallback_apiKey');
+    const inputFallbackProvider = document.getElementById('fallback_provider');
+    const inputFallbackManualToggle = document.getElementById('fallback_manual_toggle');
+    const fallbackManualPanel = document.getElementById('fallback-manual-panel');
     const btnSaveFallback = document.getElementById('btn-save-fallback');
     const btnResetFallback = document.getElementById('btn-reset-fallback');
     const fallbackStatusDiv = document.getElementById('fallback-status');
@@ -2338,6 +2554,12 @@
      */
     function renderFallback(data) {
         if (!inputFallbackModel) return;
+        // 中转站下拉：跟随主模型 + 各站（与场景矩阵同款）
+        inputFallbackProvider.innerHTML = '<option value="">跟随主模型</option>'
+            + savedProviders.map(function (p) {
+                const tag = p.protocol && p.protocol !== 'openai' ? ' [' + esc(p.protocol) + ']' : '';
+                return '<option value="' + esc(p.id) + '">' + esc(p.name || p.id) + tag + '</option>';
+            }).join('');
         const fb = data && data.fallback ? data.fallback : null;
         if (!fb) {
             inputFallbackModel.value = '';
@@ -2345,6 +2567,9 @@
             inputFallbackTemperature.value = '';
             inputFallbackBaseUrl.value = '';
             inputFallbackApiKey.value = '';
+            inputFallbackProvider.value = '';
+            inputFallbackManualToggle.checked = false;
+            syncFallbackManualMode();
             return;
         }
         inputFallbackModel.value = fb.overrideModel || fb.staticModel || '';
@@ -2354,6 +2579,11 @@
         inputFallbackMaxTokens.placeholder = fb.staticMaxTokens != null
             ? ('静态默认 ' + fb.staticMaxTokens + '，留空沿用主模型') : '留空沿用主模型';
         inputFallbackTemperature.value = fb.overrideTemperature != null ? fb.overrideTemperature : '';
+        inputFallbackProvider.value = fb.overrideProviderId || '';
+        // 手动模式判定：没选中转站却存着手动地址/密钥（升级前老配置或主动填的）→ 自动展开
+        inputFallbackManualToggle.checked = !fb.overrideProviderId
+            && (!!fb.overrideBaseUrl || !!fb.overrideHasKey);
+        syncFallbackManualMode();
         inputFallbackBaseUrl.value = fb.overrideBaseUrl || fb.staticBaseUrl || '';
         inputFallbackApiKey.value = '';
         // 密钥不回显：已覆盖时给掩码提示，留空提交 = 保留现有密钥
@@ -2367,14 +2597,35 @@
             : '留空 = 不启用兜底';
     }
 
+    /** 兜底手动模式：与全局同款二选一（手动地址 vs 中转站） */
+    function syncFallbackManualMode() {
+        const manual = inputFallbackManualToggle.checked;
+        fallbackManualPanel.classList.toggle('hidden', !manual);
+        inputFallbackProvider.disabled = manual;
+        inputFallbackBaseUrl.disabled = !manual;
+        inputFallbackApiKey.disabled = !manual;
+        if (manual) inputFallbackProvider.value = '';
+        return manual;
+    }
+
+    /** 用户主动切回跟随/中转站模式时清掉手动地址（渲染回显时不调用） */
+    function clearFallbackManualFieldsOnLeavingManualMode() {
+        if (!inputFallbackManualToggle.checked) {
+            inputFallbackBaseUrl.value = '';
+            inputFallbackApiKey.value = '';
+        }
+    }
+
     function saveFallback() {
         const model = inputFallbackModel.value.trim();
         const maxTokens = inputFallbackMaxTokens.value.trim();
         const temperature = inputFallbackTemperature.value.trim();
-        const baseUrl = inputFallbackBaseUrl.value.trim();
-        const apiKey = inputFallbackApiKey.value.trim();
+        const manual = inputFallbackManualToggle.checked;
+        const providerId = manual ? '' : inputFallbackProvider.value;
+        const baseUrl = manual ? inputFallbackBaseUrl.value.trim() : '';
+        const apiKey = manual ? inputFallbackApiKey.value.trim() : '';
         // 与场景矩阵同款：整表留空 = 清除兜底覆盖（回退 yml 静态值）
-        if (!model && !maxTokens && !temperature && !baseUrl && !apiKey) {
+        if (!model && !maxTokens && !temperature && !providerId && !baseUrl && !apiKey) {
             resetFallback();
             return;
         }
@@ -2382,8 +2633,9 @@
         if (model) entry.model = model;
         if (maxTokens) entry.maxTokens = parseInt(maxTokens, 10);
         if (temperature !== '') entry.temperature = parseFloat(temperature);
+        // 中转站模式下只发站引用（地址密钥协议由站提供）；手动模式才发地址密钥
+        if (providerId) entry.providerId = providerId;
         if (baseUrl) entry.baseUrl = baseUrl;
-        // 密钥只在真的填了新值时提交（留空=后端保留现有密钥）
         if (apiKey) entry.apiKey = apiKey;
 
         btnSaveFallback.disabled = true;
@@ -2394,7 +2646,8 @@
         })
         .then(function (data) {
             renderLlmConfig(data);
-            fallbackStatus('兜底模型已保存并生效：' + (model || '沿用静态配置'), 'ok');
+            fallbackStatus('兜底模型已保存并生效：' + (model || '沿用静态配置')
+                + (providerId ? '（中转站 ' + providerId + '）' : ''), 'ok');
             showToast('兜底模型已保存');
         })
         .catch(function (err) {
@@ -2425,6 +2678,13 @@
 
     if (btnSaveFallback) btnSaveFallback.addEventListener('click', saveFallback);
     if (btnResetFallback) btnResetFallback.addEventListener('click', resetFallback);
+    if (inputFallbackManualToggle) inputFallbackManualToggle.addEventListener('change', function () {
+        const manual = syncFallbackManualMode();
+        if (!manual) clearFallbackManualFieldsOnLeavingManualMode();
+        fallbackStatus(manual
+            ? '手动模式：直接填地址与密钥（保存后不使用中转站）'
+            : '已切回跟随模式：地址密钥由主模型或选中的中转站提供', 'ok');
+    });
 
     function loadLlmConfig() {
         fetchJson('/api/config/llm')
@@ -2439,14 +2699,18 @@
     llmConfigForm.addEventListener('submit', function (e) {
         e.preventDefault();
         const body = { reset: false, authMode: inputAuthMode.value };
-        if (inputBaseUrl.value.trim() !== '') body.baseUrl = inputBaseUrl.value.trim();
-        if (inputApiKey.value.trim() !== '') body.apiKey = inputApiKey.value.trim();
+        const manual = inputManualToggle.checked;
+        // 手动模式才提交地址密钥与协议；中转站模式提交站引用即可（站里已有地址密钥协议），
+        // 两套都发会让后端存的配置与界面所见不一致
+        if (manual) {
+            if (inputBaseUrl.value.trim() !== '') body.baseUrl = inputBaseUrl.value.trim();
+            if (inputApiKey.value.trim() !== '') body.apiKey = inputApiKey.value.trim();
+            if (inputProtocol) body.protocol = inputProtocol.value;
+        }
         if (inputModel.value.trim() !== '') body.model = inputModel.value.trim();
         if (inputMaxTokens.value.trim() !== '') body.maxTokens = parseInt(inputMaxTokens.value, 10);
-        // 手动模式协议随全局表单提交（openai 是缺省值，显式提交保证与界面所见一致）
-        if (inputProtocol) body.protocol = inputProtocol.value;
         // 中转站引用随全局表单提交：'' = 手动模式（清除引用），选中 id = 地址密钥协议走该站
-        body.providerId = inputProvider.value;
+        body.providerId = manual ? '' : inputProvider.value;
         btnSaveLlmConfig.disabled = true;
         fetchJson('/api/config/llm', {
             method: 'PUT',
@@ -2813,8 +3077,8 @@
         .then(function (data) {
             renderLlmConfig(data);
             sceneStatus(wanted
-                ? '场景级 API 已开启：各场景可自带 Base URL / API Key（在下方各行编辑）'
-                : '场景级 API 已关闭：所有场景强制走全局地址与密钥，场景自带配置不生效', 'ok');
+                ? '场景级 API 已开启：各场景可选中转站（在下方各行选择）'
+                : '场景级 API 已关闭：所有场景强制走全局中转站，场景选站不生效', 'ok');
             showToast(wanted ? '场景级 API 已开启' : '场景级 API 已关闭（统一走全局）');
         })
         .catch(function (err) {

@@ -142,6 +142,12 @@ public class LlmRuntimeConfig {
         private String model;
         private Long maxTokens;
         private Double temperature;
+        /**
+         * 场景级中转站引用（推荐配法）：指向 providers 里的 id。生效时该站的
+         * baseUrl/apiKey/protocol 一并接管本场景——场景要指向异族评审模型只需选站，
+         * 不必手填地址密钥。null=不引用（走 baseUrl/apiKey 手动字段或回退全局）
+         */
+        private String providerId;
         /** 场景级 base-url 覆盖；null=不覆盖（回退场景 yml / 全局） */
         private String baseUrl;
         /** 场景级 api-key 覆盖；null=保留现状，空串=显式清除（密钥不回显，空白提交必须区别于"清除"） */
@@ -149,6 +155,7 @@ public class LlmRuntimeConfig {
 
         public boolean isEmpty() {
             return StringUtils.isBlank(model) && maxTokens == null && temperature == null
+                    && StringUtils.isBlank(providerId)
                     && StringUtils.isBlank(baseUrl) && StringUtils.isBlank(apiKey);
         }
     }
@@ -256,6 +263,11 @@ public class LlmRuntimeConfig {
         next.setFallback(mergeFallback(current, request));
         next.setProviders(mergeProviders(current, request));
         next.setProviderId(mergeProviderId(current, next, request));
+        // 删除站点走定点解除：只清该站引用，绝不重放整张场景覆盖表（否则其它场景会被误清）
+        detachProviderReferences(next, request.getDetachProviderId());
+        // 场景/兜底的中转站引用必须存在：悬空引用会被 providerOf 静默忽略，
+        // 于是界面显示"已选站"、实际却走另一套地址（删除站点后尤其容易留下）
+        validateSceneProviders(next);
         mergeEmbedding(current, next, request);
         mergeReferenceMode(current, next, request);
         mergeToggles(current, next, request);
@@ -385,10 +397,92 @@ public class LlmRuntimeConfig {
         next.setMaxTokens(in.getMaxTokens());
         next.setTemperature(in.getTemperature() == null ? null
                 : validTemperature("fallback", in.getTemperature()));
+        String providerId = StringUtils.trimToNull(in.getProviderId());
+        next.setProviderId(providerId);
         next.setBaseUrl(StringUtils.trimToNull(in.getBaseUrl()));
         next.setApiKey(in.getApiKey() == null
                 ? (prev == null ? null : prev.getApiKey()) : StringUtils.trimToNull(in.getApiKey()));
+        // 兜底选中转站：清掉手动地址密钥，避免旧值在生效链路里反压站配置
+        // （applyFallback 按"站 > 手动 > 静态"取首个非空，残留旧值本身不会压过站，
+        //  但界面上看不到的残留会让"切回跟随主模型"后突然用上旧地址）
+        if (providerId != null) {
+            next.setBaseUrl(null);
+            next.setApiKey(null);
+        }
         return next.isEmpty() ? null : next;
+    }
+
+    /**
+     * 删除站点时定点解除引用：清掉全局/场景/兜底里指向该站的 providerId 及旧地址密钥，
+     * 其余字段原样保留。为避免保存失败时污染旧 overlay，涉及变更的条目都新建对象，
+     * 不在 current 共享的 Map/SceneOverlay 上原地修改。
+     */
+    private static void detachProviderReferences(Overlay next, String detachProviderId) {
+        String id = StringUtils.trimToNull(detachProviderId);
+        if (id == null) {
+            return;
+        }
+        if (id.equals(next.getProviderId())) {
+            next.setProviderId(null);
+        }
+        if (next.getScenes() != null) {
+            Map<String, SceneOverlay> updated = new LinkedHashMap<>();
+            for (Map.Entry<String, SceneOverlay> entry : next.getScenes().entrySet()) {
+                SceneOverlay so = entry.getValue();
+                if (so != null && id.equals(so.getProviderId())) {
+                    SceneOverlay detached = new SceneOverlay();
+                    detached.setModel(so.getModel());
+                    detached.setMaxTokens(so.getMaxTokens());
+                    detached.setTemperature(so.getTemperature());
+                    // providerId/baseUrl/apiKey 全部清除：解除后必须回退全局，
+                    // 而不是让旧的场景级手动地址突然重新生效
+                    if (!detached.isEmpty()) {
+                        updated.put(entry.getKey(), detached);
+                    }
+                } else {
+                    updated.put(entry.getKey(), so);
+                }
+            }
+            next.setScenes(updated.isEmpty() ? null : updated);
+        }
+        SceneOverlay fallback = next.getFallback();
+        if (fallback != null && id.equals(fallback.getProviderId())) {
+            SceneOverlay detached = new SceneOverlay();
+            detached.setModel(fallback.getModel());
+            detached.setMaxTokens(fallback.getMaxTokens());
+            detached.setTemperature(fallback.getTemperature());
+            next.setFallback(detached.isEmpty() ? null : detached);
+        }
+    }
+
+    /**
+     * 校验场景/兜底的中转站引用都存在于本次保存后的注册表。
+     *
+     * <p>为什么不静默丢弃：丢弃后该场景会静默回落到全局端点，而界面仍显示"已选站"——
+     * 用户看到的是 A、实际走 B，属于最难排查的一类配置错位。保存时直接拒绝，
+     * 前端能立刻提示"该站不存在"。全局 providerId 的 {@link #mergeProviderId} 同款处理。
+     *
+     * <p>删除中转站的路径：前端删除时会把引用一并清掉（见 deleteProvider），
+     * 因此正常 UI 操作不会撞到这条；它兜住的是直接调 API / 并发保存等异常路径。
+     */
+    private static void validateSceneProviders(Overlay next) {
+        Map<String, ProviderOverlay> providers = next.getProviders();
+        if (next.getScenes() != null) {
+            for (Map.Entry<String, SceneOverlay> entry : next.getScenes().entrySet()) {
+                String providerId = entry.getValue() == null ? null : entry.getValue().getProviderId();
+                if (StringUtils.isNotBlank(providerId)
+                        && (providers == null || !providers.containsKey(providerId))) {
+                    throw new IllegalArgumentException("场景 " + entry.getKey() + " 引用的中转站不存在："
+                            + providerId + "（请先在注册表中保存它，或清除该场景的选站）");
+                }
+            }
+        }
+        SceneOverlay fallback = next.getFallback();
+        if (fallback != null && StringUtils.isNotBlank(fallback.getProviderId())
+                && (providers == null || !providers.containsKey(fallback.getProviderId()))) {
+            throw new IllegalArgumentException("兜底模型引用的中转站不存在："
+                    + fallback.getProviderId() + "（请先在注册表中保存它，或清除兜底的选站）");
+        }
     }
 
     /**
@@ -524,6 +618,7 @@ public class LlmRuntimeConfig {
             fb.setModel(source.getFallback().getModel());
             fb.setMaxTokens(source.getFallback().getMaxTokens());
             fb.setTemperature(source.getFallback().getTemperature());
+            fb.setProviderId(source.getFallback().getProviderId());
             fb.setBaseUrl(source.getFallback().getBaseUrl());
             fb.setApiKey(source.getFallback().getApiKey());
             copy.setFallback(fb);
@@ -579,13 +674,28 @@ public class LlmRuntimeConfig {
             so.setModel(StringUtils.trimToNull(in.getModel()));
             so.setMaxTokens(in.getMaxTokens());
             so.setTemperature(validTemperature(entry.getKey(), in.getTemperature()));
-            so.setBaseUrl(StringUtils.trimToNull(in.getBaseUrl()));
+            String providerId = StringUtils.trimToNull(in.getProviderId());
+            so.setProviderId(providerId);
+            // baseUrl 与 apiKey 同款"null=保留"语义：旧版前端只提交 model 时，
+            // 若按空值覆盖会把已配的地址静默清掉（实测：只改模型 → baseUrl 变 null，
+            // 留下一个"密钥还在、地址丢了"的半残覆盖，下次调用必失败）。
+            // 显式清除仍可用空串表达（trimToNull 后为 null 的分支由 in.getBaseUrl()==null 区分）
+            so.setBaseUrl(in.getBaseUrl() == null
+                    ? currentBaseUrlOf(current, entry.getKey())
+                    : StringUtils.trimToNull(in.getBaseUrl()));
             so.setApiKey(in.getApiKey() == null
                     ? currentApiKeyOf(current, entry.getKey())
                     : StringUtils.trimToNull(in.getApiKey()));
+            // 选中转站 = 该站的地址密钥协议接管：同时清掉旧版手动字段，否则手动字段会在
+            // 生效链路里反压站配置（见 applyModel 注释），界面上也说不清到底走哪套
+            if (providerId != null) {
+                so.setBaseUrl(null);
+                so.setApiKey(null);
+            }
             // 显式清除（apiKey 空串）后可能整条变空壳：不丢弃会留下一个全 null 的占位条目，
             // 表现在矩阵上就是“已覆盖”徽标常亮但什么都不生效
             if (so.getModel() == null && so.getMaxTokens() == null && so.getTemperature() == null
+                    && so.getProviderId() == null
                     && so.getBaseUrl() == null && so.getApiKey() == null) {
                 continue;
             }
@@ -622,6 +732,15 @@ public class LlmRuntimeConfig {
         }
         SceneOverlay prev = current.getScenes().get(sceneKey);
         return prev == null ? null : prev.getApiKey();
+    }
+
+    /** 该场景现有 baseUrl 覆盖（供"null=保留"合并用）；无则 null */
+    private static String currentBaseUrlOf(Overlay current, String sceneKey) {
+        if (current == null || current.getScenes() == null) {
+            return null;
+        }
+        SceneOverlay prev = current.getScenes().get(sceneKey);
+        return prev == null ? null : prev.getBaseUrl();
     }
 
     /**
@@ -732,6 +851,7 @@ public class LlmRuntimeConfig {
         // 覆盖只作用于 model/maxTokens，绝不吞地址与密钥，否则覆盖后评审静默回退主族
         copy.setBaseUrl(selected.getBaseUrl());
         copy.setApiKey(selected.getApiKey());
+        copy.setProtocol(selected.getProtocol());
         copy.setCompletionsPath(selected.getCompletionsPath());
         copy.setModel(StringUtils.isNotBlank(o.getModel()) ? o.getModel() : selected.getModel());
         // 兜底语义：selected 已有上限就尊重它，全局值只补空
@@ -786,10 +906,19 @@ public class LlmRuntimeConfig {
         merged.setTemperature(fb.getTemperature() != null ? fb.getTemperature()
                 : staticFallback == null ? null : staticFallback.getTemperature());
         merged.setEnableThinking(staticFallback == null ? null : staticFallback.getEnableThinking());
-        merged.setBaseUrl(StringUtils.isNotBlank(fb.getBaseUrl()) ? fb.getBaseUrl()
-                : staticFallback == null ? null : staticFallback.getBaseUrl());
-        merged.setApiKey(StringUtils.isNotBlank(fb.getApiKey()) ? fb.getApiKey()
-                : staticFallback == null ? null : staticFallback.getApiKey());
+        // 兜底选中转站：该站地址密钥优先于手动字段（兜底的意义就是换供应商，
+        // 而"换供应商"现在只需选站，不必再手抄地址与密钥）
+        ProviderOverlay fbProvider = providerOf(fb.getProviderId());
+        String providerBaseUrl = fbProvider == null ? null : fbProvider.getBaseUrl();
+        String providerApiKey = fbProvider == null ? null : fbProvider.getApiKey();
+        merged.setBaseUrl(firstNonBlank(providerBaseUrl, fb.getBaseUrl(),
+                staticFallback == null ? null : staticFallback.getBaseUrl()));
+        merged.setApiKey(firstNonBlank(providerApiKey, fb.getApiKey(),
+                staticFallback == null ? null : staticFallback.getApiKey()));
+        // 兜底协议同理：选中转站即随站切协议（否则 Anthropic 兜底站会按全局 OpenAI 协议请求）
+        String providerProtocol = fbProvider == null ? null : fbProvider.getProtocol();
+        merged.setProtocol(firstNonBlank(providerProtocol,
+                staticFallback == null ? null : staticFallback.getProtocol()));
         merged.setCompletionsPath(staticFallback == null ? null : staticFallback.getCompletionsPath());
 
         StoryVO.Module copy = new StoryVO.Module();
@@ -819,11 +948,32 @@ public class LlmRuntimeConfig {
             result.setModel(StringUtils.isNotBlank(so.getModel()) ? so.getModel() : merged.getModel());
             result.setMaxTokens(so.getMaxTokens() != null ? so.getMaxTokens() : merged.getMaxTokens());
             result.setTemperature(so.getTemperature() != null ? so.getTemperature() : merged.getTemperature());
-            // 场景级地址密钥覆盖（仅在开关打开时生效；关闭时下面的统一抹除接管）
-            if (sceneApiOn() && StringUtils.isNotBlank(so.getBaseUrl())) {
+            // 场景选中转站：该站地址密钥接管本场景（优先级高于场景手动字段）。
+            // 这是"场景指向异族评审模型"的主路径——选站即可，协议也随之切换，
+            // 避免上一版"场景独立 API 只能沿用全局协议"导致跨协议供应商必然 401
+            ProviderOverlay sceneProvider = providerOf(so.getProviderId());
+            if (sceneApiOn() && sceneProvider != null) {
+                if (StringUtils.isNotBlank(sceneProvider.getBaseUrl())) {
+                    result.setBaseUrl(sceneProvider.getBaseUrl());
+                }
+                if (StringUtils.isNotBlank(sceneProvider.getApiKey())) {
+                    result.setApiKey(sceneProvider.getApiKey());
+                }
+                // 协议随站切换：全局 OpenAI + 评审站 Anthropic 时，两边各用各的客户端。
+                // 网关 effectiveApi 只在场景未声明协议时才继承全局
+                if (StringUtils.isNotBlank(sceneProvider.getProtocol())) {
+                    result.setProtocol(sceneProvider.getProtocol());
+                }
+            }
+            // 场景级地址密钥手动字段（仅在开关打开时生效；关闭时下面的统一抹除接管）。
+            // 顺序必须在站点之后：站是主路径，手动字段只是它没配某字段时的补位——
+            // 反过来写会让残留的旧手动地址反压站配置（实测：选站后仍请求 OLD 地址）
+            if (sceneApiOn() && StringUtils.isNotBlank(so.getBaseUrl())
+                    && (sceneProvider == null || StringUtils.isBlank(sceneProvider.getBaseUrl()))) {
                 result.setBaseUrl(so.getBaseUrl());
             }
-            if (sceneApiOn() && StringUtils.isNotBlank(so.getApiKey())) {
+            if (sceneApiOn() && StringUtils.isNotBlank(so.getApiKey())
+                    && (sceneProvider == null || StringUtils.isBlank(sceneProvider.getApiKey()))) {
                 result.setApiKey(so.getApiKey());
             }
         }
@@ -845,6 +995,7 @@ public class LlmRuntimeConfig {
         copy.setEnableThinking(source.getEnableThinking());
         copy.setBaseUrl(source.getBaseUrl());
         copy.setApiKey(source.getApiKey());
+        copy.setProtocol(source.getProtocol());
         copy.setCompletionsPath(source.getCompletionsPath());
         return copy;
     }
@@ -965,6 +1116,7 @@ public class LlmRuntimeConfig {
                 row.setOverrideModel(so.getModel());
                 row.setOverrideMaxTokens(so.getMaxTokens());
                 row.setOverrideTemperature(so.getTemperature());
+                row.setOverrideProviderId(StringUtils.trimToNull(so.getProviderId()));
                 row.setOverrideBaseUrl(StringUtils.isNotBlank(so.getBaseUrl()) ? so.getBaseUrl() : null);
                 if (StringUtils.isNotBlank(so.getApiKey())) {
                     row.setOverrideHasKey(true);
@@ -998,6 +1150,7 @@ public class LlmRuntimeConfig {
             view.setOverrideModel(fb.getModel());
             view.setOverrideMaxTokens(fb.getMaxTokens());
             view.setOverrideTemperature(fb.getTemperature());
+            view.setOverrideProviderId(StringUtils.trimToNull(fb.getProviderId()));
             view.setOverrideBaseUrl(StringUtils.isNotBlank(fb.getBaseUrl()) ? fb.getBaseUrl() : null);
             if (StringUtils.isNotBlank(fb.getApiKey())) {
                 view.setOverrideHasKey(true);
@@ -1019,16 +1172,34 @@ public class LlmRuntimeConfig {
      *
      * <p>同名会让 ModelFallbackChain 直接返回单元素链，烧穿保护失去降级目标；同时静态兜底
      * 存在且是异族模型时才有回落价值，否则不如保持原样（避免把兜底清空）。
+     *
+     * <p><b>同名但不同供应商不算无效</b>（2026-10-27 实测）：兜底选了另一个中转站时，
+     * 即使模型名相同，实际也是另一路端点/账号——拦掉它会把模型名换成静态兜底，
+     * 却仍保留用户选的中转站地址密钥协议，拼出"静态模型 + 异站供应商"的错配请求。
+     * 因此只有"同名且同端点"才判无效。
      */
     private boolean sameNameFallbackDropped(SceneOverlay fb, StoryVO.Module.ChatModel staticFallback) {
         if (fb == null || StringUtils.isBlank(fb.getModel())) {
             return false;
         }
         Overlay o = overlay;
-        return o != null
-                && fb.getModel().trim().equals(StringUtils.trimToEmpty(o.getModel()))
-                && staticFallback != null && StringUtils.isNotBlank(staticFallback.getModel())
-                && !staticFallback.getModel().equals(fb.getModel());
+        if (o == null
+                || !fb.getModel().trim().equals(StringUtils.trimToEmpty(o.getModel()))
+                || staticFallback == null || StringUtils.isBlank(staticFallback.getModel())
+                || staticFallback.getModel().equals(fb.getModel())) {
+            return false;
+        }
+        // 兜底引用了中转站 = 明确换了端点：即便模型同名，也不能按"无效兜底"整条作废
+        if (StringUtils.isNotBlank(fb.getProviderId()) && providerOf(fb.getProviderId()) != null) {
+            return false;
+        }
+        // 手动地址与全局地址不同，同理视为另一路端点
+        String fallbackBaseUrl = StringUtils.trimToNull(fb.getBaseUrl());
+        String globalBaseUrl = StringUtils.trimToNull(o.getBaseUrl());
+        if (fallbackBaseUrl != null && globalBaseUrl != null && !fallbackBaseUrl.equals(globalBaseUrl)) {
+            return false;
+        }
+        return true;
     }
 
     private static LlmConfigDTO.ModelView toModelView(StoryVO.Module.ChatModel chatModel) {

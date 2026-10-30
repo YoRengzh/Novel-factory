@@ -4,7 +4,7 @@
 
     <groupId>cn.novel.yonren</groupId>
     <artifactId>novel_factory</artifactId>
-    <version>1.0-SNAPSHOT</version>
+    <version>1.3.0</version>
     <packaging>pom</packaging>
 
     <modules>
@@ -86,27 +86,27 @@
             <dependency>
                 <groupId>cn.novel.yonren</groupId>
                 <artifactId>novel_factory-api</artifactId>
-                <version>1.0-SNAPSHOT</version>
+                <version>1.3.0</version>
             </dependency>
             <dependency>
                 <groupId>cn.novel.yonren</groupId>
                 <artifactId>novel_factory-domain</artifactId>
-                <version>1.0-SNAPSHOT</version>
+                <version>1.3.0</version>
             </dependency>
             <dependency>
                 <groupId>cn.novel.yonren</groupId>
                 <artifactId>novel_factory-infrastructure</artifactId>
-                <version>1.0-SNAPSHOT</version>
+                <version>1.3.0</version>
             </dependency>
             <dependency>
                 <groupId>cn.novel.yonren</groupId>
                 <artifactId>novel_factory-types</artifactId>
-                <version>1.0-SNAPSHOT</version>
+                <version>1.3.0</version>
             </dependency>
             <dependency>
                 <groupId>cn.novel.yonren</groupId>
                 <artifactId>novel_factory-trigger</artifactId>
-                <version>1.0-SNAPSHOT</version>
+                <version>1.3.0</version>
             </dependency>
         </dependencies>
     </dependencyManagement>

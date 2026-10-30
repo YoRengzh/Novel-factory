@@ -132,37 +132,54 @@ public final class TimeAdvanceChecks {
      *
      * @return 违规描述，通过返回 null
      */
+    /**
+ * 时间声明的**倒退检查**由「全段单调递增」改为「只防倒退」。
+     *
+     * <p><b>为什么不再要求单调递增</b>：原实现要求全段 timeAdvance 严格递增，等于禁止倒叙。
+     * 但倒叙、插叙、回忆杀都是合法叙事，真正该防的是**写回已确立时点之前**造成的时间线矛盾。
+     * 现在只在"本章时间早于段内已确立的最近时点"时记违规，不限制"后一章比前一章晚"这个顺序本身。
+     *
+     * <p>只比较**可解析出目标日期**的章；解析不出的章跳过（自由文本格式不强制，
+     * 强行解析会误伤"同日夜间""第二天清晨"这类合理写法）。
+     *
+     * @return 违规描述，通过返回 null
+     */
     public static String validateMonotonic(List<ChapterPlanItemEntity> chapters) {
         if (chapters == null || chapters.isEmpty()) {
             return null;
         }
-        StoryDate prev = null;
-        Integer prevNo = null;
+        StoryDate earliest = null;
+        Integer earliestNo = null;
         List<String> issues = new ArrayList<>();
         for (ChapterPlanItemEntity chapter : chapters) {
             if (chapter == null || chapter.getChapterNo() == null) {
                 continue;
             }
-            StoryDate target = planTarget(chapter.getTimeAdvance(), prev);
+            StoryDate target = planTarget(chapter.getTimeAdvance(), earliest);
             if (target == null) {
                 continue;
             }
-            if (prev != null && target.compareTo(prev) < 0) {
-                issues.add("第" + chapter.getChapterNo() + "章（" + target + "）早于第" + prevNo + "章（" + prev + "）");
+            // 只防"早于已确立的最近时点"，不强制递增——倒叙、插叙、同日都合法。
+            if (earliest != null && target.compareTo(earliest) < 0) {
+                issues.add("第" + chapter.getChapterNo() + "章（" + target + "）早于已确立时点（第"
+                        + earliestNo + "章 " + earliest + "），属时间线倒退");
             }
-            prev = target;
-            prevNo = chapter.getChapterNo();
+            if (earliest == null || target.compareTo(earliest) > 0) {
+                earliest = target;
+                earliestNo = chapter.getChapterNo();
+            }
         }
         return issues.isEmpty() ? null : String.join("；", issues);
     }
 
     /** 单调性违规的修正指令（与其它规划闸门同款：点名 + 可执行改法） */
     public static String monotonicFeedback(String issue) {
-        return "\n\n【上一版计划的时间推进被机械驳回：时间倒退】\n- " + issue
+        return "\n\n【上一版计划的时间声明被机械驳回：时间线倒退】\n- " + issue
                 + "\n\n修正要求（逐条执行，**不得只换措辞**）："
-                + "\n1. 全段 timeAdvance 的目标时间必须**单调不减**——后一章不得早于前一章；"
-                + "\n2. 同一时刻的多章可写「同日夜间」「当日晚些」等，但**不得写回更早的日期**；"
-                + "\n3. 若你确实需要倒叙，把倒叙放进正文叙述，timeAdvance 仍按故事时间正序推进。";
+                + "\n1. 不得写回已确立时点之前——这是唯一硬约束；"
+                + "\n2. 倒叙、插叙、同日连续都是**合法**的，不需要为了“递增”而改时间；"
+                + "\n3. 若确实需要回忆更早的事，把回忆放进正文叙述（如“三年前那场雨”），"
+                + "timeAdvance 仍写本章实际所处的时间点。";
     }
 
     /**

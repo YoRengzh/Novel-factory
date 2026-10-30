@@ -46,15 +46,34 @@ public final class ModelFallbackChain {
         if (fallback == null || StringUtils.isBlank(fallback.getModel())) {
             return chain;
         }
-        // 兜底与主模型同名时没有降级意义（同一模型重试只会再失败一次，白烧一轮）
-        if (fallback.getModel().trim().equals(primary.getModel())) {
+        // 同名且同端点才跳过（同一模型重试只会再失败一次）；
+        // 先合并继承字段再比端点：兜底未填地址/密钥/协议本就表示"沿用主模型"，
+        // 不能把这些 null 当成不同端点
+        StoryVO.Module.ChatModel merged = mergeWithPrimary(fallback, primary);
+        if (fallback.getModel().trim().equals(StringUtils.trimToEmpty(primary.getModel()))
+                && sameEndpoint(merged, primary)) {
             return chain;
         }
         if (chain.size() >= MAX_CHAIN_LENGTH) {
             return chain;
         }
-        chain.add(mergeWithPrimary(fallback, primary));
+        chain.add(merged);
         return chain;
+    }
+
+    /**
+     * 同名兜底是否等于主模型的"同一站"：地址、协议或密钥任一不同即视为不同端点。
+     * 空字段表示沿用 module 级 aiApi；两边都缺省即同端点（保持旧行为）。
+     * 同一 URL 不同账号也有独立降级价值（例如额度/限流不同），不应被同名过滤。
+     */
+    private static boolean sameEndpoint(StoryVO.Module.ChatModel fallback,
+                                        StoryVO.Module.ChatModel primary) {
+        return StringUtils.equals(StringUtils.trimToEmpty(fallback.getBaseUrl()),
+                        StringUtils.trimToEmpty(primary.getBaseUrl()))
+                && StringUtils.equals(StringUtils.trimToEmpty(fallback.getProtocol()),
+                        StringUtils.trimToEmpty(primary.getProtocol()))
+                && StringUtils.equals(StringUtils.trimToEmpty(fallback.getApiKey()),
+                        StringUtils.trimToEmpty(primary.getApiKey()));
     }
 
     /** 取全局兜底配置；模块或兜底未配置时返回 null */
@@ -83,6 +102,10 @@ public final class ModelFallbackChain {
                 ? fallback.getBaseUrl() : primary.getBaseUrl());
         merged.setApiKey(StringUtils.isNotBlank(fallback.getApiKey())
                 ? fallback.getApiKey() : primary.getApiKey());
+        // 协议随地址密钥一起继承：兜底指向 Anthropic 站时，地址是 Anthropic 的、
+        // 协议却留在 OpenAI 会直接 401/404
+        merged.setProtocol(StringUtils.isNotBlank(fallback.getProtocol())
+                ? fallback.getProtocol() : primary.getProtocol());
         merged.setCompletionsPath(StringUtils.isNotBlank(fallback.getCompletionsPath())
                 ? fallback.getCompletionsPath() : primary.getCompletionsPath());
         return merged;

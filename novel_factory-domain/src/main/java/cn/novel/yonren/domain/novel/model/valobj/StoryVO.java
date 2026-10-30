@@ -107,6 +107,10 @@ public class StoryVO {
             // 仅 scene-models 条目可配（chapter-judge 指向异供应商如 DeepSeek 时使用）
             private String baseUrl;
             private String apiKey;
+            // 场景级接口协议覆盖（LlmProtocol.code）：选中转站时随站切换。
+            // 全局走 OpenAI、评审场景指向 Anthropic 站时必须各自用对协议，
+            // 否则会拿 Anthropic 的密钥去请求 Chat Completions 端点
+            private String protocol;
             // 场景级补全路径覆盖：智谱 GLM 等供应商路径为 /chat/completions（base-url 已含 /v4），
             // 留空沿用 module 级 completionsPath
             private String completionsPath;

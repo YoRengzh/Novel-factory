@@ -343,16 +343,16 @@
                     <div class="section-label" data-page-node-id="sSR1Tmu4uw419PZ0mJdSw5">SCENE MODELS</div>
                     <h2 class="section-title" data-page-node-id="m1nbxq44CG3VtAfwuNTpcf">场景模型</h2>
                     <p class="settings-hint" data-page-node-id="bZref5VnUGT8zfPHK2oAmJ">
-                        <b>说明</b>：每个生成场景可独立指定模型 / 输出上限 / 采样温度。优先级：场景覆盖 &gt; 全局覆盖（05 设置里的接入配置）&gt; 程序内置配置（场景条目缺项回落统一模型）。覆盖输入留空 = 清除该字段覆盖、回退下一层。保存即生效、跨重启保留。
+                        <b>说明</b>：每个生成场景可独立指定模型 / 输出上限 / 采样温度，以及<b>走哪个中转站</b>（留空 = 跟随全局）。优先级：场景覆盖 &gt; 全局覆盖（05 设置里的接入配置）&gt; 程序内置配置（场景条目缺项回落统一模型）。覆盖输入留空 = 清除该字段覆盖、回退下一层。保存即生效、跨重启保留。
                     </p>
                     <div class="scene-api-switch" data-page-node-id="ScApiSwitchRow1">
                         <label class="switch-label" for="scene_api_enabled">
                             <input type="checkbox" id="scene_api_enabled" data-page-node-id="ScApiSwitchBox1">
-                            <span>启用场景级 API（每个场景可独立配置 Base URL 与 API Key）</span>
+                            <span>启用场景级 API（每个场景可独立选择中转站）</span>
                         </label>
                         <span class="settings-hint scene-api-hint" id="scene-api-hint">
-                            关闭时：所有场景强制走 05 设置里「模型接入」的全局地址与密钥，场景自带地址密钥一律不生效；
-                            打开时：每个场景可自配地址密钥，并在下方各行编辑（留空 = 沿用全局 / yml 静态）。
+                            关闭时：所有场景强制走 05 设置里「模型接入」选中的中转站，场景选站一律不生效；
+                            打开时：每个场景可在下方各行选自己的中转站（留空 = 跟随全局）。
                         </span>
                     </div>
                     <div id="scene-unified-note" class="scene-unified-note hidden" data-page-node-id="R8r8J8KJS0zgnDVcNVYCyZ"></div>
@@ -372,7 +372,7 @@
                     <h2 class="section-title">兜底模型</h2>
                     <p class="settings-hint">
                         <b>说明</b>：所有场景共用这一个兜底模型，只有主模型与场景配置都不可用（额度耗尽 / 模型下线 / 参数被拒）时才启用。
-                        兜底的意义是<b>换一个供应商</b>——同供应商的另一个模型常与主模型一起挂，所以这里可以单独填 Base URL 与 API Key；
+                        兜底的意义是<b>换一个供应商</b>——同供应商的另一个模型常与主模型一起挂，所以这里可以<b>选中转站</b>；
                         留空则沿用主模型的地址密钥（同供应商时只写模型名即可）。
                         <b>输出上限建议显式填写</b>：不同模型族的 token 上限差异很大，沿用主模型的值可能直接 400。
                         留空模型名 = 不启用兜底。
@@ -380,7 +380,7 @@
                     <div class="form-grid">
                         <div class="form-group">
                             <label for="fallback_model">模型名（model）</label>
-                            <input type="text" id="fallback_model" list="chatgpt-model-options" placeholder="留空 = 不启用兜底" autocomplete="off">
+                            <input type="text" id="fallback_model" placeholder="留空 = 不启用兜底" autocomplete="off">
                         </div>
                         <div class="form-group">
                             <label for="fallback_maxTokens">最大输出 Token</label>
@@ -390,13 +390,29 @@
                             <label for="fallback_temperature">采样温度（0~1）</label>
                             <input type="number" id="fallback_temperature" min="0" max="1" step="0.1" placeholder="留空沿用主模型" autocomplete="off">
                         </div>
-                        <div class="form-group full-width">
-                            <label for="fallback_baseUrl">Base URL（留空沿用主模型）</label>
-                            <input type="text" id="fallback_baseUrl" placeholder="留空沿用全局地址" autocomplete="off">
+                        <div class="form-group">
+                            <label for="fallback_provider">中转站（留空沿用主模型）</label>
+                            <select id="fallback_provider">
+                                <option value="">跟随主模型</option>
+                            </select>
                         </div>
                         <div class="form-group full-width">
-                            <label for="fallback_apiKey">API Key（留空沿用主模型 / 保留现有）</label>
-                            <input type="password" id="fallback_apiKey" placeholder="留空保留现有" autocomplete="new-password">
+                            <label class="switch-label" for="fallback_manual_toggle">
+                                <input type="checkbox" id="fallback_manual_toggle">
+                                <span>手动填地址与密钥（不使用中转站）</span>
+                            </label>
+                        </div>
+                        <div id="fallback-manual-panel" class="form-group full-width hidden">
+                            <div class="form-grid">
+                                <div class="form-group full-width">
+                                    <label for="fallback_baseUrl">Base URL（留空沿用主模型）</label>
+                                    <input type="text" id="fallback_baseUrl" placeholder="留空沿用全局地址" autocomplete="off">
+                                </div>
+                                <div class="form-group full-width">
+                                    <label for="fallback_apiKey">API Key（留空沿用主模型 / 保留现有）</label>
+                                    <input type="password" id="fallback_apiKey" placeholder="留空保留现有" autocomplete="new-password">
+                                </div>
+                            </div>
                         </div>
                     </div>
                     <div id="fallback-status" class="config-status hidden"></div>
@@ -437,33 +453,45 @@
                             <div class="form-group full-width" data-page-node-id="ehUJpYpS5rRkcXOGWR04wL">
                                 <label for="llm_provider">中转站（API 供应商）</label>
                                 <select id="llm_provider">
-                                    <option value="">手动（使用下方地址密钥）</option>
+                                    <option value="">— 请先在中转站管理里添加 —</option>
                                 </select>
-                            </div>
-                            <div class="form-group full-width" data-page-node-id="ehUJpYpS5rRkcXOGWR04wL">
-                                <label for="llm_baseUrl" data-page-node-id="EUMPpI57BrjHvKp5FetCky">Base URL（接口地址）</label>
-                                <input type="text" id="llm_baseUrl" placeholder="https://dashscope.aliyuncs.com/compatible-mode" autocomplete="off" data-page-node-id="Y4pKmSBIqmyJIeEOcgzNtA">
-                            </div>
-                            <div class="form-group" data-page-node-id="F3AWguuOGKwqoUr58Qsssx">
-                                <label for="llm_protocol" data-page-node-id="AqK3LlmProtocolSelect01">接口协议（手动模式）</label>
-                                <select id="llm_protocol" data-page-node-id="AqK3LlmProtocolSelect02">
-                                    <option value="openai">OpenAI（Chat Completions）</option>
-                                    <option value="anthropic">Anthropic（Messages）</option>
-                                    <option value="responses">OpenAI Responses</option>
-                                </select>
-                            </div>
-                            <div class="form-group" data-page-node-id="z6SAfw3qKuzZEfEVFasqww">
-                                <label for="llm_apiKey" data-page-node-id="wH42ezUEAHcZjGgm4JArCn">API Key / Token</label>
-                                <input type="password" id="llm_apiKey" placeholder="留空则保留现有 Key" autocomplete="new-password" data-page-node-id="nAqph92MKDzXRalpIhex2c">
                             </div>
                             <div class="form-group" data-page-node-id="F3AWguuOGKwqoUr58Qsssx">
                                 <label for="llm_model" data-page-node-id="qKRtb2BmcK3EUjGHyhoMYn">模型名（model）</label>
-                                <input type="text" id="llm_model" list="chatgpt-model-options" placeholder="qwen3.8-flash" autocomplete="off" data-page-node-id="JdKtPhR3f7rxHlf8ruKdF2">
-                                <datalist id="chatgpt-model-options"></datalist>
+                                <input type="text" id="llm_model" placeholder="选中转站后点「获取模型」，或直接输入" autocomplete="off" data-page-node-id="JdKtPhR3f7rxHlf8ruKdF2">
+                                <div id="chatgpt-model-options" class="model-dropdown"></div>
                             </div>
                             <div class="form-group" data-page-node-id="FRmqQFFDO0PM9fxWaOyM02">
                                 <label for="llm_maxTokens" data-page-node-id="61SJLrkXJSlZMfE4ycGe8F">最大输出 Token</label>
                                 <input type="number" id="llm_maxTokens" min="1" placeholder="16384" autocomplete="off" data-page-node-id="0jgqJmQMw3lAVECABMBBB9">
+                            </div>
+                            <!-- 手动地址密钥：默认折叠。中转站模式下这两项不生效（优先级低于站），
+                                 只在"临时试一个还没登记的地址"时才需要展开 -->
+                            <div class="form-group full-width">
+                                <label class="switch-label" for="llm_manual_toggle">
+                                    <input type="checkbox" id="llm_manual_toggle">
+                                    <span>手动模式（不使用中转站，直接填地址与密钥）</span>
+                                </label>
+                            </div>
+                            <div id="llm-manual-panel" class="full-width hidden">
+                                <div class="form-grid">
+                                    <div class="form-group full-width" data-page-node-id="ehUJpYpS5rRkcXOGWR04wL">
+                                        <label for="llm_baseUrl" data-page-node-id="EUMPpI57BrjHvKp5FetCky">Base URL（接口地址）</label>
+                                        <input type="text" id="llm_baseUrl" placeholder="https://dashscope.aliyuncs.com/compatible-mode" autocomplete="off" data-page-node-id="Y4pKmSBIqmyJIeEOcgzNtA">
+                                    </div>
+                                    <div class="form-group" data-page-node-id="F3AWguuOGKwqoUr58Qsssx">
+                                        <label for="llm_protocol" data-page-node-id="AqK3LlmProtocolSelect01">接口协议</label>
+                                        <select id="llm_protocol" data-page-node-id="AqK3LlmProtocolSelect02">
+                                            <option value="openai">OpenAI（Chat Completions）</option>
+                                            <option value="anthropic">Anthropic（Messages）</option>
+                                            <option value="responses">OpenAI Responses</option>
+                                        </select>
+                                    </div>
+                                    <div class="form-group" data-page-node-id="z6SAfw3qKuzZEfEVFasqww">
+                                        <label for="llm_apiKey" data-page-node-id="wH42ezUEAHcZjGgm4JArCn">API Key / Token</label>
+                                        <input type="password" id="llm_apiKey" placeholder="留空则保留现有 Key" autocomplete="new-password" data-page-node-id="nAqph92MKDzXRalpIhex2c">
+                                    </div>
+                                </div>
                             </div>
                         </div>
                         <div id="llm-config-status" class="config-status hidden" data-page-node-id="9Kj3vWuEFwpTjowTew5Ac3"></div>

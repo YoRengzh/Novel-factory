@@ -203,6 +203,14 @@ public interface IStoryRepository {
     void appendCandidateSample(Path storyDir, String jsonlLine) throws Exception;
 
     /**
+     * 追加一行写手训练样本（JSON 行）到 memory/writer-samples.jsonl（观测文件，追加语义，
+     * 供后训练自有写手模型：SFT 范文对 / 与 candidate-samples 关联出 DPO 偏好对 / GRPO 规则奖励）。
+     * 调用方应 fail-soft：写失败不得反噬生成流程。
+     * storyDir 为 resolveStoryDirectory 校验后的路径对象
+     */
+    void appendWriterSample(Path storyDir, String jsonlLine) throws Exception;
+
+    /**
      * 追加一行全书质量评分到 memory/quality-trend.jsonl（观测文件，追加语义）。
      * 每行是一个评分窗口的汇总：rubric 版本号 + 抽样各章维度分 + 窗口机械指标。
      * 调用方应 fail-soft：评分或落盘失败都不得反噬生成流程——度量工具坏了不该拖垮生产线。

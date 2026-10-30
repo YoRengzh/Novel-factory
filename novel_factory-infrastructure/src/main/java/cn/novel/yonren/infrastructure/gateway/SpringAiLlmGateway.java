@@ -397,6 +397,8 @@ public class SpringAiLlmGateway implements LlmGateway {
 
 
     static String chatModelCacheKey(StoryVO.Module.AiApi api, StoryVO.Module.ChatModel selected) {
+        // protocol 已在 api 上（effectiveApi 合成后即含场景协议），缓存键带上它才能区分
+        // "同地址同模型、不同协议"的两个客户端
         return api.getProtocol() + "|" + api.getBaseUrl() + "|" + api.getApiKey() + "|" + api.getZeroDataRetention()
                 + "|" + selected.getModel() + "|" + selected.getMaxTokens()
                 + "|" + selected.getEnableThinking() + "|" + selected.getTemperature();
@@ -407,7 +409,8 @@ public class SpringAiLlmGateway implements LlmGateway {
         boolean hasSceneApi = selected != null
                 && (StringUtils.isNotBlank(selected.getBaseUrl()) || StringUtils.isNotBlank(selected.getApiKey()));
         boolean hasScenePath = selected != null && StringUtils.isNotBlank(selected.getCompletionsPath());
-        if (fallback == null || (!hasSceneApi && !hasScenePath)) {
+        boolean hasSceneProtocol = selected != null && StringUtils.isNotBlank(selected.getProtocol());
+        if (fallback == null || (!hasSceneApi && !hasScenePath && !hasSceneProtocol)) {
             return fallback;
         }
         StoryVO.Module.AiApi api = new StoryVO.Module.AiApi();
@@ -417,8 +420,9 @@ public class SpringAiLlmGateway implements LlmGateway {
                 ? selected.getApiKey() : fallback.getApiKey());
         api.setCompletionsPath(hasScenePath ? selected.getCompletionsPath() : fallback.getCompletionsPath());
         api.setZeroDataRetention(fallback.getZeroDataRetention());
-        // 协议始终继承 module 级：场景级第二模型族暂不支持独立协议（v1 边界，见 buildChatModel 注释）
-        api.setProtocol(fallback.getProtocol());
+        // 协议：场景显式声明时以场景为准（选中转站即随站切协议），否则继承全局。
+        // 全局 OpenAI + 评审场景指向 Anthropic 站时，两边必须各用各的客户端与 options 载体
+        api.setProtocol(hasSceneProtocol ? selected.getProtocol() : fallback.getProtocol());
         return api;
     }
 
@@ -927,7 +931,10 @@ public class SpringAiLlmGateway implements LlmGateway {
 
     /** LlmCall 中非空字段作为每调用级覆盖（选择器/摘要等小调用用小参数）；按协议选择 options 载体 */
     private ChatOptions callOptions(StoryVO.Module effective, StoryVO.Module.ChatModel selected, LlmCall call) {
-        if (LlmProtocol.parse(effective.getAiApi().getProtocol()) == LlmProtocol.ANTHROPIC) {
+        // 协议判定必须与 buildChatModel 同源：都走 effectiveApi 合成后的协议。
+        // 只看 module.aiApi 会把"场景指向 Anthropic 站"的调用错发成 OpenAI options 载体
+        LlmProtocol protocol = LlmProtocol.parse(effectiveApi(effective, selected).getProtocol());
+        if (protocol == LlmProtocol.ANTHROPIC) {
             return anthropicCallOptions(selected, call);
         }
         // openai 与 responses 共用 OpenAiChatOptions 载体（responses 客户端按 ChatOptions 接口读取）

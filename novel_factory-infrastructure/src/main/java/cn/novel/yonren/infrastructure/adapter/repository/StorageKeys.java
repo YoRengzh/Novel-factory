@@ -42,6 +42,12 @@ class StorageKeys {
     static final String AUDIT_SAMPLES_FILE = "audit-runtime-samples.jsonl";
     static final String CANDIDATE_SAMPLES_FILE = "candidate-samples.jsonl";
 
+    /**
+     * 写手训练样本（水龙头）：每章追加一行 {最终prompt, 最终采纳正文, 门禁结论}。
+     * 供后训练自有写手模型用（SFT/DPO/GRPO 原料），见 WriterSampleService。
+     */
+    static final String WRITER_SAMPLES_FILE = "writer-samples.jsonl";
+
     /** 全书质量评分趋势（每 N 章追加一行 JSONL；rubric 版本号随行落盘，防止两把尺子的读数混成一条曲线） */
     static final String QUALITY_TREND_FILE = "quality-trend.jsonl";
     /** 机械校验事件流水（伏笔账本失配/种子补齐/降级解析等；单行 JSON、追加写） */

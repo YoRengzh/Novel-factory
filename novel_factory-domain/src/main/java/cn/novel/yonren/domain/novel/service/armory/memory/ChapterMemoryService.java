@@ -440,15 +440,27 @@ public class ChapterMemoryService {
             // 计划合计推进 59 天，正文只走 16 天（缺口 73%）——写手读完四个关键事件，
             // 发现一个下午装得下，就没有任何理由加时间过渡。**许可可以不行使，义务不行**。
             // 现在写成"必须到达"，并明确"不得停在上一章同日"，把推进从可选项变成交付项。
-            String locked = timeAnchor + "\n【时间锁】年龄/故事时间以上述值为准，禁止在正文中擅自增长、倒退或跳跃。\n"
+                // **由「配额」再降为「护栏」**：上一版仍写"必须到达 + 装不下就写时间过渡"，
+            // 联合起来等于要求每章都交出一段流逝。事件只装得下一个下午时，写手只剩
+            // "第二天""过了几日""转眼入秋"这类无信息填充可用——时间动了、情节没动。
+            // 现在彻底改成**只防倒退**：时间是背景，情节走到哪里，时间就跟到哪里。
+            // timeAdvance 选填后，有声明时也只是"本章跨到了哪天"的说明，不是配额。
+            //
+            // **学段年龄覆盖**：摘要里的年龄由模型从正文抄出，正文写错就一路错下去
+            //（实测某书写"他只有十二岁"，而该章已是高一，应为 15 岁）。学段比摘要年龄更可靠。
+            String stageAge = stageAgeOverride(stageBlueprint);
+            String ageLine = StringUtils.isNotBlank(stageAge)
+                    ? "\n【学段年龄·以此为准】主角当前学段对应 **" + stageAge + " 岁**"
+                            + "（由阶段目标的学段直接确定，优先于上方摘要年龄；若两者冲突，以本值为准）。\n"
+                    : "";
+            String locked = timeAnchor + ageLine + "\n【时间锚·只防倒退】年龄/故事时间以上述值为准，"
+                    + "**禁止写回已确立时点之前**；向前推进随剧情自然发生，本章不跨时间也完全合法。\n"
                     + (StringUtils.isNotBlank(timeAdvance)
-                            ? "【本章时间目标·必须到达】本章结束时，故事时间**必须**推进到：" + timeAdvance
-                                    + "。若本章事件装不下这段时间，**必须在章末写时间过渡**"
-                                    + "（过夜、赶路、开学、节气更替等）交代流逝，不得停在上一章同日、不得省略时间推进；"
-                                    + "这是时间推进的唯一合法通道，也是本章的交付项而非可选项。"
-                            : "【本章时间目标·必须到达】本章计划未声明推进额度，故事时间应保持在上述时点之后"
-                                    + "（同日内推进即可），但**不得倒退**；若剧情需要跨越更长时间，"
-                                    + "必须在章末写明过渡，不能无声跳过。");
+                            ? "【本章时间说明】本章时间跨到：" + timeAdvance
+                                    + "。这是**背景说明**，不是配额——正文不需要专门写时间过渡，"
+                                    + "情节走到哪里，时间就跟到哪里。"
+                            : "【本章时间说明】本章未声明跨时间，故事时间可停留在上述时点；"
+                                    + "若剧情自然跨到更晚，照常写即可，**不必**为“推进时间”而插入过夜/赶路等过渡。");
             blocks.add(section("时序锚", MEMORY_PRIORITY_REALM_LOCK, false, new StringBuilder(locked)));
         }
 
@@ -524,12 +536,16 @@ public class ChapterMemoryService {
                 }
             }
             if (!timeArrears.isEmpty()) {
-                conflicts.append("【时间目标未达成】上一章未推进到计划要求的时间，本章**必须补足**：\n");
+                // 与时间锚的"护栏"口径一致：此处只在**计划显式声明了绝对目标日期**
+                // 且正文落后时才出现，属"计划与正文不一致"的提示，不是"每章必须推进"的配额。
+                conflicts.append("【时间线提示】上一章计划写明了目标日期，正文实际停得更早：\n");
                 for (String arrears : timeArrears) {
                     conflicts.append("- ").append(arrears).append("\n");
                 }
-                conflicts.append("时间的基准是【时序锚】与本章时间目标（不是账本）；补足方式是写时间过渡，"
-                        + "不是改账本或改时间声明。\n");
+                conflicts.append("时间的基准是【时序锚】与本章时间说明（不是账本）；"
+                        + "若本章确实需要赶上该日期，可交代时间推移（融进场景转换即可，"
+                        + "不必单写一段过夜/赶路的过渡）；若不需要，保持现状也合法——"
+                        + "这只是计划与正文不一致的提示，不是每章的推进配额。\n");
             }
         }
         blocks.add(section("偏差警示", MEMORY_PRIORITY_RECENT, true, conflicts));
@@ -1390,6 +1406,37 @@ public class ChapterMemoryService {
      * 实测 17 条结转 ≈1.9k 字符，是【阶段蓝图】块膨胀到 2.9k、把三账本/伏笔账挤出 18000
      * 前缀预算的主力之一。这与 {@link #renderForeshadowing} 的"写手视图无元信息"是同一条纪律。
      */
+    /**
+ * 学段→年龄覆盖 。与 {@code ChapterPlanPromptService#stageToAge} 同口径。
+     *
+     * <p>摘要里的年龄事实由模型从正文抄出，正文写错就一路错下去。学段（高一=15岁、初二=13岁）
+     * 与生日是否已过无关，也不受正文年份写错的影响，是比摘要年龄更可靠的锚点。
+     *
+     * @return 年龄字符串（如 "15"）；学段识别不到时返回 null（不编造，沿用摘要锚）
+     */
+    private String stageAgeOverride(StageBlueprintEntity blueprint) {
+        String text = blueprint == null ? null : blueprint.getStageGoal();
+        if (StringUtils.isBlank(text)) {
+            return null;
+        }
+        String[][] mapping = {
+                {"高三", "17"}, {"高二", "16"}, {"高一", "15"},
+                {"初三", "14"}, {"初二", "13"}, {"初一", "12"},
+                {"六年级", "11"}, {"五年级", "10"}, {"四年级", "9"},
+                {"三年级", "8"}, {"二年级", "7"}, {"一年级", "6"},
+                {"大一", "18"}, {"大二", "19"}, {"大三", "20"}, {"大四", "21"},
+        };
+        for (String[] pair : mapping) {
+            if (text.contains(pair[0])) {
+                return pair[1];
+            }
+        }
+        if (text.contains("高中")) return "15";
+        if (text.contains("初中")) return "12";
+        if (text.contains("大学")) return "18";
+        return null;
+    }
+
     private void renderStageBlueprint(StringBuilder sb, StageBlueprintEntity blueprint) {
         if (blueprint == null) {
             return;

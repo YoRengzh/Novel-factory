@@ -124,6 +124,14 @@ public class ChapterPlanPromptService {
                     planStoryContext.getWorldSetting(), planStoryContext.getProtagonist(),
                     planStoryContext.getOutline());
         }
+                // 学段→年龄映射：正文曾把高一写成十二岁（应为十五岁），
+        // 摘要忠实记录了错误值，导致时序锚长期锚在十二岁。此处显式锁定学段对应的年龄，
+        // 覆盖摘要里的错误记录——学段是更可靠的锚点（高一=15岁、高二=16岁、高三=17岁、大学=18岁）。
+        // priority=1（最高，不可截断）：年龄错了会连锁污染后续所有章节，不能被预算裁掉。
+        String stageAgeAnchor = buildStageAgeAnchor(dynamicContext.getStageBlueprint());
+        if (StringUtils.isNotBlank(stageAgeAnchor)) {
+            memoryBlocks.add(0, new PromptBudgetGuard.Block("学段年龄锚", 1, false, stageAgeAnchor));
+        }
         // 实体档案（E1）：规划路径（item=null）注入最久未见的休眠实体——
         // 规划层据此安排"谁重新出场"，避免配角蒸发（正文路径的按章提及过滤见 ChapterWorker）
         memoryBlocks.addAll(chapterMemoryService.buildEntityDossierBlocks(
@@ -313,14 +321,31 @@ public class ChapterPlanPromptService {
                         + "「甲在人前当众质问乙某事，乙给出承诺但附带一个交换条件，两人不欢而散」），"
                         + "**禁止**写成「谁做了什么」的一句话"
                         + "（如「乙承诺处理某事」）——后者在正文里只能被展开成一句过渡叙述。")
-                .append("每章必须声明 timeAdvance（本章结束时的时间，相对上一章推进 3-7 天；每段至少 1 章跳月），")
-                .append("全段单调递增并与阶段末目标（stageEnd）一致——它是年龄/时间推进的唯一合法通道。");
+                // 补：去掉时间配额后实测平均字数从 2213 跌到 1246（-44%）。
+                // 模型把"不注水"误读成了"少写"——它不再写过渡，但也把场景内部的展开一并省掉。
+                // 必须明确：**精简的是过渡，不是场景本身**；场景该铺展时仍要铺展。
+                .append("**“不注水”不等于“少写”**：去掉的是无信息过渡（“第二天”“过了几日”），")
+                .append("不是场景本身。每个关键事件仍要**演成一场戏**：")
+                .append("对白至少 2-3 轮有来有回（不是一问一答就结束），")
+                .append("动作要有过程与落点（不是“他做了 X”一句带过），")
+                .append("在场人物的反应要写出来。normal 章有效字数仍应达到 1400 以上，")
+                .append("靠**场景内部的展开**来充实，而不是靠时间过渡来填满。")
+                // timeAdvance 语义 由「交付项」降级为「背景设定」）：
+                // 前几轮把"推进3-7天"改成"自决"，又加了"连续同日上限"，本质都还在把
+                // 时间推进当作每章要验收的任务——模型一旦读到任务就会去凑它，
+                // 凑出来的就是"第二天""过了几日"这类无信息过渡。真正要治的是这件事。
+                .append("timeAdvance 是**选填**的背景说明：本章若都在同一天，留空即可，不必为凑数编日期。")
+                .append("需要跨时间时再写（如“次日清晨”“三日后”），写到哪天就是哪天。")
+                .append("**时间是情节的背景，不是每章的任务**——一个下午能写完的章，就让它停在那天；")
+                .append("不要为了“推进时间”而插入过夜/赶路/季节更替等无信息过渡。")
+                .append("唯一的硬约束：不得与已确立的时间线矛盾（例如主角已上高中，就不能写“小学三年级”）。");
         sb.append("\n\n").append(PLAN_SCHEMA_MARKER).append(":")
                 .append("\n{\"chapters\":[{\"chapterNo\":").append(startNo)
                 .append(",\"title\":\"章节标题\",\"goal\":\"本章目标\",\"characters\":[\"角色A\"],")
                 .append("\"keyEvents\":[\"关键事件1\",\"关键事件2\",\"关键事件3\",\"关键事件4\"],")
                 .append("\"dialogueScenes\":[\"对话承载事件①（逐字取自keyEvents）\",\"对话承载事件②（逐字取自keyEvents）\"],")
-                .append("\"timeAdvance\":\"推进2周，至XXXX年10月下旬\",\"endingHook\":\"结尾悬念\",")
+                // 示例留空：timeAdvance 是选填，示例给值模型就会每章都填，又变回任务。
+                .append("\"timeAdvance\":\"\",\"endingHook\":\"结尾悬念\",")
                 .append("\"chapterType\":\"normal\",\"suspenseBeat\":\"档位表原文之一\"");
         if (blueprint != null && blueprint.getMainLineByChapter() != null
                 && !blueprint.getMainLineByChapter().isEmpty()) {
@@ -328,6 +353,52 @@ public class ChapterPlanPromptService {
         }
         sb.append("}]}");
         return sb.toString();
+    }
+
+    /**
+ * 学段→年龄锚 。
+     *
+     * <p><b>治什么</b>：摘要里的年龄事实是模型从正文抄出来的，正文写错就一路错下去——
+     * 实测某书正文写"他只有十二岁"，而该章已是高一、按推算应为 15 岁。错误一旦进摘要，
+     * 时序锚就长期锚在十二岁，规划层据此把主角当儿童写（限制媒介、回避独立行动），成长线塌陷。
+     *
+     * <p><b>为什么用学段而不是年份推算</b>：年龄必须跟学段走——高一就是 15 岁，初二就是 13 岁。
+     * 年份推算依赖出生日期与生日是否已过，且正文里年份本身也可能写错；学段是更稳定的锚点。
+     *
+     * <p>识别不到学段时返回 null（不编造），沿用摘要锚。
+     */
+    private String buildStageAgeAnchor(StageBlueprintEntity blueprint) {
+        String text = blueprint == null ? null : blueprint.getStageGoal();
+        if (StringUtils.isBlank(text)) {
+            return null;
+        }
+        Integer age = stageToAge(text);
+        if (age == null) {
+            return null;
+        }
+        return "【学段年龄锚】主角当前学段对应的年龄为 **" + age + " 岁**"
+                + "（由阶段目标的学段直接确定，优先于摘要里可能记错的年龄值）。\n"
+                + "正文与章计划中涉及年龄的表述必须与此一致；若与【时序锚】的年龄记录冲突，以本锚为准。\n";
+    }
+
+    /** 学段关键词 → 对应起始年龄；识别不到返回 null。按"最长匹配优先"排列避免"高一"被"高中"吞掉。 */
+    private static Integer stageToAge(String text) {
+        String[][] mapping = {
+                {"高三", "17"}, {"高二", "16"}, {"高一", "15"},
+                {"初三", "14"}, {"初二", "13"}, {"初一", "12"},
+                {"六年级", "11"}, {"五年级", "10"}, {"四年级", "9"},
+                {"三年级", "8"}, {"二年级", "7"}, {"一年级", "6"},
+                {"大一", "18"}, {"大二", "19"}, {"大三", "20"}, {"大四", "21"},
+        };
+        for (String[] pair : mapping) {
+            if (text.contains(pair[0])) {
+                return Integer.parseInt(pair[1]);
+            }
+        }
+        if (text.contains("高中")) return 15;
+        if (text.contains("初中")) return 12;
+        if (text.contains("大学")) return 18;
+        return null;
     }
 
     /** 按题材生成世界语言约束；只有玄幻题材才出现仙侠词表，其他题材保持中性。 */

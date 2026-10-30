@@ -837,7 +837,9 @@ textarea { resize: vertical; line-height: 1.7; }
 
 .scene-row {
     display: grid;
-    grid-template-columns: 1.3fr 1.1fr 1fr 0.7fr 0.65fr 1.15fr 1.15fr auto;
+    /* 7 列：场景 / 当前生效 / 覆盖模型 / Tokens / 温度 / 中转站 / 操作。
+       原先是 8 列（Base URL 与 API Key 各占一列），改用中转站下拉后合并为 1 列 */
+    grid-template-columns: 1.3fr 1.15fr 1fr 0.7fr 0.6fr 1.1fr auto;
     gap: 10px;
     align-items: center;
     padding: 8px 10px;
@@ -1547,3 +1549,44 @@ body:not(.light) select {
     .scene-row.asset-row-provider,
     .scene-row.asset-row-reference { grid-template-columns: 1fr 1fr; }
 }
+
+/* 模型下拉列表：替代原生 <datalist>（其下拉由浏览器渲染、不可滚动）
+   用 fixed 而非 absolute：定位基准恒为视口，由 JS 按 getBoundingClientRect
+   写入坐标，不依赖任何祖先元素是否 position:relative。 */
+.model-dropdown {
+    display: none;
+    position: fixed;
+    z-index: 1000;
+    max-height: 280px;
+    overflow-y: auto;
+    background: var(--panel, #10141d);
+    border: 1px solid var(--line-strong, rgba(148, 163, 184, 0.22));
+    border-radius: 6px;
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+    min-width: 260px;
+}
+.model-dropdown.visible { display: block; }
+.model-dropdown .model-option {
+    padding: 8px 12px;
+    cursor: pointer;
+    font-family: var(--mono, monospace);
+    font-size: 13px;
+    line-height: 1.4;
+    color: var(--text, #e6e9f0);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+.model-dropdown .model-option:hover,
+.model-dropdown .model-option.active {
+    /* 变量名是 --accent-dim（项目里没有 --accent-soft），fallback 取同值 */
+    background: var(--accent-dim, rgba(125, 211, 252, 0.14));
+    color: var(--accent, #7dd3fc);
+}
+.model-dropdown .model-option .owner-tag {
+    font-size: 11px;
+    color: var(--muted, #94a3b8);
+    margin-right: 6px;
+}
+/* 下拉用 fixed 定位，坐标由 app.js 按 getBoundingClientRect 写入；
+   不改任何祖先元素的 position。 */

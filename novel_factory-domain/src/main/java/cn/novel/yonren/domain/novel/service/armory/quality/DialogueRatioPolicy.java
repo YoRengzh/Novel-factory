@@ -128,7 +128,7 @@ public final class DialogueRatioPolicy {
         issue.setEvidence("全章 " + content.length() + " 字，对白引号出现 0 次（对白轮次=0，行占比=0）");
         issue.setDescription("对白格式坍缩：全章没有任何引号包裹的角色发言，叙述与对白混作一团，"
                 + "读者无法分辨谁在说话——疑似生成时把纯文本禁令误扩展到了对白。");
-        issue.setSuggestion("为全部角色出声发言补「」（或中文双引号）包裹；注意纯文本禁令只约束 "
+        issue.setSuggestion("为全部角色出声发言补中文双引号“”包裹；注意纯文本禁令只约束 "
                 + "Markdown 标记与章节编号等元信息，对白引号合法且必需。");
         return List.of(issue);
     }
@@ -178,7 +178,7 @@ public final class DialogueRatioPolicy {
         issue.setDescription("角色台词用括号包裹而非引号：括号在中文排版里是旁注/舞台提示，"
                 + "用它当引号会让读者分不清谁在说话；且这类句子不被计入对白统计，"
                 + "会把「对白行占比」「轮次密度」虚报成达标。");
-        issue.setSuggestion("把全部人物台词改成成对的中文引号「」：括号只留给旁注与说明。"
+        issue.setSuggestion("把全部人物台词改成成对的中文双引号“”：括号只留给旁注与说明。"
                 + "引号内只放实际说出的话，动作与神态放在引号外的叙述里。");
         return List.of(issue);
     }

@@ -453,6 +453,18 @@ public class StoryRepository implements IStoryRepository {
     }
 
     @Override
+    public void appendWriterSample(Path storyDir, String jsonlLine) throws IOException {
+        Path memoryDir = storyDir.resolve(StorageKeys.MEMORY_DIR);
+        Path file = memoryDir.resolve(StorageKeys.WRITER_SAMPLES_FILE);
+        withStoryLock(storyDir, () -> {
+            Files.createDirectories(memoryDir);
+            // 观测文件走追加语义：单行 JSON，崩溃最多丢半行，无需原子替换
+            Files.writeString(file, jsonlLine + System.lineSeparator(),
+                    StandardOpenOption.CREATE, StandardOpenOption.APPEND);
+        });
+    }
+
+    @Override
     public void appendQualityTrend(Path storyDir, String jsonlLine) throws IOException {
         Path memoryDir = storyDir.resolve(StorageKeys.MEMORY_DIR);
         Path file = memoryDir.resolve(StorageKeys.QUALITY_TREND_FILE);

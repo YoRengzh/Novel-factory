@@ -494,8 +494,21 @@ public class QualityGate {
      * <p>数据源是 {@link StyleStatEntity#getUsedDialogueLines()}——历史章节的对白句（含引号）。
      * 取不到足够样本时返回 {@code null}，检测整体跳过：新书前几章还没有历史，
      * 此时"主流"尚未形成，报漂移只会误伤。
+     *
+ * <p><b> 规范由「」改为“”后的口径调整</b>：prompt 层（hard-constraints.md /
+     * plan-targets.md / ChapterBeatsService / ChapterWorker）已统一要求双引号，但历史章节
+     * 全是「」。纯历史统计会把主流永远钉在旧写法上，导致**遵守新规的每一章都被判"漂移"**——
+     * 那等于用质检去对抗规则本身。故此处直接返回 {@code true}（主流=双引号）：
+     * 新规下仍在写「」的章才是漂移，与 prompt 方向一致。历史统计逻辑保留为
+     * {@link #mainstreamCurlyQuotesFromHistory(StyleStatEntity)}，供需要历史基线的场景复用。
      */
     private static Boolean mainstreamCurlyQuotes(StyleStatEntity styleStat) {
+        // 规则层已锁定双引号，主流判定跟随规则而非历史存量。
+        return Boolean.TRUE;
+    }
+
+    /** 历史对白的引号主流统计（原 mainstreamCurlyQuotes 实现，保留作历史基线参考）。 */
+    private static Boolean mainstreamCurlyQuotesFromHistory(StyleStatEntity styleStat) {
         if (styleStat == null || styleStat.getUsedDialogueLines() == null
                 || styleStat.getUsedDialogueLines().size() < 10) {
             return null;
@@ -509,7 +522,7 @@ public class QualityGate {
             if (line.indexOf('「') >= 0) {
                 corner++;
             }
-            if (line.indexOf('\u201C') >= 0) {
+            if (line.indexOf('“') >= 0) {
                 curly++;
             }
         }

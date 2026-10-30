@@ -250,7 +250,7 @@ class TimeAdvanceChecksTest {
 
     // ===== TimeAdvanceChecks：单调性机械校验 =====
 
-    /** 这条规则此前只写在提示词里（"全段 timeAdvance 必须单调递增"），没有任何执行通道 */
+
     @Test
     void validateMonotonic_detectsBackwardJump() {
         List<ChapterPlanItemEntity> plan = List.of(
@@ -261,7 +261,18 @@ class TimeAdvanceChecksTest {
         String issue = TimeAdvanceChecks.validateMonotonic(plan);
 
         assertTrue(issue != null && issue.contains("第3章"), issue);
-        assertTrue(issue.contains("早于第2章"), issue);
+        assertTrue(issue.contains("时间线倒退"), issue);
+    }
+
+    @Test
+    void validateMonotonic_allowsFlashbackWithinSameDay() {
+        // 倒叙合法：第3章时间早于第2章，但只要不早于已确立时点就不算违规
+        List<ChapterPlanItemEntity> plan = List.of(
+                plan(1, "推进5天，至2012年7月9日"),
+                plan(2, "推进3天，至2012年7月12日"),
+                plan(3, "同日傍晚"));
+
+        assertNull(TimeAdvanceChecks.validateMonotonic(plan), "同日与倒叙都合法");
     }
 
     @Test

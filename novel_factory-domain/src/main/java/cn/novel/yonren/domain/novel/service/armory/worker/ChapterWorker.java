@@ -20,6 +20,7 @@ import cn.novel.yonren.domain.novel.service.armory.contract.ChapterContract;
 import cn.novel.yonren.domain.novel.service.armory.contract.GenerationMode;
 import cn.novel.yonren.domain.novel.service.armory.factory.DefaultArmoryFactory;
 import cn.novel.yonren.domain.novel.service.armory.candidate.ChapterCandidateService;
+import cn.novel.yonren.domain.novel.service.armory.writer.WriterSampleService;
 import cn.novel.yonren.domain.novel.service.armory.llm.LlmInvokeService;
 import cn.novel.yonren.domain.novel.service.armory.memory.ChapterMemoryService;
 import cn.novel.yonren.domain.novel.service.armory.memory.FinaleReviewService;
@@ -128,6 +129,10 @@ public class ChapterWorker {
 
     @Resource
     private CandidateSampleService candidateSampleService;
+
+    /** 写手训练样本水龙头：每章落一行（最终prompt+采纳稿+门禁），供后训练自有写手模型，观测件不反噬主流程 */
+    @Resource
+    private WriterSampleService writerSampleService;
 
     /** 全书质量评分（每 N 章一次，fail-soft）：为"这本书在变好还是变差"提供唯一对照基线 */
     @Resource
@@ -423,6 +428,18 @@ public class ChapterWorker {
             // 机械排序 + 异模型评审二选一；挑战者复审不过自动回退原稿，未启用时原样返回
             gateResult = chapterCandidateService.challenge(requestParameter, item, ctx, userPrompt,
                     chapterContent, gateResult, summaries, styleStat, globalNo, storyDir);
+            // 写手样本（训练数据水龙头）：完整最终 prompt 取自 usedPromptMap 的 chapter-N:user/system
+            // （LlmInvokeService 已存含规则尾注的版本），正文取过完审校/修订/盲评的最终采纳稿；
+            // 失败案例由 audit-runtime-samples.jsonl 单独留痕，此处只记"任务→合格范文"
+            if (writerSampleService != null) {
+                Map<String, String> usedPrompts = dynamicContext.getUsedPromptMap();
+                writerSampleService.record(storyDir,
+                        storyDir == null ? null : storyDir.getFileName().toString(),
+                        globalNo,
+                        usedPrompts != null ? usedPrompts.get("chapter-" + globalNo + ":user") : null,
+                        usedPrompts != null ? usedPrompts.get("chapter-" + globalNo + ":system") : null,
+                        chapterContent, gateResult, mode.getLabel());
+            }
             List<ChapterIssueEntity> unresolvedIssues = gateResult.unresolvedBlocking();
             // 验证式自动核销：以本章审校结论验证旧债，须在记入本章新债之前
             if (qualityGate.auditEnabled()) {
@@ -1013,10 +1030,13 @@ public class ChapterWorker {
             return null;
         }
         TimeAdvanceChecks.Arrears a = arrears.get(0);
+                // 措辞与时间锚的"护栏"语义对齐：此处只在**计划显式声明了绝对目标日期**、
+        // 而正文落后时才触发，所以仍要求追上；但不再指定"过夜/赶路"这类填充手段——
+        // 时间推移可以融进场景转换，不必单独写一段过渡。
         return "第" + globalNo + "章时间推进未达标：计划要求到 " + a.target()
                 + "，正文实际停在 " + a.actual() + "（欠 " + a.behindDays() + " 天）。"
-                + "本章必须在章末补足时间过渡（过夜/赶路/开学/节气更替等），把时间推进到不早于 "
-                + a.target() + "，不得再停在同日。";
+                + "本章时间应推进到不早于 " + a.target()
+                + "：可在章末交代时间推移，也可把它融进场景转换（不必单独写一段过夜/赶路的过渡）。";
     }
 
     /**
@@ -1512,7 +1532,7 @@ public class ChapterWorker {
                 .append("\n5. 金手指/核心能力运作机制全篇至多描述2次（首次建立时让读者理解运作方式、关键升级时展示能力变化），后续章节直接用行动展示操作过程和结果，不得每章用大段旁白重新解释原理；如需提醒读者机制存在，用角色的一个习惯性动作或一句话带过（如\"他又闭上眼，阵纹在视网膜上铺展开来\"——一句话带过不展开描述）")
                 .append("\n6. 同章内出现3次及以上同类操作（如连续修补3个节点、连续击败3个敌人、连续检查3个房间）时，每次必须有不同的观察角度、困难类型、操作方式或情绪状态，不得用同一种句式重复；第一次详细描写建立操作模式和难度，第二次简化描写但增加新困难或意外，第三次用结果或他人反应带出（不再重复操作过程）")
                 .append("\n7. 禁止\"这不是X，这是Y\"式定义旁白及其排比连用；禁止大段连续心理独白（超过3句）；禁止用旁白直接命名情绪（\"他感到愤怒/悲伤/震惊\"→改为用行为呈现，如\"他攥紧拳头\"）；关键转折用动作或对话呈现，不靠旁白总结；禁止已建立的设定/金手指机制在后续章节重复解释（\"这就是XX的原理\"\"XX的本质是\"）")
-                .append("\n8. 正文为纯文本，禁止使用任何 Markdown 标记：不得用星号加粗或强调（包括 * 与 **）、不得用井号标题、横线列表、下划线；人物的心理活动、系统面板/提示、技能名称、注入脑海的旁白一律用自然语言直接叙述，靠上下文呈现层次，不得用任何符号包裹或高亮；严禁在正文中出现章节编号（如\"第30章\"\"第十二章\"）或\"本章/上一章/下一章\"等作者层面的元信息。回忆过往事件时，必须用时间/地点/事件指代，绝对不能用章节编号：错误示例\"第12章他在阵眼核心发现的\"→正确写法\"十二天前在阵眼核心发现的\"；错误示例\"第28章袭击事件后\"→正确写法\"上次遇袭之后\"；错误示例\"第6章那个模糊的感知\"→正确写法\"之前那次模糊的感知\"。唯一例外——角色说出口的对白必须用「」或中文双引号包裹：上述禁令只针对 Markdown 标记与作者层面元信息，绝不适用于对白；严禁为了遵守纯文本要求而丢弃对白引号。不要输出解释。")
+                .append("\n8. 正文为纯文本，禁止使用任何 Markdown 标记：不得用星号加粗或强调（包括 * 与 **）、不得用井号标题、横线列表、下划线；人物的心理活动、系统面板/提示、技能名称、注入脑海的旁白一律用自然语言直接叙述，靠上下文呈现层次，不得用任何符号包裹或高亮；严禁在正文中出现章节编号（如\"第30章\"\"第十二章\"）或\"本章/上一章/下一章\"等作者层面的元信息。回忆过往事件时，必须用时间/地点/事件指代，绝对不能用章节编号：错误示例\"第12章他在阵眼核心发现的\"→正确写法\"十二天前在阵眼核心发现的\"；错误示例\"第28章袭击事件后\"→正确写法\"上次遇袭之后\"；错误示例\"第6章那个模糊的感知\"→正确写法\"之前那次模糊的感知\"。唯一例外——角色说出口的对白必须用中文双引号“”包裹：上述禁令只针对 Markdown 标记与作者层面元信息，绝不适用于对白；严禁为了遵守纯文本要求而丢弃对白引号。不要输出解释。")
                 .append("\n9. 结尾必须落在真实的悬念/未决/情绪拉扯点上（呼应 endingHook），把读者拽进下一章；严禁用\"本章就这样结束了\"式的总结性收尾，严禁章末感悟升华（\"从此\"\"这就是\"\"终于\"等人生感悟/主题总结/金句点题），结尾必须停在画面或动作上；严禁在事件平息后空转两段才落笔。")
                 .append(renderRegisterGuidance(storyContext))
                 .append("\n11. 禁止重复使用已出现过的情节模式（情节复用检测）：如果之前已经写过\"公开演示能力→众人震惊→获得授权\"\"被权威质疑→当场证明→获得支持\"\"独自进入禁地→发现惊天秘密→被未知存在盯上\"等套路，本章不得再用相同套路；同类情节必须有不同的场景、对手、困难、结果或情绪走向。每章的核心冲突解决方式必须与前5章不同。如果【已用情节模式黑名单】（如有）中列出了近期使用过的情节模式，本章必须避开。")

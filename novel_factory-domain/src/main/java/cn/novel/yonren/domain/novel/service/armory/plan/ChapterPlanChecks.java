@@ -237,29 +237,25 @@ public final class ChapterPlanChecks {
     }
 
 
+    /**
+ * timeAdvance 完整性检查 由「必填」改为「选填」。
+     *
+     * <p><b>为什么不再必填</b>：原实现要求每章都声明时间推进，缺失即驳回。这等于把"时间推进"
+     * 列为每章的交付项——事件只占一个下午的章也必须交出一段时间，模型只能拿"第二天""过了几日"
+     * 这类无信息过渡去凑。时间应当是情节的背景，不是每章的配额。
+     *
+     * <p>现在空值本身合法：表示本章不跨时间，写手按同日连续处理。
+     */
     public static String validateTimeAdvance(List<ChapterPlanItemEntity> chapters) {
-        if (chapters == null || chapters.isEmpty()) {
-            return null;
-        }
-        List<String> missing = new ArrayList<>();
-        for (ChapterPlanItemEntity c : chapters) {
-            if (c == null) {
-                continue;
-            }
-            if (StringUtils.isBlank(c.getTimeAdvance())) {
-                missing.add("第" + c.getChapterNo() + "章");
-            }
-        }
-        return missing.isEmpty() ? null : "未声明 timeAdvance：" + String.join("、", missing);
+        // 选填语义下无完整性要求，保留方法签名供调用方沿用。
+        return null;
     }
 
     public static String timeAdvanceFeedback(String issue) {
-        return "\n\n【上一版计划的时间推进声明被机械驳回】以下章节缺 timeAdvance：" + issue
-                + "\n\n修正要求（逐章执行）："
-                + "\n1. 为每一章补声明 timeAdvance（本章结束时的时间：相对上一章推进 3-7 天；"
-                + "允许跳月/跳季但必须显式写出推进到何时）；"
-                + "\n2. 全段 timeAdvance 必须**单调递增**、不得倒退，并与阶段末目标（stageEndYear/stageEndAge）一致；"
-                + "\n3. 这是年龄/故事时间推进的唯一合法通道——不声明，时间锁就永远不会放行。";
+        // 选填后不再因缺失而驳回；保留文案供需要提示的调用点使用。
+        return "\n\n【时间声明提示】以下章节的时间表述无法解析：" + issue
+                + "\n\ntimeAdvance 是**选填**的：本章若都在同一天，留空即可，不必为凑数编一个日期。"
+                + "需要跨时间时再写（如“次日清晨”“三日后”），写实到哪天就到哪天。";
     }
 
     /**

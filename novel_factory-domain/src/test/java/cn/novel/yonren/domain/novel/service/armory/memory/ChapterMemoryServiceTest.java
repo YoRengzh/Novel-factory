@@ -48,7 +48,8 @@ class ChapterMemoryServiceTest {
         String prefix = service.buildMemoryPrefix(summaries, null,
                 List.of("【时间欠账】上一章时间推进未达标，本章必须补足时间过渡"), null);
 
-        assertTrue(prefix.contains("【时间目标未达成】"), "前缀条目必须走独立导语");
+        // 2026-10-29：导语由「必须补足」改为「时间线提示」，不再强制推进
+        assertTrue(prefix.contains("【时间线提示】"), "前缀条目必须走独立导语");
         assertTrue(prefix.contains("时间的基准是【时序锚】"), "欠账的修正基准是时序锚而非账本");
         assertFalse(prefix.contains("上一章正文存在与账本冲突的描述"),
                 "只有欠账时不得渲染账本冲突导语（避免错误指令：以账本为准）");

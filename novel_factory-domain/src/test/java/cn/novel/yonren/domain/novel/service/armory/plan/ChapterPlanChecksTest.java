@@ -369,16 +369,16 @@ class ChapterPlanChecksTest {
     }
 
     @Test
-    void validateTimeAdvance_flagsMissingChapters() {
-        // 时序锚：timeAdvance 是年龄/时间推进的唯一合法通道——
-        // 某批全缺时，阶段蓝图声明的 stageEnd 跳接落空，进度对齐持续滞后
+    void validateTimeAdvance_missingIsLegal() {
+        // 2026-10-29：timeAdvance 由必填改为选填——本章不跨时间时留空合法，
+        // 不再因缺失而驳回。时间推进不再是每章的交付项。
         List<ChapterPlanItemEntity> chapters = List.of(
                 planItem(61, "推进3天，至2050年10月20日"),
                 planItem(62, null));
 
         String issue = ChapterPlanChecks.validateTimeAdvance(chapters);
 
-        assertTrue(issue != null && issue.contains("第62章"), issue);
+        assertTrue(issue == null, "选填语义下缺失应合法，实际返回：" + issue);
     }
 
     @Test
