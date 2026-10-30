@@ -1761,6 +1761,16 @@
                 (providerModelOwners[key] = providerModelOwners[key] || []).push(p.name || p.id);
             });
         });
+        // 已缓存的模型名在页面加载时就灌进下拉：否则刷新后下拉是空的，
+        // 兜底/场景等输入框看起来只能手输（模型缓存本就落盘了，没理由不用）
+        const cached = [];
+        savedProviders.forEach(function (p) {
+            (p.models || []).forEach(function (m) {
+                if (cached.indexOf(m) < 0) cached.push(m);
+            });
+        });
+        setModelOptions(cached);
+        refreshModelOwnerTags();
         // 全局下拉：只列中转站（手动地址收进折叠区，选中"手动模式"开关时才用）；
         // 非 openai 协议的站在名称上带标记，避免同站名不同协议时选错
         inputProvider.innerHTML = (savedProviders.length
@@ -1971,7 +1981,8 @@
             const opt = document.createElement('div');
             opt.className = 'model-option';
             opt.dataset.value = m;
-            opt.textContent = m;
+            // 归属标注由 refreshModelOwnerTags 统一渲染（新增与已存在的选项同一套逻辑）
+            opt.appendChild(document.createTextNode(m));
             // 点击选中：填入当前聚焦的输入框并关闭下拉
             opt.addEventListener('click', function () {
                 if (currentModelInput) {
@@ -1982,6 +1993,36 @@
             });
             chatGptModelOptions.appendChild(opt);
             existing.add(m);
+        });
+    }
+
+    /**
+     * 重算下拉选项的供应商标注（唯一站给站名，多站给「多家」）。
+     * 每次 renderProviders 都跑一遍：新拉取的模型先入选项、归属映射后更新，
+     * 只标新增项会让"刚获取的模型"在刷新页面之前一直缺标注
+     */
+    function refreshModelOwnerTags() {
+        Array.from(chatGptModelOptions.querySelectorAll('.model-option')).forEach(function (opt) {
+            const model = opt.dataset.value;
+            const owners = providerModelOwners[String(model).toLowerCase()];
+            const label = owners && owners.length
+                ? (owners.length === 1 ? owners[0] : '多家') + '·' : '';
+            let tag = opt.querySelector('.owner-tag');
+            if (!label) {
+                if (tag) tag.remove();
+                return;
+            }
+            if (!tag) {
+                tag = document.createElement('span');
+                tag.className = 'owner-tag';
+                opt.insertBefore(tag, opt.firstChild);
+            }
+            tag.textContent = label;
+            if (owners.length > 1) {
+                opt.title = '以下中转站都提供此模型：' + owners.join('、');
+            } else {
+                opt.removeAttribute('title');
+            }
         });
     }
 
@@ -2334,9 +2375,9 @@
 
     function loadChatGptModels() {
         fetchJson('/api/auth/chatgpt/models').then(function (models) {
-            chatGptModelOptions.innerHTML = (models || []).map(function (model) {
-                return '<option value="' + esc(model.slug) + '">' + esc(model.displayName || model.slug) + '</option>';
-            }).join('');
+            // 共享下拉只认 .model-option 元素（自定义下拉，非原生 datalist）——
+            // 旧实现往容器里写 <option> 标签，浏览器不会渲染，ChatGPT 模式等于没有下拉
+            setModelOptions((models || []).map(function (model) { return model.slug; }));
             const slugs = (models || []).map(function (model) { return model.slug; });
             if (slugs.length && slugs.indexOf(inputModel.value.trim()) < 0) {
                 inputModel.value = slugs[0];

@@ -459,7 +459,6 @@
                             <div class="form-group" data-page-node-id="F3AWguuOGKwqoUr58Qsssx">
                                 <label for="llm_model" data-page-node-id="qKRtb2BmcK3EUjGHyhoMYn">模型名（model）</label>
                                 <input type="text" id="llm_model" placeholder="选中转站后点「获取模型」，或直接输入" autocomplete="off" data-page-node-id="JdKtPhR3f7rxHlf8ruKdF2">
-                                <div id="chatgpt-model-options" class="model-dropdown"></div>
                             </div>
                             <div class="form-group" data-page-node-id="FRmqQFFDO0PM9fxWaOyM02">
                                 <label for="llm_maxTokens" data-page-node-id="61SJLrkXJSlZMfE4ycGe8F">最大输出 Token</label>
@@ -723,6 +722,12 @@
         </div>
         <div class="update-author">作者：庸谨辞</div>
     </div>
+
+    <!-- 模型下拉容器：必须挂在 body 末尾（fixed 浮层），不能放在任何 tab 内。
+         tab 互斥显示（.tab-content{display:none}），挂在某个 tab 里会导致其它 tab 的
+         模型输入框聚焦时下拉被祖先 display:none 隐藏——场景矩阵跨场景下拉曾因此完全不可见。
+         JS 按 getBoundingClientRect 写入 fixed 坐标，位置与 DOM 归属无关 -->
+    <div id="chatgpt-model-options" class="model-dropdown"></div>
 
     <script src="app.js"></script>
 </body>
