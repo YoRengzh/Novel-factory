@@ -121,27 +121,12 @@ if (!gotLock) {
   })
 
   app.whenReady().then(async () => {
-    // 启动闪屏：Electron 就绪立刻给反馈——后端要数秒才就绪，期间"零窗口死等"的体感最差。
-    // 窗口尺寸与 splash.html 内容匹配；失败分支必须关掉它再弹窗，否则弹窗压在闪屏后面
-    const splash = new BrowserWindow({
-      width: 460,
-      height: 300,
-      frame: false,
-      resizable: false,
-      minimizable: false,
-      maximizable: false,
-      alwaysOnTop: true,
-      skipTaskbar: true,
-      center: true,
-      show: true,
-      webPreferences: { contextIsolation: true, nodeIntegration: false }
-    })
-    splash.loadFile(path.join(__dirname, 'splash.html'))
-
+    // 不显示启动闪屏：闪屏窗口在 splash.html 渲染完成前会露出 Electron 的默认白底，
+    // 用户看到的是"缩小版白块"而不是加载提示。后端就绪通常 4-5 秒，期间无窗口，
+    // 就绪后主窗首屏渲染完成即显示（ready-to-show 控制，不会白屏）。
     if (!DEV) {
       // 先探端口：已被占用（残留进程/其他应用）比启动失败更常见——给出明确提示而非傻等
       if (await isPortReady(PORT)) {
-        splash.close()
         dialog.showErrorBox('端口被占用', '端口 8080 已被占用。\n'
           + '可能是上次未完全退出的 Novel Factory（任务管理器结束 java 进程后重试）。')
         app.quit()
@@ -151,7 +136,6 @@ if (!gotLock) {
     }
     const ready = await waitBackendReady()
     if (!ready) {
-      splash.close()
       dialog.showErrorBox('后端启动失败', '60 秒内后端服务未就绪。\n请查看日志目录 data/log/ 排查。')
       app.quit()
       return
@@ -173,16 +157,14 @@ if (!gotLock) {
     })
     // 页面 <title> 会覆盖窗口标题——拦截之，标题恒定为产品名
     win.on('page-title-updated', (e) => e.preventDefault())
-    // 首屏渲染完成才换屏：闪屏关、主窗亮，中间不露白
+    // 首屏渲染完成才亮窗：后端就绪后到首屏画出来之间仍有短暂空档，show:false 保证不露白屏
     win.once('ready-to-show', () => {
       win.show()
-      splash.close()
     })
-    // 首屏加载失败（后端刚就绪就抖没了等极端情况）也不能永远停在闪屏：
+    // 首屏加载失败（后端刚就绪就抖没了等极端情况）也不能让窗口永远不出现：
     // did-fail-load 兜底亮出主窗，让页面自己的重试逻辑接手
     win.webContents.once('did-fail-load', () => {
       win.show()
-      splash.close()
     })
     win.loadURL(APP_ORIGIN)
     // 主窗口只允许停留在本机 UI：XSS 一旦把窗口导航到外部站点，那个页面同样持有 preload；

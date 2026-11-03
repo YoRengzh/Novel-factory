@@ -10,24 +10,32 @@
     // 作业 ID 持久化：章节计划裁决的等待窗口可达数小时，刷新页面不应把进行中的作业"弄丢"
     const JOB_KEY = 'novel_factory_job_id';
 
-    // ===== 主题切换（深/浅，localStorage 持久化） =====
+    // ===== 主题切换（日间/夜间，localStorage 持久化） =====
+    // 旧版本存的是 light/dark：读取时做一次映射，避免升级后用户的主题选择被重置
+    function normalizeTheme(value) {
+        if (value === 'day' || value === 'light') return 'day';
+        return 'night';
+    }
+
     function currentTheme() {
-        return document.body.classList.contains('light') ? 'light' : 'dark';
+        return document.body.classList.contains('day') ? 'day' : 'night';
     }
 
     function applyTheme(theme, persist) {
-        document.body.classList.toggle('light', theme === 'light');
+        var normalized = normalizeTheme(theme);
+        document.body.classList.toggle('day', normalized === 'day');
         document.querySelectorAll('.theme-toggle').forEach(function (btn) {
-            btn.textContent = theme === 'light' ? '深色' : '浅色';
+            // 按钮显示的是"点一下会切到哪个主题"，不是当前主题
+            btn.textContent = normalized === 'day' ? '夜间' : '日间';
         });
         if (window.recolorParticles) window.recolorParticles();
         if (persist !== false) {
-            try { localStorage.setItem(THEME_KEY, theme); } catch (e) {}
+            try { localStorage.setItem(THEME_KEY, normalized); } catch (e) {}
         }
     }
 
     function toggleTheme() {
-        applyTheme(currentTheme() === 'light' ? 'dark' : 'light');
+        applyTheme(currentTheme() === 'day' ? 'night' : 'day');
     }
 
     document.querySelectorAll('.theme-toggle').forEach(function (btn) {
@@ -1673,6 +1681,8 @@
 
     function loadChapter(storyDir, chapterNo) {
         const token = ++storyViewToken;
+        // 换章即作废上次选中：否则用户在新章里点一次就会沿用旧片段
+        if (typeof resetSegmentSelection === 'function') resetSegmentSelection();
         fetchJson('/api/stories/' + encodeURIComponent(storyDir) + '/chapters/' + chapterNo)
         .then(function (ch) {
             if (token !== storyViewToken) return;   // 过期响应：已切到别的故事/章节
@@ -1699,6 +1709,224 @@
             showToast('加载章节失败：' + err.message);
         });
     }
+
+
+    // ===== 段落级编辑：选中文本 → 润色/扩写/续写 =====
+    // 只在阅读态生效（编辑态下用户已经在直接改字，浮动条会挡住输入）。
+    // 结果不直接落盘：先做左右对照，用户点「采用改写」才替换到编辑框并走既有保存链路。
+    const segmentToolbar = document.getElementById('segment-toolbar');
+    const segmentDialog = document.getElementById('segment-dialog');
+    const segmentDialogTitle = document.getElementById('segment-dialog-title');
+    const segmentOriginal = document.getElementById('segment-original');
+    const segmentEdited = document.getElementById('segment-edited');
+    const segmentNote = document.getElementById('segment-note');
+    const btnSegmentClose = document.getElementById('btn-segment-close');
+    const btnSegmentApply = document.getElementById('btn-segment-apply');
+    const btnSegmentDiscard = document.getElementById('btn-segment-discard');
+
+    /** 本次选中的片段与上下文：工具条点击与弹层确认都读它 */
+    let segmentSelection = null;
+    /** 最近一次 AI 改写结果 */
+    let segmentResult = null;
+
+    const SEGMENT_MIN_CHARS = 8;      // 太短的选中（几个字）不值得花一次模型调用
+    const SEGMENT_MAX_CHARS = 2000;   // 过长就不是"段落"了，引导用户改用整章修订
+    const SEGMENT_CONTEXT = 600;      // 与后端 CONTEXT_CHARS 对齐
+
+    const SEGMENT_ACTION_LABELS = { polish: '润色', expand: '扩写', continue: '续写' };
+
+    function hideSegmentToolbar() {
+        if (segmentToolbar) segmentToolbar.classList.add('hidden');
+    }
+
+    /** 切换章节/进入编辑态时必须清掉旧选中，否则用户在新章里选一点就会沿用旧片段 */
+    function resetSegmentSelection() {
+        segmentSelection = null;
+        hideSegmentToolbar();
+    }
+
+    /**
+     * 阅读态选中结束时决定是否显示工具条。
+     * 用 selection 的 client rect 定位（相对视口，配合 position:fixed）。
+     */
+    function maybeShowSegmentToolbar() {
+        if (!segmentToolbar) return;
+        // 编辑态不显示：contenteditable 里选字是常规编辑动作
+        if (contentEdit && !contentEdit.classList.contains('hidden')) {
+            resetSegmentSelection();
+            return;
+        }
+        if (contentReadonly.classList.contains('hidden')) {
+            resetSegmentSelection();
+            return;
+        }
+        const sel = window.getSelection();
+        if (!sel || sel.rangeCount === 0 || sel.isCollapsed) {
+            hideSegmentToolbar();
+            return;
+        }
+        const text = sel.toString();
+        if (!text || text.trim().length < SEGMENT_MIN_CHARS) {
+            hideSegmentToolbar();
+            return;
+        }
+        // 选中必须落在正文区里：在别处选字不该弹这个条
+        const anchorNode = sel.anchorNode;
+        if (!anchorNode || !contentReadonly.contains(anchorNode)) {
+            hideSegmentToolbar();
+            return;
+        }
+        const full = contentReadonly.textContent || '';
+        const start = full.indexOf(text);
+        if (start < 0) {
+            hideSegmentToolbar();
+            return;
+        }
+        if (text.length > SEGMENT_MAX_CHARS) {
+            hideSegmentToolbar();
+            showToast('选中过长（' + text.length + ' 字），请缩短到 ' + SEGMENT_MAX_CHARS + ' 字以内，或用整章编辑');
+            return;
+        }
+
+        segmentSelection = {
+            text: text,
+            start: start,
+            end: start + text.length,
+            before: start > 0 ? full.slice(Math.max(0, start - SEGMENT_CONTEXT), start) : '',
+            after: full.slice(start + text.length, start + text.length + SEGMENT_CONTEXT),
+        };
+
+        const rect = sel.getRangeAt(0).getBoundingClientRect();
+        segmentToolbar.classList.remove('hidden');
+        // 先显示再量尺寸：隐藏状态下量不到宽高
+        const tw = segmentToolbar.offsetWidth;
+        const th = segmentToolbar.offsetHeight;
+        let left = rect.left + rect.width / 2 - tw / 2;
+        let top = rect.top - th - 8;   // 默认放在选中区上方
+        if (top < 8) top = rect.bottom + 8;   // 顶部空间不足则放下方
+        left = Math.max(8, Math.min(left, window.innerWidth - tw - 8));
+        segmentToolbar.style.left = left + 'px';
+        segmentToolbar.style.top = top + 'px';
+    }
+
+    function openSegmentDialog(action, result) {
+        segmentResult = result;
+        segmentDialogTitle.textContent = SEGMENT_ACTION_LABELS[action] + '结果';
+        segmentOriginal.textContent = segmentSelection ? segmentSelection.text : '';
+        segmentEdited.textContent = result.editedText || '';
+        if (result.fallback) {
+            segmentNote.textContent = result.note || '模型未返回可用内容，正文保持不变';
+            segmentNote.classList.remove('hidden');
+            btnSegmentApply.disabled = true;
+        } else {
+            segmentNote.classList.add('hidden');
+            btnSegmentApply.disabled = false;
+        }
+        segmentDialog.classList.remove('hidden');
+    }
+
+    function closeSegmentDialog() {
+        segmentDialog.classList.add('hidden');
+        segmentResult = null;
+        hideSegmentToolbar();
+    }
+
+    /** 采用改写：替换阅读区文本 → 同步到编辑框 → 走既有保存链路（含摘要回流） */
+    function applySegmentResult() {
+        if (!segmentResult || !segmentSelection) return;
+        const full = contentReadonly.textContent || '';
+        const replaced = full.slice(0, segmentSelection.start)
+            + segmentResult.editedText
+            + full.slice(segmentSelection.end);
+        contentReadonly.textContent = replaced;
+        // 编辑框同步：用户接下来点「编辑」时看到的就是替换后的正文
+        if (contentEdit) contentEdit.textContent = replaced;
+        closeSegmentDialog();
+        // 直接进入编辑态，让「保 存」按钮可见——否则阅读态只有「编 辑」一个入口，
+        // 用户替换完还得先点「编 辑」才能保存，多一步且容易误以为改动已落盘
+        contentReadonly.classList.add('hidden');
+        if (contentEdit) contentEdit.classList.remove('hidden');
+        if (btnEdit) btnEdit.classList.add('hidden');
+        if (btnSave) btnSave.classList.remove('hidden');
+        const btnCancelEdit = document.getElementById('btn-cancel-edit');
+        if (btnCancelEdit) btnCancelEdit.classList.remove('hidden');
+        showToast('已替换选中片段，点「保 存」写回章节（会触发摘要回流）');
+    }
+
+    /** 调用后端做一次段落编辑 */
+    function runSegmentEdit(action) {
+        if (!segmentSelection) return;
+        if (!currentStoryDir || !currentChapterNo) {
+            showToast('请先打开一章正文');
+            return;
+        }
+        const label = SEGMENT_ACTION_LABELS[action] || action;
+        hideSegmentToolbar();
+        segmentDialogTitle.textContent = label + '中…';
+        segmentOriginal.textContent = segmentSelection.text;
+        segmentEdited.textContent = '';
+        segmentNote.textContent = '正在调用模型，通常十几秒…';
+        segmentNote.classList.remove('hidden');
+        btnSegmentApply.disabled = true;
+        segmentDialog.classList.remove('hidden');
+
+        fetchJson('/api/stories/' + encodeURIComponent(currentStoryDir)
+                + '/chapters/' + currentChapterNo + '/segment-edit', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                action: action,
+                selectedText: segmentSelection.text,
+                contextBefore: segmentSelection.before,
+                contextAfter: segmentSelection.after,
+            })
+        })
+        .then(function (res) {
+            openSegmentDialog(action, res);
+        })
+        .catch(function (err) {
+            segmentNote.textContent = label + '失败：' + err.message;
+            segmentNote.classList.remove('hidden');
+            btnSegmentApply.disabled = true;
+        });
+    }
+
+    if (segmentToolbar) {
+        segmentToolbar.querySelectorAll('button[data-action]').forEach(function (btn) {
+            btn.addEventListener('mousedown', function (e) {
+                // 阻止默认：否则按下时选区被清空，工具条位置会跳
+                e.preventDefault();
+            });
+            btn.addEventListener('click', function () {
+                runSegmentEdit(btn.getAttribute('data-action'));
+            });
+        });
+    }
+
+    // 选区变化：拖动结束（mouseup / touchend / keyup）才判定，避免拖动过程中反复弹条
+    ['mouseup', 'touchend', 'keyup'].forEach(function (evt) {
+        document.addEventListener(evt, function (e) {
+            // 点在工具条自身时不重新判定（否则会先隐藏再显示，按钮点不中）
+            if (segmentToolbar && segmentToolbar.contains(e.target)) return;
+            if (segmentDialog && !segmentDialog.classList.contains('hidden')) return;
+            // 延迟一帧：selection 在事件回调里可能还没最终确定
+            setTimeout(maybeShowSegmentToolbar, 0);
+        });
+    });
+
+    // 滚动时收起：工具条是 fixed 定位，滚动后与选区脱位
+    window.addEventListener('scroll', hideSegmentToolbar, true);
+    // 点击正文以外区域收起
+    document.addEventListener('mousedown', function (e) {
+        if (segmentToolbar && !segmentToolbar.classList.contains('hidden')
+                && !segmentToolbar.contains(e.target)) {
+            hideSegmentToolbar();
+        }
+    });
+
+    if (btnSegmentClose) btnSegmentClose.addEventListener('click', closeSegmentDialog);
+    if (btnSegmentDiscard) btnSegmentDiscard.addEventListener('click', closeSegmentDialog);
+    if (btnSegmentApply) btnSegmentApply.addEventListener('click', applySegmentResult);
 
     // ===== 模型接入设置 =====
     const llmConfigForm = document.getElementById('llm-config-form');
@@ -3814,9 +4042,11 @@
     }
 
     // ===== 初始化 =====
-    var savedTheme = 'dark';
-    try { savedTheme = localStorage.getItem(THEME_KEY) || 'dark'; } catch (e) {}
-    applyTheme(savedTheme, false);
+    var savedTheme = 'night';
+    try { savedTheme = localStorage.getItem(THEME_KEY) || 'night'; } catch (e) {}
+    // 持久化归一化后的值：旧版存的是 light/dark，若不回写，每次启动都要再映射一遍，
+    // 且 localStorage 里长期留着过时词汇（排查主题问题时容易被误导）
+    applyTheme(savedTheme, true);
     restoreJob();
     autoGrowAll();
     // 启动即探测后端版本：旧版后端（无 /api/app/version）会在这里被识别出来，

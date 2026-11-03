@@ -21,6 +21,7 @@ import cn.novel.yonren.domain.novel.model.entity.StageBlueprintEntity;
 import cn.novel.yonren.domain.novel.model.valobj.BookExport;
 import cn.novel.yonren.domain.novel.model.valobj.LedgerEntry;
 import cn.novel.yonren.domain.novel.service.armory.CheckpointService;
+import cn.novel.yonren.domain.novel.service.armory.prompt.valobj.PromptContext;
 import cn.novel.yonren.domain.novel.service.armory.memory.ChapterMemoryService;
 import cn.novel.yonren.domain.novel.service.armory.edit.ChapterEditService;
 import cn.novel.yonren.domain.novel.service.armory.quality.ChapterLengthPolicy;
@@ -71,6 +72,14 @@ public class StoryManageController {
 
     @Resource
     private ChapterEditService chapterEditService;
+
+    /** 段落级编辑（润色/扩写/续写）：只改选中片段，不落盘 */
+    @Resource
+    private cn.novel.yonren.domain.novel.service.armory.edit.SegmentEditService segmentEditService;
+
+    /** 段落编辑需要 toStoryVO() 取模型配置（与设定集草稿同款入口） */
+    @Resource
+    private cn.novel.yonren.domain.novel.model.valobj.properties.StoryProperties storyProperties;
 
     @Resource
     private ChapterMemoryService chapterMemoryService;
@@ -453,6 +462,66 @@ public class StoryManageController {
         dto.setPartial(reflow.partial());
         dto.setWarning(reflow.warning());
         return dto;
+    }
+
+    /**
+     * 段落级文本编辑：选中一段正文，让 AI 只改这一段（润色 / 扩写 / 续写）。
+     *
+     * <p><b>为什么不落盘</b>：返回的是"建议片段"，前端做对照让用户确认后再走既有的
+     * {@code PUT /chapters/{no}} 保存——那条路径已含摘要回流与运行中作业互斥检查，
+     * 这里另开写盘通道会让两套一致性机制分叉。
+     *
+     * <p><b>为什么校验 selectedText 是否在正文里</b>：接口在本机无鉴权，不校验会让它
+     * 退化成"任意文本改写代理"，消耗额度却不产生写作价值。
+     */
+    @PostMapping("/{storyDirName}/chapters/{chapterNo}/segment-edit")
+    public cn.novel.yonren.api.dto.SegmentEditResponseDTO segmentEdit(
+            @PathVariable("storyDirName") String storyDirName,
+            @PathVariable("chapterNo") int chapterNo,
+            @RequestBody cn.novel.yonren.api.dto.SegmentEditRequestDTO request) {
+        Path storyDir = resolveStoryDir(storyDirName);
+        ChapterContentEntity chapter;
+        try {
+            chapter = storyRepository.readChapter(storyDir, chapterNo);
+        } catch (Exception e) {
+            log.error("段落编辑读取章节失败：{} 第{}章", storyDirName, chapterNo, e);
+            throw new ResponseStatusException(HttpStatus.INTERNAL_SERVER_ERROR, "章节读取失败：" + e.getMessage());
+        }
+        if (chapter == null) {
+            throw new ResponseStatusException(HttpStatus.NOT_FOUND,
+                    "章节不存在：" + storyDirName + " 第 " + chapterNo + " 章");
+        }
+        if (request.getSelectedText() == null || request.getSelectedText().isBlank()) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "选中文本为空");
+        }
+        if (chapter.getContent() == null || !chapter.getContent().contains(request.getSelectedText())) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
+                    "选中文本不在该章正文中（可能章节已被修改，请刷新后重试）");
+        }
+
+        PromptContext ctx = buildSegmentPromptContext(storyDir, chapterNo);
+        try {
+            return segmentEditService.edit(storyProperties.toStoryVO(), chapterNo, request, ctx);
+        } catch (IllegalArgumentException e) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, e.getMessage());
+        } catch (Exception e) {
+            log.error("段落编辑失败：{} 第{}章", storyDirName, chapterNo, e);
+            throw new ResponseStatusException(HttpStatus.INTERNAL_SERVER_ERROR, "段落编辑失败：" + e.getMessage());
+        }
+    }
+
+    /** 段落编辑的 prompt 上下文：只取题材/风格，不读账本与伏笔（轻量诉求不该付整章的上下文成本） */
+    private PromptContext buildSegmentPromptContext(Path storyDir, int chapterNo) {
+        PromptContext ctx = PromptContext.builder().chapterNo(chapterNo).build();
+        try {
+            StoryBibleParser.Snapshot bible = StoryBibleParser.parse(storyRepository.readStoryBible(storyDir));
+            ctx.setTheme(bible.theme());
+            ctx.setStyle(bible.style());
+        } catch (Exception e) {
+            // 题材/风格只影响资料检索的选材，缺失时降级为不检索而不是失败
+            log.warn("段落编辑读取 story-bible 失败，题材/风格留空：{}", e.getMessage());
+        }
+        return ctx;
     }
 
     /**

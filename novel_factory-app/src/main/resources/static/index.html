@@ -38,7 +38,7 @@
                         <span data-page-node-id="SetTabLabel04">设置</span>
                     </button>
                 </nav>
-                <button id="btn-theme" class="btn-logout theme-toggle" type="button" data-page-node-id="hPgE0oRWe8r2vLahsLcAFl">浅色</button>
+                <button id="btn-theme" class="btn-logout theme-toggle" type="button" data-page-node-id="hPgE0oRWe8r2vLahsLcAFl">日间</button>
                 <button id="btn-logout" class="btn-logout" type="button" data-page-node-id="W5jUKfAfoeYMtHJeTa9UBE">刷新</button>
             </div>
         </header>
@@ -315,6 +315,41 @@
                         <div id="chapter-content-edit" class="chapter-text hidden" contenteditable="true" spellcheck="false" data-page-node-id="xnKTyy7dM0GcvbGTx6B8WJ"></div>
                         <div id="save-result" class="save-result hidden" data-page-node-id="gKT0dSnqk73yxaNU9uKRsW"></div>
                     </div>
+                </div>
+
+                <!-- 选中文本的浮动工具条：只在阅读态、选中足够长的片段时出现 -->
+                <div id="segment-toolbar" class="segment-toolbar hidden" role="toolbar" aria-label="段落编辑">
+                    <button type="button" data-action="polish" title="只改表达，不改事实与篇幅">润色</button>
+                    <button type="button" data-action="expand" title="在原有事实基础上补充细节">扩写</button>
+                    <button type="button" data-action="continue" title="沿着这段往下续写一小段">续写</button>
+                </div>
+
+                <!-- 段落编辑结果对照：左原文、右改写，用户确认后才替换 -->
+                <div id="segment-dialog" class="segment-dialog hidden" role="dialog" aria-label="段落编辑结果">
+                  <div class="segment-dialog-card">
+                    <div class="segment-dialog-head">
+                        <div>
+                            <div class="section-label">SEGMENT EDIT</div>
+                            <h3 class="segment-dialog-title" id="segment-dialog-title">润色结果</h3>
+                        </div>
+                        <button type="button" id="btn-segment-close" class="update-close" aria-label="关闭">×</button>
+                    </div>
+                    <div class="segment-dialog-body">
+                        <div class="segment-pane">
+                            <div class="segment-pane-label">原文</div>
+                            <div class="segment-pane-text" id="segment-original"></div>
+                        </div>
+                        <div class="segment-pane">
+                            <div class="segment-pane-label">改写后</div>
+                            <div class="segment-pane-text" id="segment-edited"></div>
+                        </div>
+                    </div>
+                    <div class="segment-dialog-note hidden" id="segment-note"></div>
+                    <div class="segment-dialog-foot">
+                        <button type="button" id="btn-segment-apply" class="btn-primary">采 用 改 写</button>
+                        <button type="button" id="btn-segment-discard" class="btn-secondary">保 持 原 文</button>
+                    </div>
+                  </div>
                 </div>
             </section>
 

@@ -34,50 +34,46 @@
 }
 
 /* ============================================================
-   浅色主题：覆盖变量与硬编码色
+   日间主题：暖色调（米白纸感底 + 赭石强调），与夜间深空石墨底形成对照
    ============================================================ */
-body.light {
-    --bg: #f4f6fa;
-    --bg-deep: #e9edf4;
-    --panel: #ffffff;
-    --panel-2: #f7f9fc;
-    --surface: #ffffff;            /* 卡片/表面填充（浅色主题：与 panel 同色） */
-    --line: rgba(15, 23, 42, 0.12);
-    --line-strong: rgba(15, 23, 42, 0.22);
-    --text: #1c2333;
-    --text-secondary: #5a6478;
-    --text-faint: #8b93a7;
-    --muted: #6b7280;              /* 弱化文本（浅色主题） */
-    --accent: #0284c7;
-    --accent-dim: rgba(2, 132, 199, 0.12);
-    --accent-glow: rgba(2, 132, 199, 0.25);
-    --gold: #b8860b;
-    --ok: #059669;
-    --warn: #d97706;
-    --error: #dc2626;
-    --neon-cyan: #0284c7;
-    --particle-rgb: 2, 132, 199;
-    background-image: radial-gradient(rgba(15, 23, 42, 0.07) 1px, transparent 1px);
+body.day {
+    --bg: #faf6ef;                 /* 米白：模拟纸张底色，避免纯白的冷硬感 */
+    --bg-deep: #f2ebdf;            /* 更深一档的暖砂，用于页头/凹陷区 */
+    --panel: #fffaf2;              /* 卡片：略亮于底色，保持暖调 */
+    --panel-2: #f6efe3;
+    --surface: #fffaf2;            /* 卡片/表面填充（日间主题：与 panel 同色） */
+    --line: rgba(120, 90, 60, 0.16);
+    --line-strong: rgba(120, 90, 60, 0.28);
+    --text: #3a2f24;               /* 暖褐近黑：比纯黑柔和，长文阅读不刺眼 */
+    --text-secondary: #6f5f4e;
+    --text-faint: #9c8b78;
+    --muted: #7d6d5b;              /* 弱化文本（日间主题） */
+    --accent: #4a6d8c;             /* 雾蓝：暖底上用冷色强调，避免整页泛红；与 --error 同族但更浅 */
+    --accent-dim: rgba(74, 109, 140, 0.12);
+    --accent-glow: rgba(74, 109, 140, 0.25);
+    --gold: #8a6d3b;
+    --ok: #4d7c3a;                 /* 暖调绿：与整体色温统一 */
+    --warn: #8a6d3b;               /* 暖灰褐：不再用刺眼的橙红 */
+    --error: #4a6d8c;              /* 雾蓝：日间主题里"错误"用冷色区分，避免整页被暖红占满 */
+    --neon-cyan: #4a6d8c;
+    --particle-rgb: 74, 109, 140;
+    background-image: radial-gradient(rgba(120, 90, 60, 0.08) 1px, transparent 1px);
 }
 
-body.light .app-header { background: rgba(255, 255, 255, 0.92); }
+body.day .app-header { background: rgba(250, 246, 239, 0.92); }
 
-body.light input[type="text"],
-body.light input[type="password"],
-body.light input[type="number"],
-body.light select,
-body.light textarea { background: #ffffff; }
+body.day input[type="text"],
+body.day input[type="password"],
+body.day input[type="number"],
+body.day select,
+body.day textarea { background: #fffaf2; }
 
-body.light .chapter-text { color: #333a4d; }
+body.day .chapter-text { color: #3f3428; }
 
-
-
-
-
-body.light .social button {
-    background: rgba(15, 23, 42, 0.06);
-    border-color: rgba(15, 23, 42, 0.2);
-    color: #1c2333;
+body.day .social button {
+    background: rgba(120, 90, 60, 0.07);
+    border-color: rgba(120, 90, 60, 0.22);
+    color: #3a2f24;
 }
 
 * { margin: 0; padding: 0; box-sizing: border-box; }
@@ -1188,9 +1184,15 @@ textarea { resize: vertical; line-height: 1.7; }
 
 .resume-action .settings-hint { margin-bottom: 0; }
 
-/* 深色主题下 select 的原生下拉箭头是浅灰的，几乎看不见 */
-body:not(.light) select {
+/* 夜间主题下 select 的原生下拉箭头是浅灰的，几乎看不见 */
+body:not(.day) select {
     color-scheme: dark;
+}
+
+/* 日间主题声明浅色配色方案：让原生控件（滚动条/下拉箭头/日期选择器）跟随暖色底 */
+body.day select,
+body.day input {
+    color-scheme: light;
 }
 
 /* ---- 批末体检（作业状态卡内）与运行观测 ---- */
@@ -1590,3 +1592,146 @@ body:not(.light) select {
 }
 /* 下拉用 fixed 定位，坐标由 app.js 按 getBoundingClientRect 写入；
    不改任何祖先元素的 position。 */
+
+/* ============================================================
+   段落级编辑：选中文本的浮动工具条 + 结果对照弹层
+   ============================================================ */
+.segment-toolbar {
+    position: fixed;
+    z-index: 60;
+    display: flex;
+    gap: 2px;
+    padding: 4px;
+    background: var(--panel);
+    border: 1px solid var(--line-strong);
+    border-radius: 6px;
+    box-shadow: 0 6px 20px rgba(0, 0, 0, 0.28);
+    /* 用 transform 做入场，避免和 left/top 定位打架 */
+    animation: segment-pop 0.12s ease-out;
+}
+
+@keyframes segment-pop {
+    from { opacity: 0; transform: translateY(4px); }
+    to   { opacity: 1; transform: translateY(0); }
+}
+
+.segment-toolbar button {
+    padding: 5px 11px;
+    background: transparent;
+    border: none;
+    border-radius: 4px;
+    color: var(--text-secondary);
+    font-family: inherit;
+    font-size: 12.5px;
+    cursor: pointer;
+    transition: background 0.15s, color 0.15s;
+}
+
+.segment-toolbar button:hover {
+    background: var(--accent-dim);
+    color: var(--accent);
+}
+
+/* 弹层：外层做遮罩 + 居中，内层 .segment-dialog-card 承载宽度与分块 */
+.segment-dialog {
+    position: fixed;
+    inset: 0;
+    z-index: 70;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: rgba(0, 0, 0, 0.42);
+    padding: 24px;
+}
+
+.segment-dialog-card {
+    display: flex;
+    flex-direction: column;
+    width: min(980px, 100%);
+    max-height: 88vh;
+    background: var(--panel);
+    border: 1px solid var(--line-strong);
+    border-radius: 10px;
+    overflow: hidden;
+    box-shadow: 0 18px 48px rgba(0, 0, 0, 0.34);
+}
+
+.segment-dialog-head {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 16px;
+    padding: 16px 20px 12px;
+    border-bottom: 1px solid var(--line);
+}
+
+.segment-dialog-title {
+    margin: 4px 0 0;
+    font-size: 15px;
+    font-weight: 600;
+    color: var(--text);
+}
+
+.segment-dialog-body {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 16px;
+    padding: 16px 20px;
+    overflow: hidden;
+}
+
+.segment-pane {
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+}
+
+.segment-pane-label {
+    font-family: var(--mono);
+    font-size: 11px;
+    letter-spacing: 1px;
+    color: var(--text-faint);
+    margin-bottom: 6px;
+}
+
+.segment-pane-text {
+    flex: 1;
+    min-height: 96px;
+    max-height: 46vh;
+    overflow-y: auto;
+    padding: 12px 14px;
+    background: var(--panel-2);
+    border: 1px solid var(--line);
+    border-radius: 6px;
+    color: var(--text);
+    font-family: var(--serif);
+    font-size: 14px;
+    line-height: 1.9;
+    white-space: pre-wrap;
+    word-break: break-word;
+}
+
+/* 改写侧用强调色左边框，一眼能看出哪边是 AI 产出 */
+.segment-pane:last-child .segment-pane-text {
+    border-left: 2px solid var(--accent);
+}
+
+.segment-dialog-note {
+    padding: 10px 20px;
+    border-top: 1px solid var(--line);
+    color: var(--warn);
+    font-size: 12.5px;
+}
+
+.segment-dialog-foot {
+    display: flex;
+    justify-content: flex-end;
+    gap: 10px;
+    padding: 14px 20px 18px;
+    border-top: 1px solid var(--line);
+}
+
+@media (max-width: 720px) {
+    .segment-dialog-body { grid-template-columns: 1fr; }
+    .segment-pane-text { max-height: 30vh; }
+}
