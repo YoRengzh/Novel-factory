@@ -66,6 +66,41 @@ class SegmentEditServiceTest {
     }
 
     @Test
+    @DisplayName("续写：只输出新增内容（前端按追加处理，原文原样保留）")
+    void continueReturnsOnlyNewContent() {
+        String prompt = SegmentEditService.buildPrompt(
+                SegmentEditService.ACTION_CONTINUE, "他看了一眼，还是没伸手。",
+                request("continue", "", null, null, null));
+
+        assertTrue(prompt.contains("只输出新续写的内容"),
+                "续写走追加语义，回传完整段落会导致原文出现两次");
+        assertTrue(prompt.contains("不要重复选中片段里的任何句子"));
+        assertTrue(prompt.contains("只输出**新续写的内容**"), "任务描述也要强调只回新增");
+    }
+
+    @Test
+    @DisplayName("扩写：输出必须包含原文全部内容（同样是整段替换）")
+    void expandMustIncludeOriginalContent() {
+        String prompt = SegmentEditService.buildPrompt(
+                SegmentEditService.ACTION_EXPAND, "他推开门。",
+                request("expand", "", null, null, null));
+
+        assertTrue(prompt.contains("必须包含原文的全部内容"),
+                "扩写只回新增部分会让原文被替换掉");
+        assertTrue(prompt.contains("返回完整的新段落，不是新增片段"));
+    }
+
+    @Test
+    @DisplayName("润色：仍是「只输出改写后的这一段」")
+    void polishKeepsRewriteContract() {
+        String prompt = SegmentEditService.buildPrompt(
+                SegmentEditService.ACTION_POLISH, "他推开门。",
+                request("polish", "", null, null, null));
+
+        assertTrue(prompt.contains("只输出改写后的这一段文字本身"));
+    }
+
+    @Test
     @DisplayName("上下文：前文保留尾部、后文保留头部，且明确声明不要改写上下文")
     void contextTruncationKeepsNearSide() {
         String longBefore = "甲".repeat(1000) + "紧邻前文";
@@ -108,6 +143,41 @@ class SegmentEditServiceTest {
         // 正文里出现的冒号不该被当成引导语前缀（首行超长）
         String withColon = "他说：这不是我的错，是这间屋子先动的手。";
         assertEquals(withColon, SegmentEditService.cleanOutput(withColon));
+    }
+
+    @Test
+    @DisplayName("清洗：解 JSON Mode 包裹（网关强制 JSON_OBJECT，模型会返回 {\"text\":\"...\"}）")
+    void cleanOutputUnwrapsJsonMode() {
+        assertEquals("门框上那个「三」干透了。",
+                SegmentEditService.cleanOutput("{\"text\": \"门框上那个「三」干透了。\"}"));
+        // 不同模型对 schema 的理解各异，常见键名都要能取到
+        assertEquals("改写结果", SegmentEditService.cleanOutput("{\"content\": \"改写结果\"}"));
+        assertEquals("改写结果", SegmentEditService.cleanOutput("{\"result\": \"改写结果\"}"));
+        assertEquals("改写结果", SegmentEditService.cleanOutput("{\"edited\": \"改写结果\"}"));
+    }
+
+    @Test
+    @DisplayName("清洗：JSON 里没有约定键名但只有一个字符串值时，取该值")
+    void cleanOutputUnwrapsSingleKeyJson() {
+        assertEquals("唯一的值", SegmentEditService.cleanOutput("{\"whatever\": \"唯一的值\"}"));
+    }
+
+    @Test
+    @DisplayName("清洗：不是 JSON 的正文原样保留（正文以 { 开头也不能被吞）")
+    void cleanOutputKeepsNonJsonText() {
+        String body = "{这是个正常的段落，用了花括号当语气停顿。}";
+        assertEquals(body, SegmentEditService.cleanOutput(body));
+        // 半截 JSON（模型输出被截断）同样原样返回，交给上层判空/降级
+        String broken = "{\"text\": \"被截断的";
+        assertEquals(broken, SegmentEditService.cleanOutput(broken));
+    }
+
+    @Test
+    @DisplayName("prompt 明确要求 text 字段，避免模型自创键名")
+    void promptDeclaresJsonSchema() {
+        String prompt = SegmentEditService.buildPrompt("polish", "原文",
+                request("polish", "", null, null, null));
+        assertTrue(prompt.contains("{\"text\":"), "必须给出 JSON schema");
     }
 
     @Test

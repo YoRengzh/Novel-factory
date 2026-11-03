@@ -1456,6 +1456,23 @@ body.day input {
 .update-panel-foot .btn-primary,
 .update-panel-foot .btn-secondary { text-decoration: none; display: inline-flex; align-items: center; }
 
+/* 求 Star：靠右推、蓝色描边（与「检查更新」同色系但更醒目），与功能性按钮区分开 */
+.update-star {
+    margin-left: auto;
+    border-color: var(--accent) !important;
+    color: var(--accent) !important;
+    white-space: nowrap;
+    /* 收紧字距：默认的 letter-spacing 会把「给个Star」撑得很散 */
+    letter-spacing: normal;
+    font-size: 12.5px;
+}
+
+/* 不用 color-mix：Electron 内置 Chromium 版本不一，直接用 rgba 更稳 */
+.update-star:hover {
+    background: var(--accent-dim);
+    box-shadow: 0 0 14px var(--accent-glow);
+}
+
 .update-author {
     padding: 9px 18px 12px;
     font-family: var(--mono);

@@ -129,12 +129,22 @@ public class SegmentEditService {
         }
 
         sb.append("【输出要求】\n")
-                .append("1. 只输出改写后的这一段文字本身，不要输出上下文、不要重复原文、不要加解释或标题；\n")
+                .append(ACTION_CONTINUE.equals(action)
+                        // 续写走"追加"语义：前端把返回内容接在选中片段之后，原文原样保留。
+                        // 若让模型回传完整段落，前端追加会造成原文出现两次
+                        ? "1. 只输出**新续写的内容**，不要重复选中的原文，不要输出上下文、不要加解释或标题；\n"
+                        : "1. 只输出改写后的这一段文字本身，不要输出上下文、不要加解释或标题；\n")
                 .append("2. 保持原文的人称、时态、专有名词与既成事实不变")
                 .append(ACTION_CONTINUE.equals(action)
                         ? "（续写可以引入新内容，但必须与上文语气连贯、事件承接自然）；\n"
                         : "（润色与扩写都不得改变情节事实）；\n")
-                .append("3. 不要使用 Markdown 标记，不要加引号包裹。\n");
+                .append("3. 不要使用 Markdown 标记，不要加引号包裹。\n")
+                // 网关对 OpenAI 协议强制 JSON_OBJECT（治正文/摘要的截断不闭合），
+                // 不显式给 schema 时模型会自创键名（实测返回 {"text": "..."} 但各模型键名不一）。
+                // 明确 schema 能让解包稳定命中，也避免模型把解释塞进别的键。
+                .append(ACTION_CONTINUE.equals(action)
+                        ? "4. 按以下 JSON 格式输出，新续写的内容放在 text 字段：{\"text\":\"紧接上文的新内容\"}\n"
+                        : "4. 按以下 JSON 格式输出，改写结果放在 text 字段：{\"text\":\"改写后的这一段文字\"}\n");
         return sb.toString();
     }
 
@@ -155,17 +165,26 @@ public class SegmentEditService {
             case ACTION_EXPAND ->
                 "在原有事实与情绪的基础上，把这一段写得更充分（大致 1.5–3 倍篇幅）。\n"
                         + "具体要求：补充可感知的细节（动作、感官、具体物件、身体反应），"
-                        + "不要靠形容词堆砌或复述已有信息撑长度；不新增情节转折。";
+                        + "不要靠形容词堆砌或复述已有信息撑长度；不新增情节转折。\n"
+                        // 前端是"整段替换"，必须让模型回传完整段落——只回新增部分会把原文冲掉
+                        + "**输出必须包含原文的全部内容并在此基础上扩充**，返回完整的新段落，不是新增片段。";
             default ->
                 "沿着这一段结尾的情绪与事件，自然往下续写一小段（一段话量级）。\n"
                         + "具体要求：承接上文的动作或话题，让下一个动作有来由；"
-                        + "不要把矛盾提前解决，不要引入与上文无关的新人物或新地点。";
+                        + "不要把矛盾提前解决，不要引入与上文无关的新人物或新地点。\n"
+                        // 续写走"追加"语义：前端把返回内容接在选中片段之后，原文原样保留
+                        + "**只输出新续写的内容**：从选中片段的结尾自然接下去，"
+                        + "不要重复选中片段里的任何句子。";
         };
     }
 
     /**
-     * 清洗模型输出：去掉代码围栏、包裹引号、"以下是改写结果"之类的引导语。
+     * 清洗模型输出：解 JSON 包裹、去代码围栏、去包裹引号、去"以下是改写结果"之类的引导语。
      * 段落编辑的输出形态很窄，机械清洗比让模型自纠更可靠。
+     *
+     * <p><b>为什么必须解 JSON</b>：网关对 OpenAI 协议的所有调用都强制
+     * {@code responseFormat=JSON_OBJECT}（治正文/摘要的截断不闭合），模型因此会返回
+     * {@code {"text":"..."}} 而不是纯文本。不解包的话整串 JSON 会被当成改写结果塞回正文。
      */
     static String cleanOutput(String raw) {
         if (StringUtils.isBlank(raw)) {
@@ -184,6 +203,8 @@ public class SegmentEditService {
             }
             text = text.trim();
         }
+        // JSON Mode 的产物：{"text": "..."} / {"content": "..."} / {"result": "..."} / {"edited": "..."}
+        text = unwrapJsonText(text);
         // 去掉整体包裹的引号
         if ((text.startsWith("「") && text.endsWith("」")) || (text.startsWith("\"") && text.endsWith("\""))
                 || (text.startsWith("“") && text.endsWith("”"))) {
@@ -198,6 +219,45 @@ public class SegmentEditService {
             }
         }
         return StringUtils.trimToNull(text);
+    }
+
+    /**
+     * 从 JSON 对象里取出正文：按常见键名优先级找第一个非空字符串值。
+     * 不是合法 JSON、或找不到字符串字段时原样返回（交给后续清洗继续处理）。
+     *
+     * <p>键名不限于 text——不同模型对 JSON Mode 的 schema 理解各异，实测出现过
+     * content / result / edited / output 等写法，统一按候选列表依次尝试。
+     */
+    static String unwrapJsonText(String text) {
+        if (text == null) {
+            return null;
+        }
+        String trimmed = text.trim();
+        if (!trimmed.startsWith("{") || !trimmed.endsWith("}")) {
+            return text;
+        }
+        try {
+            com.alibaba.fastjson2.JSONObject obj = com.alibaba.fastjson2.JSON.parseObject(trimmed);
+            if (obj == null || obj.isEmpty()) {
+                return text;
+            }
+            for (String key : new String[]{"text", "content", "result", "edited", "output", "revised"}) {
+                String value = obj.getString(key);
+                if (StringUtils.isNotBlank(value)) {
+                    return value.trim();
+                }
+            }
+            // 没有约定键名时：若对象只有一个字符串值，取它（模型可能用了任意键名）
+            if (obj.size() == 1) {
+                Object only = obj.values().iterator().next();
+                if (only instanceof String s && StringUtils.isNotBlank(s)) {
+                    return s.trim();
+                }
+            }
+        } catch (Exception ignored) {
+            // 不是合法 JSON（比如正文本身以 { 开头）→ 原样返回，不吞内容
+        }
+        return text;
     }
 
     /** 上下文截断：保留靠近选中片段的一侧，另一侧用省略号示意 */

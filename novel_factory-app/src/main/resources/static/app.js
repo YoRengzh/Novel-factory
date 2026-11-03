@@ -1813,7 +1813,14 @@
         segmentResult = result;
         segmentDialogTitle.textContent = SEGMENT_ACTION_LABELS[action] + '结果';
         segmentOriginal.textContent = segmentSelection ? segmentSelection.text : '';
+        // 续写是"追加"语义：右栏展示"原文 + 新增"的最终效果，否则用户只看到新增的几句、
+        // 不知道应用后会变成什么样。润色/扩写是"替换"语义：右栏就是模型回传的完整段落。
+        // ⚠️ fallback 时 editedText 就是原文本身，不能再拼一次（否则预览里原文出现两遍）
         segmentEdited.textContent = result.editedText || '';
+        if (action === 'continue' && !result.fallback && result.editedText && segmentSelection) {
+            segmentEdited.textContent = segmentSelection.text + result.editedText;
+            segmentDialogTitle.textContent = '续写结果（原文保留，新内容追加在后）';
+        }
         if (result.fallback) {
             segmentNote.textContent = result.note || '模型未返回可用内容，正文保持不变';
             segmentNote.classList.remove('hidden');
@@ -1831,12 +1838,18 @@
         hideSegmentToolbar();
     }
 
-    /** 采用改写：替换阅读区文本 → 同步到编辑框 → 走既有保存链路（含摘要回流） */
+    /** 采用改写：替换/追加到阅读区 → 同步编辑框 → 进入编辑态等保存 */
     function applySegmentResult() {
         if (!segmentResult || !segmentSelection) return;
         const full = contentReadonly.textContent || '';
+        // 续写是"追加"语义：保留原文，把新内容接在选中片段之后；
+        // 润色/扩写是"替换"语义：模型回传的是完整段落，直接替换选中片段。
+        // 两种语义必须分开——统一按替换处理会把续写的原句删掉，统一按追加处理会让改写内容重复。
+        const inserted = segmentResult.action === 'continue'
+            ? segmentSelection.text + segmentResult.editedText
+            : segmentResult.editedText;
         const replaced = full.slice(0, segmentSelection.start)
-            + segmentResult.editedText
+            + inserted
             + full.slice(segmentSelection.end);
         contentReadonly.textContent = replaced;
         // 编辑框同步：用户接下来点「编辑」时看到的就是替换后的正文
@@ -1850,7 +1863,8 @@
         if (btnSave) btnSave.classList.remove('hidden');
         const btnCancelEdit = document.getElementById('btn-cancel-edit');
         if (btnCancelEdit) btnCancelEdit.classList.remove('hidden');
-        showToast('已替换选中片段，点「保 存」写回章节（会触发摘要回流）');
+        showToast('已' + (segmentResult.action === 'continue' ? '追加' : '替换')
+            + '，点「保 存」写回章节（会触发摘要回流）');
     }
 
     /** 调用后端做一次段落编辑 */
