@@ -2,9 +2,11 @@ package cn.novel.yonren.domain.novel.service.armory.plan;
 
 import cn.novel.yonren.domain.novel.model.aggregate.ChapterPlanAggregate;
 import cn.novel.yonren.domain.novel.model.entity.ChapterPlanItemEntity;
+import cn.novel.yonren.domain.novel.model.entity.ChapterSummaryEntity;
 import cn.novel.yonren.domain.novel.model.entity.StageBlueprintEntity;
 import cn.novel.yonren.domain.novel.service.armory.quality.ForeshadowSpanPolicy;
 import cn.novel.yonren.domain.novel.service.armory.quality.SuspenseLadderPolicy;
+import cn.novel.yonren.domain.novel.service.armory.quality.NarrativeProgressionPolicy;
 import cn.novel.yonren.types.enums.ResponseCode;
 import cn.novel.yonren.types.exception.AppException;
 import cn.novel.yonren.types.utils.JsonParseFallback;
@@ -109,7 +111,100 @@ public final class ChapterPlanChecks {
         }
     }
 
+    /** 旧入口没有蓝图证据，保留原有门禁，不能仅因 mainLineAdvance 非空就放行。 */
     public static String validateSuspenseAdvance(List<ChapterPlanItemEntity> chapters, List<String> ladder) {
+        return validateSuspenseAdvance(chapters, ladder, Set.of());
+    }
+
+    /**
+     * 细推进豁免入口：蓝图逐章精确对表，且去标签后内容非空、非重复，才允许复用粗档。
+     * 跨段只接入紧邻本段的最多两章摘要，避免重审久远历史或跨越摘要缺口。
+     * 摘要未存 mainLineAdvance：仅在摘要含蓝图推进正文时接入历史；证据缺失不虚构跨段停滞，段内仍保留旧门禁。
+     */
+    public static String validateSuspenseAdvance(List<ChapterPlanItemEntity> chapters,
+                                                StageBlueprintEntity blueprint,
+                                                List<ChapterSummaryEntity> executedSummaries) {
+        if (chapters == null || chapters.isEmpty()) {
+            return null;
+        }
+        List<String> ladder = blueprint == null ? null : blueprint.getSuspenseLadder();
+        List<StageBlueprintEntity.MainLineBeat> planned = blueprint == null ? null : blueprint.getMainLineByChapter();
+        Map<Integer, String> expected = expectedAdvances(planned);
+        List<ChapterPlanItemEntity> observations = new ArrayList<>();
+        Integer start = chapters.get(0) == null ? null : chapters.get(0).getChapterNo();
+        if (start != null && executedSummaries != null) {
+            Map<Integer, ChapterSummaryEntity> history = new HashMap<>();
+            for (ChapterSummaryEntity summary : executedSummaries) {
+                if (summary != null && summary.getChapterNo() != null && summary.getChapterNo() < start) {
+                    history.put(summary.getChapterNo(), summary);
+                }
+            }
+            for (int no = start - 1; no >= Math.max(1, start - SuspenseLadderPolicy.HOLD_LIMIT + 1); no--) {
+                ChapterSummaryEntity summary = history.get(no);
+                if (summary == null) {
+                    break;
+                }
+                String want = expected.get(no);
+                String expectedFact = want == null ? "" : want.replaceFirst("^【[^】]+】", "");
+                if (expectedFact.isEmpty() || !normalizeAdvance(summary.getSummary()).contains(expectedFact)) {
+                    break;
+                }
+                observations.add(0, ChapterPlanItemEntity.builder()
+                        .chapterNo(no).suspenseBeat(summary.getSuspenseBeat()).mainLineAdvance(want)
+                        .chapterType("transition".equalsIgnoreCase(summary.getChapterType())
+                                ? cn.novel.yonren.types.enums.ChapterTypeVO.TRANSITION : null)
+                        .build());
+            }
+        }
+        observations.addAll(chapters);
+        Set<String> issues = new LinkedHashSet<>();
+        Set<Integer> currentNos = new HashSet<>();
+        for (ChapterPlanItemEntity chapter : chapters) {
+            if (chapter != null) {
+                currentNos.add(chapter.getChapterNo());
+            }
+        }
+        Set<Integer> verified = new HashSet<>();
+        Map<String, Integer> seen = new HashMap<>();
+        Set<String> repeated = new HashSet<>();
+        for (ChapterPlanItemEntity item : observations) {
+            if (item == null || item.getChapterNo() == null) {
+                continue;
+            }
+            String got = normalizeAdvance(item.getMainLineAdvance());
+            String fingerprint = fineAdvanceFingerprint(got, ladder);
+            if (fingerprint.isEmpty()) {
+                if (!got.isEmpty() && currentNos.contains(item.getChapterNo())) {
+                    issues.add("第 " + item.getChapterNo() + " 章的 mainLineAdvance 去标签和粗档原文后没有细推进内容");
+                }
+                continue;
+            }
+            Integer previous = seen.putIfAbsent(fingerprint, item.getChapterNo());
+            if (previous != null) {
+                repeated.add(fingerprint);
+                verified.remove(previous);
+                if (currentNos.contains(item.getChapterNo())) {
+                    issues.add("第 " + previous + "–" + item.getChapterNo()
+                            + " 章的 mainLineAdvance 去标签和粗档原文后重复，不能用冒牌细推进豁免同档门禁");
+                }
+            }
+            if (!repeated.contains(fingerprint) && got.equals(expected.get(item.getChapterNo()))) {
+                verified.add(item.getChapterNo());
+            }
+        }
+        String mainLineIssue = validateMainLineAdvance(chapters, planned);
+        if (mainLineIssue != null) {
+            issues.add(mainLineIssue);
+        }
+        String suspenseIssue = validateSuspenseAdvance(observations, ladder, verified);
+        if (suspenseIssue != null) {
+            issues.add(suspenseIssue);
+        }
+        return issues.isEmpty() ? null : String.join("；", issues);
+    }
+
+    private static String validateSuspenseAdvance(List<ChapterPlanItemEntity> chapters, List<String> ladder,
+                                                  Set<Integer> verified) {
         if (chapters == null || chapters.isEmpty()) {
             return null;
         }
@@ -123,11 +218,11 @@ public final class ChapterPlanChecks {
             // 避免违规信息里出现"第 0 章"这种无法定位的告警
             int displayNo = item.getChapterNo() == null ? i + 1 : item.getChapterNo();
             beats.add(new SuspenseLadderPolicy.Beat(displayNo, item.getSuspenseBeat(),
-                    item.getChapterType() == cn.novel.yonren.types.enums.ChapterTypeVO.TRANSITION));
+                    item.getChapterType() == cn.novel.yonren.types.enums.ChapterTypeVO.TRANSITION,
+                    item.getChapterNo() != null && verified.contains(item.getChapterNo())));
         }
         List<String> issues = new ArrayList<>();
-        // 描述去重**不依赖档位表**，所以放在 usable 判断之外——无蓝图模式同样要拦；
-        // 实测：多章回填同一 suspenseBeat 逐字相同时，只做档位下标比较会报过一次就沉默
+        // 无蓝图时仍执行旧去重；只有独有细推进经过蓝图核验的章才能复用粗档原文。
         issues.addAll(SuspenseLadderPolicy.duplicateBeatViolations(beats));
         if (SuspenseLadderPolicy.usable(ladder)) {
             issues.addAll(SuspenseLadderPolicy.violations(beats, ladder));
@@ -138,14 +233,12 @@ public final class ChapterPlanChecks {
     public static String suspenseFeedback(String issue) {
         return "\n\n【上一版计划被机械驳回】以下问题必须修正（其余部分可保留）：\n- " + issue
                 + "\n\n修正要求（逐条执行，**不得只换措辞**）："
-                + "\n1. 相邻两章的 suspenseBeat **不得逐字相同**——即使落在同一档位，也必须写出两章各自推进了什么，"
-                + "使人一眼能看出差异；"
-                + "\n2. 若档位表档数不足以让每章不同（如只有 3 档而本段有 5 章），"
-                + "**保留原档位表的档位归类**，另外为每章补充一条「本章独有的推进子项」（谁知道了什么 / 谁做了什么决定 / "
-                + "什么被公开），并把它写进该章 keyEvents 与 suspenseBeat 中；"
-                + "\n3. 档位索引仍**不得倒退**；非 transition 章仍不得连续 3 章停留同一档；"
-                + "\n4. 重新输出**完整**计划（章数不变），suspenseBeat 必须以档位表原文**开头**，"
-                + "再附本章独有的推进子项。";
+                + "\n1. suspenseBeat 只填本章结束时的档位表原文，不得缺失或倒退；"
+                + "\n2. 不同推进写在 mainLineAdvance，必须**逐字取自**蓝图对应章号的原文，去掉章号/线名/档位等标签后"
+                + "仍须非空且不重复，并在 keyEvents 中落地；不要给 suspenseBeat 追加文字绕过校验；"
+                + "\n3. 只有上述细推进已通过蓝图对表和去重，才允许连续多章使用同一粗档及同一句 suspenseBeat。"
+                + "无蓝图、缺字段、不匹配或雷同均不享受豁免，保留原同档门禁；不要为换档提前揭谜；"
+                + "\n4. 重新输出**完整**计划（章数不变），不得自行改写蓝图来消除重复。";
     }
 
     /**
@@ -183,19 +276,9 @@ public final class ChapterPlanChecks {
         if (chapters == null || chapters.isEmpty() || planned == null || planned.isEmpty()) {
             return null;
         }
-        Map<Integer, String> expected = new HashMap<>();
-        for (StageBlueprintEntity.MainLineBeat beat : planned) {
-            if (beat != null && beat.getChapterNo() != null && StringUtils.isNotBlank(beat.getAdvance())) {
-                expected.put(beat.getChapterNo(), normalizeAdvance(beat.getAdvance()));
-            }
-        }
-        if (expected.isEmpty()) {
-            return null;
-        }
-
+        Map<Integer, String> expected = expectedAdvances(planned);
         List<String> issues = new ArrayList<>();
-        String prev = null;
-        int prevNo = 0;
+        Map<String, Integer> seen = new HashMap<>();
         for (ChapterPlanItemEntity item : chapters) {
             if (item == null || item.getChapterNo() == null) {
                 continue;
@@ -207,23 +290,63 @@ public final class ChapterPlanChecks {
             if (StringUtils.isBlank(got)) {
                 issues.add("第 " + no + " 章未回填 mainLineAdvance"
                         + (want == null ? "" : "（应逐字取自蓝图：" + brief(want) + "）"));
-                prev = null;
                 continue;
             }
-            // 未落地：蓝图对本窗内的章给了内容，就必须对得上。**容错方向取"宽容"**——
-            // 模型常会在原文之外补一句解释，故允许"前缀命中 / 互为包含"，只拦真正跑偏的。
-            if (want != null && !got.equals(want) && !got.startsWith(want) && !want.startsWith(got)) {
+            if (want == null) {
+                issues.add("第 " + no + " 章蓝图未给出唯一的 mainLineAdvance 原文，不能核验细推进");
+            } else if (!got.equals(want)) {
                 issues.add("第 " + no + " 章的 mainLineAdvance 与蓝图不符：应为「" + brief(want)
                         + "」，实际「" + brief(got) + "」——必须逐字取自蓝图");
             }
-            if (prev != null && got.equals(prev)) {
-                issues.add("第 " + prevNo + "–" + no + " 章的 mainLineAdvance **逐字相同**（「" + brief(got)
-                        + "」）——相邻两章必须各自推进不同的事");
+            String fingerprint = fineAdvanceFingerprint(got, null);
+            if (fingerprint.isEmpty()) {
+                issues.add("第 " + no + " 章的 mainLineAdvance 去标签后没有细推进内容");
+                continue;
             }
-            prev = got;
-            prevNo = no;
+            Integer previous = seen.putIfAbsent(fingerprint, no);
+            if (previous != null) {
+                issues.add("第 " + previous + "–" + no + " 章的 mainLineAdvance 去标签后**逐字相同**（「" + brief(got)
+                        + "」）——各章必须推进不同的事，换章号或线名不算推进");
+            }
         }
         return issues.isEmpty() ? null : String.join("；", issues);
+    }
+
+    private static Map<Integer, String> expectedAdvances(List<StageBlueprintEntity.MainLineBeat> planned) {
+        Map<Integer, String> expected = new HashMap<>();
+        Set<Integer> seen = new HashSet<>();
+        if (planned != null) {
+            for (StageBlueprintEntity.MainLineBeat beat : planned) {
+                if (beat == null || beat.getChapterNo() == null) {
+                    continue;
+                }
+                if (!seen.add(beat.getChapterNo())) {
+                    expected.remove(beat.getChapterNo());
+                } else if (StringUtils.isNotBlank(beat.getAdvance())) {
+                    expected.put(beat.getChapterNo(), normalizeAdvance(beat.getAdvance()));
+                }
+            }
+        }
+        return expected;
+    }
+
+    /** 只识别格式上的冒牌差异，不把文本不同伪称为语义不同；场景重演仍由独立闸门检查。 */
+    private static String fineAdvanceFingerprint(String value, List<String> ladder) {
+        String text = normalizeAdvance(value)
+                .replaceAll("【[^】]*】|\\[[^\\]]*\\]", "")
+                .replaceAll("第[0-9零〇一二三四五六七八九十百千两]+章", "")
+                .replaceAll("(?:档位[0-9零〇一二三四五六七八九十百千两]+|第[0-9零〇一二三四五六七八九十百千两]+档)", "")
+                .replaceFirst("^[0-9]+[.、)）:：]", "")
+                .replaceFirst("^(?:主线推进|本章独有推进|推进子项|[^:：]{1,12}线)[：:]", "");
+        if (ladder != null) {
+            for (String rung : ladder) {
+                String entry = normalizeAdvance(rung);
+                if (!entry.isEmpty()) {
+                    text = text.replace(entry, "");
+                }
+            }
+        }
+        return NarrativeProgressionPolicy.normalizeForRepetition(text);
     }
 
     /** 归一化：去空白与引号（与项目其它文本比对口径一致；实现复用仓库统一入口，勿另写正则） */
@@ -443,7 +566,8 @@ public final class ChapterPlanChecks {
                 + "不得改写、不得自行替换；"
                 + "\n2. 若你判断蓝图的安排不合理，**仍要先逐字落地**——蓝图是长视野决策，"
                 + "单章落地时无权改写它；确需调整请在该章 keyEvents 里补充说明，而不是改 mainLineAdvance；"
-                + "\n3. 相邻两章不得使用同一句推进描述；"
+                + "\n3. 各章 mainLineAdvance 去掉章号/线名/档位等标签后不得重复；"
+                + "suspenseBeat 只填粗档原文，差异写在 mainLineAdvance，不要靠追加一句说明或提前揭谜换档；"
                 + "\n4. 重新输出**完整**计划（章数不变）。";
     }
 
@@ -615,10 +739,11 @@ public final class ChapterPlanChecks {
                 + "\n1. 同一场景或同一物理动作（取信/折信/塞信/收进本子这类流程）只允许占用段内**一章**："
                 + "已在前章做过的动作，在后章不得再完整做一遍——要么合并到前章，要么让后章从"
                 + "「动作已经完成」的状态直接进戏；"
-                + "\n2. 同一件主线推进不得排给两章：两章的 mainLineAdvance/suspenseBeat 若指向同一件事，"
-                + "保留其中一章，另一章改为推进别的事；"
+                + "\n2. 同一件主线推进不得排给两章：以蓝图逐章的 mainLineAdvance 为准，"
+                + "把重复的 keyEvents 改为承载本章独有的推进，不得自行改写蓝图或仅因同粗档就提前揭谜；"
                 + "\n3. 在档位原文之后**追加一句话**并不能让两章变成不同的推进——"
-                + "共用的原文部分必须真正不同（谁知道了什么 / 谁做了什么决定 / 什么被公开）；"
+                + "suspenseBeat 可在细推进通过核验后复用粗档原文；不同推进写在 mainLineAdvance，"
+                + "逐字取自蓝图并在 keyEvents 中落地，不要改写档位或追加文字冒充差异；"
                 + "\n4. 重新输出**完整**计划（章数不变）。";
     }
 

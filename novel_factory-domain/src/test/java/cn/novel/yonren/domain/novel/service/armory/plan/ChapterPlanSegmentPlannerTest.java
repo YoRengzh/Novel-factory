@@ -140,6 +140,25 @@ class ChapterPlanSegmentPlannerTest {
      * 且回注文本必须**点名问题**（否则"重规划"只是原样重生成一遍）。
      */
     @Test
+    void planSegment_sameCoarseRungWithVerifiedDistinctAdvancesDoesNotReplan() {
+        StageBlueprintEntity blueprint = blueprintWithMainLine();
+        ChapterPlanAggregate aggregate = ChapterPlanChecks.parseLenient(compliantPlan());
+        for (int i = 0; i < aggregate.getChapters().size(); i++) {
+            aggregate.getChapters().get(i).setSuspenseBeat(LADDER.get(1));
+            aggregate.getChapters().get(i).setMainLineAdvance(blueprint.getMainLineByChapter().get(i).getAdvance());
+        }
+        when(llmInvokeService.invoke(any(), any(), any(), anyString(), any()))
+                .thenReturn(com.alibaba.fastjson.JSON.toJSONString(aggregate));
+
+        ChapterPlanSegmentPlanner.PlannedSegment planned = planner.planSegment(
+                new StoryVO(), PromptContext.builder().build(), "prompt",
+                1, 3, blueprint, null, usedPromptMap);
+
+        assertEquals(3, planned.plan().getChapters().size());
+        verify(llmInvokeService, times(1)).invoke(any(), any(), any(), anyString(), any());
+    }
+
+    @Test
     void planSegment_mainLineGateRejectsAndReplansWithFeedback() {
         // 计划 JSON 不含 mainLineAdvance ⇒ 必然命中"未声明"
         when(llmInvokeService.invoke(any(), any(), any(), anyString(), any()))

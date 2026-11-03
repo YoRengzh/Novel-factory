@@ -8,6 +8,8 @@ import cn.novel.yonren.domain.novel.model.entity.StageBlueprintEntity;
 import cn.novel.yonren.domain.novel.model.entity.StoryContextEntity;
 import cn.novel.yonren.domain.novel.model.entity.VolumeBlueprintEntity;
 import cn.novel.yonren.domain.novel.service.armory.plan.StoryPacing;
+import cn.novel.yonren.domain.novel.service.armory.quality.NarrativeProgressionPolicy;
+import cn.novel.yonren.domain.novel.service.armory.quality.UsedPatternPolicy;
 import cn.novel.yonren.types.utils.JsonParseFallback;
 import com.fasterxml.jackson.core.json.JsonReadFeature;
 import com.fasterxml.jackson.databind.DeserializationFeature;
@@ -141,7 +143,8 @@ public class RollingOutlineService {
                 .append("2. suspenseLadder：该悬念的**推进档位表**，3-6 档、有序，从「完全不知」排到「彻底摊牌」；\n")
                 .append("3. 每档必须写成**可观察**的表述（谁知道了什么 / 谁做了什么决定 / 什么被公开），")
                 .append("**严禁**写成内心感受、情绪波动或氛围渲染；\n")
-                .append("4. 档位会被逐章机械比对：索引不得倒退，非过渡章不得连续 3 章停在同一档；\n")
+                .append("4. 档位索引不得倒退；与蓝图逐字对表且去标签后非重复的 mainLineAdvance 可承载同一粗档内的推进，")
+                .append("缺少这种细推进时仍按连续 3 章同档的风险门禁处理，不要靠提前揭谜凑换档；\n")
                 .append("5. 不要输出 Markdown，不要输出解释文字。\n");
         sb.append("\n请严格按照以下 JSON 格式输出（**只输出这两个字段**）：\n")
                 .append("{\"coreSuspense\":\"本书核心悬念一句话\",")
@@ -207,8 +210,6 @@ public class RollingOutlineService {
                                             List<ChapterSummaryEntity> summaries) {
         int start = blueprint == null || blueprint.getStartChapter() == null ? 1 : blueprint.getStartChapter();
         int end = mainLineWindowEnd(blueprint);
-        int count = Math.max(1, end - start + 1);
-
         StringBuilder sb = new StringBuilder();
         sb.append("你是一名资深小说主编。上一步为长篇连载制定阶段蓝图时，遗漏了「逐章主线推进」字段，")
                 .append("现在**只补这一项**，不要重复输出其他字段。\n\n");
@@ -230,7 +231,38 @@ public class RollingOutlineService {
                 sb.append("  ").append(i + 1).append(". ").append(nullToBlank(ladder.get(i))).append("\n");
             }
         }
-        sb.append("\n【要求】\n")
+        appendRecentProgress(sb, summaries, start);
+        sb.append(NarrativeProgressionPolicy.guidance());
+        sb.append(mainLineRequirements(start, end));
+        sb.append("\n请严格按照以下 JSON 格式输出（只输出这一项，替换所有占位内容）：\n")
+                .append("{\"mainLineByChapter\":").append(mainLineExample(start, end)).append("}");
+        return sb.toString();
+    }
+
+    private void appendRecentProgress(StringBuilder sb, List<ChapterSummaryEntity> summaries, int start) {
+        List<ChapterSummaryEntity> past = summaries == null ? List.of() : summaries.stream()
+                .filter(s -> s != null && s.getChapterNo() != null && s.getChapterNo() < start)
+                .toList();
+        sb.append("\n【已发生的近章推进·不是待执行模板】\n");
+        for (ChapterSummaryEntity summary : recentSummaries(past)) {
+            sb.append("- 第").append(summary.getChapterNo()).append("章：")
+                    .append(StringUtils.abbreviate(nullToBlank(summary.getSummary()), 180)).append("\n");
+        }
+    }
+
+    private String mainLineExample(int start, int end) {
+        List<StageBlueprintEntity.MainLineBeat> example = new ArrayList<>();
+        for (int no = start; no <= end; no++) {
+            example.add(new StageBlueprintEntity.MainLineBeat(no,
+                    "【从允许的剧情线中选一】第" + no + "章独有的具体选择、局面变化及后续影响（替换占位内容）"));
+        }
+        return com.alibaba.fastjson.JSON.toJSONString(example);
+    }
+
+    private String mainLineRequirements(int start, int end) {
+        int count = Math.max(1, end - start + 1);
+        StringBuilder sb = new StringBuilder();
+        sb.append("\n【逐章主线推进要求】\n")
                 .append("1. 为第 ").append(start).append("–").append(end).append(" 章的**每一章**写一条「本章主线推进」，")
                 .append("共 ").append(count).append(" 条，章号从 ").append(start).append(" 连续排到 ")
                 .append(end).append("，不得缺章或跳号；\n")
@@ -264,10 +296,6 @@ public class RollingOutlineService {
                 .append("106-120 十五章主粮仅 3 章、本金 0/程序 0——这是本纪律要拦截的头号问题）。\n")
                 .append("4. 整体必须与上方档位表相容：档位索引不得倒退，且每一章的推进应能对应到某个档位；\n")
                 .append("5. 不要输出 Markdown，不要输出解释文字。\n");
-        sb.append("\n请严格按照以下 JSON 格式输出（**只输出这一个字段**）：\n")
-                .append("{\"mainLineByChapter\":[{\"chapterNo\":").append(start)
-                .append(",\"advance\":\"【学习】本章主线推进（可观察表述，写明谁对谁的什么交锋承载）\"},")
-                .append("{\"chapterNo\":").append(Math.min(start + 1, end)).append(",\"advance\":\"【本金】…\"}]}");
         return sb.toString();
     }
 
@@ -806,6 +834,11 @@ public class RollingOutlineService {
                                         VolumeBlueprintEntity volume) {
         StringBuilder sb = new StringBuilder();
         sb.append("你是一名资深小说主编，负责为长篇连载制定阶段蓝图（滚动大纲），保证长线剧情不偏离主线。\n\n");
+        sb.append(NarrativeProgressionPolicy.guidance());
+        String usedPatterns = UsedPatternPolicy.render(summaries, window.startChapter(), UsedPatternPolicy.PLAN_LOOKBACK);
+        if (StringUtils.isNotBlank(usedPatterns)) {
+            sb.append(usedPatterns).append("\n");
+        }
 
         sb.append("【故事大纲】\n").append(nullToBlank(storyContext == null ? null : storyContext.getOutline())).append("\n");
         sb.append("\n【主人公】\n").append(nullToBlank(storyContext == null ? null : storyContext.getProtagonist())).append("\n");
@@ -1116,14 +1149,14 @@ public class RollingOutlineService {
                 .append("    - suspenseLadder：该悬念的**推进档位表**，3-6 档、有序，从'完全不知'排到'彻底摊牌'；\n")
                 .append("    - 每档必须写成**可观察**的表述（谁知道了什么 / 谁做了什么决定 / 什么被公开），")
                 .append("严禁写成内心感受、情绪波动或氛围；\n")
-                .append("    - 档位会被逐章机械比对（章计划回填 suspenseBeat）：索引不得倒退，")
-                .append("非过渡章**不得连续 3 章停在同一档**；\n")
-                .append("    - **'产生怀疑又被自我否定圆回'不算推进**——若某章结束时的认知档位与章首相同，那就是原地章；\n")
-                .append("    - **档数必须 ≥ 本阶段章数**：4 档配 5 章必然多章共用一档（实测连续 4 章停在同一档——")
-                .append("档数少于章数时，最宽的那一档会被反复共用并撑满整段，主线观感上就是停滞；")
-                .append("相邻两档必须**语义可区分**（上一档结了什么新事实/谁下了什么新决定，下一档推进了什么），")
-                .append("严禁把'形成默契/关系深化/局势升级'这类**状态性宽词**当档位——它能装下整段，等于没有档位；")
-                .append("超过 6 档会让每档失去意义。\n")
+                .append("    - 档位会被逐章机械比对（章计划回填 suspenseBeat）：索引不得倒退；")
+                .append("与蓝图逐字对表且去标签后非重复的 mainLineAdvance 可以承载同一粗档内的推进，")
+                .append("缺少这种细推进时，仍保留连续 3 章同档的风险门禁；\n")
+                .append("    - '产生怀疑又被自我否定圆回'且没有新事实/决定/关系变化，不算推进；")
+                .append("但粗档未变不等于没有推进，不得为过闸而提前揭谜。\n")
+                .append("    - 档位表保持 3-6 档，不要求档数等于阶段章数；粗档位之间的具体差异由 mainLineByChapter 表达，")
+                .append("不得为凑一章一档而反复制造新问题或提前摊牌。相邻两档必须**语义可区分**，")
+                .append("严禁把'形成默契/关系深化/局势升级'这类能装下整段的宽词当档位。\n")
                 .append("12. ⚠️ 里程碑必须与人物阶段（年龄/生理/状态）相符（对照上方【时序锚】，如给出）：\n")
                 .append("    - 先按【时序锚】估算本阶段结束时的故事时间与主角年龄；\n")
                 .append("    - tasks / suspenseLadder / exitConditions 中**不得出现超出该阶段能力边界的里程碑**")
@@ -1140,6 +1173,10 @@ public class RollingOutlineService {
 
         int exampleEnd = window.adaptive() ? Math.min(window.startChapter() + 44, maxEnd)
                 : Math.min(window.startChapter() + STAGE_LENGTH - 1, maxEnd);
+        int mainLineEnd = Math.min(exampleEnd, window.startChapter() + MAINLINE_WINDOW - 1);
+        sb.append("\nmainLineByChapter 必填，与蓝图一次输出；覆盖实际 endChapter 内的前 ")
+                .append(MAINLINE_WINDOW).append(" 章（较短阶段覆盖全部），不要等下一次补采。\n")
+                .append(mainLineRequirements(window.startChapter(), mainLineEnd));
         sb.append("\n请严格按照以下 JSON 格式输出：\n")
                 .append("{\"stageNo\":").append(window.stageNo())
                 .append(",\"startChapter\":").append(window.startChapter())
@@ -1148,13 +1185,15 @@ public class RollingOutlineService {
                 .append(",\"estimatedTotalChapters\":158,\"estimatedRemainingChaptersMin\":120,\"estimatedRemainingChaptersMax\":135")
                 .append(",\"remainingFinaleBeats\":[\"终局节点1\"],\"completedFinaleBeats\":[]")
                 .append(",\"volumeNo\":").append(volume == null ? 1 : volume.getVolumeNo())
-                .append(",\"volumeTitle\":").append(volume == null ? "无卷" : nullToBlank(volume.getTitle()))
+                .append(",\"volumeTitle\":").append(com.alibaba.fastjson.JSON.toJSONString(
+                        volume == null ? "无卷" : nullToBlank(volume.getTitle())))
                 .append(",\"arcNo\":1").append(",\"arcGoal\":\"本弧一句话目标（对应卷内弧清单中本弧的 oneLineGoal）\"")
                 .append(",\"stageGoal\":\"阶段目标\",\"tasks\":[\"里程碑1\"],")
                 .append("\"coreSuspense\":\"本书核心悬念一句话\",")
                 .append("\"suspenseLadder\":[\"档位1（完全不知）\",\"档位2（可观察的中间态）\",\"档位3（彻底摊牌）\"],")
                 .append("\"entryConstraints\":[\"本阶段开始时应成立的局面1\"],")
                 .append("\"exitConditions\":[\"可核对的达成谓词1\"],")
+                .append("\"mainLineByChapter\":").append(mainLineExample(window.startChapter(), mainLineEnd)).append(",")
                 .append("\"carriedTasks\":[{\"content\":\"上一版任务\",\"status\":\"完成\",\"note\":\"说明\"}]}");
         return sb.toString();
     }
@@ -1368,6 +1407,7 @@ public class RollingOutlineService {
                                     Integer hardTotal) {
         StringBuilder sb = new StringBuilder();
         sb.append("你是一名资深小说总编，负责为长篇连载制定\"卷\"蓝图（全书长期锚）：一卷 = 一次剧情移动（承转合），由若干弧组成。\n\n");
+        sb.append(NarrativeProgressionPolicy.guidance());
 
         sb.append("【故事大纲】\n").append(nullToBlank(storyContext == null ? null : storyContext.getOutline())).append("\n");
         sb.append("\n【主人公】\n").append(nullToBlank(storyContext == null ? null : storyContext.getProtagonist())).append("\n");

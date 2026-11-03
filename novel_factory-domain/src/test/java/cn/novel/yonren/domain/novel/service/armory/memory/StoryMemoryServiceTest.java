@@ -31,6 +31,7 @@ import java.util.Map;
 import java.util.concurrent.ExecutionException;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
@@ -673,6 +674,180 @@ class StoryMemoryServiceTest { /*MARKER-CHECK-1*/
         assertEquals(2, points.stream().filter(p -> "ledger".equals(p.getPayload().get("kind"))).count(),
                 "脏标记后的写入要带上全量账本，不能只写本章条目");
         assertEquals(1, points.stream().filter(p -> "bible".equals(p.getPayload().get("kind"))).count());
+    }
+
+    @Test
+    void indexChapter_dirtyRepair_restoresMissingChaptersWithoutReembeddingUnchangedPoints(@TempDir Path storyDir) throws Exception {
+        Files.writeString(storyDir.resolve("story-bible.txt"), "小说名称：测试");
+        when(chapterMemoryService.buildCharacterLedger(anyList())).thenReturn(List.of(
+                new LedgerEntry("主角甲", "报名三班", 1, 1, null, null, false)));
+        when(chapterMemoryService.buildLedger(anyList(), any())).thenReturn(List.of());
+        List<ChapterSummaryEntity> summaries = threeChapters();
+        String collection = "novel-memory-" + storyDir.getFileName();
+        service.indexAfterChapter(module(), storyDir, summaries.subList(0, 1), null);
+        ArgumentCaptor<List<VectorPoint>> initial = ArgumentCaptor.forClass(List.class);
+        verify(vectorStore).upsert(eq(collection), initial.capture());
+        when(vectorStore.listPoints(collection)).thenReturn(storedPoints(initial.getValue()));
+
+        doThrow(new IllegalStateException("第2章写入失败")).doNothing()
+                .when(vectorStore).upsert(eq(collection), anyList());
+        service.indexAfterChapter(module(), storyDir, summaries.subList(0, 2), null);
+        assertTrue(indexDirty(storyDir));
+        clearInvocations(vectorStore, embeddingGateway);
+
+        service.indexAfterChapter(module(), storyDir, summaries, null);
+
+        ArgumentCaptor<List<VectorPoint>> repaired = ArgumentCaptor.forClass(List.class);
+        verify(vectorStore).upsert(eq(collection), repaired.capture());
+        List<VectorPoint> points = repaired.getValue();
+        assertEquals(List.of("2", "3"), points.stream()
+                .map(p -> p.getPayload().get("chapterNo")).toList(),
+                "必须补回失败的第2章以及当前第3章，不重写第1章、未变账本和设定");
+        ArgumentCaptor<List<String>> embedded = ArgumentCaptor.forClass(List.class);
+        verify(embeddingGateway).embed(any(), embedded.capture());
+        assertEquals(points.stream().map(p -> p.getPayload().get("text")).toList(), embedded.getValue());
+        assertFalse(indexDirty(storyDir));
+        verify(vectorStore, never()).clear(anyString());
+        verify(vectorStore, never()).delete(anyString(), anyList());
+    }
+
+    @Test
+    void indexChapter_dirtyRepair_keepsDirtyAfterFailedCompensationUntilRecovery(@TempDir Path storyDir) throws Exception {
+        when(chapterMemoryService.buildCharacterLedger(anyList())).thenReturn(List.of());
+        when(chapterMemoryService.buildLedger(anyList(), any())).thenReturn(List.of());
+        List<ChapterSummaryEntity> summaries = threeChapters();
+        String collection = "novel-memory-" + storyDir.getFileName();
+        service.indexAfterChapter(module(), storyDir, summaries.subList(0, 1), null);
+        ArgumentCaptor<List<VectorPoint>> initial = ArgumentCaptor.forClass(List.class);
+        verify(vectorStore).upsert(eq(collection), initial.capture());
+        when(vectorStore.listPoints(collection)).thenReturn(storedPoints(initial.getValue()));
+        doThrow(new IllegalStateException("第2章失败"))
+                .doThrow(new IllegalStateException("补偿失败"))
+                .doNothing().when(vectorStore).upsert(eq(collection), anyList());
+
+        service.indexAfterChapter(module(), storyDir, summaries.subList(0, 2), null);
+        assertTrue(indexDirty(storyDir));
+        service.indexAfterChapter(module(), storyDir, summaries, null);
+        assertTrue(indexDirty(storyDir), "补偿 upsert 失败不得清除 dirty");
+        clearInvocations(vectorStore, embeddingGateway);
+
+        service.indexAfterChapter(module(), storyDir, summaries, null);
+
+        ArgumentCaptor<List<VectorPoint>> repaired = ArgumentCaptor.forClass(List.class);
+        verify(vectorStore).upsert(eq(collection), repaired.capture());
+        assertEquals(List.of("2", "3"), repaired.getValue().stream()
+                .map(p -> p.getPayload().get("chapterNo")).toList());
+        assertFalse(indexDirty(storyDir));
+    }
+
+    @Test
+    void indexChapter_dirtyRepair_keepsDirtyWhenStoredPointsCannotBeRead(@TempDir Path storyDir) throws Exception {
+        when(chapterMemoryService.buildCharacterLedger(anyList())).thenReturn(List.of());
+        when(chapterMemoryService.buildLedger(anyList(), any())).thenReturn(List.of());
+        List<ChapterSummaryEntity> summaries = threeChapters();
+        String collection = "novel-memory-" + storyDir.getFileName();
+        service.indexAfterChapter(module(), storyDir, summaries.subList(0, 1), null);
+        doThrow(new IllegalStateException("写入失败")).doNothing()
+                .when(vectorStore).upsert(eq(collection), anyList());
+        service.indexAfterChapter(module(), storyDir, summaries.subList(0, 2), null);
+        assertTrue(indexDirty(storyDir));
+        when(vectorStore.listPoints(collection)).thenThrow(new IllegalStateException("读取失败"));
+        clearInvocations(vectorStore, embeddingGateway);
+
+        service.indexAfterChapter(module(), storyDir, summaries, null);
+
+        assertTrue(indexDirty(storyDir), "无法确认现存点时不能宣称补偿成功");
+        verify(embeddingGateway, never()).embed(any(), anyList());
+        verify(vectorStore, never()).upsert(anyString(), anyList());
+        verify(vectorStore, never()).clear(anyString());
+    }
+
+    @Test
+    void indexChapter_dirtyRepair_skipsAlreadyStoredChunksOfPartiallyWrittenChapter(@TempDir Path storyDir) throws Exception {
+        when(chapterMemoryService.buildCharacterLedger(anyList())).thenReturn(List.of());
+        when(chapterMemoryService.buildLedger(anyList(), any())).thenReturn(List.of());
+        List<ChapterSummaryEntity> summaries = threeChapters();
+        summaries.get(1).setSummary("长章记忆。".repeat(300));
+        String collection = "novel-memory-" + storyDir.getFileName();
+        service.indexAfterChapter(module(), storyDir, summaries.subList(0, 1), null);
+        doThrow(new IllegalStateException("部分点写入后失败")).doNothing()
+                .when(vectorStore).upsert(eq(collection), anyList());
+        service.indexAfterChapter(module(), storyDir, summaries.subList(0, 2), null);
+        assertTrue(indexDirty(storyDir));
+        ArgumentCaptor<List<VectorPoint>> attempted = ArgumentCaptor.forClass(List.class);
+        verify(vectorStore, times(2)).upsert(eq(collection), attempted.capture());
+        List<VectorPoint> failedChapter = attempted.getAllValues().get(1);
+        assertTrue(failedChapter.size() > 1, "失败章应切成多个记忆点");
+        List<VectorPoint> persisted = new ArrayList<>(attempted.getAllValues().get(0));
+        persisted.add(failedChapter.get(0));
+        when(vectorStore.listPoints(collection)).thenReturn(storedPoints(persisted));
+        clearInvocations(vectorStore, embeddingGateway);
+
+        service.indexAfterChapter(module(), storyDir, summaries, null);
+
+        ArgumentCaptor<List<VectorPoint>> repaired = ArgumentCaptor.forClass(List.class);
+        verify(vectorStore).upsert(eq(collection), repaired.capture());
+        List<VectorPoint> points = repaired.getValue();
+        assertEquals(failedChapter.subList(1, failedChapter.size()).stream().map(VectorPoint::getId).toList(),
+                points.stream().filter(p -> "2".equals(p.getPayload().get("chapterNo")))
+                        .map(VectorPoint::getId).toList(), "只补写失败章尚未落入集合的切块");
+        assertEquals(1, points.stream().filter(p -> "3".equals(p.getPayload().get("chapterNo"))).count());
+        assertTrue(points.stream().noneMatch(p -> persisted.stream().anyMatch(old -> old.getId().equals(p.getId()))));
+        ArgumentCaptor<List<String>> embedded = ArgumentCaptor.forClass(List.class);
+        verify(embeddingGateway).embed(any(), embedded.capture());
+        assertEquals(points.stream().map(p -> p.getPayload().get("text")).toList(), embedded.getValue());
+        assertFalse(indexDirty(storyDir));
+    }
+
+    @Test
+    void indexChapter_dirtyRepair_keepsDirtyUntilWorldWriteSucceedsWithoutReembeddingStory(@TempDir Path storyDir) throws Exception {
+        Files.writeString(storyDir.resolve("story-bible.txt"), "小说名称：初始设定");
+        when(chapterMemoryService.buildCharacterLedger(anyList())).thenReturn(List.of());
+        when(chapterMemoryService.buildLedger(anyList(), any())).thenReturn(List.of());
+        List<ChapterSummaryEntity> summaries = threeChapters();
+        String collection = "novel-memory-" + storyDir.getFileName();
+        String worldCollection = "novel-world-shared";
+        service.indexAfterChapter(module(), storyDir, summaries.subList(0, 1), "shared");
+        ArgumentCaptor<List<VectorPoint>> initialWorld = ArgumentCaptor.forClass(List.class);
+        verify(vectorStore).upsert(eq(worldCollection), initialWorld.capture());
+        when(vectorStore.listPoints(worldCollection)).thenReturn(storedPoints(initialWorld.getValue()));
+        Files.writeString(storyDir.resolve("story-bible.txt"), "小说名称：更新设定");
+        doThrow(new IllegalStateException("第2章失败")).doNothing()
+                .when(vectorStore).upsert(eq(collection), anyList());
+        service.indexAfterChapter(module(), storyDir, summaries.subList(0, 2), "shared");
+        assertTrue(indexDirty(storyDir));
+        doThrow(new IllegalStateException("世界集合补偿失败")).doNothing()
+                .when(vectorStore).upsert(eq(worldCollection), anyList());
+        clearInvocations(vectorStore, embeddingGateway);
+
+        service.indexAfterChapter(module(), storyDir, summaries, "shared");
+
+        assertTrue(indexDirty(storyDir), "故事集合成功但世界集合失败时仍需保留 dirty");
+        ArgumentCaptor<List<VectorPoint>> repairedStory = ArgumentCaptor.forClass(List.class);
+        verify(vectorStore).upsert(eq(collection), repairedStory.capture());
+        when(vectorStore.listPoints(collection)).thenReturn(storedPoints(repairedStory.getValue()));
+        clearInvocations(vectorStore, embeddingGateway);
+
+        service.indexAfterChapter(module(), storyDir, summaries, "shared");
+
+        verify(vectorStore, never()).upsert(eq(collection), anyList());
+        ArgumentCaptor<List<String>> embedded = ArgumentCaptor.forClass(List.class);
+        verify(embeddingGateway).embed(any(), embedded.capture());
+        assertEquals(List.of("小说名称：更新设定"), embedded.getValue(), "重试只嵌入尚未更新的世界设定");
+        verify(vectorStore).upsert(eq(worldCollection), anyList());
+        assertFalse(indexDirty(storyDir));
+        verify(vectorStore, never()).clear(anyString());
+    }
+
+    private List<StoredPoint> storedPoints(List<VectorPoint> points) {
+        return points.stream().map(p -> StoredPoint.builder()
+                .id((String) p.getId()).kind(p.getPayload().get("kind"))
+                .text(p.getPayload().get("text")).build()).toList();
+    }
+
+    private boolean indexDirty(Path storyDir) throws Exception {
+        return com.alibaba.fastjson2.JSON.parseObject(Files.readString(
+                storyDir.resolve("memory").resolve("embedding-index-meta.json"))).getBooleanValue("dirty");
     }
 
     @Test

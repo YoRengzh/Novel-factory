@@ -442,9 +442,17 @@ public class SpringAiLlmGateway implements LlmGateway {
         OpenAiApi.Builder apiBuilder = OpenAiApi.builder()
                 .baseUrl(api.getBaseUrl())
                 .apiKey(api.getApiKey());
-        // 供应商路径不同：智谱无 /v1 前缀，标准 OpenAI 兼容代理留空即默认 /v1/chat/completions
+        // 供应商路径不同：智谱无 /v1 前缀，标准 OpenAI 兼容代理留空即默认 /v1/chat/completions。
+        // 但 baseUrl 已带 /v1 时（OpenAI 客户端与 AgentHub 文档的常见写法），默认路径再拼 /v1
+        // 会变成 /v1/v1/chat/completions → 404 not found。与模型列表 / Responses / Anthropic
+        // 的"带不带 /v1 均可"对齐——三协议 + 模型列表都必须同样适配
         if (StringUtils.isNotBlank(api.getCompletionsPath())) {
             apiBuilder.completionsPath(api.getCompletionsPath());
+        } else {
+            String derived = openAiCompletionsPath(api.getBaseUrl());
+            if (StringUtils.isNotBlank(derived)) {
+                apiBuilder.completionsPath(derived);
+            }
         }
         boolean dashscopeEndpoint = StringUtils.contains(
                 StringUtils.defaultString(selected.getBaseUrl(), api.getBaseUrl()), "dashscope");
@@ -476,6 +484,26 @@ public class SpringAiLlmGateway implements LlmGateway {
                 .defaultOptions(options)
                 .retryTemplate(retryTemplate)
                 .build();
+    }
+
+    /**
+     * OpenAI 协议的 completionsPath 推导：baseUrl 已带 /v1 时返回 /chat/completions，
+     * 否则返回空串（交由 OpenAiApi 默认的 /v1/chat/completions）。
+     *
+     * <p><b>为什么需要它</b>：OpenAiApi 的默认路径固定拼 /v1/chat/completions，用户把
+     * baseUrl 写成 https://api.example.com/v1（OpenAI 客户端与多数中转站文档的常见写法）时
+     * 会得到 /v1/v1/chat/completions → 404。与 {@code ResponsesApiChatModel.responsesEndpoint}、
+     * {@code ModelListClient} 的"带不带 /v1 均可"保持同一适配承诺。
+     *
+     * <p>返回空串而不是 /v1/chat/completions：后者会覆盖 OpenAiApi 的内部默认值，
+     * 让"默认路径"与"显式路径"两条分支产生分歧，后续改默认值时会漏改一处。
+     */
+    static String openAiCompletionsPath(String baseUrl) {
+        String base = StringUtils.defaultString(baseUrl).trim();
+        while (base.endsWith("/")) {
+            base = base.substring(0, base.length() - 1);
+        }
+        return base.endsWith("/v1") ? "/chat/completions" : "";
     }
 
     /**

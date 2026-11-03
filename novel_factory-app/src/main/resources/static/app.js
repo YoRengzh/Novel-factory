@@ -1753,6 +1753,10 @@
 
     function renderProviders(data) {
         savedProviders = data.providers || [];
+        // 保留用户界面上尚未保存的站选择：拉取模型后会重拉配置视图，
+        // 若直接用后端 providerId（还是 null，因为没点保存）覆盖，
+        // 用户刚选中的站会被静默清空——下拉随之退回"全站混列"状态
+        const pendingProviderId = inputProvider ? inputProvider.value : '';
         // 模型归属映射：哪个模型在哪几家中转站可用（来自各站「获取模型」的缓存）
         providerModelOwners = {};
         savedProviders.forEach(function (p) {
@@ -1761,16 +1765,9 @@
                 (providerModelOwners[key] = providerModelOwners[key] || []).push(p.name || p.id);
             });
         });
-        // 已缓存的模型名在页面加载时就灌进下拉：否则刷新后下拉是空的，
-        // 兜底/场景等输入框看起来只能手输（模型缓存本就落盘了，没理由不用）
-        const cached = [];
-        savedProviders.forEach(function (p) {
-            (p.models || []).forEach(function (m) {
-                if (cached.indexOf(m) < 0) cached.push(m);
-            });
-        });
-        setModelOptions(cached);
-        refreshModelOwnerTags();
+        // 按当前选中站重建下拉：选中站只列该站模型，手动模式列全部已缓存模型。
+        // 旧实现把所有站的模型混在一起灌进来，选中 A 站也会看到 B 站的模型
+        rebuildModelOptionsForActiveProvider();
         // 全局下拉：只列中转站（手动地址收进折叠区，选中"手动模式"开关时才用）；
         // 非 openai 协议的站在名称上带标记，避免同站名不同协议时选错
         inputProvider.innerHTML = (savedProviders.length
@@ -1780,7 +1777,8 @@
                 const tag = p.protocol && p.protocol !== 'openai' ? ' [' + esc(p.protocol) + ']' : '';
                 return '<option value="' + esc(p.id) + '">' + esc(p.name || p.id) + tag + '（' + esc(p.baseUrl || '') + '）</option>';
             }).join('');
-        inputProvider.value = data.providerId || '';
+        // 后端有值以它为准（已保存的全局引用）；后端为空但界面上有未保存的选择则保留
+        inputProvider.value = data.providerId || pendingProviderId || '';
         renderProviderList();
     }
 
@@ -1997,6 +1995,65 @@
     }
 
     /**
+     * 当前生效的中转站 id（决定下拉只显示哪一站的模型）。
+     * 规则与后端 applyApi 同源：全局选中站优先；场景/兜底行自带站时以该行为准。
+     * 返回 null = 手动模式（无站过滤，显示全部已缓存模型）
+     */
+    function activeProviderId() {
+        return (inputProvider && inputProvider.value) || null;
+    }
+
+    /** 某站已缓存的模型名（未知/无缓存返回空表） */
+    function modelsOfProvider(providerId) {
+        if (!providerId) return [];
+        const p = savedProviders.find(function (x) { return x.id === providerId; });
+        return p && p.models ? p.models : [];
+    }
+
+    /** 按当前选中站重建下拉选项：选中站 = 只列该站模型；手动模式 = 列全部已缓存模型 */
+    function rebuildModelOptionsForActiveProvider() {
+        rebuildModelOptionsForProvider(activeProviderId());
+    }
+
+    /**
+     * 按指定站重建下拉：providerId=null 表示手动模式（列全部已缓存模型）。
+     * 是"重建"而非"追加"——旧站的选项必须清掉，否则选中 A 站仍能看到 B 站的模型
+     */
+    function rebuildModelOptionsForProvider(providerId) {
+        const models = providerId ? modelsOfProvider(providerId) : cachedModelNames();
+        chatGptModelOptions.innerHTML = '';
+        setModelOptions(models);
+        refreshModelOwnerTags();
+    }
+
+    /** 全部已缓存模型名（去重，保持各站声明顺序） */
+    function cachedModelNames() {
+        const all = [];
+        savedProviders.forEach(function (p) {
+            (p.models || []).forEach(function (m) {
+                if (all.indexOf(m) < 0) all.push(m);
+            });
+        });
+        return all;
+    }
+
+    /**
+     * 选中站但该站还没有模型缓存时，自动拉一次模型列表。
+     * 需求：只要选了中转站，点模型框就该有可选模型——不能要求用户先去点「获取模型」。
+     * 失败不抛给用户：保持空下拉，用户仍可手输（拉取错误由 providerStatus 提示）
+     */
+    let autoFetchingProviderId = null;
+    function ensureProviderModels(providerId) {
+        if (!providerId) return;
+        if (modelsOfProvider(providerId).length) return;
+        if (autoFetchingProviderId === providerId) return;   // 并发去重：聚焦事件会连续触发
+        autoFetchingProviderId = providerId;
+        fetchProviderModels(providerId).finally(function () {
+            if (autoFetchingProviderId === providerId) autoFetchingProviderId = null;
+        });
+    }
+
+    /**
      * 重算下拉选项的供应商标注（唯一站给站名，多站给「多家」）。
      * 每次 renderProviders 都跑一遍：新拉取的模型先入选项、归属映射后更新，
      * 只标新增项会让"刚获取的模型"在刷新页面之前一直缺标注
@@ -2029,9 +2086,48 @@
     // ===== 自定义模型下拉：显示/隐藏/过滤/键盘导航 =====
     let currentModelInput = null;   // 当前聚焦的模型输入框
     let modelDropdownVisible = false;
+    /** 当前下拉是按哪个站构建的（null=手动模式全量）：拉取完成后据此决定重建哪一套 */
+    let currentDropdownProviderId = null;
+
+    /**
+     * 该模型输入框所属行自带的站（场景矩阵行 / 兜底行的站选择）。
+     * 行内选了站就按行内走（后端 applyApi/applyFallback 也是这个优先级）；
+     * 行内"跟随全局/跟随主模型"时才回落到全局选中的站。
+     * 返回 { providerId, scoped } —— scoped=true 表示这是行内站，下拉不要跟着全局站变
+     */
+    function owningProviderOf(input) {
+        if (!input) return { providerId: null, scoped: false };
+        const row = input.closest('[data-scene-key]');
+        if (row) {
+            const sel = row.querySelector('[data-field="providerId"]');
+            const value = sel ? String(sel.value || '') : '';
+            if (value && value !== '__legacy__') return { providerId: value, scoped: true };
+            return { providerId: null, scoped: false };
+        }
+        if (input === inputFallbackModel) {
+            const value = inputFallbackProvider ? String(inputFallbackProvider.value || '') : '';
+            if (value && value !== '__legacy__') return { providerId: value, scoped: true };
+            return { providerId: null, scoped: false };
+        }
+        return { providerId: null, scoped: false };
+    }
 
     function showModelDropdown(input) {
         currentModelInput = input;
+        // 每次弹出前按该行实际生效的站确认选项：选了站就只列该站模型。
+        // 行内站优先（场景/兜底行自带站），否则用全局选中的站；都没有=手动模式，列全部已缓存模型
+        const owning = owningProviderOf(input);
+        currentDropdownProviderId = owning.providerId || activeProviderId();
+        if (currentDropdownProviderId) {
+            if (!modelsOfProvider(currentDropdownProviderId).length) {
+                ensureProviderModels(currentDropdownProviderId);
+            } else {
+                rebuildModelOptionsForProvider(currentDropdownProviderId);
+            }
+        } else {
+            // 手动模式：明确重建为全量，避免上一轮按站过滤的残留
+            rebuildModelOptionsForProvider(null);
+        }
         // 用 fixed + getBoundingClientRect 定位：基准恒定是视口，与祖先是否 relative 无关，
         // 因此不必改动任何父容器的 position（避免污染全站表单组）。
         const rect = input.getBoundingClientRect();
@@ -2146,7 +2242,9 @@
             body: JSON.stringify(body)
         })
         .then(function (models) {
-            setModelOptions(models);
+            // 按"当前下拉所属站"重建，而不是按全局站：场景行/兜底行可能选的是别的站。
+            // 用追加会让选中站过滤失效（别的站模型混进来）
+            rebuildModelOptionsForProvider(currentDropdownProviderId || providerId);
             providerStatus('已获取 ' + models.length + ' 个模型（' + who + '），已并入全局/场景/兜底的下拉选项；'
                 + (providerId ? '场景矩阵的「站名·模型」标注同步更新' : ''), 'ok');
             showToast('获取到 ' + models.length + ' 个模型');
@@ -2171,6 +2269,9 @@
         fetchProviderModels(null, baseUrl, inputProviderApiKey.value.trim(), inputProviderProtocol.value);
     });
     if (inputProvider) inputProvider.addEventListener('change', function () {
+        // 切站即切换模型集：下拉重建为该站模型；该站无缓存则立刻拉一次
+        rebuildModelOptionsForActiveProvider();
+        ensureProviderModels(inputProvider.value);
         if (inputProvider.value) {
             const p = savedProviders.find(function (x) { return x.id === inputProvider.value; });
             llmStatusDiv.className = 'config-status';
@@ -2376,7 +2477,9 @@
     function loadChatGptModels() {
         fetchJson('/api/auth/chatgpt/models').then(function (models) {
             // 共享下拉只认 .model-option 元素（自定义下拉，非原生 datalist）——
-            // 旧实现往容器里写 <option> 标签，浏览器不会渲染，ChatGPT 模式等于没有下拉
+            // 旧实现往容器里写 <option> 标签，浏览器不会渲染，ChatGPT 模式等于没有下拉。
+            // 先清空再灌：ChatGPT 的模型集与中转站无关，不该混进已有的站模型
+            chatGptModelOptions.innerHTML = '';
             setModelOptions((models || []).map(function (model) { return model.slug; }));
             const slugs = (models || []).map(function (model) { return model.slug; });
             if (slugs.length && slugs.indexOf(inputModel.value.trim()) < 0) {
@@ -2486,6 +2589,11 @@
             rowEl.querySelectorAll('.scene-input').forEach(function (inp) {
                 inp.addEventListener('input', function () { delete sceneKeyClears[s.key]; });
                 inp.addEventListener('change', function () { delete sceneKeyClears[s.key]; });
+            });
+            // 本行换站：该行的模型框下拉要跟着换成新站的模型（行内站优先于全局站）
+            providerSelect.addEventListener('change', function () {
+                if (!providerSelect.value || providerSelect.value === '__legacy__') return;
+                ensureProviderModels(providerSelect.value);
             });
         });
     }
@@ -2719,6 +2827,10 @@
 
     if (btnSaveFallback) btnSaveFallback.addEventListener('click', saveFallback);
     if (btnResetFallback) btnResetFallback.addEventListener('click', resetFallback);
+    if (inputFallbackProvider) inputFallbackProvider.addEventListener('change', function () {
+        // 兜底行换站：该行模型框下拉换成新站的模型；无缓存则自动拉一次
+        if (inputFallbackProvider.value) ensureProviderModels(inputFallbackProvider.value);
+    });
     if (inputFallbackManualToggle) inputFallbackManualToggle.addEventListener('change', function () {
         const manual = syncFallbackManualMode();
         if (!manual) clearFallbackManualFieldsOnLeavingManualMode();

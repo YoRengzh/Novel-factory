@@ -53,10 +53,10 @@ public class ChapterPlanItemEntity {
      * <p><b>为什么要这个字段</b>：此前的计划约束是"每章至少一处关系/信息/资源的变化"，
      * 而"内心评价悄然变化"也能满足它——实测出现过整批 6 章主线零推进，每章都是
      * "发现线索 → 自我否定 → 回到原点"，规划层甚至还把它写成了要"确立"的叙事范式。
-     * 档位是**有序枚举**，机械比较就能判定"整批在原地打转"，这是结构的解法而非文风劝导。
+     * 档位是**有序枚举**，机械比较负责防缺失与倒退，不能仅凭同粗档断言语义停滞。
      *
-     * <p>校验见 {@code ChapterPlanChecks.validateSuspenseAdvance}：不得倒退；
-     * 非过渡章不得连续 3 章停留同一档。
+     * <p>校验见 {@code ChapterPlanChecks.validateSuspenseAdvance}：有蓝图逐字对表、去标签后非重复的
+     * {@code mainLineAdvance} 时允许连续同档；无可核验细推进时保留原重复与三章同档门禁。
      */
     private String suspenseBeat;
 

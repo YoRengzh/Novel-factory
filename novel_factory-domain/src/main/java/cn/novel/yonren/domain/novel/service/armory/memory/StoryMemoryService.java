@@ -143,8 +143,9 @@ public class StoryMemoryService {
      * 的那一章被写过；而状态只会在被提及时变化，故"本章没提及"的条目其已存点仍是最新状态。
      * 这个增量把每章写入从"全量账本 + 设定（百章规模已 228 点）"降到"本章点 + 少数变动条目"。
      *
-     * <p>安全性依赖两件事，都在下面显式处理：上次写入失败（脏标记）→ 本次全量补偿；
-     * bible 被作者改过（指纹不符）→ 本次补写设定点。
+     * <p>安全性依赖两件事，都在下面显式处理：上次写入失败（脏标记）→ 对全部章节点、账本和设定
+     * 做差异补偿，只重嵌缺失或文本变化的点；bible 被作者改过（指纹不符）→ 本次补写设定点。
+     * 故事集合及适用的世界集合全部补写成功后才清除脏标记，读取现状失败则保留脏标记待下次重试。
      */
     public void indexChapter(StoryVO.Module module, Path storyDir,
                              List<ChapterSummaryEntity> summaries, int chapterNo, String worldId) {
@@ -173,21 +174,31 @@ public class StoryMemoryService {
 
             boolean fullRepair = indexDirty(storyDir);
             boolean bibleChanged = fullRepair || bibleIndexOutdated(storyDir);
-            List<MemText> storyTexts = new ArrayList<>(chapterTexts(storyDir, target));
-            appendLedgerTexts(storyDir, storyTexts, summaries, fullRepair ? null : chapterNo);
-            if (bibleChanged) {
-                storyTexts.addAll(bibleTexts(storyDir));
+            String storyCollection = collectionOf(storyDir);
+            List<MemText> storyTexts;
+            if (fullRepair) {
+                storyTexts = changedTexts(storyTexts(storyDir, summaries), vectorStore.listPoints(storyCollection));
+            } else {
+                storyTexts = new ArrayList<>(chapterTexts(storyDir, target));
+                appendLedgerTexts(storyDir, storyTexts, summaries, chapterNo);
+                if (bibleChanged) {
+                    storyTexts.addAll(bibleTexts(storyDir));
+                }
             }
-            embedAndUpsert(module, storyTexts, collectionOf(storyDir));
+            embedAndUpsert(module, storyTexts, storyCollection);
 
             if (isValidWorldId(worldId) && bibleChanged) {
-                List<MemText> worldTexts = new ArrayList<>(worldBibleTexts(storyDir, worldId));
+                List<MemText> worldTexts = worldBibleTexts(storyDir, worldId);
                 if (!worldTexts.isEmpty()) {
-                    embedAndUpsert(module, worldTexts, worldCollectionOf(worldId));
+                    String worldCollection = worldCollectionOf(worldId);
+                    if (fullRepair) {
+                        worldTexts = changedTexts(worldTexts, vectorStore.listPoints(worldCollection));
+                    }
+                    embedAndUpsert(module, worldTexts, worldCollection);
                 }
             }
             if (fullRepair) {
-                log.info("上次索引写入失败过，本章已按全量补偿（第 {} 章）", chapterNo);
+                log.info("上次索引写入失败过，本章已完成全量点集差异补偿（第 {} 章）", chapterNo);
             }
             writeIndexMeta(module, storyDir);
         } catch (Exception e) {
@@ -418,19 +429,9 @@ public class StoryMemoryService {
             fullRewrite(module, storyDir, storyCollection, desired);
             return;
         }
-        Map<String, String> storedText = new HashMap<>();
-        for (StoredPoint point : stored) {
-            storedText.put(point.getId(), point.getText());
-        }
-        Set<String> desiredIds = new HashSet<>();
-        List<MemText> toWrite = new ArrayList<>();
-        for (MemText text : desired) {
-            String id = stableId(text.stableKey());
-            desiredIds.add(id);
-            if (!text.text().equals(storedText.get(id))) {
-                toWrite.add(text);
-            }
-        }
+        Set<String> storedIds = stored.stream().map(StoredPoint::getId).collect(Collectors.toSet());
+        Set<String> desiredIds = desired.stream().map(t -> stableId(t.stableKey())).collect(Collectors.toSet());
+        List<MemText> toWrite = changedTexts(desired, stored);
         // 只删"本链路管理的点"：同集合里还有卷方向点（kind=volume），那是卷生成路径维护的，回滚不该抹掉它
         List<String> toDelete = stored.stream()
                 .filter(p -> MANAGED_KINDS.contains(p.getKind()) && !desiredIds.contains(p.getId()))
@@ -457,7 +458,7 @@ public class StoryMemoryService {
                     .filter(p -> MANAGED_KINDS.contains(p.getKind()))
                     .count();
             long newlyInserted = toWrite.stream()
-                    .filter(t -> !storedText.containsKey(stableId(t.stableKey())))
+                    .filter(t -> !storedIds.contains(stableId(t.stableKey())))
                     .count();
             long actualManaged = managedStored - toDelete.size() + newlyInserted;
             long totalInCollection = vectorStore.count(storyCollection);
@@ -517,6 +518,17 @@ public class StoryMemoryService {
             log.warn("故事记忆集合删除失败（已跳过，不影响目录删除；集合 {} 可能残留）：{}",
                     collection, e.getMessage());
         }
+    }
+
+    /** 回滚对账与失败补偿共用：只重嵌缺失或文本已变化的点，不删除集合中的其它点。 */
+    private List<MemText> changedTexts(List<MemText> desired, List<StoredPoint> stored) {
+        Map<String, String> storedText = new HashMap<>();
+        for (StoredPoint point : stored) {
+            storedText.put(point.getId(), point.getText());
+        }
+        return desired.stream()
+                .filter(t -> !t.text().equals(storedText.get(stableId(t.stableKey()))))
+                .toList();
     }
 
     /** 当前故事状态对应的完整点集：全部章节点 + 全量账本 + 设定（对账的"应有"侧） */

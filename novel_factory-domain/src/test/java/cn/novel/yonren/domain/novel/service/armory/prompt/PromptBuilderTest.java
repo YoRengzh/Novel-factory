@@ -125,6 +125,17 @@ class PromptBuilderTest {
      * 而不是等到运行期生成时才以"缺约束静默跑完"的形式暴露
      */
     @Test
+    void plotStructureReferenceDoesNotRequireRepeatedTemplates() {
+        PromptBuilder builder = new PromptBuilder(List.of(new PlotStructureStrategy(new PromptRuleFileLoader())));
+        String rules = builder.buildUserTail(PromptScene.CHAPTER_PLAN, ctx());
+        assertTrue(rules.contains("不强制选一种模板贯穿全书"));
+        assertTrue(rules.contains("不固定比例"));
+        assertTrue(rules.contains("发现问题→主角轻松解决→旁人震惊→再来一个问题"));
+        assertFalse(rules.contains("必须**选定一种**"));
+        assertFalse(rules.contains("发展（60%）"));
+    }
+
+    @Test
     void realCriticalStrategiesLoadFromPackagedAssets() {
         PromptRuleFileLoader loader = new PromptRuleFileLoader();
         PromptBuilder builder = new PromptBuilder(List.of(

@@ -507,6 +507,32 @@ class ChapterPlanPromptServiceTest {
     }
 
     @Test
+    void buildPlanPrompt_allowsVerifiedFineProgressWithoutForcingRungChangeOrBeatPadding() {
+        StageBlueprintEntity blueprint = StageBlueprintEntity.builder()
+                .stageNo(1).startChapter(1).endChapter(80)
+                .suspenseLadder(List.of("双方不知", "一方持证", "公开摊牌"))
+                .mainLineByChapter(List.of(
+                        new StageBlueprintEntity.MainLineBeat(1, "林舟拿到带封印的账册"),
+                        new StageBlueprintEntity.MainLineBeat(2, "沈宁决定隐瞒证人住址"),
+                        new StageBlueprintEntity.MainLineBeat(3, "周砚拒绝提供仓库钥匙")))
+                .build();
+        DefaultArmoryFactory.DynamicContext ctx = DefaultArmoryFactory.DynamicContext.builder()
+                .stageBlueprint(blueprint).chapterSummaries(List.of()).build();
+
+        String prompt = service.buildPlanPrompt(ctx, 1, 3, blueprint, false, null, null);
+
+        assertTrue(prompt.contains("允许多章同档"), prompt);
+        assertTrue(prompt.contains("mainLineAdvance 已与蓝图逐字对表"), prompt);
+        assertTrue(prompt.contains("去掉章号/线名/档位"), prompt);
+        assertTrue(prompt.contains("不同推进写在 mainLineAdvance"), prompt);
+        assertTrue(prompt.contains("不要给 suspenseBeat 追加文字"), prompt);
+        assertTrue(prompt.contains("无蓝图或缺少可核验细推进时保留原门禁"), prompt);
+        assertFalse(prompt.contains("宁可让悬念早一点挑明"), prompt);
+        assertFalse(prompt.contains("在档位原文**之后**附本章独有的推进子项"), prompt);
+        assertFalse(prompt.contains("**相邻两章的 suspenseBeat 不得逐字相同**"), prompt);
+    }
+
+    @Test
     void buildPlanPrompt_omitsAnchorWithoutLadder() {
         // 无蓝图模式 / 老故事：不注入锚块（校验侧同样会跳过，不得凭空判定）
         DefaultArmoryFactory.DynamicContext ctx = DefaultArmoryFactory.DynamicContext.builder()

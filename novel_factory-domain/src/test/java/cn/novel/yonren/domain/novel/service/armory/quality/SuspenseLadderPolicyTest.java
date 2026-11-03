@@ -202,6 +202,62 @@ class SuspenseLadderPolicyTest {
                 List.of(beat(1, LADDER.get(0), false)), LADDER).violated());
     }
 
+    @Test
+    @DisplayName("三章同粗档有已核验细推进：不判停滞或粗档重复，maxHold 仍保留观测")
+    void verifiedFineProgressAllowsSameRungWithoutHidingHoldObservation() {
+        List<SuspenseLadderPolicy.Beat> beats = List.of(
+                new SuspenseLadderPolicy.Beat(1, LADDER.get(1), false, true),
+                new SuspenseLadderPolicy.Beat(2, LADDER.get(1), false, true),
+                new SuspenseLadderPolicy.Beat(3, LADDER.get(1), false, true));
+
+        assertTrue(SuspenseLadderPolicy.violations(beats, LADDER).isEmpty());
+        assertTrue(SuspenseLadderPolicy.duplicateBeatViolations(beats).isEmpty());
+        assertEquals(3, SuspenseLadderPolicy.maxHold(beats, LADDER).length());
+    }
+
+    @Test
+    void verifiedProgressNeverExemptsMissingRungOrRegression() {
+        List<SuspenseLadderPolicy.Beat> beats = List.of(
+                new SuspenseLadderPolicy.Beat(1, LADDER.get(1), false, true),
+                new SuspenseLadderPolicy.Beat(2, null, false, true),
+                new SuspenseLadderPolicy.Beat(3, LADDER.get(0), false, true));
+
+        List<String> issues = SuspenseLadderPolicy.violations(beats, LADDER);
+
+        assertEquals(2, issues.size());
+        assertTrue(issues.stream().anyMatch(issue -> issue.contains("未声明 suspenseBeat")));
+        assertTrue(issues.stream().anyMatch(issue -> issue.contains("档位倒退")));
+    }
+
+    @Test
+    void laterUnverifiedChapterRestoresHoldAndDuplicateGates() {
+        List<SuspenseLadderPolicy.Beat> beats = List.of(
+                new SuspenseLadderPolicy.Beat(1, LADDER.get(1), false, true),
+                new SuspenseLadderPolicy.Beat(2, LADDER.get(1), false, true),
+                new SuspenseLadderPolicy.Beat(3, LADDER.get(1), false, true),
+                beat(4, LADDER.get(1), false),
+                beat(5, LADDER.get(1), false));
+
+        List<String> holds = SuspenseLadderPolicy.violations(beats, LADDER);
+        List<String> duplicates = SuspenseLadderPolicy.duplicateBeatViolations(beats);
+
+        assertEquals(1, holds.size());
+        assertTrue(holds.get(0).contains("第 4 章"));
+        assertEquals(1, duplicates.size(), "前两章已豁免不能吞掉后续缺证据的重复告警");
+        assertTrue(duplicates.get(0).contains("–4 章"));
+    }
+
+    @Test
+    void appendedBeatTextDoesNotQualifyAsVerifiedFineProgress() {
+        List<SuspenseLadderPolicy.Beat> beats = List.of(
+                beat(1, LADDER.get(1) + "（本章补充一句甲）", false),
+                beat(2, LADDER.get(1) + "（本章补充一句乙）", false),
+                beat(3, LADDER.get(1) + "（本章补充一句丙）", false));
+
+        assertTrue(SuspenseLadderPolicy.violations(beats, LADDER).stream()
+                .anyMatch(issue -> issue.contains("主线原地")));
+    }
+
     // ==================== 相邻章档位描述去重 ====================
 
     /**

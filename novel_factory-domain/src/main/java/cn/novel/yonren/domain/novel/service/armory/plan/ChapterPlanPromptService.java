@@ -197,15 +197,15 @@ public class ChapterPlanPromptService {
                 .append("对白须写成**高频短交锋**（3-5 字一句、一来一回多轮），不要用少数长对白段凑篇幅——")
                 .append("恋爱/智斗/掉马题材的张力来自往返次数，不是单段长度");
         if (ChapterPlanChecks.hasUsableLadder(blueprint)) {
-            sb.append("\n8.1 ⚠️ suspenseBeat——**主线推进的机械校验字段**：每章必须回填")
+            sb.append("\n8.1 ⚠️ suspenseBeat——**粗档位校验字段**：每章必须回填")
                     .append("「本章结束时核心悬念所处的档位」的**原文**，逐字取自下方【悬念推进锚】的档位表。")
-                    .append("规范：索引不得倒退；非 transition 章不得连续 3 章停在同一档；")
-                    .append("**相邻两章的 suspenseBeat 不得逐字相同**——同一档位下也必须写出各章独有的推进"
-                    + "（谁知道了什么 / 谁做了什么决定 / 什么被公开），写清楚区别所在；")
-                    .append("档位表档数不足以让每章不同时，在档位原文**之后**附本章独有的推进子项，"
-                    + "而不是整段复用同一句描述。")
-                    .append("**严禁把'产生怀疑 → 自我否定 → 回到原点'当成推进**——那会让整段计划被机械驳回并重新规划。")
-                    .append("整段必须真的往前走：宁可让悬念早一点挑明，也不要原地循环。");
+                    .append("规范：不得缺失、索引不得倒退。粗档位不是逐章节拍，允许多章同档；")
+                    .append("但只有每章 mainLineAdvance 已与蓝图逐字对表，且去掉章号/线名/档位等标签后仍非空、非重复，")
+                    .append("才能豁免同档停留及 suspenseBeat 重复门禁。不同推进写在 mainLineAdvance，并在 keyEvents 中落地，")
+                    .append("不要给 suspenseBeat 追加文字制造差异。无蓝图或缺少可核验细推进时保留原门禁：")
+                    .append("相邻 suspenseBeat 不得重复，非 transition 章不得连续 3 章停在同一档。")
+                    .append("**严禁把'产生怀疑 → 自我否定 → 回到原点'当成推进**；")
+                    .append("不要为了机械换档提前揭谜，也不要原地循环。");
         }
         // 8.2 章级主线推进：与 8.1 的两个维度——8.1 是纵向"走到第几格"，
         // 8.2 是横向"这一章主线做了什么"。档位只有 3-6 档覆盖整个阶段，多章共用同一档是常态，
@@ -214,7 +214,7 @@ public class ChapterPlanPromptService {
                 && !blueprint.getMainLineByChapter().isEmpty()) {
             sb.append("\n8.2 ⚠️ mainLineAdvance——**章级主线推进**：每章必须回填本章在主线上的推进，")
                     .append("**逐字取自**下方【章级主线推进】块中对应章号的原文。")
-                    .append("规范：不得改写、不得自行替换；相邻两章不得使用同一句描述——")
+                    .append("规范：不得改写、不得自行替换或追加解释；去掉章号/线名/档位等标签后，各章不得重复——")
                     .append("缺章或雷同会被机械驳回并要求重新规划。")
                     .append("注意与 8.1 的分工：suspenseBeat 记「本章结束时的档位」（纵向），")
                     .append("mainLineAdvance 记「本章主线做了什么」（横向），两者都要填。");
@@ -237,9 +237,11 @@ public class ChapterPlanPromptService {
             for (int i = 0; i < ladder.size(); i++) {
                 sb.append("\n  ").append(i + 1).append(". ").append(ladder.get(i));
             }
-            sb.append("\n规则：档位索引**不得倒退**；非 transition 章**不得连续 3 章停留在同一档**；")
-                    .append("**相邻两章不得逐字复用同一句 suspenseBeat**（同档也要写出各章独有推进）——")
-                    .append("违反会被机械驳回并要求重新规划。注意'产生怀疑又被自我否定圆回'**不算推进**。");
+            sb.append("\n规则：档位不得缺失、索引**不得倒退**；")
+                    .append("同档的逐章差异写入 mainLineAdvance，不是给 suspenseBeat 堆字。")
+                    .append("只有蓝图逐字对表且去标签后非空、非重复的细推进，才能允许连续同档并复用档位原文；")
+                    .append("缺少上述证据时保留原重复/同档门禁。同粗档本身不等于语义停滞，也不要求提前揭谜。")
+                    .append("注意'产生怀疑又被自我否定圆回'**不算推进**。");
         }
         // 章级主线推进块：与档位锚并列。档位锚给"纵向的格子"，本块给"横向的动作"。
         // 只渲染本段用得到的那几章——蓝图可能覆盖 15 章而本段只有 5 章，多渲染纯占预算。
@@ -617,7 +619,7 @@ public class ChapterPlanPromptService {
         for (String line : lines) {
             sb.append("\n").append(line);
         }
-        sb.append("\n规则：**逐字照抄**，不得改写或替换；相邻两章不得雷同——")
+        sb.append("\n规则：**逐字照抄**，不得改写、替换或追加解释；去掉章号/线名/档位等标签后各章不得雷同——")
                 .append("违反会被机械驳回并要求重新规划。");
     }
 

@@ -24,6 +24,51 @@ class RollingOutlineServiceTest {
     private final RollingOutlineService service = new RollingOutlineService();
 
     @Test
+    void allPlanningPromptsFavorCausalityInsteadOfTemplateLoops() {
+        StageBlueprintEntity blueprint = blueprint(1, 1, 10);
+        List<String> prompts = List.of(
+                service.buildGenerationPrompt(story(), null, List.of(), List.of(),
+                        RollingOutlineService.StageWindow.fixed(1, 1), 10),
+                service.buildMainLineRepairPrompt(story(), blueprint, List.of()),
+                service.buildVolumePrompt(story(), null, List.of(),
+                        new RollingOutlineService.VolumeWindow(1, 1), 100));
+        for (String prompt : prompts) {
+            assertTrue(prompt.contains("【因果推进与反套路】"));
+            assertTrue(prompt.contains("结构模板及参考资料只是诊断工具"));
+            assertTrue(prompt.contains("不要求每章吃亏"));
+        }
+    }
+
+    @Test
+    void generationRequestsMainLineInFirstResponseAndUsesValidJsonExample() throws Exception {
+        VolumeBlueprintEntity volume = VolumeBlueprintEntity.builder().volumeNo(1)
+                .title("包含\"引号\"的卷名").build();
+        String prompt = service.buildGenerationPrompt(story(), null, List.of(), List.of(),
+                RollingOutlineService.StageWindow.fixed(1, 1), 10, null, volume);
+        assertTrue(prompt.contains("mainLineByChapter 必填，与蓝图一次输出"));
+        assertTrue(prompt.contains("章号从 1 连续排到 10"));
+        assertFalse(prompt.contains("档数必须 ≥ 本阶段章数"));
+        String json = prompt.substring(prompt.lastIndexOf("\n{") + 1);
+        var example = new com.fasterxml.jackson.databind.ObjectMapper().readTree(json);
+        assertEquals(volume.getTitle(), example.get("volumeTitle").asText());
+        assertTrue(example.has("mainLineByChapter"));
+        var patch = service.parseMainLinePatch(json, blueprint(1, 1, 10));
+        assertNotNull(patch, "主蓝图示例本身也必须完整覆盖推进窗口");
+        assertEquals(10, patch.mainLineByChapter().size());
+        assertEquals(10, patch.mainLineByChapter().get(9).getChapterNo());
+    }
+
+    @Test
+    void mainLineRepairIncludesActualPriorProgressButNotFutureSummaries() {
+        ChapterSummaryEntity past = ChapterSummaryEntity.builder().chapterNo(10).summary("甲已拒绝担保").build();
+        ChapterSummaryEntity future = ChapterSummaryEntity.builder().chapterNo(30).summary("未来不应成为已知事实").build();
+        String prompt = service.buildMainLineRepairPrompt(story(), blueprint(2, 11, 40), List.of(future, past));
+        assertTrue(prompt.contains("第10章：甲已拒绝担保"));
+        assertFalse(prompt.contains("未来不应成为已知事实"));
+        assertTrue(prompt.contains("章号从 11 连续排到 25"));
+    }
+
+    @Test
     void needsGeneration_triggersWhenMissingOrBeyondCoverage() {
         assertTrue(service.needsGeneration(null, 1));
         assertTrue(service.needsGeneration(List.of(), 1));
@@ -692,7 +737,8 @@ class RollingOutlineServiceTest {
 
         assertTrue(prompt.contains("coreSuspense"), "蓝图必须产出核心悬念");
         assertTrue(prompt.contains("suspenseLadder"), "蓝图必须产出档位表");
-        assertTrue(prompt.contains("不得连续 3 章"), "必须写明机械校验规则，否则模型不知道会踩线");
+        assertTrue(prompt.contains("连续 3 章同档的风险门禁"), "必须写明缺少细推进时的机械风险门禁");
+        assertTrue(prompt.contains("与蓝图逐字对表且去标签后非重复"), "有可核验细推进时，不应强迫换粗档");
         assertTrue(prompt.contains("可观察"), "档位要可观察，否则退回内心感受就无法机械比较");
         assertTrue(prompt.contains("\"suspenseLadder\":["), "JSON schema 必须给出回填字段");
     }
@@ -717,7 +763,8 @@ class RollingOutlineServiceTest {
         assertTrue(prompt.contains("coreSuspense"));
         assertTrue(prompt.contains("suspenseLadder"));
         assertTrue(prompt.contains("可观察"), "档位必须可观察，否则退回内心感受就无法机械比较");
-        assertTrue(prompt.contains("不得连续 3 章"), "要写明机械规则");
+        assertTrue(prompt.contains("连续 3 章同档的风险门禁"), "要写明缺少细推进时的机械规则");
+        assertTrue(prompt.contains("不要靠提前揭谜凑换档"));
         assertTrue(prompt.contains("确立死敌关系与线上初遇"), "带上本阶段目标做约束");
         assertTrue(prompt.length() < 1200, "补采 prompt 要短——长了就会重演'被省略'");
     }

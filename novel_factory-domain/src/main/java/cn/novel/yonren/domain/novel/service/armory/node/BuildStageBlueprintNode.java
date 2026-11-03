@@ -23,6 +23,7 @@ import cn.novel.yonren.domain.novel.service.armory.memory.StageExitReviewService
 import cn.novel.yonren.domain.novel.service.armory.plan.StoryPacing;
 import cn.novel.yonren.domain.novel.service.armory.prompt.valobj.PromptContext;
 import cn.novel.yonren.domain.novel.service.armory.quality.SuspenseLadderPolicy;
+import cn.novel.yonren.domain.novel.service.armory.quality.NarrativeProgressionPolicy;
 import cn.novel.yonren.domain.novel.service.job.GenerationJob;
 import cn.novel.yonren.types.enums.PromptScene;
 import cn.novel.yonren.types.enums.ResponseCode;
@@ -686,8 +687,8 @@ public class BuildStageBlueprintNode extends AbstractArmorySupport {
 
     /**
      * **章级推进线别纪律** ：对补采产出的章级主线推进做机械校验——
-     * 每条须带剧情线标签、悬疑暗线不得超半数/连续两章（规则与话术见
-     * {@code RollingOutlineService#mainLineDisciplineIssues}）。
+     * 每条须带剧情线标签、悬疑暗线不得超半数/连续两章，并检查明确的复述与解题喝彩循环。
+     * 配比与重复风险共用一次返修额度，不叠加额外的模型调用循环。
      * 违规走聚焦补采同款"带反馈重问一次"：按原补采 prompt 追加驳回反馈重取，
      * 补丁可用则替换；仍违规则 WARN 留痕放行——蓝图层没有重试循环，
      * 下游还有段计划的对话承载闸门作第二道兜底。
@@ -696,16 +697,18 @@ public class BuildStageBlueprintNode extends AbstractArmorySupport {
                                            DefaultArmoryFactory.DynamicContext dynamicContext,
                                            StoryContextEntity storyContext, PromptContext promptContext,
                                            StageBlueprintEntity blueprint) {
-        List<String> issues = RollingOutlineService.mainLineDisciplineIssues(blueprint);
+        List<String> issues = mainLineReviewIssues(blueprint, dynamicContext.getChapterSummaries());
         if (issues.isEmpty()) {
             log.info("阶段蓝图第{}阶段章级推进线别分布: {}", blueprint.getStageNo(),
                     RollingOutlineService.mainLineDistribution(blueprint));
             return;
         }
-        log.warn("阶段蓝图第{}阶段的章级推进未过线别纪律，带反馈重问一次：{}",
+        log.warn("阶段蓝图第{}阶段的章级推进存在配比/重复风险，共用一次反馈返修：{}",
                 blueprint.getStageNo(), String.join("；", issues));
         String retryPrompt = rollingOutlineService.buildMainLineRepairPrompt(storyContext, blueprint,
                 dynamicContext.getChapterSummaries())
+                + "\n【待修改的上一版章级推进】（不是合格示例）\n"
+                + com.alibaba.fastjson.JSON.toJSONString(blueprint.getMainLineByChapter())
                 + RollingOutlineService.mainLineDisciplineFeedback(issues);
         Map<String, String> retryPrompts = new HashMap<>();
         String raw;
@@ -724,7 +727,7 @@ public class BuildStageBlueprintNode extends AbstractArmorySupport {
             return;
         }
         blueprint.setMainLineByChapter(patch.mainLineByChapter());
-        List<String> stillBad = RollingOutlineService.mainLineDisciplineIssues(blueprint);
+        List<String> stillBad = mainLineReviewIssues(blueprint, dynamicContext.getChapterSummaries());
         if (stillBad.isEmpty()) {
             log.info("章级推进线别纪律：重问后通过（第{}阶段）——线别分布: {}", blueprint.getStageNo(),
                     RollingOutlineService.mainLineDistribution(blueprint));
@@ -732,6 +735,12 @@ public class BuildStageBlueprintNode extends AbstractArmorySupport {
             log.warn("章级推进线别纪律重问后仍未通过，放行本次蓝图（第{}阶段）：{}",
                     blueprint.getStageNo(), String.join("；", stillBad));
         }
+    }
+
+    private List<String> mainLineReviewIssues(StageBlueprintEntity blueprint, List<ChapterSummaryEntity> summaries) {
+        List<String> issues = new ArrayList<>(RollingOutlineService.mainLineDisciplineIssues(blueprint));
+        issues.addAll(NarrativeProgressionPolicy.issues(blueprint, summaries));
+        return issues;
     }
 
     /**

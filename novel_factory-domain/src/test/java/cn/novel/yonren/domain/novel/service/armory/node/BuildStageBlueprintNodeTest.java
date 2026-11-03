@@ -127,6 +127,43 @@ class BuildStageBlueprintNodeTest {
         MockitoAnnotations.openMocks(this);
     }
 
+    private String repetitiveBlueprint() {
+        return VALID_BLUEPRINT_JSON
+                .replace("【悬疑】首次察觉体内异样", "【悬疑】发现电脑故障，主角修复电脑，同事震惊")
+                .replace("【学习】向师姐试探口风", "【学习】遇到水管难题，主角修好水管，邻居惊叹");
+    }
+
+    @Test
+    void prepare_repairsTemplateLoopUsingOneSharedRetry() {
+        when(llmInvokeService.invoke(any(), eq(PromptScene.STAGE_BLUEPRINT), any(), anyString(), any()))
+                .thenReturn(repetitiveBlueprint(), "{" + MAINLINE_FIELD + "}");
+        DefaultArmoryFactory.DynamicContext ctx = DefaultArmoryFactory.DynamicContext.builder()
+                .chapterOffset(10).stageBlueprints(new ArrayList<>(List.of(blueprint(1, 1, 10)))).build();
+
+        node.prepareBlueprint(command(45), ctx);
+
+        ArgumentCaptor<String> prompts = ArgumentCaptor.forClass(String.class);
+        // 蓝图 + 共享的一次返修 + 原有独立伏笔排期调用。
+        verify(llmInvokeService, times(3)).invoke(any(), eq(PromptScene.STAGE_BLUEPRINT), any(), prompts.capture(), any());
+        assertTrue(prompts.getAllValues().get(1).contains("套路风险"));
+        assertTrue(prompts.getAllValues().get(1).contains("【待修改的上一版章级推进】"));
+        assertTrue(prompts.getAllValues().get(1).contains("发现电脑故障"));
+        assertEquals("【悬疑】首次察觉体内异样", ctx.getStageBlueprint().getMainLineByChapter().get(0).getAdvance());
+    }
+
+    @Test
+    void prepare_templateRiskNeverAddsUnboundedRetryLoop() {
+        when(llmInvokeService.invoke(any(), eq(PromptScene.STAGE_BLUEPRINT), any(), anyString(), any()))
+                .thenReturn(repetitiveBlueprint());
+        DefaultArmoryFactory.DynamicContext ctx = DefaultArmoryFactory.DynamicContext.builder()
+                .chapterOffset(10).stageBlueprints(new ArrayList<>(List.of(blueprint(1, 1, 10)))).build();
+
+        node.prepareBlueprint(command(45), ctx);
+
+        verify(llmInvokeService, times(3)).invoke(any(), eq(PromptScene.STAGE_BLUEPRINT), any(), anyString(), any());
+        assertNotNull(ctx.getStageBlueprint());
+    }
+
     @Test
     void prepare_reusesCurrentBlueprintWithoutLlmCall() {
         StageBlueprintEntity current = blueprint(2, 11, 40);

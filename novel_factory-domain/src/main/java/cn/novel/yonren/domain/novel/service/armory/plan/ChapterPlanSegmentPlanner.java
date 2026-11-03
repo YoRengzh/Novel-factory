@@ -124,7 +124,7 @@ public class ChapterPlanSegmentPlanner {
 
         // 主线推进闸门 + 一次带反馈重规划：把违规原文回注给规划模型让它自己修，
         // 而不是直接抛异常（那等于把整批交给下一次随机采样），也不静默放行（那等于没有闸门）。
-        // 校验只做档位下标的序比较，档位表由蓝图针对本书生成，因此换任何题材都成立
+        // 粗档保持序比较；独有的章级细推进通过蓝图对表后，同档不再被直接当成停滞。
         List<String> suspenseLadder = blueprint == null ? null : blueprint.getSuspenseLadder();
         if (!ChapterPlanChecks.hasUsableLadder(blueprint)) {
             // 留痕：静默跳过与"跑了但没触发"事后无法区分（无蓝图模式/老故事属已知降级）
@@ -142,7 +142,8 @@ public class ChapterPlanSegmentPlanner {
             log.info("{}章级主线推进闸门跳过：蓝图未给出 mainLineByChapter"
                     + "（老数据或补采失败，属已知降级而非静默）", label);
         }
-        String ladderIssue = ChapterPlanChecks.validateSuspenseAdvance(parsed.plan().getChapters(), suspenseLadder);
+        String ladderIssue = ChapterPlanChecks.validateSuspenseAdvance(
+                parsed.plan().getChapters(), blueprint, summariesForPressure);
         String mainLineIssue = ChapterPlanChecks.validateMainLineAdvance(parsed.plan().getChapters(), mainLine);
         String timeAdvanceIssue = ChapterPlanChecks.validateTimeAdvance(parsed.plan().getChapters());
         // 时间推进单调性（2026-10-26）：这条规则此前只写在提示词里（"全段 timeAdvance 必须单调递增"），
@@ -243,7 +244,8 @@ public class ChapterPlanSegmentPlanner {
                 prompt + feedback, label, expected, usedPromptMap, false, job);
         ChapterPlanChecks.normalizeChapterNumbers(retry.plan(), startChapter - 1);
         ChapterPlanChecks.validateSegmentStructure(retry.plan().getChapters(), expected, startChapter);
-        String stillBadLadder = ChapterPlanChecks.validateSuspenseAdvance(retry.plan().getChapters(), suspenseLadder);
+        String stillBadLadder = ChapterPlanChecks.validateSuspenseAdvance(
+                retry.plan().getChapters(), blueprint, summariesForPressure);
         String stillBadMainLine = ChapterPlanChecks.validateMainLineAdvance(retry.plan().getChapters(), mainLine);
         String stillBadTimeAdvance = ChapterPlanChecks.validateTimeAdvance(retry.plan().getChapters());
         String stillBadTimeOrder = TimeAdvanceChecks.validateMonotonic(retry.plan().getChapters());

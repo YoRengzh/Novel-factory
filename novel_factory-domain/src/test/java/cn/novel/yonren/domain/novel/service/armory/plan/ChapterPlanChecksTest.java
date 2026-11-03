@@ -3,6 +3,7 @@ package cn.novel.yonren.domain.novel.service.armory.plan;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import cn.novel.yonren.domain.novel.model.aggregate.ChapterPlanAggregate;
 import cn.novel.yonren.domain.novel.model.entity.ChapterPlanItemEntity;
+import cn.novel.yonren.domain.novel.model.entity.ChapterSummaryEntity;
 import cn.novel.yonren.domain.novel.model.entity.StageBlueprintEntity;
 import cn.novel.yonren.types.enums.ChapterTypeVO;
 import cn.novel.yonren.types.exception.AppException;
@@ -335,9 +336,9 @@ class ChapterPlanChecksTest {
         assertTrue(issue.contains("与蓝图不符"), issue);
     }
 
-    /** 容许模型在蓝图原文后补一句解释（前缀命中）——不宜因这种常见写法就驳回 */
+    /** 逐字对表不能退化为前缀命中：附加一句解释不构成蓝图核验。 */
     @Test
-    void validateMainLineAdvance_toleratesTrailingExplanation() {
+    void validateMainLineAdvance_rejectsTrailingExplanation() {
         List<ChapterPlanItemEntity> chapters = List.of(
                 planWithAdvance(11, "档位2", "父亲首次听到投资提议（陆建军借喝酒游说）"),
                 planWithAdvance(12, "档位2", "父亲翻看凭证起疑"));
@@ -345,8 +346,10 @@ class ChapterPlanChecksTest {
                 planned(11, "父亲首次听到投资提议"),
                 planned(12, "父亲翻看凭证起疑"));
 
-        assertNull(ChapterPlanChecks.validateMainLineAdvance(chapters, planned),
-                "蓝图原文之后附加说明属常见写法，不应判违规");
+        String issue = ChapterPlanChecks.validateMainLineAdvance(chapters, planned);
+
+        assertNotNull(issue);
+        assertTrue(issue.contains("与蓝图不符"), issue);
     }
 
     /** 无蓝图（老数据/补采失败）→ 跳过，不得因缺字段而失败 */
@@ -366,6 +369,262 @@ class ChapterPlanChecksTest {
 
         assertTrue(feedback.contains("第 11 章"), feedback);
         assertTrue(feedback.contains("逐字取自"), "必须说清正确的做法：" + feedback);
+    }
+
+    private static final List<String> COARSE_LADDER = List.of("双方不知身份", "一方起疑并保留证据", "公开摊牌");
+
+    private List<ChapterPlanItemEntity> distinctFinePlans() {
+        return List.of(
+                planWithAdvance(1, COARSE_LADDER.get(1), "林舟拿到带封印的账册"),
+                planWithAdvance(2, COARSE_LADDER.get(1), "沈宁决定隐瞒证人住址"),
+                planWithAdvance(3, COARSE_LADDER.get(1), "周砚拒绝提供仓库钥匙"));
+    }
+
+    private StageBlueprintEntity fineBlueprint(List<ChapterPlanItemEntity> chapters) {
+        return StageBlueprintEntity.builder().startChapter(1).endChapter(80)
+                .suspenseLadder(COARSE_LADDER)
+                .mainLineByChapter(chapters.stream()
+                        .map(chapter -> planned(chapter.getChapterNo(), chapter.getMainLineAdvance())).toList())
+                .build();
+    }
+
+    @Test
+    void validateSuspenseAdvance_threeSameRungChaptersPassWithBlueprintVerifiedDistinctAdvances() {
+        List<ChapterPlanItemEntity> chapters = distinctFinePlans();
+        StageBlueprintEntity blueprint = fineBlueprint(chapters);
+
+        assertNull(ChapterPlanChecks.validateMainLineAdvance(chapters, blueprint.getMainLineByChapter()));
+        assertNull(ChapterPlanChecks.validateSuspenseAdvance(chapters, blueprint, List.of()),
+                "三个粗档位可以覆盖八十章，不能强迫三章换档");
+        assertNotNull(ChapterPlanChecks.validateSuspenseAdvance(chapters, COARSE_LADDER),
+                "旧入口无蓝图核验，不能仅因非空细推进就豁免");
+    }
+
+    @Test
+    void validateSuspenseAdvance_missingOrUnknownRungStillFailsWithVerifiedAdvances() {
+        for (String raw : new String[]{null, "不存在的档位"}) {
+            List<ChapterPlanItemEntity> chapters = distinctFinePlans();
+            StageBlueprintEntity blueprint = fineBlueprint(chapters);
+            chapters.get(1).setSuspenseBeat(raw);
+
+            String issue = ChapterPlanChecks.validateSuspenseAdvance(chapters, blueprint, List.of());
+
+            assertNotNull(issue);
+            assertTrue(issue.contains("未声明 suspenseBeat"), issue);
+        }
+    }
+
+    @Test
+    void validateSuspenseAdvance_missingAdvanceDoesNotExemptCoarseHold() {
+        List<ChapterPlanItemEntity> chapters = distinctFinePlans();
+        StageBlueprintEntity blueprint = fineBlueprint(chapters);
+        chapters.get(1).setMainLineAdvance(null);
+
+        String issue = ChapterPlanChecks.validateSuspenseAdvance(chapters, blueprint, List.of());
+
+        assertNotNull(issue);
+        assertTrue(issue.contains("未回填 mainLineAdvance"), issue);
+        assertTrue(issue.contains("主线原地"), issue);
+    }
+
+    @Test
+    void validateSuspenseAdvance_noBlueprintFineDataKeepsLegacyGate() {
+        List<ChapterPlanItemEntity> chapters = distinctFinePlans();
+        StageBlueprintEntity blueprint = StageBlueprintEntity.builder().suspenseLadder(COARSE_LADDER).build();
+
+        String issue = ChapterPlanChecks.validateSuspenseAdvance(chapters, blueprint, List.of());
+
+        assertNotNull(issue);
+        assertTrue(issue.contains("主线原地"), issue);
+    }
+
+    @Test
+    void validateSuspenseAdvance_repeatedAdvancesEvenInBlueprintDoNotExemptHold() {
+        List<ChapterPlanItemEntity> chapters = distinctFinePlans();
+        chapters.get(2).setMainLineAdvance(chapters.get(0).getMainLineAdvance());
+        StageBlueprintEntity blueprint = fineBlueprint(chapters);
+
+        String issue = ChapterPlanChecks.validateSuspenseAdvance(chapters, blueprint, List.of());
+
+        assertNotNull(issue);
+        assertTrue(issue.contains("逐字相同"), "非相邻重复也必须拒绝：" + issue);
+        assertTrue(issue.contains("主线原地"), issue);
+    }
+
+    @Test
+    void validateSuspenseAdvance_changedChapterAndLineLabelsAreNotFineProgress() {
+        List<ChapterPlanItemEntity> chapters = List.of(
+                planWithAdvance(1, COARSE_LADDER.get(1), "【甲线】第1章：林舟拿到带封印的账册"),
+                planWithAdvance(2, COARSE_LADDER.get(1), "【乙线】第2章：林舟拿到带封印的账册"),
+                planWithAdvance(3, COARSE_LADDER.get(1), "[丙线]第3章：林舟拿到带封印的账册"));
+
+        String issue = ChapterPlanChecks.validateSuspenseAdvance(chapters, fineBlueprint(chapters), List.of());
+
+        assertNotNull(issue);
+        assertTrue(issue.contains("去标签"), issue);
+        assertTrue(issue.contains("主线原地"), issue);
+    }
+
+    @Test
+    void validateSuspenseAdvance_labelsOrCoarseRungAloneAreNotFineProgress() {
+        List<ChapterPlanItemEntity> chapters = List.of(
+                planWithAdvance(1, COARSE_LADDER.get(1), "【甲线】第1章：" + COARSE_LADDER.get(1)),
+                planWithAdvance(2, COARSE_LADDER.get(1), "【乙线】第2章：" + COARSE_LADDER.get(1)),
+                planWithAdvance(3, COARSE_LADDER.get(1), "[丙线]第3章：" + COARSE_LADDER.get(1)));
+
+        String issue = ChapterPlanChecks.validateSuspenseAdvance(chapters, fineBlueprint(chapters), List.of());
+
+        assertNotNull(issue);
+        assertTrue(issue.contains("没有细推进内容"), issue);
+    }
+
+    @Test
+    void validateSuspenseAdvance_appendedOrTruncatedMainLineCannotForgeBlueprintMatch() {
+        for (String fake : List.of("林舟拿到带封印的账册（补充一句不同的话）", "林舟拿到")) {
+            List<ChapterPlanItemEntity> chapters = distinctFinePlans();
+            StageBlueprintEntity blueprint = fineBlueprint(chapters);
+            chapters.get(0).setMainLineAdvance(fake);
+
+            String issue = ChapterPlanChecks.validateSuspenseAdvance(chapters, blueprint, List.of());
+
+            assertNotNull(issue);
+            assertTrue(issue.contains("与蓝图不符"), issue);
+            assertTrue(issue.contains("主线原地"), issue);
+        }
+    }
+
+    @Test
+    void validateSuspenseAdvance_extraBeatTextCannotReplaceBlueprintVerifiedAdvances() {
+        List<ChapterPlanItemEntity> chapters = distinctFinePlans();
+        StageBlueprintEntity blueprint = fineBlueprint(chapters);
+        for (ChapterPlanItemEntity chapter : chapters) {
+            chapter.setMainLineAdvance("本章不同的附加句子" + chapter.getChapterNo());
+            chapter.setSuspenseBeat(COARSE_LADDER.get(1) + "（附加子项" + chapter.getChapterNo() + "）");
+        }
+
+        String issue = ChapterPlanChecks.validateSuspenseAdvance(chapters, blueprint, List.of());
+
+        assertNotNull(issue);
+        assertTrue(issue.contains("与蓝图不符"), issue);
+        assertTrue(issue.contains("主线原地"), issue);
+    }
+
+    @Test
+    void validateSuspenseAdvance_regressionStillFailsWithVerifiedAdvances() {
+        List<ChapterPlanItemEntity> chapters = distinctFinePlans();
+        StageBlueprintEntity blueprint = fineBlueprint(chapters);
+        chapters.get(2).setSuspenseBeat(COARSE_LADDER.get(0));
+
+        String issue = ChapterPlanChecks.validateSuspenseAdvance(chapters, blueprint, List.of());
+
+        assertNotNull(issue);
+        assertTrue(issue.contains("档位倒退"), issue);
+    }
+
+    private ChapterSummaryEntity executedFineChapter(ChapterPlanItemEntity chapter) {
+        return ChapterSummaryEntity.builder().chapterNo(chapter.getChapterNo())
+                .suspenseBeat(chapter.getSuspenseBeat())
+                .summary("此前发生：" + chapter.getMainLineAdvance() + "。后果仍在延续。")
+                .build();
+    }
+
+    @Test
+    void validateSuspenseAdvance_verifiesExecutedSummaryEvidenceAcrossSegmentBoundary() {
+        List<ChapterPlanItemEntity> chapters = distinctFinePlans();
+        List<ChapterSummaryEntity> summaries = List.of(executedFineChapter(chapters.get(0)),
+                executedFineChapter(chapters.get(1)));
+
+        assertNull(ChapterPlanChecks.validateSuspenseAdvance(chapters.subList(2, 3), fineBlueprint(chapters), summaries));
+    }
+
+    @Test
+    void validateSuspenseAdvance_unwitnessedHistoryDoesNotInventBoundaryStagnation() {
+        List<ChapterPlanItemEntity> chapters = distinctFinePlans();
+        List<ChapterSummaryEntity> summaries = List.of(executedFineChapter(chapters.get(0)),
+                ChapterSummaryEntity.builder().chapterNo(2).suspenseBeat(COARSE_LADDER.get(1))
+                        .summary("只是说本章有了新的推进，没有具体证据").build());
+
+        assertNull(ChapterPlanChecks.validateSuspenseAdvance(chapters.subList(2, 3), fineBlueprint(chapters), summaries),
+                "摘要缺少细推进证据时，不能新增历史停滞结论或让当前合格推进被迫换档");
+    }
+
+    @Test
+    void validateSuspenseAdvance_replayedExecutedAdvanceFailsAcrossSegmentBoundary() {
+        List<ChapterPlanItemEntity> chapters = distinctFinePlans();
+        chapters.get(2).setMainLineAdvance(chapters.get(0).getMainLineAdvance());
+        List<ChapterSummaryEntity> summaries = List.of(executedFineChapter(chapters.get(0)),
+                executedFineChapter(chapters.get(1)));
+
+        String issue = ChapterPlanChecks.validateSuspenseAdvance(chapters.subList(2, 3), fineBlueprint(chapters), summaries);
+
+        assertNotNull(issue);
+        assertTrue(issue.contains("重复"), issue);
+        assertTrue(issue.contains("主线原地"), issue);
+    }
+
+    @Test
+    void validateSuspenseAdvance_missingBlueprintChapterCannotReceiveExemption() {
+        List<ChapterPlanItemEntity> chapters = distinctFinePlans();
+        StageBlueprintEntity blueprint = fineBlueprint(chapters.subList(0, 2));
+
+        String issue = ChapterPlanChecks.validateSuspenseAdvance(chapters, blueprint, List.of());
+
+        assertNotNull(issue);
+        assertTrue(issue.contains("第 3 章蓝图未给出"), issue);
+        assertTrue(issue.contains("主线原地"), issue);
+    }
+
+    @Test
+    void validateSuspenseAdvance_ambiguousBlueprintChapterCannotReceiveExemption() {
+        List<ChapterPlanItemEntity> chapters = distinctFinePlans();
+        StageBlueprintEntity blueprint = fineBlueprint(chapters);
+        blueprint.setMainLineByChapter(List.of(
+                planned(1, chapters.get(0).getMainLineAdvance()),
+                planned(2, chapters.get(1).getMainLineAdvance()),
+                planned(2, "另一个冲突的安排"),
+                planned(3, chapters.get(2).getMainLineAdvance())));
+
+        String issue = ChapterPlanChecks.validateSuspenseAdvance(chapters, blueprint, List.of());
+
+        assertNotNull(issue);
+        assertTrue(issue.contains("第 2 章蓝图未给出唯一"), issue);
+        assertTrue(issue.contains("主线原地"), issue);
+    }
+
+    @Test
+    void validateSuspenseAdvance_preservesFormattingToleranceForExactBlueprintText() {
+        List<ChapterPlanItemEntity> chapters = distinctFinePlans();
+        StageBlueprintEntity blueprint = fineBlueprint(chapters);
+        chapters.get(0).setMainLineAdvance("  林舟拿到\n「带封印的账册」  ");
+
+        assertNull(ChapterPlanChecks.validateSuspenseAdvance(chapters, blueprint, List.of()),
+                "仅空白和引号的格式差异仍沿用统一归一化口径");
+    }
+
+    @Test
+    void validateSuspenseAdvance_historicalRegressionIsNotExemptedByFineProgress() {
+        List<ChapterPlanItemEntity> chapters = distinctFinePlans();
+        StageBlueprintEntity blueprint = fineBlueprint(chapters);
+        List<ChapterSummaryEntity> history = List.of(executedFineChapter(chapters.get(0)),
+                executedFineChapter(chapters.get(1)));
+        chapters.get(2).setSuspenseBeat(COARSE_LADDER.get(0));
+
+        String issue = ChapterPlanChecks.validateSuspenseAdvance(chapters.subList(2, 3), blueprint, history);
+
+        assertNotNull(issue);
+        assertTrue(issue.contains("档位倒退"), issue);
+    }
+
+    @Test
+    void suspenseFeedback_directsFineProgressToMainLineRatherThanBeatPadding() {
+        String feedback = ChapterPlanChecks.suspenseFeedback("第 3 章停留门禁");
+
+        assertTrue(feedback.contains("第 3 章"), feedback);
+        assertTrue(feedback.contains("不同推进写在 mainLineAdvance"), feedback);
+        assertTrue(feedback.contains("逐字取自"), feedback);
+        assertTrue(feedback.contains("去掉章号/线名/档位"), feedback);
+        assertTrue(feedback.contains("不要给 suspenseBeat 追加文字"), feedback);
+        assertFalse(feedback.contains("再附本章独有的推进子项"), feedback);
     }
 
     @Test

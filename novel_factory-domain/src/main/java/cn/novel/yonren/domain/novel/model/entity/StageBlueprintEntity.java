@@ -71,7 +71,7 @@ public class StageBlueprintEntity {
     private String coreSuspense;
     // 核心悬念的推进档位表（有序，3-6 档）：从"完全不知"到"彻底摊牌"的中间状态，每档须可观察
     // （谁知道了什么 / 谁做了什么决定 / 什么被公开），不写内心感受。章计划逐章回填 suspenseBeat，
-    // 机械校验档位不倒退、非过渡章不连续 3 章原地——治"发现线索→自我否定→回到原点"的原地转圈
+    // 机械校验档位缺失与倒退；经蓝图对表且去标签后非重复的章级细推进可豁免同档门禁，旧数据保留原门禁
     private List<String> suspenseLadder;
     // 阶段收束时的机械节奏报告（字数/伏笔/账本变更统计 + 失衡警示），注入下一版蓝图生成 prompt；阶段末章后写回
     private String stageReport;
@@ -86,7 +86,7 @@ public class StageBlueprintEntity {
      *
      * <p>两者是**两个维度**，不可互相替代：
      * <ul>
-     *   <li>{@code suspenseLadder} + 章计划 {@code suspenseBeat}：纵向——"走到第几格了"（序比较，防倒退/防原地）</li>
+     *   <li>{@code suspenseLadder} + 章计划 {@code suspenseBeat}：纵向——"走到第几格了"（序比较，防缺失/倒退）</li>
      *   <li>{@code mainLineByChapter} + 章计划 {@code mainLineAdvance}：横向——"这一章主线做了什么"（防多章雷同）</li>
      * </ul>
      *

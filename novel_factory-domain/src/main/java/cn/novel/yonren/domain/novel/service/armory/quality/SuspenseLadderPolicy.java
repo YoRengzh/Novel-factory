@@ -8,7 +8,7 @@ import java.util.List;
 
 public final class SuspenseLadderPolicy {
 
-    /** 停留链长度达到该值即视为违规（连续 3 章同一档） */
+    /** 缺少可核验章级细推进时的同档停留门槛；不是语义停滞判据。 */
     public static final int HOLD_LIMIT = 3;
 
     private static boolean transitionExempt(Beat beat, int trailingTransitionRun) {
@@ -18,10 +18,14 @@ public final class SuspenseLadderPolicy {
     private SuspenseLadderPolicy() {
     }
 
-    public record Beat(int chapterNo, String rawBeat, boolean transition) {
+    /** verifiedMainLineAdvance 仅由调用方完成蓝图对表、去标签去重后置为 true，不能由附加文本推断。 */
+    public record Beat(int chapterNo, String rawBeat, boolean transition, boolean verifiedMainLineAdvance) {
+        public Beat(int chapterNo, String rawBeat, boolean transition) {
+            this(chapterNo, rawBeat, transition, false);
+        }
     }
 
-    /** 最长停留段：length 为连续同档的章数，起止章号用于定位 */
+    /** 最长粗档停留段：仅作观测；达门槛不等于已经判定语义停滞。 */
     public record HoldRun(int length, int startChapterNo, int endChapterNo) {
         public boolean violated() {
             return length >= HOLD_LIMIT;
@@ -42,6 +46,7 @@ public final class SuspenseLadderPolicy {
         int run = 0;
         int trailingTransitionRun = 0;
         boolean runFlagged = false;
+        boolean runVerified = false;
         for (Beat beat : beats) {
             if (beat == null) {
                 trailingTransitionRun = 0;
@@ -57,6 +62,7 @@ public final class SuspenseLadderPolicy {
             trailingTransitionRun = beat.transition() ? trailingTransitionRun + 1 : 0;
             if (prevIndex == null) {
                 run = 1;
+                runVerified = beat.verifiedMainLineAdvance();
             } else {
                 if (index < prevIndex) {
                     issues.add("第 " + beat.chapterNo() + " 章**档位倒退**：" + brief(ladder.get(index))
@@ -65,6 +71,8 @@ public final class SuspenseLadderPolicy {
                 }
                 boolean sameRung = index == prevIndex;
                 run = sameRung ? run + 1 : 1;
+                runVerified = sameRung ? runVerified && beat.verifiedMainLineAdvance()
+                        : beat.verifiedMainLineAdvance();
                 if (!sameRung) {
                     // 换档即换停留段，重新获得一次告警机会
                     runFlagged = false;
@@ -72,9 +80,11 @@ public final class SuspenseLadderPolicy {
             }
             // 同一停留段只报一次：回注给规划模型的信息要保持可读，重复告警只会稀释重点
             // 过渡章豁免已收紧为"段末恰好 1 章过渡"（见 transitionExempt）：连续 ≥2 章过渡照样报违规
-            if (run >= HOLD_LIMIT && !transitionExempt(beat, trailingTransitionRun) && !runFlagged) {
-                issues.add("第 " + beat.chapterNo() + " 章起**主线原地**：已连续 " + run
-                        + " 章停留在同一档位「" + brief(ladder.get(index)) + "」，悬念没有推进"
+            if (run >= HOLD_LIMIT && !runVerified
+                    && !transitionExempt(beat, trailingTransitionRun) && !runFlagged) {
+                issues.add("第 " + beat.chapterNo() + " 章起**主线原地风险**：已连续 " + run
+                        + " 章停留在同一粗档位「" + brief(ladder.get(index))
+                        + "」，且缺少与蓝图逐字对表、去标签后非重复的 mainLineAdvance；不能仅凭同档断言语义停滞"
                         + (beat.transition() ? "（且末尾连续 " + trailingTransitionRun
                         + " 章为过渡章，不是单章蓄势）" : ""));
                 runFlagged = true;
@@ -110,7 +120,7 @@ public final class SuspenseLadderPolicy {
                 run = 1;
                 runStart = beat.chapterNo();
             }
-            // 与 violations 同口径：单章过渡收尾的段不算停留；连续 ≥2 章过渡收尾照样计入
+            // 保留旧的过渡收尾统计口径；细推进豁免不改变粗档停留观测。
             if (!transitionExempt(beat, trailingTransitionRun) && run > longest.length()) {
                 longest = new HoldRun(run, runStart, beat.chapterNo());
             }
@@ -170,6 +180,8 @@ public final class SuspenseLadderPolicy {
         String prev = null;
         int prevNo = 0;
         int run = 1;
+        boolean runVerified = false;
+        boolean runFlagged = false;
         for (Beat beat : beats) {
             if (beat == null) {
                 continue;
@@ -179,20 +191,26 @@ public final class SuspenseLadderPolicy {
                 prev = null;
                 prevNo = 0;
                 run = 1;
+                runVerified = false;
+                runFlagged = false;
                 continue;
             }
             if (current.equals(prev)) {
                 run++;
-                // 同一重复段只报一次：回注信息要可读，重复告警只会稀释重点
-                if (run == 2) {
+                runVerified &= beat.verifiedMainLineAdvance();
+                // 已核验的独有细推进允许复用粗档原文；缺证据后仍须恢复告警。
+                if (run >= 2 && !runVerified && !runFlagged) {
                     issues.add("第 " + prevNo + "–" + beat.chapterNo() + " 章的 suspenseBeat **逐字相同**"
-                            + "（「" + brief(current) + "」）——这不是「推进档位」，而是把整段当成了一个档位。"
-                            + "相邻两章必须写出**本章独有**的推进内容，不能复用同一句描述");
+                            + "（「" + brief(current) + "」），且没有可核验的独有细推进。"
+                            + "不同推进应写入 mainLineAdvance 并逐字取自蓝图，不要给 suspenseBeat 追加文字绕过去重");
+                    runFlagged = true;
                 }
             } else {
                 prev = current;
                 prevNo = beat.chapterNo();
                 run = 1;
+                runVerified = beat.verifiedMainLineAdvance();
+                runFlagged = false;
             }
         }
         return issues;
