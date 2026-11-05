@@ -16,8 +16,8 @@ import cn.novel.yonren.domain.novel.model.entity.StageBlueprintEntity;
 import cn.novel.yonren.domain.novel.model.entity.StoryContextEntity;
 import cn.novel.yonren.domain.novel.model.entity.StyleStatEntity;
 import cn.novel.yonren.domain.novel.service.armory.audit.ParagraphDensityAuditService;
-import cn.novel.yonren.domain.novel.service.armory.contract.ChapterContract;
-import cn.novel.yonren.domain.novel.service.armory.contract.GenerationMode;
+import cn.novel.yonren.domain.novel.model.valobj.contract.ChapterContract;
+import cn.novel.yonren.domain.novel.model.valobj.contract.GenerationMode;
 import cn.novel.yonren.domain.novel.service.armory.factory.DefaultArmoryFactory;
 import cn.novel.yonren.domain.novel.service.armory.candidate.ChapterCandidateService;
 import cn.novel.yonren.domain.novel.service.armory.writer.WriterSampleService;
@@ -42,15 +42,15 @@ import cn.novel.yonren.domain.novel.service.armory.plan.ChapterPlanSegmentPlanne
 import cn.novel.yonren.domain.novel.service.armory.plan.TimeAdvanceChecks;
 import cn.novel.yonren.domain.novel.service.armory.prompt.PromptBudgetGuard;
 import cn.novel.yonren.domain.novel.service.armory.prompt.PromptBudgetGuard.PrefixBlock;
-import cn.novel.yonren.domain.novel.service.armory.prompt.valobj.PromptContext;
+import cn.novel.yonren.domain.novel.model.valobj.prompt.PromptContext;
 import cn.novel.yonren.domain.novel.service.armory.candidate.CandidateSampleService;
-import cn.novel.yonren.domain.novel.service.armory.quality.BatchHealthReport;
+import cn.novel.yonren.domain.novel.model.valobj.quality.BatchHealthReport;
 import cn.novel.yonren.domain.novel.service.armory.quality.BatchHealthService;
-import cn.novel.yonren.domain.novel.service.armory.quality.GateResult;
+import cn.novel.yonren.domain.novel.model.valobj.quality.GateResult;
 import cn.novel.yonren.domain.novel.service.armory.quality.QualityGate;
 import cn.novel.yonren.domain.novel.service.armory.quality.UsedPatternPolicy;
 import cn.novel.yonren.domain.novel.service.job.GenerationJob;
-import cn.novel.yonren.types.enums.GenreTypeVO;
+import cn.novel.yonren.types.enums.GenreType;
 import cn.novel.yonren.types.enums.PromptScene;
 import cn.novel.yonren.types.enums.ResponseCode;
 import cn.novel.yonren.types.exception.AppException;
@@ -483,7 +483,7 @@ public class ChapterWorker {
             // 题材随调用传入：重复意象清单按题材分组取用（{@code repetition-watchlist.txt}），
             // 题材取自故事设定（与摘要落盘的 storyGenre 同一来源，口径一致）
             styleStatService.merge(styleStat, chapterContent.getContent(),
-                    GenreTypeVO.match(storyContext == null ? null : storyContext.getTheme(),
+                    GenreType.match(storyContext == null ? null : storyContext.getTheme(),
                             storyContext == null ? null : storyContext.getStyle()).getCode());
 
             // 摘要立即生成，供下一章记忆前缀使用。摘要是质量门：三级降级+抢救均失败抛异常终止本批，
@@ -537,7 +537,7 @@ public class ChapterWorker {
             summary.setDialogueUtterances(cn.novel.yonren.domain.novel.service.armory.quality.DialogueRatioPolicy
                     .utteranceCount(chapterContent.getContent()));
             // 题材机械入账：体检据此切换"对话驱动题材"的阈值（批末日志与 /health 共用同一份数据）
-            summary.setStoryGenre(cn.novel.yonren.types.enums.GenreTypeVO.match(
+            summary.setStoryGenre(cn.novel.yonren.types.enums.GenreType.match(
                     storyContext == null ? null : storyContext.getTheme(),
                     storyContext == null ? null : storyContext.getStyle()).getCode());
             // 章型机械入账（非模型输出）：规划层密度反馈据此豁免过渡章——
@@ -764,7 +764,7 @@ public class ChapterWorker {
     private boolean isStoryComplete(List<StageBlueprintEntity> blueprints, int chapterNo,
                                     ChapterPlanItemEntity item) {
         if (item == null || item.getChapterType() == null
-                || item.getChapterType() != cn.novel.yonren.types.enums.ChapterTypeVO.FINALE
+                || item.getChapterType() != cn.novel.yonren.types.enums.ChapterType.FINALE
                 || blueprints == null || blueprints.isEmpty()) {
             return false;
         }
@@ -962,7 +962,7 @@ public class ChapterWorker {
         for (int no = from; no <= end; no++) {
             aggregate.getChapters().add(cn.novel.yonren.domain.novel.model.entity.ChapterPlanItemEntity.builder()
                     .chapterNo(no)
-                    .chapterType(cn.novel.yonren.types.enums.ChapterTypeVO.FINALE)
+                    .chapterType(cn.novel.yonren.types.enums.ChapterType.FINALE)
                     .goal(goal)
                     .build());
         }
@@ -1544,12 +1544,12 @@ public class ChapterWorker {
 
     /** 题材/时代/人物语域契约：中性规则常驻，仙侠词表只对 fantasy 生效。 */
     private String renderRegisterGuidance(StoryContextEntity context) {
-        GenreTypeVO genre = GenreTypeVO.match(context == null ? null : context.getTheme(),
+        GenreType genre = GenreType.match(context == null ? null : context.getTheme(),
                 context == null ? null : context.getStyle());
         StringBuilder rule = new StringBuilder("\n10. 【语言与语域契约】客观叙述、人物对话和内心判断必须符合故事时代与世界设定；")
                 .append("人物措辞必须符合其年龄、身份、教育、职业与已知信息。严禁让儿童、古代人物或低认知角色无来源地使用成熟学术腔、管理报告腔、互联网黑话或时代错位词；")
                 .append("必须表达复杂判断时，改写为该人物能观察到的动作、物件、经验和口语，不得借叙述者替角色发表论文式总结。");
-        if (genre == GenreTypeVO.FANTASY) {
+        if (genre == GenreType.FANTASY) {
             rule.append("玄幻/仙侠题材描述世界、动作、对话与环境时，优先使用设定内已有词汇（如灵气、阵纹、符箓、灵脉、宗门、长老、法宝）；")
                     .append("握手信号、加密信号、波形数据、服务器、协议、分布式节点、灰度、缓存、日志等程序员术语不得充当客观世界名词，")
                     .append("除非角色设定明确支持，且只作短促心理类比、点到即止。");

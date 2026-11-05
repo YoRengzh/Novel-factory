@@ -1,8 +1,8 @@
 package cn.novel.yonren.domain.novel.service.armory.prompt;
 
 import cn.novel.yonren.domain.novel.service.armory.PromptRuleStrategy;
-import cn.novel.yonren.domain.novel.service.armory.prompt.valobj.PromptContext;
-import cn.novel.yonren.domain.novel.service.armory.prompt.valobj.PromptRule;
+import cn.novel.yonren.domain.novel.model.valobj.prompt.PromptContext;
+import cn.novel.yonren.domain.novel.model.valobj.prompt.PromptRule;
 import cn.novel.yonren.types.enums.PromptScene;
 import cn.novel.yonren.types.enums.ResponseCode;
 import cn.novel.yonren.types.exception.AppException;

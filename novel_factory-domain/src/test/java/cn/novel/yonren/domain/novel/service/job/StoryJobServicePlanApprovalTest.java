@@ -5,7 +5,7 @@ import cn.novel.yonren.domain.novel.model.aggregate.ChapterPlanAggregate;
 import cn.novel.yonren.domain.novel.model.aggregate.StoryGenerateResultAggregate;
 import cn.novel.yonren.domain.novel.model.entity.ArmoryCommandEntity;
 import cn.novel.yonren.domain.novel.model.entity.ChapterPlanItemEntity;
-import cn.novel.yonren.domain.novel.model.valobj.properties.StoryProperties;
+import cn.novel.yonren.domain.novel.config.StoryProperties;
 import cn.novel.yonren.domain.novel.service.armory.StoryGenerateService;
 import cn.novel.yonren.domain.novel.service.armory.factory.DefaultArmoryFactory;
 import cn.novel.yonren.types.enums.JobStatus;
@@ -38,7 +38,7 @@ import static org.mockito.Mockito.when;
  * 挂起不置失败且释放线程、裁决通过后续跑剩余阶段、修订稿未过机械校验则拒绝且保持挂起、
  * 驳回中止、超时按 AUTO_APPROVE 退化成黑盒。
  *
- * <p>本测试模拟审批门节点的契约：先 {@code markAwaitingApproval}（**携带待裁决计划**）再抛挂起信号
+ * 本测试模拟审批门节点的契约：先 {@code markAwaitingApproval}（**携带待裁决计划**）再抛挂起信号
  * （真实场景由 PlanApprovalGateNode 完成，见 PlanApprovalGateNodeTest）。
  * 计划与状态一次性交接是"状态可见 ⇒ 计划可读"不变式的依据，故断言无需等待服务层登记
  */

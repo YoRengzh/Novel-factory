@@ -5,7 +5,7 @@ import cn.novel.yonren.domain.novel.model.valobj.LlmCall;
 import cn.novel.yonren.domain.novel.model.valobj.StoryVO;
 import cn.novel.yonren.domain.novel.service.armory.prompt.PromptBuilder;
 import cn.novel.yonren.domain.novel.service.armory.prompt.reference.DynamicReferenceService;
-import cn.novel.yonren.domain.novel.service.armory.prompt.valobj.PromptContext;
+import cn.novel.yonren.domain.novel.model.valobj.prompt.PromptContext;
 import cn.novel.yonren.types.enums.ModelScene;
 import cn.novel.yonren.types.enums.PromptScene;
 import org.junit.jupiter.api.Test;

@@ -3,7 +3,7 @@ package cn.novel.yonren.domain.novel.service.armory.memory;
 import cn.novel.yonren.domain.novel.adapter.llm.LlmGateway;
 import cn.novel.yonren.domain.novel.model.entity.ChapterSummaryEntity;
 import cn.novel.yonren.domain.novel.model.valobj.StoryVO;
-import cn.novel.yonren.domain.novel.model.valobj.properties.StoryProperties;
+import cn.novel.yonren.domain.novel.config.StoryProperties;
 import cn.novel.yonren.domain.novel.service.armory.quality.EvidenceMatch;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -25,8 +25,8 @@ import static org.mockito.Mockito.when;
 /**
  * 账本挂起裁决（L1 兜底通道）测试。
  *
- * <p>核心是两条：<b>能救的救回来</b>（按来源账本写回、留痕），以及
- * <b>救不回来的一条都不许混进账本</b>——模型声称有据但引文过不了机械校验时必须按不支持处理。
+ * 核心是两条：能救的救回来（按来源账本写回、留痕），以及
+ * 救不回来的一条都不许混进账本——模型声称有据但引文过不了机械校验时必须按不支持处理。
  * 后者是本通道存在的安全前提：裁决层只能补全证据，不能凭空引入事实。
  */
 class LedgerAdjudicateServiceTest {

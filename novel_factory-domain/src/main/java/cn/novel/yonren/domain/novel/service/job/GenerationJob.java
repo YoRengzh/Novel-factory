@@ -4,7 +4,7 @@ import lombok.Getter;
 import lombok.NoArgsConstructor;
 import lombok.Setter;
 import cn.novel.yonren.domain.novel.model.aggregate.ChapterPlanAggregate;
-import cn.novel.yonren.domain.novel.service.armory.quality.BatchHealthReport;
+import cn.novel.yonren.domain.novel.model.valobj.quality.BatchHealthReport;
 import cn.novel.yonren.types.enums.JobStatus;
 import org.apache.commons.lang3.StringUtils;
 

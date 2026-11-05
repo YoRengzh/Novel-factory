@@ -1,10 +1,12 @@
 package cn.novel.yonren.domain.novel.service.armory.prompt.reference;
 
+import cn.novel.yonren.domain.novel.model.valobj.prompt.ReferenceIndexEntry;
+
 import cn.novel.yonren.domain.novel.adapter.llm.LlmGateway;
 import cn.novel.yonren.domain.novel.model.valobj.LlmCall;
 import cn.novel.yonren.domain.novel.model.valobj.StoryVO;
-import cn.novel.yonren.domain.novel.service.armory.prompt.valobj.PromptContext;
-import cn.novel.yonren.types.enums.ChapterTypeVO;
+import cn.novel.yonren.domain.novel.model.valobj.prompt.PromptContext;
+import cn.novel.yonren.types.enums.ChapterType;
 import cn.novel.yonren.types.enums.PromptScene;
 import org.junit.jupiter.api.Test;
 import org.springframework.ai.converter.BeanOutputConverter;
@@ -33,7 +35,7 @@ class LlmReferenceSelectorTest {
 
     private final PromptContext ctx = PromptContext.builder()
             .theme("悬疑").style("推理").chapterNo(3).totalChapters(10)
-            .chapterType(ChapterTypeVO.CLIMAX).build();
+            .chapterType(ChapterType.CLIMAX).build();
 
     @Test
     void select_filtersToWhitelist() {

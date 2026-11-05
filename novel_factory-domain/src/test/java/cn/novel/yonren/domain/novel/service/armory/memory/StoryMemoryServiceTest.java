@@ -12,7 +12,7 @@ import cn.novel.yonren.domain.novel.model.valobj.ScoredVectorPoint;
 import cn.novel.yonren.domain.novel.model.valobj.StoredPoint;
 import cn.novel.yonren.domain.novel.model.valobj.StoryVO;
 import cn.novel.yonren.domain.novel.model.valobj.VectorPoint;
-import cn.novel.yonren.domain.novel.model.valobj.properties.StoryMemoryProperties;
+import cn.novel.yonren.domain.novel.config.StoryMemoryProperties;
 import cn.novel.yonren.types.exception.AppException;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -77,7 +77,7 @@ class StoryMemoryServiceTest { /*MARKER-CHECK-1*/
         });
     }
 
-    // ==================== 回滚索引对账（2026-10-11，自旧系统对齐） ====================
+    // ==================== 回滚索引对账（自旧系统对齐） ====================
 
     private List<ChapterSummaryEntity> threeChapters() {
         return List.of(
@@ -442,8 +442,7 @@ class StoryMemoryServiceTest { /*MARKER-CHECK-1*/
 
     @Test
     void retrieve_skipsUnfitCandidateInsteadOfCuttingOffTheRest() {
-        // 装不下某条时只跳过该条（贪心填满预算），不得 break——
-        // 否则一条中等命中会把它后面的小候选全部丢掉（尾部丢失）
+        // 装不下某条时只跳过该条（贪心填满预算），不得 break——// 否则一条中等命中会把它后面的小候选全部丢掉（尾部丢失）
         properties.setMaxRecallChars(1000);
         when(vectorStore.search(anyString(), any(), anyInt())).thenReturn(List.of(
                 ScoredVectorPoint.builder().score(0.9)
@@ -876,14 +875,13 @@ class StoryMemoryServiceTest { /*MARKER-CHECK-1*/
     }
 
     /**
-     * 核对口径必须只数**受管的点**（2026-10-14）。
+     * 核对口径必须只数**受管的点**。
      *
-     * <p>背景：实测 145 章回滚时日志报「应有受管点 453，实际 454」——差值恒为 1 个卷方向点。
+     * 背景：实测 145 章回滚时日志报「应有受管点 453，实际 454」——差值恒为 1 个卷方向点。
      * 成因是对账用**集合总数**与"应有受管点"比对，而删除时刻意跳过卷点（那是卷生成路径维护的），
      * 两个口径必然差一个卷点数。必现的误报会训练人忽略这条 WARN。
      *
-     * <p>本用例守住关键行为：**集合里有卷点不触发任何额外写删**——
-     * 修正后对账不再因卷点存在而误判（旧实现在此场景会报点数不符）。
+     * 本用例守住关键行为：**集合里有卷点不触发任何额外写删**——* 修正后对账不再因卷点存在而误判（旧实现在此场景会报点数不符）。
      */
     @Test
     void rebuildIndex_countIgnoresUnmanagedVolumePoints(@TempDir Path storyDir) throws Exception {
@@ -920,14 +918,14 @@ class StoryMemoryServiceTest { /*MARKER-CHECK-1*/
     }
 
     /**
-     * 回归：**改写已存在点不得被算成"新增"**（2026-10-19）。
+     * 回归：**改写已存在点不得被算成"新增"**。
      *
-     * <p>实测 165 章回滚：日志报「应有受管点 518，实际 524」并给出"可能有漏写/漏删"的 WARN，
+     * 实测 165 章回滚：日志报「应有受管点 518，实际 524」并给出"可能有漏写/漏删"的 WARN，
      * 而集合里受管点实测恰好 518（多出的 6 正是本次改写数）。旧式
      * {@code managedStored - toDelete + toWrite} 把"文本变了要重写"当成"新增了一个点"，
      * 每次回滚都虚增「改写条数」个点——必现误报会训练人忽略这条 WARN。
      *
-     * <p>本用例只断言行为：改写场景下集合点数不变，因此不应产生任何"点数不符"的告警。
+     * 本用例只断言行为：改写场景下集合点数不变，因此不应产生任何"点数不符"的告警。
      * 通过 logback 捕获日志验证（不依赖返回值）。
      */
     @Test

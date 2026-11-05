@@ -1,6 +1,6 @@
 package cn.novel.yonren.domain.novel.service.armory.prompt;
 
-import cn.novel.yonren.domain.novel.model.valobj.properties.PromptBudgetProperties;
+import cn.novel.yonren.domain.novel.config.PromptBudgetProperties;
 import cn.novel.yonren.domain.novel.service.armory.prompt.PromptBudgetGuard.Block;
 import cn.novel.yonren.domain.novel.service.armory.prompt.PromptBudgetGuard.PrefixBlock;
 import org.junit.jupiter.api.BeforeEach;
@@ -82,8 +82,7 @@ class PromptBudgetGuardTest {
     /**
      * 诚实记账的回归用例：截断必须按实际占用扣减余量，不得清零。
      *
-     * <p>原实现在截断后直接 {@code remaining = 0}，排在截断块之后的所有块不分优先级整批出局——
-     * 旧系统实测第 111/112/115 章「截断[一致性索引]；丢弃[情节模式黑名单、审校反馈、久远唤醒、文风指纹]」，
+     * 原实现在截断后直接 {@code remaining = 0}，排在截断块之后的所有块不分优先级整批出局——* 旧系统实测第 111/112/115 章「截断[一致性索引]；丢弃[情节模式黑名单、审校反馈、久远唤醒、文风指纹]」，
      * 截断后的余量本可装入小纠正通道却被白白扔掉。本用例锁定：摘要截断剩 58 字余量时，
      * 20 字的审校反馈（4 档）必须存活；40 字的文风指纹（5 档）装不下、仍应丢弃。
      */
@@ -201,11 +200,10 @@ class PromptBudgetGuardTest {
     }
 
     /**
-     * 2026-10-01 优先级重排的回归：预算紧张时「久远唤醒」(5) 必须先于
+     * 优先级重排的回归：预算紧张时「久远唤醒」(5) 必须先于
      * 「审校反馈/风格警示/疲劳词红线」(4) 被丢弃。
      *
-     * <p>动机来自实测：第 8/12/13 章连续丢弃这三块行为指导，而超长章与禁泄违例连续三批反复发作——
-     * 写手看不到"上一章已被指出的问题"，等于每章从头再犯。这四块的相对次序是本次修复的核心约束，
+     * 动机来自实测：第 8/12/13 章连续丢弃这三块行为指导，而超长章与禁泄违例连续三批反复发作——* 写手看不到"上一章已被指出的问题"，等于每章从头再犯。这四块的相对次序是本次修复的核心约束，
      * 因此钉成断言，避免日后调优先级时无意回退。
      */
     @Test
@@ -239,7 +237,7 @@ class PromptBudgetGuardTest {
     /**
      * 情节模式黑名单必须与行为指导块同档，不得再排到"久远唤醒"之后。
      *
-     * <p>它是**唯一**专门防重复情节的块，原先 priority 最低。实测旧系统某批前缀预算
+     * 它是**唯一**专门防重复情节的块，原先 priority 最低。实测旧系统某批前缀预算
      * 连续 99-100% 打满、**五章全部丢弃本块**——那批在提示词层面完全没有防重复约束，
      * 随即出现跨章重演同一场景（第 96/99 章）与同一条伏笔被排两遍（第 97/100 章）。
      */

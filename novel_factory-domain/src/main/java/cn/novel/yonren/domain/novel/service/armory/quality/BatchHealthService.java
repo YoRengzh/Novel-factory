@@ -1,11 +1,13 @@
 package cn.novel.yonren.domain.novel.service.armory.quality;
 
+import cn.novel.yonren.domain.novel.model.valobj.quality.BatchHealthReport;
+
 import cn.novel.yonren.domain.novel.model.entity.ChapterSummaryEntity;
 import cn.novel.yonren.domain.novel.model.entity.ForeshadowSettlementEntity;
 import cn.novel.yonren.domain.novel.service.armory.candidate.CandidateSampleService;
 import cn.novel.yonren.domain.novel.model.entity.QualityDebtEntity;
 import cn.novel.yonren.domain.novel.model.entity.StageBlueprintEntity;
-import cn.novel.yonren.types.enums.ChapterTypeVO;
+import cn.novel.yonren.types.enums.ChapterType;
 import lombok.extern.slf4j.Slf4j;
 import cn.novel.yonren.domain.novel.service.armory.memory.OutlineSegmentParser;
 import cn.novel.yonren.domain.novel.service.armory.plan.StoryPacing;
@@ -748,7 +750,7 @@ public class BatchHealthService {
                                     List<String> recommendations,
                                     List<ChapterSummaryEntity> chapters) {
         long transition = chapters.stream()
-                .filter(s -> ChapterTypeVO.of(s.getChapterType()).isTransition())
+                .filter(s -> ChapterType.of(s.getChapterType()).isTransition())
                 .count();
         double share = (double) transition / chapters.size();
         BatchHealthReport.Level level;
@@ -778,7 +780,7 @@ public class BatchHealthService {
         int run = 0;
         int chapterNo = 0;
         for (ChapterSummaryEntity s : chapters) {
-            if (ChapterTypeVO.of(s.getChapterType()).isTransition()) {
+            if (ChapterType.of(s.getChapterType()).isTransition()) {
                 run++;
                 if (run > maxRun) {
                     maxRun = run;
@@ -809,7 +811,7 @@ public class BatchHealthService {
         int counted = 0;
         int low = 0;
         for (ChapterSummaryEntity s : chapters) {
-            if (s.getValidChars() == null || ChapterTypeVO.of(s.getChapterType()).isTransition()) {
+            if (s.getValidChars() == null || ChapterType.of(s.getChapterType()).isTransition()) {
                 continue;
             }
             counted++;
@@ -861,7 +863,7 @@ public class BatchHealthService {
         int counted = 0;
         int low = 0;
         for (ChapterSummaryEntity s : recent) {
-            if (s.getValidChars() == null || ChapterTypeVO.of(s.getChapterType()).isTransition()) {
+            if (s.getValidChars() == null || ChapterType.of(s.getChapterType()).isTransition()) {
                 continue;
             }
             counted++;
@@ -1121,7 +1123,7 @@ public class BatchHealthService {
         StringBuilder collapsedChapters = new StringBuilder();
         for (ChapterSummaryEntity s : chapters) {
             if (s == null || s.getDialogueUtterances() == null || s.getValidChars() == null
-                    || s.getValidChars() <= 0 || ChapterTypeVO.of(s.getChapterType()).isTransition()) {
+                    || s.getValidChars() <= 0 || ChapterType.of(s.getChapterType()).isTransition()) {
                 continue;
             }
             counted++;

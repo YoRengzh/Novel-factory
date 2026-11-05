@@ -23,8 +23,7 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
 /**
- * 章节审校服务测试：JSON 解析/修复/质量门硬失败，以及 BLOCKING 证据校验——
- * 逐字/空白差异/省略号截断命中不降级，改写与空证据降级，MINOR 不受影响
+ * 章节审校服务测试：JSON 解析/修复/质量门硬失败，以及 BLOCKING 证据校验——* 逐字/空白差异/省略号截断命中不降级，改写与空证据降级，MINOR 不受影响
  */
 class ChapterAuditServiceTest {
 

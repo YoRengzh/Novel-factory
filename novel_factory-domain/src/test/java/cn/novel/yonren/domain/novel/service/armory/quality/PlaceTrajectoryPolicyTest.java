@@ -13,7 +13,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 /**
  * 地点轨迹判据测试。
  *
- * <p>背景（162 章实测）：地点只存在于 timePoint 自由文本且从不回灌规划层，
+ * 背景（162 章实测）：地点只存在于 timePoint 自由文本且从不回灌规划层，
  * 导致每章新地点率 0.827、10 章窗口内中位 10 个不同地点（= 每章都在换新场景）。
  */
 class PlaceTrajectoryPolicyTest {
@@ -105,8 +105,7 @@ class PlaceTrajectoryPolicyTest {
     void trajectoryRequiresConsistentPlaceNaming() {
         // 命名一致性改为"源头约束"而非"机械归并"：
         // 曾按公共子串把变体名归并，但在 162 章基线上把「九渊封存处」建筑群下 33 个子区域
-        //（外围冰瀑下 / 最高处葬剑台 / 核心虚空内 / 前往途中…）全部吞并成一个地点——
-        // 同一建筑群的不同子区域与"同一处的不同叫法"字面不可分，归并会抹平真实换场。
+        //（外围冰瀑下 / 最高处葬剑台 / 核心虚空内 / 前往途中…）全部吞并成一个地点——// 同一建筑群的不同子区域与"同一处的不同叫法"字面不可分，归并会抹平真实换场。
         // 故本块保持字面统计，改为明确要求规划层统一命名。
         List<ChapterSummaryEntity> summaries = List.of(
                 summary(1, "某宅客厅", null),

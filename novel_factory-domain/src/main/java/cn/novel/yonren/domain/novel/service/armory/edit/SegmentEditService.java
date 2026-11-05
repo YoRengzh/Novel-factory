@@ -4,7 +4,7 @@ import cn.novel.yonren.api.dto.SegmentEditRequestDTO;
 import cn.novel.yonren.api.dto.SegmentEditResponseDTO;
 import cn.novel.yonren.domain.novel.model.valobj.StoryVO;
 import cn.novel.yonren.domain.novel.service.armory.llm.LlmInvokeService;
-import cn.novel.yonren.domain.novel.service.armory.prompt.valobj.PromptContext;
+import cn.novel.yonren.domain.novel.model.valobj.prompt.PromptContext;
 import cn.novel.yonren.types.enums.PromptScene;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;

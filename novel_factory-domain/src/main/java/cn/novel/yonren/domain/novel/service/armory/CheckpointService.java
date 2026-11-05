@@ -3,7 +3,7 @@ package cn.novel.yonren.domain.novel.service.armory;
 import cn.novel.yonren.domain.novel.adapter.repository.IStoryRepository;
 import cn.novel.yonren.domain.novel.model.entity.CheckpointEntity;
 import cn.novel.yonren.types.enums.CheckpointType;
-import cn.novel.yonren.domain.novel.model.valobj.properties.StoryProperties;
+import cn.novel.yonren.domain.novel.config.StoryProperties;
 import cn.novel.yonren.domain.novel.service.armory.memory.StoryMemoryService;
 import cn.novel.yonren.types.enums.ResponseCode;
 import cn.novel.yonren.types.exception.AppException;

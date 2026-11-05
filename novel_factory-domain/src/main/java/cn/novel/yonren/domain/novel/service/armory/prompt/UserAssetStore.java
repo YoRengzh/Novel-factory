@@ -2,9 +2,9 @@ package cn.novel.yonren.domain.novel.service.armory.prompt;
 
 import cn.novel.yonren.api.dto.StyleViewDTO;
 import cn.novel.yonren.api.dto.UserReferenceDTO;
-import cn.novel.yonren.domain.novel.service.armory.prompt.reference.ReferenceIndexEntry;
+import cn.novel.yonren.domain.novel.model.valobj.prompt.ReferenceIndexEntry;
 import cn.novel.yonren.domain.novel.service.armory.prompt.reference.ReferenceIndexLoader;
-import cn.novel.yonren.types.enums.GenreTypeVO;
+import cn.novel.yonren.types.enums.GenreType;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.core.io.ClassPathResource;
@@ -165,7 +165,7 @@ public class UserAssetStore {
     /** 全部题材的文风视图（内置有无 + 覆盖有无） */
     public List<StyleViewDTO> listStyles() {
         List<StyleViewDTO> result = new ArrayList<>();
-        for (GenreTypeVO genre : GenreTypeVO.values()) {
+        for (GenreType genre : GenreType.values()) {
             Path override = styleFile(genre.getCode());
             result.add(new StyleViewDTO(genre.getCode(),
                     builtinStyleExists(genre.getCode()),
@@ -186,7 +186,7 @@ public class UserAssetStore {
         return new StyleContent(override != null ? override : builtin, override != null, builtin);
     }
 
-    /** 写文风覆盖（data/styles/{code}.md）；题材码必须存在于 GenreTypeVO */
+    /** 写文风覆盖（data/styles/{code}.md）；题材码必须存在于 GenreType */
     public void writeStyle(String code, String content) {
         String name = validatedGenre(code);
         String body = validatedContent(content, "文风");
@@ -245,12 +245,12 @@ public class UserAssetStore {
         if (code == null) {
             throw new IllegalArgumentException("缺少题材码");
         }
-        for (GenreTypeVO genre : GenreTypeVO.values()) {
+        for (GenreType genre : GenreType.values()) {
             if (genre.getCode().equals(code.trim().toLowerCase())) {
                 return genre.getCode();
             }
         }
-        throw new IllegalArgumentException("未知题材码：" + code + "（须为 GenreTypeVO 之一）");
+        throw new IllegalArgumentException("未知题材码：" + code + "（须为 GenreType 之一）");
     }
 
     private Path referenceDir() {

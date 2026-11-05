@@ -3,8 +3,8 @@ package cn.novel.yonren.domain.novel.service.job;
 import cn.novel.yonren.domain.novel.model.entity.ArmoryCommandEntity;
 import cn.novel.yonren.domain.novel.model.entity.StoryContextEntity;
 import cn.novel.yonren.domain.novel.model.valobj.StoryVO;
-import cn.novel.yonren.domain.novel.model.valobj.properties.StoryProperties;
-import cn.novel.yonren.domain.novel.service.armory.quality.BatchHealthReport;
+import cn.novel.yonren.domain.novel.config.StoryProperties;
+import cn.novel.yonren.domain.novel.model.valobj.quality.BatchHealthReport;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -19,7 +19,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 /**
  * 无人值守续写计划测试。
  *
- * <p>重点不在"能不能续"，而在**该停的时候一定停**：挂机最怕的不是停不下来，而是该停不停。
+ * 重点不在"能不能续"，而在**该停的时候一定停**：挂机最怕的不是停不下来，而是该停不停。
  * 因此四条停机条件（未达标 / 未超批数上限 / 体检未达停线 / 未开启）逐条覆盖，
  * 并要求每条都给出人类可读理由——"为什么停了"必须可归因，不必翻日志。
  */

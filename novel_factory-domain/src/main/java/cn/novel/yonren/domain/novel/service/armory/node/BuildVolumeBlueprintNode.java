@@ -14,7 +14,7 @@ import cn.novel.yonren.domain.novel.service.armory.memory.RollingOutlineService;
 import cn.novel.yonren.domain.novel.service.armory.memory.StoryMemoryService;
 import cn.novel.yonren.domain.novel.service.job.GenerationJob;
 import org.apache.commons.lang3.StringUtils;
-import cn.novel.yonren.domain.novel.service.armory.prompt.valobj.PromptContext;
+import cn.novel.yonren.domain.novel.model.valobj.prompt.PromptContext;
 import cn.novel.yonren.types.enums.PromptScene;
 import cn.novel.yonren.types.enums.ResponseCode;
 import cn.novel.yonren.types.exception.AppException;

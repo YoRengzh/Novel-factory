@@ -12,14 +12,14 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
- * 全局兜底模型链测试（2026-10-23 由按场景降级链收敛而来）。
+ * 全局兜底模型链测试（由按场景降级链收敛而来）。
  *
- * <p>核心不变量：
- * <ul>
- *   <li>链最长 2 站：主模型 → 全局兜底；</li>
- *   <li>兜底缺省字段回落主模型，显式填写的字段以兜底为准（跨供应商时地址密钥必须能变）；</li>
- *   <li>兜底与主模型同名时跳过（同一模型重试只会再失败一次）。</li>
- * </ul>
+ * 核心不变量：
+ *
+ *   链最长 2 站：主模型 → 全局兜底；
+ *   兜底缺省字段回落主模型，显式填写的字段以兜底为准（跨供应商时地址密钥必须能变）；
+ *   兜底与主模型同名时跳过（同一模型重试只会再失败一次）。
+ *
  */
 class ModelFallbackChainTest {
 

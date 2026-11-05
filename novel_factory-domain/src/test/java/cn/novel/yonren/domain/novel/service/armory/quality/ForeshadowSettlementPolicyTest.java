@@ -11,9 +11,9 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
- * 清账审计口径测试（2026-10-02，P2a）。
+ * 清账审计口径测试（P2a）。
  *
- * <p>反例取自真实裁决文本：两个阶段 19 条 VOID 里约 9–10 条的 reason 写着
+ * 反例取自真实裁决文本：两个阶段 19 条 VOID 里约 9–10 条的 reason 写着
  * 「已在第24章兑现」「已在第9章解决」「第17章已闭合」——剧情收了、账本没记。
  */
 class ForeshadowSettlementPolicyTest {
@@ -29,11 +29,10 @@ class ForeshadowSettlementPolicyTest {
     }
 
     /**
-     * 静默兑现的口径必须**同时含裁决补认的「已完成」**（2026-10-10）。
+     * 静默兑现的口径必须**同时含裁决补认的「已完成」**。
      *
-     * <p>裁决新增 DONE 之后，"账记为未填、实际已兑现"的条目不再走 {@code VOID + 【已兑现】}，
-     * 而是判 DONE。若指标仍只数 VOID 那一支，它会随着 DONE 的启用**凭空变好**——
-     * 而摘要层漏记的问题一点没变。被判 DONE 恰恰证明自动匹配没认出那次兑现，是同一份证据。
+     * 裁决新增 DONE 之后，"账记为未填、实际已兑现"的条目不再走 {@code VOID + 【已兑现】}，
+     * 而是判 DONE。若指标仍只数 VOID 那一支，它会随着 DONE 的启用**凭空变好**——* 而摘要层漏记的问题一点没变。被判 DONE 恰恰证明自动匹配没认出那次兑现，是同一份证据。
      */
     @Test
     @DisplayName("口径自洽：DONE 与 VOID-【已兑现】同属「摘要漏记回收」的证据")
@@ -111,7 +110,7 @@ class ForeshadowSettlementPolicyTest {
     /**
      * **精度回归**：无章号引用的否定用法不得算成静默兑现。
      *
-     * <p>真实假阳性（ch8）：「路人甲说法在父母认真对待孩子异常后已融入日常，
+     * 真实假阳性（ch8）：「路人甲说法在父母认真对待孩子异常后已融入日常，
      * **无独立回收必要**」——句尾"回收"是否定用法，被宽松模式误判。
      * 加"必须写明第几章"约束后不再命中，且语义自洽：真已兑现的线理应说得出在哪一章兑现。
      */

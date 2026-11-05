@@ -49,7 +49,7 @@ class BuildStageBlueprintNodeTest {
     /**
      * 伏笔排期表 JSON 片段（第 11-55 章阶段的排期）。
      *
-     * <p>必须带全：缺了它会触发**第三次聚焦补采**，于是所有"恰好调用一次"的断言都会失败。
+     * 必须带全：缺了它会触发**第三次聚焦补采**，于是所有"恰好调用一次"的断言都会失败。
      * 本夹具的 payoff 全部落在阶段内（≤55）——因为测试未设 `maxChapterCount`，
      * hardTotal 退化为阶段末章，"跨阶段"要求在那种情形下被**条件化跳过**（见
      * `BuildStageBlueprintNode#repairForeshadowSchedule` 的 crossStagePossible）。
@@ -61,7 +61,7 @@ class BuildStageBlueprintNodeTest {
     /**
      * 章级主线推进的 JSON 片段（第 11-25 章，15 条）。
      *
-     * <p>条数必须**恰好覆盖排期窗**：{@code RollingOutlineService.MAINLINE_WINDOW = 15}，
+     * 条数必须**恰好覆盖排期窗**：{@code RollingOutlineService.MAINLINE_WINDOW = 15}，
      * 而 {@code parseMainLinePatch} 会严格校验"章号连续覆盖"——补采只给前几条会被判不可用
      * （半张表比没有更危险：校验会因"缺章"不断驳回，而模型每次补采都只给前几条）。
      */
@@ -85,7 +85,7 @@ class BuildStageBlueprintNodeTest {
     /**
      * 正常蓝图夹具：**带悬念档位表 + 章级主线推进**。
      *
-     * <p>⚠️ 这两个字段都不是可选项——缺了任何一个，蓝图节点都会触发对应的"聚焦补采"
+     * ⚠️ 这两个字段都不是可选项——缺了任何一个，蓝图节点都会触发对应的"聚焦补采"
      * 再调一次模型（见 {@code prepare_repairsMissingSuspenseLadderByFocusedRecall}），
      * 于是所有"恰好调用一次"的断言都会失败。这里带上它们，代表**正常情形**，
      * 让本类其余用例继续专注于各自要验的东西。
@@ -479,7 +479,7 @@ class BuildStageBlueprintNodeTest {
     /**
      * 悬念档位缺失时的**聚焦补采**：主调用漏了档位表 → 必须再问一次并把结果合并进蓝图。
      *
-     * <p>这条守的是实测踩到的坑：把"给出档位表"当作完整蓝图 prompt 里的第 11 条要求，
+     * 这条守的是实测踩到的坑：把"给出档位表"当作完整蓝图 prompt 里的第 11 条要求，
      * 模型会在长 prompt 里静默省略它；若就此放过，档位表恒为 null，
      * 锚块不注入、校验跳过、指标不出——整条"主线推进"链路**一声不响地空转**。
      */
@@ -576,7 +576,7 @@ class BuildStageBlueprintNodeTest {
         assertTrue(!promptCaptor.getAllValues().get(0).contains("【所属卷方向锚】"));
     }
 
-    // ===== stageEnd 重锚回填（2026-10-11 修正 + 2026-10-26 下限口径改造）=====
+    // ===== stageEnd 重锚回填（修正 + 下限口径改造）=====
 
     /**
      * 夹具时间账：大纲第 8-12 章预算 2012-2013 年（14-15 岁），
@@ -674,13 +674,13 @@ class BuildStageBlueprintNodeTest {
     }
 
     /**
-     * 单调下限取**正文实际锚点**，不取上一阶段声明（2026-10-26 修正）。
+     * 单调下限取**正文实际锚点**，不取上一阶段声明（修正）。
      *
-     * <p>旧口径用上一阶段声明做下限：上一阶段声明 2013/15 而正文只走到 2010/12 时，
+     * 旧口径用上一阶段声明做下限：上一阶段声明 2013/15 而正文只走到 2010/12 时，
      * 本阶段被钳到 2013/15，声明值又成为下一阶段的下限——年份链**单向棘轮**，
      * 再也回不到正文实际时间。
      *
-     * <p>新口径：下限 = max(重锚预算, 正文实际锚点)。锚点是已发生的事实，既能防倒退，
+     * 新口径：下限 = max(重锚预算, 正文实际锚点)。锚点是已发生的事实，既能防倒退，
      * 又不会把"没走到的计划"固化成永久下限。上一阶段声明只在**无锚点**时兜底。
      */
     @Test
@@ -776,7 +776,7 @@ class BuildStageBlueprintNodeTest {
         assertEquals("2010年", lastRepaired.getStageEndYear(), "2010 ≤ 2009+1，属自然延续，增量 1 年照常计入");
     }
 
-    // ===== 追进度字段接线（2026-10-26，此前是死代码）=====
+    // ===== 追进度字段接线（此前是死代码）=====
 
     /**
      * 三个 {@code transient} pacing 字段此前**没有任何一处赋值**——注释写着"由 BuildStageBlueprintNode

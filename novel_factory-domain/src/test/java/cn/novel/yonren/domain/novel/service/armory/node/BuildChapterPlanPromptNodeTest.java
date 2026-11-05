@@ -4,7 +4,7 @@ import cn.novel.yonren.domain.novel.model.entity.ArmoryCommandEntity;
 import cn.novel.yonren.domain.novel.model.entity.StageBlueprintEntity;
 import cn.novel.yonren.domain.novel.model.entity.StoryContextEntity;
 import cn.novel.yonren.domain.novel.model.valobj.StoryVO;
-import cn.novel.yonren.domain.novel.model.valobj.properties.StoryProperties;
+import cn.novel.yonren.domain.novel.config.StoryProperties;
 import cn.novel.yonren.domain.novel.service.armory.factory.DefaultArmoryFactory;
 import cn.novel.yonren.domain.novel.service.armory.memory.RollingOutlineService;
 import cn.novel.yonren.domain.novel.service.armory.plan.ChapterPlanPromptService;

@@ -128,7 +128,7 @@ public class StyleStatService {
      * 词条来自外置清单（见 {@code RepetitionWatchlistCatalog}）——题材为 null 或该题材无专属词条时，
      * 只统计通用组；清单为空则整体不启用（行为与引入前完全一致）。
      *
-     * @param genreCode 题材 code（{@code GenreTypeVO.code}），可空
+     * @param genreCode 题材 code（{@code GenreType.code}），可空
      */
     public void merge(StyleStatEntity stat, String content, String genreCode) {
         if (stat == null || StringUtils.isBlank(content)) {

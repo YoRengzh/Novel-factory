@@ -5,7 +5,7 @@ import cn.novel.yonren.domain.novel.model.aggregate.ChapterPlanAggregate;
 import cn.novel.yonren.domain.novel.model.entity.ChapterPlanItemEntity;
 import cn.novel.yonren.domain.novel.model.entity.ChapterSummaryEntity;
 import cn.novel.yonren.domain.novel.model.entity.StageBlueprintEntity;
-import cn.novel.yonren.types.enums.ChapterTypeVO;
+import cn.novel.yonren.types.enums.ChapterType;
 import cn.novel.yonren.types.exception.AppException;
 import org.junit.jupiter.api.Test;
 
@@ -178,7 +178,7 @@ class ChapterPlanChecksTest {
         List<ChapterPlanItemEntity> chapters = List.of(
                 planWithBeat(1, ladder.get(0) + "——角色A首次听到投资提议", null),
                 planWithBeat(2, ladder.get(0) + "——角色B翻看凭证起疑", null),
-                planWithBeat(3, ladder.get(0) + "——角色C察觉神色不对", ChapterTypeVO.TRANSITION));
+                planWithBeat(3, ladder.get(0) + "——角色C察觉神色不对", ChapterType.TRANSITION));
 
         assertNull(ChapterPlanChecks.validateSuspenseAdvance(chapters, ladder));
     }
@@ -254,7 +254,7 @@ class ChapterPlanChecksTest {
                 .build();
     }
 
-    private ChapterPlanItemEntity planWithBeat(Integer chapterNo, String beat, ChapterTypeVO type) {
+    private ChapterPlanItemEntity planWithBeat(Integer chapterNo, String beat, ChapterType type) {
         return ChapterPlanItemEntity.builder()
                 .chapterNo(chapterNo)
                 .title("标题")
@@ -303,7 +303,7 @@ class ChapterPlanChecksTest {
         assertTrue(issue.contains("逐字相同"), "违规描述须点明原因：" + issue);
     }
 
-    /** 章计划未回填 mainLineAdvance —— 必须点名，并给出蓝图原文以便模型照抄 */
+    /** 章计划未回填 mainLineAdvance ——必须点名，并给出蓝图原文以便模型照抄 */
     @Test
     void validateMainLineAdvance_flagsMissingField() {
         List<ChapterPlanItemEntity> chapters = List.of(
@@ -629,7 +629,7 @@ class ChapterPlanChecksTest {
 
     @Test
     void validateTimeAdvance_missingIsLegal() {
-        // 2026-10-29：timeAdvance 由必填改为选填——本章不跨时间时留空合法，
+        // timeAdvance 由必填改为选填——本章不跨时间时留空合法，
         // 不再因缺失而驳回。时间推进不再是每章的交付项。
         List<ChapterPlanItemEntity> chapters = List.of(
                 planItem(61, "推进3天，至2050年10月20日"),
@@ -704,7 +704,7 @@ class ChapterPlanChecksTest {
         assertTrue(feedback.contains("一句带过"), feedback);
     }
 
-    // ==================== 跨章场景重演校验（2026-10-09） ====================
+    // ==================== 跨章场景重演校验 ====================
 
     /** 造一章：给出关键事件列表（跨章重演校验的比对面） */
     private ChapterPlanItemEntity planWithEvents(int chapterNo, String... events) {
@@ -781,7 +781,7 @@ class ChapterPlanChecksTest {
         assertNull(ChapterPlanChecks.validateSceneReplay(chapters), "不同章节不得误报");
     }
 
-    // ==================== 伏笔登记模板剥离（2026-10-12） ====================
+    // ==================== 伏笔登记模板剥离 ====================
 
 
     @Test
@@ -828,7 +828,7 @@ class ChapterPlanChecksTest {
         assertTrue(feedback.contains("追加一句话"), "必须点明追加子项这一绕行姿势：" + feedback);
     }
 
-    // ==================== 档位原文剥离（2026-10-12） ====================
+    // ==================== 档位原文剥离 ====================
 
     private static final List<String> LADDER_121 = List.of(
             "档位1：角色丙仅知未来年份是自己重生前记忆的截止年份",
@@ -901,12 +901,12 @@ class ChapterPlanChecksTest {
         assertTrue(issue.contains("日历第七道短杠"), issue);
     }
 
-    // ==================== 对话承载校验（2026-10-10） ====================
+    // ==================== 对话承载校验 ====================
 
     private static final List<String> ROSTER = List.of("角色丙", "角色己");
 
     /** 造一章：默认 characters 即名册二人，给出关键事件与对话承载声明 */
-    private ChapterPlanItemEntity planWithScenes(int chapterNo, ChapterTypeVO type,
+    private ChapterPlanItemEntity planWithScenes(int chapterNo, ChapterType type,
                                                  List<String> keyEvents, List<String> scenes) {
         return ChapterPlanItemEntity.builder()
                 .chapterNo(chapterNo)
@@ -924,7 +924,7 @@ class ChapterPlanChecksTest {
     void validateDialogueCarriage_passesWhenScenesDeclaredVerbatimAndNamed() {
         String scene1 = "角色己带着篮球走近，直接要求单挑一局，角色丙应下";
         String scene2 = "角色丙承认控分意图，角色己承诺对外保密此事";
-        ChapterPlanItemEntity chapter = planWithScenes(101, ChapterTypeVO.NORMAL,
+        ChapterPlanItemEntity chapter = planWithScenes(101, ChapterType.NORMAL,
                 List.of(scene1, scene2, "马老师在远处观察，记录了两人的互动"),
                 List.of(scene1, scene2));
 
@@ -934,10 +934,10 @@ class ChapterPlanChecksTest {
     /** 第 105 章病灶回归：0 条声明（缺字段/空列表）必须点名章号驳回 */
     @Test
     void validateDialogueCarriage_flagsMissingDeclaration() {
-        ChapterPlanItemEntity missing = planWithScenes(105, ChapterTypeVO.NORMAL,
+        ChapterPlanItemEntity missing = planWithScenes(105, ChapterType.NORMAL,
                 List.of("角色丙在整理论坛私信时发现英文账号使用了术语", "他将发件人的语言特征对照推断"),
                 null);
-        ChapterPlanItemEntity empty = planWithScenes(106, ChapterTypeVO.NORMAL,
+        ChapterPlanItemEntity empty = planWithScenes(106, ChapterType.NORMAL,
                 List.of("角色丙在整理论坛私信时发现英文账号使用了术语", "他将发件人的语言特征对照推断"),
                 List.of());
 
@@ -952,7 +952,7 @@ class ChapterPlanChecksTest {
     /** 声明诚实性：与 keyEvents 对不上的"声明"是占位虚报，连同有效数量一起驳回 */
     @Test
     void validateDialogueCarriage_flagsDeclarationNotInKeyEvents() {
-        ChapterPlanItemEntity chapter = planWithScenes(105, ChapterTypeVO.NORMAL,
+        ChapterPlanItemEntity chapter = planWithScenes(105, ChapterType.NORMAL,
                 List.of("角色丙在整理论坛私信时发现英文账号使用了术语"),
                 List.of("角色丙与角色己当面对质术语来源"));
 
@@ -968,7 +968,7 @@ class ChapterPlanChecksTest {
     void validateDialogueCarriage_flagsSceneWithoutTwoNamedPersons() {
         String solo = "角色丙在旧本新页写下推断过程，未向任何人透露";
         String scene = "角色己指出角色丙的说法前后矛盾，角色丙被迫解释";
-        ChapterPlanItemEntity chapter = planWithScenes(105, ChapterTypeVO.NORMAL,
+        ChapterPlanItemEntity chapter = planWithScenes(105, ChapterType.NORMAL,
                 List.of(solo, scene), List.of(solo, scene));
 
         String issue = ChapterPlanChecks.validateDialogueCarriage(List.of(chapter), ROSTER);
@@ -986,7 +986,7 @@ class ChapterPlanChecksTest {
                 .characters(List.of("马老师"))
                 .keyEvents(List.of(scene, "马老师在办公室查阅寄信登记本", "马老师在教师例会上提出定性"))
                 .dialogueScenes(List.of(scene))
-                .chapterType(ChapterTypeVO.TRANSITION)
+                .chapterType(ChapterType.TRANSITION)
                 .build();
 
         assertNull(ChapterPlanChecks.validateDialogueCarriage(List.of(chapter),
@@ -998,7 +998,7 @@ class ChapterPlanChecksTest {
     void validateDialogueCarriage_flagsSoloEventMajority() {
         String scene1 = "角色丙与角色己就控分意图当面对质";
         String scene2 = "角色丙向角色己说明留在旧镇的原因";
-        ChapterPlanItemEntity chapter = planWithScenes(105, ChapterTypeVO.NORMAL,
+        ChapterPlanItemEntity chapter = planWithScenes(105, ChapterType.NORMAL,
                 List.of(scene1, scene2,
                         "角色丙在旧本新页写下推断过程",
                         "角色丙将发件人的语言特征逐项对照",
@@ -1015,7 +1015,7 @@ class ChapterPlanChecksTest {
     @Test
     void validateDialogueCarriage_countsDistinctEventsOnly() {
         String scene = "角色己逼问角色丙控分的真实意图";
-        ChapterPlanItemEntity chapter = planWithScenes(101, ChapterTypeVO.NORMAL,
+        ChapterPlanItemEntity chapter = planWithScenes(101, ChapterType.NORMAL,
                 List.of(scene, "角色丙承认控分意图，角色己承诺保密"),
                 List.of(scene, scene));
 
@@ -1033,7 +1033,7 @@ class ChapterPlanChecksTest {
                 .characters(List.of("角色丙"))
                 .keyEvents(List.of("角色丙在课堂上首次展露心算天赋", "角色丙独自翻看母亲的旧账本"))
                 .dialogueScenes(List.of("角色丙在课堂上首次展露心算天赋", "角色丙独自翻看母亲的旧账本"))
-                .chapterType(ChapterTypeVO.NORMAL)
+                .chapterType(ChapterType.NORMAL)
                 .build();
 
         assertNull(ChapterPlanChecks.validateDialogueCarriage(List.of(chapter), List.of()),

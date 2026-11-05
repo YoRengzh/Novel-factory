@@ -4,7 +4,7 @@ import cn.novel.yonren.domain.novel.adapter.llm.LlmGateway;
 import cn.novel.yonren.domain.novel.model.entity.ChapterPlanItemEntity;
 import cn.novel.yonren.domain.novel.model.valobj.LlmCall;
 import cn.novel.yonren.domain.novel.model.valobj.StoryVO;
-import cn.novel.yonren.domain.novel.model.valobj.properties.StoryProperties;
+import cn.novel.yonren.domain.novel.config.StoryProperties;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
@@ -25,8 +25,7 @@ import static org.mockito.Mockito.when;
 /**
  * 段落信息增量审校测试。
  *
- * <p>要点：只产出**局部改写补丁**（不是整章重写），且任何环节失败都必须保留原稿——
- * 它是一个增强件，不得阻断生成。默认关闭。
+ * 要点：只产出**局部改写补丁**（不是整章重写），且任何环节失败都必须保留原稿——* 它是一个增强件，不得阻断生成。默认关闭。
  */
 class ParagraphDensityAuditServiceTest {
 
@@ -163,7 +162,7 @@ class ParagraphDensityAuditServiceTest {
     /**
      * 删掉只出现一次的计划角色名 → 整批回退。
      *
-     * <p>此前这条路径只查"机械文风违规不增加"：一次套用就能把实体删干净，
+     * 此前这条路径只查"机械文风违规不增加"：一次套用就能把实体删干净，
      * 而这类损失不会出现在任何指标上。
      */
     @Test
@@ -202,9 +201,9 @@ class ParagraphDensityAuditServiceTest {
     }
 
     /**
-     * 长度下限闸门（2026-10-10）：挤水的目的是去掉重复，不是把章挤薄。
+     * 长度下限闸门：挤水的目的是去掉重复，不是把章挤薄。
      *
-     * <p>实测同一段章节重跑一次，字数掉 21%（平均 1716→1360）、对白掉 30%，其中挤水补丁
+     * 实测同一段章节重跑一次，字数掉 21%（平均 1716→1360）、对白掉 30%，其中挤水补丁
      * 从 2 条涨到 9 条是贡献项之一——而这条路径此前**没有任何长度闸门**
      * （修订链路至少有"字数不低于原稿 80%"，这里一条都没有）。
      */

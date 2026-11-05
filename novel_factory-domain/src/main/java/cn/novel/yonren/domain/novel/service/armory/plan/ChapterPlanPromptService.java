@@ -19,8 +19,8 @@ import cn.novel.yonren.domain.novel.service.armory.quality.ForeshadowSpanPolicy;
 import cn.novel.yonren.domain.novel.service.armory.quality.PlaceTrajectoryPolicy;
 import cn.novel.yonren.domain.novel.service.armory.quality.UsedPatternPolicy;
 import cn.novel.yonren.domain.novel.service.armory.quality.RelationTrajectoryPolicy;
-import cn.novel.yonren.types.enums.ChapterTypeVO;
-import cn.novel.yonren.types.enums.GenreTypeVO;
+import cn.novel.yonren.types.enums.ChapterType;
+import cn.novel.yonren.types.enums.GenreType;
 import jakarta.annotation.Resource;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.lang3.StringUtils;
@@ -406,7 +406,7 @@ public class ChapterPlanPromptService {
     /** 按题材生成世界语言约束；只有玄幻题材才出现仙侠词表，其他题材保持中性。 */
     private String renderWorldLanguageRule(DefaultArmoryFactory.DynamicContext dynamicContext) {
         StoryContextEntity context = dynamicContext.getStoryContextEntity();
-        GenreTypeVO genre = GenreTypeVO.match(context == null ? null : context.getTheme(),
+        GenreType genre = GenreType.match(context == null ? null : context.getTheme(),
                 context == null ? null : context.getStyle());
         StringBuilder rule = new StringBuilder("\n4. 关键事件、目标、结尾悬念必须使用与故事题材、时代、人物身份一致的世界内语言，")
                 .append("不得把作者分析语、学术报告腔或时代之外的技术黑话直接当作剧情事实；")
@@ -462,7 +462,7 @@ public class ChapterPlanPromptService {
                 .append("排夜间/睡眠/入夜场景而锚尚在白天时，须先安排过夜或明确的时间过渡事件（并在 goal 中注明推进到何时），")
                 .append("或把该事件顺延到后续章节；")
                 .append("严禁在无过渡的情况下让事件时段与锚记载直接冲突——审计将按时序锚判事实矛盾记 BLOCKING。");
-        if (genre == GenreTypeVO.FANTASY) {
+        if (genre == GenreType.FANTASY) {
             rule.append("玄幻/仙侠题材可使用灵气、阵纹、符箓、灵脉、宗门、长老、法宝等既有设定词，")
                     .append("不得用握手信号、加密信号、波形数据、服务器、协议、分布式节点、灰度、缓存、日志等程序员术语替代世界内概念；")
                     .append("若主角设定允许，此类术语只可作为短促的心理类比出现在正文，不进入计划事件名词。");
@@ -478,7 +478,7 @@ public class ChapterPlanPromptService {
                 Math.max(0, summaries.size() - DENSITY_LOOKBACK), summaries.size());
         List<String> lowDensity = recent.stream()
                 .filter(s -> s != null && s.getValidChars() != null && s.getValidChars() < LOW_DENSITY_CHARS)
-                .filter(s -> !ChapterTypeVO.of(s.getChapterType()).isTransition())
+                .filter(s -> !ChapterType.of(s.getChapterType()).isTransition())
                 .map(s -> "第" + s.getChapterNo() + "章（实际 " + s.getValidChars() + " 有效字 / "
                         + (s.getKeyEventCount() == null ? "?" : s.getKeyEventCount()) + " 个关键事件）")
                 .toList();
@@ -540,7 +540,7 @@ public class ChapterPlanPromptService {
         List<String> collapsed = recent.stream()
                 .filter(s -> s != null && s.getDialogueUtterances() != null && s.getValidChars() != null
                         && s.getValidChars() > 0)
-                .filter(s -> !ChapterTypeVO.of(s.getChapterType()).isTransition())
+                .filter(s -> !ChapterType.of(s.getChapterType()).isTransition())
                 .filter(s -> DialogueRatioPolicy.utteranceDensity(
                         s.getDialogueUtterances(), s.getValidChars()) < line)
                 .map(s -> "第" + s.getChapterNo() + "章（" + String.format("%.1f",

@@ -5,7 +5,7 @@ import cn.novel.yonren.domain.novel.model.entity.StageBlueprintEntity;
 import cn.novel.yonren.domain.novel.model.valobj.StoryVO;
 import cn.novel.yonren.domain.novel.service.armory.llm.LlmInvokeService;
 import cn.novel.yonren.domain.novel.service.armory.llm.PlanBranchService;
-import cn.novel.yonren.domain.novel.service.armory.prompt.valobj.PromptContext;
+import cn.novel.yonren.domain.novel.model.valobj.prompt.PromptContext;
 import cn.novel.yonren.domain.novel.service.job.GenerationJob;
 import cn.novel.yonren.types.exception.AppException;
 import org.junit.jupiter.api.BeforeEach;
@@ -31,8 +31,7 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 /**
- * 章节计划段规划执行器测试：三条规划路径（链式单段/链式分段/worker 惰性）共用的闭环——
- * 三级降级 + 章数纠错、编号平移、结构校验、主线推进闸门（驳回→带反馈重规划→二次放行）、
+ * 章节计划段规划执行器测试：三条规划路径（链式单段/链式分段/worker 惰性）共用的闭环——* 三级降级 + 章数纠错、编号平移、结构校验、主线推进闸门（驳回→带反馈重规划→二次放行）、
  * 分支推演回退。LlmInvokeService / PlanBranchService 打桩，其余全部真实执行
  */
 class ChapterPlanSegmentPlannerTest {
@@ -86,7 +85,7 @@ class ChapterPlanSegmentPlannerTest {
 
     /**
      * 计划 JSON 夹具。事件文本以**档位原文收尾**：档位逐章不同时，跨章关键事件的共享模板
-     * 片段均 &lt;10 字，不会误触「跨章场景重演」校验（stagnant 夹具全章同档，属预期失败用例，
+     * 片段均 <10 字，不会误触「跨章场景重演」校验（stagnant 夹具全章同档，属预期失败用例，
      * 多报一条重演不影响断言）。dialogueScenes 为合规声明（≥2 条逐字复制 + 双人名 + 单人事件
      * 不过半），使夹具默认通过对话承载闸门，各用例只针对自己要测的闸门。
      */
@@ -136,7 +135,7 @@ class ChapterPlanSegmentPlannerTest {
     }
 
     /**
-     * 2026-10-02：章级主线推进闸门必须接进规划器——章计划未回填 mainLineAdvance 时要打回重规划，
+     * 章级主线推进闸门必须接进规划器——章计划未回填 mainLineAdvance 时要打回重规划，
      * 且回注文本必须**点名问题**（否则"重规划"只是原样重生成一遍）。
      */
     @Test
@@ -212,7 +211,7 @@ class ChapterPlanSegmentPlannerTest {
     }
 
     /**
-     * 2026-10-10：对话承载闸门必须接进规划器——计划未声明 dialogueScenes 时打回重规划，
+     * 对话承载闸门必须接进规划器——计划未声明 dialogueScenes 时打回重规划，
      * 回注文本必须点名问题，并给出"里程碑是落点不是事件本体"的修正方向
      * （解开蓝图逐字锁与"要有戏"的死结，否则模型只会原样重生成一遍）。
      */
@@ -266,9 +265,9 @@ class ChapterPlanSegmentPlannerTest {
     }
 
     /**
-     * 2026-10-01 新增能力：**档位描述去重不依赖档位表**——无蓝图模式下同样要拦。
+     * 新增能力：**档位描述去重不依赖档位表**——无蓝图模式下同样要拦。
      *
-     * <p>旧行为是"无档位表 ⇒ 整个闸门直接 return"，于是模型把同一句 suspenseBeat 复制 5 遍
+     * 旧行为是"无档位表 ⇒ 整个闸门直接 return"，于是模型把同一句 suspenseBeat 复制 5 遍
      * 也无人过问（实测第 11–15 章正是如此）。去重只做逐字比较、不需要档位表，没有理由跟着跳过。
      */
     @Test

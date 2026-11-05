@@ -52,7 +52,7 @@ class ChapterAuditCalibrationTest {
         StoryVO storyVO = loadStoryVO();
 
         ChapterAuditService auditService = new ChapterAuditService(new SpringAiLlmGateway(1, 20, 600, new LlmRuntimeConfig(), new cn.novel.yonren.domain.novel.service.job.LlmBudgetFuse(
-                        new cn.novel.yonren.domain.novel.model.valobj.properties.StoryProperties(),
+                        new cn.novel.yonren.domain.novel.config.StoryProperties(),
                         new cn.novel.yonren.domain.novel.service.job.JobRegistry())));
         List<ChapterSummaryEntity> summaries = readSummaries(storyDir);
         StyleStatEntity styleStat = readStyleStat(storyDir);

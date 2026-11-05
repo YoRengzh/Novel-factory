@@ -1,5 +1,7 @@
 package cn.novel.yonren.domain.novel.service.armory.prompt.reference;
 
+import cn.novel.yonren.domain.novel.model.valobj.prompt.ReferenceChunk;
+
 import org.apache.commons.lang3.StringUtils;
 import org.springframework.stereotype.Component;
 

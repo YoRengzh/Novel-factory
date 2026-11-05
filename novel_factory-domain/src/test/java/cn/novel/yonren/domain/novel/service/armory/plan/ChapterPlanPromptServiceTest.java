@@ -6,13 +6,13 @@ import cn.novel.yonren.domain.novel.model.entity.QualityDebtEntity;
 import cn.novel.yonren.domain.novel.model.entity.ForeshadowScheduleEntity;
 import cn.novel.yonren.domain.novel.model.entity.StageBlueprintEntity;
 import cn.novel.yonren.domain.novel.model.entity.StoryContextEntity;
-import cn.novel.yonren.domain.novel.model.valobj.properties.PromptBudgetProperties;
+import cn.novel.yonren.domain.novel.config.PromptBudgetProperties;
 import cn.novel.yonren.domain.novel.service.armory.factory.DefaultArmoryFactory;
 import cn.novel.yonren.domain.novel.service.armory.memory.ChapterMemoryService;
 import cn.novel.yonren.domain.novel.service.armory.memory.RollingOutlineService;
 import cn.novel.yonren.domain.novel.service.armory.memory.StoryMemoryService;
 import cn.novel.yonren.domain.novel.service.armory.prompt.PromptBudgetGuard;
-import cn.novel.yonren.types.enums.ChapterTypeVO;
+import cn.novel.yonren.types.enums.ChapterType;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
@@ -392,7 +392,7 @@ class ChapterPlanPromptServiceTest {
         }
         summaries.get(3).setValidChars(900);
         summaries.get(3).setKeyEventCount(1);
-        summaries.get(3).setChapterType(ChapterTypeVO.TRANSITION.getCode());
+        summaries.get(3).setChapterType(ChapterType.TRANSITION.getCode());
 
         StringBuilder sb = new StringBuilder();
         ChapterPlanPromptService.appendDensityFeedback(sb, summaries);
@@ -586,8 +586,7 @@ class ChapterPlanPromptServiceTest {
     // ==================== 章级主线推进注入块 ====================
 
     /**
-     * 注入块只渲染**本段用得到的章**：蓝图按 15 章窗产出，而一段通常只有 5 章——
-     * 全量渲染纯占前缀预算（而前缀预算实测长期 99-100%）。
+     * 注入块只渲染**本段用得到的章**：蓝图按 15 章窗产出，而一段通常只有 5 章——* 全量渲染纯占前缀预算（而前缀预算实测长期 99-100%）。
      */
     @Test
     void appendMainLineBlock_rendersOnlyChaptersInSegment() {
@@ -641,7 +640,7 @@ class ChapterPlanPromptServiceTest {
     /**
      * **回归：`mainLineAdvance` 必须出现在输出 JSON 示例里**。
      *
-     * <p>2026-10-02 实测教训：只写要求（8.2）与注入块、**漏了示例里的字段**，
+     * 实测教训：只写要求（8.2）与注入块、**漏了示例里的字段**，
      * 结果 qwen3.7-max 五章全部不回填 `mainLineAdvance`，闸门打回重规划后依然为空，
      * 只能二次放行。**要求文本 ≠ 契约，字段不进示例就等于不存在。**
      */
@@ -695,8 +694,7 @@ class ChapterPlanPromptServiceTest {
     /**
      * 三块各自的触发条件：本段必埋（且**本段不得兑现**）、本段必兑、**逾期补收**。
      *
-     * <p>「本段不得兑现」这半句是把 D3 的抽象要求落成可执行约束的关键——
-     * 否则段计划看到"本段要埋 X"的第一反应就是顺手收掉。
+     * 「本段不得兑现」这半句是把 D3 的抽象要求落成可执行约束的关键——* 否则段计划看到"本段要埋 X"的第一反应就是顺手收掉。
      */
     @Test
     void scheduleBlock_rendersThreeSections() {
@@ -744,7 +742,7 @@ class ChapterPlanPromptServiceTest {
     /**
      * 同一条线在多个阶段块里各存一份时必须去重，且**保留最后一条**。
      *
-     * <p>实测（第 96-100 章那批）：8 个逾期注入名额里 5 条逐字是同一条、2 条是同一条石子，
+     * 实测（第 96-100 章那批）：8 个逾期注入名额里 5 条逐字是同一条、2 条是同一条石子，
      * 整份清单只覆盖 3 件事——规划层被反复命令去收同三样东西，这就是"重复拖沓"的来源。
      */
     @Test
@@ -822,9 +820,8 @@ class ChapterPlanPromptServiceTest {
     /**
      * 逾期挂起：逾期 ≥ 30 章的线**停止自动补收**，改入「逾期挂起·待人工裁定」块。
      *
-     * <p>标定依据（第 96-100 章实测逾期分布，正好两簇）：仍在推进的条目逾期 11-22 章，
-     * 卡死的三条逾期 48-74 章。继续每段下令的实测后果是规划层每段都把它安排一遍——
-     * 同一件事被反复重写（"藏物/记号纸"重复拖沓的机制）。
+     * 标定依据（第 96-100 章实测逾期分布，正好两簇）：仍在推进的条目逾期 11-22 章，
+     * 卡死的三条逾期 48-74 章。继续每段下令的实测后果是规划层每段都把它安排一遍——* 同一件事被反复重写（"藏物/记号纸"重复拖沓的机制）。
      */
     @Test
     void scheduleBlock_suspendsChronicallyOverdueInsteadOfReordering() {
@@ -857,8 +854,7 @@ class ChapterPlanPromptServiceTest {
     }
 
     /**
-     * 长线在养：阶段出口判 PARKED 的线不再被要求回收，但必须**明说这是有意为之**——
-     * 否则规划层会把它当"被忘了的线"自发安排回收（实测 那条年份线索就是这样被反复重写的）。
+     * 长线在养：阶段出口判 PARKED 的线不再被要求回收，但必须**明说这是有意为之**——* 否则规划层会把它当"被忘了的线"自发安排回收（实测 那条年份线索就是这样被反复重写的）。
      */
     @Test
     void scheduleBlock_showsParkedLongLinesWithoutOrderingRecovery() {
@@ -896,12 +892,12 @@ class ChapterPlanPromptServiceTest {
         assertFalse(text.contains("本段必须补收"), "在养项不该再被催收：" + text);
     }
 
-    // ==================== 对白坍缩反馈块（2026-10-09） ====================
+    // ==================== 对白坍缩反馈块 ====================
 
     /**
      * 最近 5 章里有轮次密度低于劣化线的章 → 注入【对白坍缩反馈】，责令本段把冲突写进台词。
      *
-     * <p>实测第 96 章 4.4 次/千字（劣化线 6.0，同批其它章 12-27）：计划的 4 条关键事件里
+     * 实测第 96 章 4.4 次/千字（劣化线 6.0，同批其它章 12-27）：计划的 4 条关键事件里
      * 有 2 条是对话承载，**数量合规**，但篇幅最大的那条是纯独白推导——规则只管条数、
      * 不管篇幅占比，写手于是交付了动作分解。责任在规划层。
      */
@@ -943,11 +939,10 @@ class ChapterPlanPromptServiceTest {
     }
 
     /**
-     * 计划层必须把"对白承载"与"场面级事件"写成硬要求（2026-10-10）。
+     * 计划层必须把"对白承载"与"场面级事件"写成硬要求。
      *
-     * <p>实测：同一段章节、同一份计划重跑一次，对白句数从 139 掉到 97（平均 28→19/章，
-     * 而历史 45 章稳在 31-57）。当时的规定是"每章关键事件至少 **1** 个由对话承载"——
-     * 一章只有一个对话事件时，其余三个关键事件都写成静态交代，全章就对白塌方，而规则字面上仍然满足。
+     * 实测：同一段章节、同一份计划重跑一次，对白句数从 139 掉到 97（平均 28→19/章，
+     * 而历史 45 章稳在 31-57）。当时的规定是"每章关键事件至少 **1** 个由对话承载"——* 一章只有一个对话事件时，其余三个关键事件都写成静态交代，全章就对白塌方，而规则字面上仍然满足。
      * 计划的写法直接决定正文的写法：一句话的事件在正文里只会被展开成一句过渡叙述。
      */
     @Test

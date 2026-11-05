@@ -1,25 +1,12 @@
 package cn.novel.yonren.trigger.http;
 
-import cn.novel.yonren.api.dto.ChapterContentDTO;
-import cn.novel.yonren.api.dto.ChapterMetaDTO;
 import cn.novel.yonren.api.dto.ChapterSaveRequestDTO;
-import cn.novel.yonren.api.dto.ChapterSaveResponseDTO;
-import cn.novel.yonren.api.dto.FactTimelineDTO;
-import cn.novel.yonren.api.dto.PendingFactDTO;
-import cn.novel.yonren.api.dto.StoryResumeDTO;
-import cn.novel.yonren.api.dto.StoryGenerateRequestDTO;
 import cn.novel.yonren.api.dto.StorySummaryDTO;
-import cn.novel.yonren.domain.novel.adapter.repository.IStoryRepository;
-import cn.novel.yonren.domain.novel.model.entity.ChapterContentEntity;
-import cn.novel.yonren.domain.novel.model.entity.ChapterSummaryEntity;
-import cn.novel.yonren.domain.novel.model.valobj.BookExport;
-import cn.novel.yonren.domain.novel.service.armory.edit.ChapterEditService;
-import cn.novel.yonren.domain.novel.service.export.BookExportService;
-import cn.novel.yonren.domain.novel.service.export.BookFormat;
-import cn.novel.yonren.domain.novel.service.job.JobRegistry;
+import cn.novel.yonren.domain.novel.service.manage.StoryManageService;
+import cn.novel.yonren.types.enums.ResponseCode;
+import cn.novel.yonren.types.exception.AppException;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
-import org.mockito.ArgumentCaptor;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.MockitoAnnotations;
@@ -28,15 +15,10 @@ import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.server.ResponseStatusException;
 
-import java.nio.charset.StandardCharsets;
-import java.nio.file.Path;
-import java.nio.file.Paths;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertFalse;
-import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
@@ -47,20 +29,16 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 /**
- * 故事库端点测试：列表/章节列表/读章/保存 + 409 运行中作业/404 不存在/400 空正文
+ * 故事库端点 HTTP 层测试（分层重构后）：
+ * 业务断言已迁移至 domain 的 StoryManageServiceTest，本类只验证
+ * trigger 层职责——AppException → HTTP 状态码映射、DTO 透传、导出响应头。
  */
 class StoryManageControllerTest {
 
+    private static final String DIR = "20260902-story-0001";
+
     @Mock
-    private IStoryRepository storyRepository;
-    @Mock
-    private JobRegistry jobRegistry;
-    @Mock
-    private ChapterEditService chapterEditService;
-    @Mock
-    private BookExportService bookExportService;
-    @Mock
-    private cn.novel.yonren.domain.novel.service.armory.memory.StoryMemoryService storyMemoryService;
+    private StoryManageService storyManageService;
 
     @InjectMocks
     private StoryManageController controller;
@@ -70,489 +48,124 @@ class StoryManageControllerTest {
         MockitoAnnotations.openMocks(this);
     }
 
+    // ==================== AppException → HTTP 状态映射 ====================
+
     @Test
-    void listStories_returnsAllWithActiveJobFlag() throws Exception {
-        when(storyRepository.listStories()).thenReturn(List.of(
-                new IStoryRepository.StorySummary("20260902-story-0001", "测试小说", 5, 1000L)));
-        when(jobRegistry.isActiveForStory("20260902-story-0001")).thenReturn(true);
+    void appExceptionMapping_notFound() {
+        when(storyManageService.readChapter(eq(DIR), anyInt()))
+                .thenThrow(new AppException(ResponseCode.CHAPTER_NOT_FOUND.getCode(), "章节不存在"));
+
+        ResponseStatusException e = assertThrows(ResponseStatusException.class,
+                () -> controller.readChapter(DIR, 99));
+        assertEquals(HttpStatus.NOT_FOUND, e.getStatusCode());
+        assertEquals("章节不存在", e.getReason());
+    }
+
+    @Test
+    void appExceptionMapping_activeJobConflict() {
+        when(storyManageService.saveChapter(eq(DIR), anyInt(), any()))
+                .thenThrow(new AppException(ResponseCode.ACTIVE_JOB_CONFLICT.getCode(), "该故事有运行中的作业"));
+
+        ResponseStatusException e = assertThrows(ResponseStatusException.class,
+                () -> controller.saveChapter(DIR, 1, new ChapterSaveRequestDTO()));
+        assertEquals(HttpStatus.CONFLICT, e.getStatusCode());
+    }
+
+    @Test
+    void appExceptionMapping_illegalParameter() {
+        when(storyManageService.factTimeline(DIR, " "))
+                .thenThrow(new AppException(ResponseCode.ILLEGAL_PARAMETER.getCode(), "实体名不能为空"));
+
+        ResponseStatusException e = assertThrows(ResponseStatusException.class,
+                () -> controller.factTimeline(DIR, " "));
+        assertEquals(HttpStatus.BAD_REQUEST, e.getStatusCode());
+    }
+
+    /** 仓储故障被服务层包成 UN_ERROR，必须映射 500——绝不能降级成 400 把服务端故障误报成用户输入错误 */
+    @Test
+    void appExceptionMapping_repositoryFailure_mapsTo500() {
+        when(storyManageService.workbench(DIR))
+                .thenThrow(new AppException(ResponseCode.UN_ERROR.getCode(), "summaries.json 读取失败"));
+
+        ResponseStatusException e = assertThrows(ResponseStatusException.class,
+                () -> controller.workbench(DIR));
+        assertEquals(HttpStatus.INTERNAL_SERVER_ERROR, e.getStatusCode());
+    }
+
+    /** 未知异常码也走 500（保守：无法归类的一律视为服务端问题） */
+    @Test
+    void appExceptionMapping_unknownCode_mapsTo500() {
+        when(storyManageService.listStories())
+                .thenThrow(new AppException("9999", "未定义的码"));
+
+        ResponseStatusException e = assertThrows(ResponseStatusException.class, controller::listStories);
+        assertEquals(HttpStatus.INTERNAL_SERVER_ERROR, e.getStatusCode());
+    }
+
+    @Test
+    void unknownException_mapsTo500() {
+        when(storyManageService.listStories()).thenThrow(new IllegalStateException("仓储崩了"));
+
+        ResponseStatusException e = assertThrows(ResponseStatusException.class, controller::listStories);
+        assertEquals(HttpStatus.INTERNAL_SERVER_ERROR, e.getStatusCode());
+        assertTrue(e.getReason().contains("故事列表查询失败"));
+    }
+
+    // ==================== 透传与响应头 ====================
+
+    @Test
+    void listStories_passesThroughServiceResult() {
+        StorySummaryDTO dto = new StorySummaryDTO();
+        dto.setStoryDirName(DIR);
+        dto.setNovelTitle("测试小说");
+        when(storyManageService.listStories()).thenReturn(List.of(dto));
 
         List<StorySummaryDTO> result = controller.listStories();
 
         assertEquals(1, result.size());
-        assertEquals("20260902-story-0001", result.get(0).getStoryDirName());
-        assertEquals("测试小说", result.get(0).getNovelTitle());
-        assertEquals(5, result.get(0).getChapterCount());
-        assertTrue(result.get(0).isActiveJob());
+        assertEquals(DIR, result.get(0).getStoryDirName());
     }
 
+    /** 中文文件名必须走 RFC 5987 的 filename*，否则浏览器下载名会乱码 */
     @Test
-    void listChapters_returnsMetadata() throws Exception {
-        Path storyDir = Paths.get("/workspace/20260902-story-0001");
-        when(storyRepository.resolveStoryDirectory("20260902-story-0001")).thenReturn(storyDir);
-        when(storyRepository.readChapterNumbers(storyDir)).thenReturn(List.of(1, 2));
-        ChapterContentEntity ch1 = new ChapterContentEntity();
-        ch1.setChapterNo(1);
-        ch1.setTitle("开端");
-        ch1.setContent("内容一百字");
-        when(storyRepository.readChapter(storyDir, 1)).thenReturn(ch1);
-        ChapterContentEntity ch2 = new ChapterContentEntity();
-        ch2.setChapterNo(2);
-        ch2.setTitle("发展");
-        ch2.setContent("另一些内容");
-        when(storyRepository.readChapter(storyDir, 2)).thenReturn(ch2);
+    void exportBook_zipHeadersWithUtf8Filename() {
+        cn.novel.yonren.api.dto.ExportFilePayloadDTO book =
+                new cn.novel.yonren.api.dto.ExportFilePayloadDTO(
+                        "示例书-分章TXT-2章-20261011.zip", new byte[]{1, 2, 3});
+        when(storyManageService.exportBook(DIR, "txt")).thenReturn(book);
 
-        List<ChapterMetaDTO> result = controller.listChapters("20260902-story-0001");
-
-        assertEquals(2, result.size());
-        assertEquals("开端", result.get(0).getTitle());
-    }
-
-    @Test
-    void listChapters_invalidDir_throws404() throws Exception {
-        when(storyRepository.resolveStoryDirectory("bad"))
-                .thenThrow(new RuntimeException("目录不存在"));
-
-        ResponseStatusException e = assertThrows(ResponseStatusException.class,
-                () -> controller.listChapters("bad"));
-        assertEquals(HttpStatus.NOT_FOUND, e.getStatusCode());
-    }
-
-    @Test
-    void readChapter_returnsContent() throws Exception {
-        Path storyDir = Paths.get("/workspace/20260902-story-0001");
-        when(storyRepository.resolveStoryDirectory("20260902-story-0001")).thenReturn(storyDir);
-        ChapterContentEntity entity = new ChapterContentEntity();
-        entity.setChapterNo(3);
-        entity.setTitle("高潮");
-        entity.setContent("正文内容");
-        when(storyRepository.readChapter(storyDir, 3)).thenReturn(entity);
-
-        ChapterContentDTO dto = controller.readChapter("20260902-story-0001", 3);
-
-        assertEquals(3, dto.getChapterNo());
-        assertEquals("高潮", dto.getTitle());
-        assertEquals("正文内容", dto.getContent());
-    }
-
-    @Test
-    void readChapter_missing_throws404() throws Exception {
-        Path storyDir = Paths.get("/workspace/20260902-story-0001");
-        when(storyRepository.resolveStoryDirectory("20260902-story-0001")).thenReturn(storyDir);
-        when(storyRepository.readChapter(storyDir, 99)).thenReturn(null);
-
-        ResponseStatusException e = assertThrows(ResponseStatusException.class,
-                () -> controller.readChapter("20260902-story-0001", 99));
-        assertEquals(HttpStatus.NOT_FOUND, e.getStatusCode());
-    }
-
-    // ==================== 导出成书（分章 ZIP） ====================
-
-    /** 三种格式响应都恒为 application/zip 附件：txt 版 */
-    @Test
-    void exportBook_txtReturnsPerChapterZip() throws Exception {
-        Path storyDir = Paths.get("/workspace/20260902-story-0001");
-        when(storyRepository.resolveStoryDirectory("20260902-story-0001")).thenReturn(storyDir);
-        when(bookExportService.exportChapters(eq(storyDir), eq(BookFormat.TXT))).thenReturn(
-                BookExport.builder()
-                        .fileName("示例书-分章TXT-2章-20261011.zip")
-                        .fileBytes(new byte[]{1, 2, 3})
-                        .format(BookFormat.TXT)
-                        .chapterCount(2)
-                        .effectiveChars(100L)
-                        .novelTitle("示例书")
-                        .build());
-
-        ResponseEntity<byte[]> response = controller.exportBook("20260902-story-0001", "txt");
+        ResponseEntity<byte[]> response = controller.exportBook(DIR, "txt");
 
         assertEquals(HttpStatus.OK, response.getStatusCode());
         String disposition = response.getHeaders().getFirst(HttpHeaders.CONTENT_DISPOSITION);
         assertTrue(disposition.startsWith("attachment"));
-        // 中文文件名必须走 RFC 5987 的 filename*，否则浏览器下载名会乱码
         assertTrue(disposition.contains("filename*=UTF-8''"));
         assertEquals("application/zip", String.valueOf(response.getHeaders().getContentType()));
         assertArrayEquals(new byte[]{1, 2, 3}, response.getBody());
     }
 
-    /** docx 版：包内每章是独立 Word 文档，响应形态与 txt/md 相同 */
     @Test
-    void exportBook_docxReturnsPerChapterZip() throws Exception {
-        Path storyDir = Paths.get("/workspace/20260902-story-0001");
-        when(storyRepository.resolveStoryDirectory("20260902-story-0001")).thenReturn(storyDir);
-        when(bookExportService.exportChapters(eq(storyDir), eq(BookFormat.DOCX))).thenReturn(
-                BookExport.builder()
-                        .fileName("示例书-分章DOCX-2章-20261011.zip")
-                        .fileBytes(new byte[]{9, 8})
-                        .format(BookFormat.DOCX)
-                        .chapterCount(2)
-                        .novelTitle("示例书")
-                        .build());
-
-        ResponseEntity<byte[]> response = controller.exportBook("20260902-story-0001", "docx");
-
-        assertEquals(HttpStatus.OK, response.getStatusCode());
-        assertEquals("application/zip", String.valueOf(response.getHeaders().getContentType()));
-        assertArrayEquals(new byte[]{9, 8}, response.getBody());
-        assertTrue(response.getHeaders().getFirst(HttpHeaders.CONTENT_DISPOSITION).contains(".zip"));
-    }
-
-    @Test
-    void exportBook_withoutChapters_returns404() throws Exception {
-        Path storyDir = Paths.get("/workspace/20260902-story-0001");
-        when(storyRepository.resolveStoryDirectory("20260902-story-0001")).thenReturn(storyDir);
-        when(bookExportService.exportChapters(eq(storyDir), any())).thenReturn(null);
+    void exportBook_noChapters_maps404() {
+        when(storyManageService.exportBook(DIR, "txt"))
+                .thenThrow(new AppException(ResponseCode.NO_STORY_DATA.getCode(), "该故事还没有可导出的章节"));
 
         ResponseStatusException e = assertThrows(ResponseStatusException.class,
-                () -> controller.exportBook("20260902-story-0001", "txt"));
-
+                () -> controller.exportBook(DIR, "txt"));
         assertEquals(HttpStatus.NOT_FOUND, e.getStatusCode());
         assertTrue(e.getReason().contains("还没有可导出的章节"));
     }
 
-    @Test
-    void exportBook_unsupportedFormat_returns400WithoutCallingService() throws Exception {
-        // pdf 是非法格式；zip 是旧参数，随单文件导出一起退役（三种合法格式的响应本就是 zip）
-        for (String illegal : new String[]{"pdf", "zip"}) {
-            ResponseStatusException e = assertThrows(ResponseStatusException.class,
-                    () -> controller.exportBook("20260902-story-0001", illegal));
-
-            assertEquals(HttpStatus.BAD_REQUEST, e.getStatusCode(), illegal);
-        }
-        verify(bookExportService, never()).exportChapters(any(), any());
-    }
+    // ==================== 入参前置校验（留在 controller 的 HTTP 语义） ====================
 
     @Test
-    void saveChapter_activeJob_throws409() {
-        when(jobRegistry.isActiveForStory("20260902-story-0001")).thenReturn(true);
-
-        ChapterSaveRequestDTO request = new ChapterSaveRequestDTO();
-        request.setContent("新内容");
+    void createCheckpoint_blankName_rejectedBeforeService() {
+        cn.novel.yonren.api.dto.CheckpointCreateRequestDTO request =
+                new cn.novel.yonren.api.dto.CheckpointCreateRequestDTO();
+        request.setName(" ");
 
         ResponseStatusException e = assertThrows(ResponseStatusException.class,
-                () -> controller.saveChapter("20260902-story-0001", 1, request));
-        assertEquals(HttpStatus.CONFLICT, e.getStatusCode());
-    }
-
-    @Test
-    void saveChapter_blankContent_throws400() {
-        ChapterSaveRequestDTO request = new ChapterSaveRequestDTO();
-        request.setContent("");
-
-        ResponseStatusException e = assertThrows(ResponseStatusException.class,
-                () -> controller.saveChapter("20260902-story-0001", 1, request));
+                () -> controller.createCheckpoint(DIR, request));
         assertEquals(HttpStatus.BAD_REQUEST, e.getStatusCode());
-    }
-
-    @Test
-    void saveChapter_success_writesAndReflows() throws Exception {
-        Path storyDir = Paths.get("/workspace/20260902-story-0001");
-        when(storyRepository.resolveStoryDirectory("20260902-story-0001")).thenReturn(storyDir);
-        when(jobRegistry.isActiveForStory("20260902-story-0001")).thenReturn(false);
-        String content = "正".repeat(1500);
-        when(chapterEditService.reflow(storyDir, 1, content))
-                .thenReturn(new ChapterEditService.ReflowResult(true, false, null));
-
-        ChapterSaveRequestDTO request = new ChapterSaveRequestDTO();
-        request.setContent(content);
-
-        ChapterSaveResponseDTO dto = controller.saveChapter("20260902-story-0001", 1, request);
-
-        assertTrue(dto.isSaved());
-        assertTrue(dto.isSummaryUpdated());
-        verify(storyRepository).writeChapters(eq(storyDir), any());
-        verify(chapterEditService).reflow(storyDir, 1, content);
-    }
-
-    @Test
-    void saveChapter_preservesExistingTitle() throws Exception {
-        Path storyDir = Paths.get("/workspace/20260902-story-0001");
-        when(storyRepository.resolveStoryDirectory("20260902-story-0001")).thenReturn(storyDir);
-        when(jobRegistry.isActiveForStory("20260902-story-0001")).thenReturn(false);
-        ChapterContentEntity existing = new ChapterContentEntity();
-        existing.setChapterNo(1);
-        existing.setTitle("原有标题");
-        existing.setContent("旧正文");
-        when(storyRepository.readChapter(storyDir, 1)).thenReturn(existing);
-        String content = "正".repeat(1500);
-        when(chapterEditService.reflow(storyDir, 1, content))
-                .thenReturn(new ChapterEditService.ReflowResult(true, false, null));
-
-        ChapterSaveRequestDTO request = new ChapterSaveRequestDTO();
-        request.setContent(content);
-        controller.saveChapter("20260902-story-0001", 1, request);
-
-        ArgumentCaptor<List<ChapterContentEntity>> captor = ArgumentCaptor.forClass(List.class);
-        verify(storyRepository).writeChapters(eq(storyDir), captor.capture());
-        assertEquals("原有标题", captor.getValue().get(0).getTitle());
-        assertEquals(content, captor.getValue().get(0).getContent());
-    }
-
-    @Test
-    void saveChapter_missingChapter_writesEmptyTitle() throws Exception {
-        Path storyDir = Paths.get("/workspace/20260902-story-0001");
-        when(storyRepository.resolveStoryDirectory("20260902-story-0001")).thenReturn(storyDir);
-        when(jobRegistry.isActiveForStory("20260902-story-0001")).thenReturn(false);
-        when(storyRepository.readChapter(storyDir, 9)).thenReturn(null);
-        String content = "正".repeat(1500);
-        when(chapterEditService.reflow(storyDir, 9, content))
-                .thenReturn(new ChapterEditService.ReflowResult(true, false, null));
-
-        ChapterSaveRequestDTO request = new ChapterSaveRequestDTO();
-        request.setContent(content);
-        controller.saveChapter("20260902-story-0001", 9, request);
-
-        ArgumentCaptor<List<ChapterContentEntity>> captor = ArgumentCaptor.forClass(List.class);
-        verify(storyRepository).writeChapters(eq(storyDir), captor.capture());
-        assertEquals("", captor.getValue().get(0).getTitle());
-        assertEquals(content, captor.getValue().get(0).getContent());
-    }
-
-    /**
-     * 短正文现在可以保存（语义已变更）。
-     *
-     * <p>旧实现用 1500 字生成质量线拦人工保存，导致整章不足 1500 字就改不了——
-     * 实测段落级润色后保存直接 400。现在人工保存只要求非空，1500 仍是生成路径门禁。
-     */
-    @Test
-    void saveChapter_shortContent_nowAllowed() throws Exception {
-        Path storyDir = Paths.get("/workspace/20260902-story-0001");
-        when(storyRepository.resolveStoryDirectory("20260902-story-0001")).thenReturn(storyDir);
-        when(jobRegistry.isActiveForStory("20260902-story-0001")).thenReturn(false);
-        ChapterContentEntity existing = new ChapterContentEntity();
-        existing.setChapterNo(1);
-        existing.setTitle("原标题");
-        existing.setContent("原正文");
-        when(storyRepository.readChapter(storyDir, 1)).thenReturn(existing);
-        when(chapterEditService.reflow(storyDir, 1, "短正文"))
-                .thenReturn(new ChapterEditService.ReflowResult(true, false, null));
-
-        ChapterSaveRequestDTO request = new ChapterSaveRequestDTO();
-        request.setContent("短正文");
-
-        ChapterSaveResponseDTO dto = controller.saveChapter("20260902-story-0001", 1, request);
-
-        assertTrue(dto.isSaved(), "短正文不再被 1500 字线拒绝");
-        verify(storyRepository).writeChapters(eq(storyDir), any());
-    }
-
-    /** reflow=false 时跳过回流：段落级润色/扩写不改事实，重算摘要是纯浪费（实测几分钟） */
-    @Test
-    void saveChapter_reflowFalse_skipsReflow() throws Exception {
-        Path storyDir = Paths.get("/workspace/20260902-story-0001");
-        when(storyRepository.resolveStoryDirectory("20260902-story-0001")).thenReturn(storyDir);
-        when(jobRegistry.isActiveForStory("20260902-story-0001")).thenReturn(false);
-        ChapterContentEntity existing = new ChapterContentEntity();
-        existing.setChapterNo(1);
-        existing.setTitle("原标题");
-        when(storyRepository.readChapter(storyDir, 1)).thenReturn(existing);
-
-        ChapterSaveRequestDTO request = new ChapterSaveRequestDTO();
-        request.setContent("润色后的正文");
-        request.setReflow(false);
-
-        ChapterSaveResponseDTO dto = controller.saveChapter("20260902-story-0001", 1, request);
-
-        assertTrue(dto.isSaved());
-        assertFalse(dto.isSummaryUpdated(), "跳过回流时摘要不更新");
-        verify(chapterEditService, never()).reflow(any(), anyInt(), any());
-    }
-
-    @Test
-    void pendingFacts_returnsQuarantinedFactsByChapter() throws Exception {
-        Path storyDir = Paths.get("/workspace/20260902-story-0001");
-        when(storyRepository.resolveStoryDirectory("20260902-story-0001")).thenReturn(storyDir);
-        ChapterSummaryEntity summary = ChapterSummaryEntity.builder().chapterNo(5).build();
-        summary.setPendingFacts(List.of(
-                new ChapterSummaryEntity.StateEntry("赵阔", "已飞升", "正文里根本没有这句话"),
-                new ChapterSummaryEntity.StateEntry("古物", "碎裂", "碎成了八瓣")));
-        when(storyRepository.readChapterSummaries(storyDir)).thenReturn(List.of(summary));
-
-        List<PendingFactDTO> result = controller.pendingFacts("20260902-story-0001");
-
-        assertEquals(2, result.size());
-        assertEquals(5, result.get(0).getChapterNo());
-        assertEquals("赵阔", result.get(0).getName());
-        assertEquals("正文里根本没有这句话", result.get(0).getEvidence());
-        assertEquals("古物", result.get(1).getName());
-    }
-
-    @Test
-    void factTimeline_returnsEntityHistoryAcrossChapters() throws Exception {
-        Path storyDir = Paths.get("/workspace/20260902-story-0001");
-        when(storyRepository.resolveStoryDirectory("20260902-story-0001")).thenReturn(storyDir);
-        ChapterSummaryEntity ch1 = ChapterSummaryEntity.builder().chapterNo(1).build();
-        ch1.setCharacterStates(List.of(new ChapterSummaryEntity.StateEntry(
-                "小陈", "重伤", "小陈咬破舌尖，强行催动古物")));
-        ChapterSummaryEntity ch3 = ChapterSummaryEntity.builder().chapterNo(3).build();
-        ch3.setCharacterStates(List.of(new ChapterSummaryEntity.StateEntry(
-                "小陈", "痊愈", null)));
-        ch3.setItemStates(List.of(new ChapterSummaryEntity.StateEntry(
-                "古物", "镜面裂开细纹", "镜面裂开一道细纹")));
-        when(storyRepository.readChapterSummaries(storyDir)).thenReturn(List.of(ch1, ch3));
-
-        List<FactTimelineDTO> result = controller.factTimeline("20260902-story-0001", "小陈");
-
-        // 精确匹配：仅角色条目命中，按章序排列，证据随条目携带
-        assertEquals(2, result.size());
-        assertEquals(1, result.get(0).getChapterNo());
-        assertEquals("角色", result.get(0).getFactType());
-        assertEquals("重伤", result.get(0).getStatus());
-        assertEquals("小陈咬破舌尖，强行催动古物", result.get(0).getEvidence());
-        assertEquals(3, result.get(1).getChapterNo());
-        assertNull(result.get(1).getEvidence());
-    }
-
-    @Test
-    void factTimeline_fallsBackToContainsWhenExactMisses() throws Exception {
-        Path storyDir = Paths.get("/workspace/20260902-story-0001");
-        when(storyRepository.resolveStoryDirectory("20260902-story-0001")).thenReturn(storyDir);
-        ChapterSummaryEntity ch1 = ChapterSummaryEntity.builder().chapterNo(1).build();
-        ch1.setItemStates(List.of(new ChapterSummaryEntity.StateEntry(
-                "古物", "首次显威", null)));
-        when(storyRepository.readChapterSummaries(storyDir)).thenReturn(List.of(ch1));
-
-        // 精确名无结果 → 包含匹配回退
-        List<FactTimelineDTO> result = controller.factTimeline("20260902-story-0001", "物");
-
-        assertEquals(1, result.size());
-        assertEquals("古物", result.get(0).getName());
-        assertEquals("物品", result.get(0).getFactType());
-        assertEquals("首次显威", result.get(0).getStatus());
-    }
-
-    // ==================== 续写准备 ====================
-
-    private static final String RESUME_BIBLE = String.join("\n",
-            "小说名称: 示例书",
-            "小说类型: 悬疑推理",
-            "小说格调: 冷硬悬疑",
-            "世界观: 旧港被旧案封锁",
-            "叙述视角: 第三人称限知视角",
-            "目标读者: 男频",
-            "语气基调: 压抑克制",
-            "主人公: 林昭，沉物打捞人",
-            "故事概述: 林昭捞出焚字纹袖标",
-            "章节数量: 5",
-            "章节目标: 让读者体验解谜快感",
-            "世界ID: novel-shared-01");
-
-    @Test
-    void resume_returnsFullSettingAndNextChapter() throws Exception {
-        Path storyDir = Paths.get("/workspace/20260902-story-0001");
-        when(storyRepository.resolveStoryDirectory("20260902-story-0001")).thenReturn(storyDir);
-        when(storyRepository.readStoryBible(storyDir)).thenReturn(RESUME_BIBLE);
-        // 故意乱序：末章章号要取最大值，不能依赖仓储返回顺序
-        when(storyRepository.readChapterNumbers(storyDir)).thenReturn(List.of(1, 3, 2, 4));
-        when(storyRepository.readStoryMeta(storyDir)).thenReturn(new IStoryRepository.StoryMeta(150));
-
-        StoryResumeDTO dto = controller.resume("20260902-story-0001");
-
-        assertEquals("20260902-story-0001", dto.getStoryDirName());
-        assertEquals("示例书", dto.getNovelTitle());
-        assertEquals(4, dto.getLatestChapterNo());
-        assertEquals(5, dto.getNextChapterNo());
-        assertEquals(4, dto.getExistingChapterCount());
-        assertTrue(dto.isSettingAvailable());
-        assertTrue(dto.getMissingFields().isEmpty());
-
-        StoryGenerateRequestDTO setting = dto.getSetting();
-        assertEquals("示例书", setting.getNovel_title());
-        assertEquals("悬疑推理", setting.getTheme());
-        assertEquals("旧港被旧案封锁", setting.getWorldSetting());
-        assertEquals("林昭，沉物打捞人", setting.getProtagonist());
-        assertEquals("让读者体验解谜快感", setting.getChapterGoal());
-        // 世界 ID 必须带上：它是系列共享向量集合的键
-        assertEquals("novel-shared-01", setting.getWorldId());
-        // 续写标记与 sticky 的总章数上限是这条端点存在的理由，缺一个前端都跑不通
-        assertEquals("20260902-story-0001", setting.getResumeStoryDir());
-        assertEquals(150, setting.getMaxChapterCount());
-        // 批次大小是"这次写几章"，与历史无关：给默认值而不是沿用 bible 里的旧值
-        assertEquals(5, setting.getChapterCount());
-    }
-
-    @Test
-    void resume_namesMissingBibleFieldsInsteadOfLettingSubmitFailBlindly() throws Exception {
-        Path storyDir = Paths.get("/workspace/20260902-story-0001");
-        when(storyRepository.resolveStoryDirectory("20260902-story-0001")).thenReturn(storyDir);
-        // 老故事的 bible 可能缺字段，而入参校验是一条 or 链、不报具体字段
-        when(storyRepository.readStoryBible(storyDir)).thenReturn("小说名称: 只有书名\n");
-        when(storyRepository.readChapterNumbers(storyDir)).thenReturn(List.of());
-        when(storyRepository.readStoryMeta(storyDir)).thenReturn(null);
-
-        StoryResumeDTO dto = controller.resume("20260902-story-0001");
-
-        assertEquals("只有书名", dto.getNovelTitle());
-        assertNull(dto.getLatestChapterNo());
-        assertEquals(1, dto.getNextChapterNo(), "还没有章节时应从第 1 章开始");
-        assertEquals(0, dto.getExistingChapterCount());
-        assertTrue(dto.getMissingFields().contains("语气基调"));
-        assertTrue(dto.getMissingFields().contains("章节目标"));
-        assertNull(dto.getSetting().getMaxChapterCount(), "读不到 story-meta 就不设上限，不要凭空补默认值");
-    }
-
-    @Test
-    void resume_toleratesUnreadableStoryMeta() throws Exception {
-        Path storyDir = Paths.get("/workspace/20260902-story-0001");
-        when(storyRepository.resolveStoryDirectory("20260902-story-0001")).thenReturn(storyDir);
-        when(storyRepository.readStoryBible(storyDir)).thenReturn(RESUME_BIBLE);
-        when(storyRepository.readChapterNumbers(storyDir)).thenReturn(List.of(1));
-        when(storyRepository.readStoryMeta(storyDir)).thenThrow(new IllegalStateException("meta 损坏"));
-
-        StoryResumeDTO dto = controller.resume("20260902-story-0001");
-
-        // 总章数读不到只是"不设上限"，不该让整条续写路径崩掉
-        assertNull(dto.getSetting().getMaxChapterCount());
-        assertEquals(2, dto.getNextChapterNo());
-    }
-
-    @Test
-    void resume_rejectsUnknownStoryDirWith404() throws Exception {
-        when(storyRepository.resolveStoryDirectory("bad")).thenThrow(new IllegalStateException("不存在"));
-
-        ResponseStatusException ex = assertThrows(ResponseStatusException.class, () -> controller.resume("bad"));
-
-        assertEquals(HttpStatus.NOT_FOUND, ex.getStatusCode());
-    }
-
-    @Test
-    void deleteStory_removesDirectoryAndClearsMemoryCollection() throws Exception {
-        Path storyDir = Paths.get("/workspace/20260902-story-0001");
-        when(storyRepository.resolveStoryDirectory("20260902-story-0001")).thenReturn(storyDir);
-        when(jobRegistry.isActiveForStory("20260902-story-0001")).thenReturn(false);
-
-        StoryManageController.DeleteStoryResult result = controller.deleteStory("20260902-story-0001");
-
-        assertTrue(result.deleted());
-        assertEquals("20260902-story-0001", result.storyDirName());
-        // 先删目录、再清集合：两者都必须发生
-        verify(storyRepository).deleteStory(storyDir);
-        verify(storyMemoryService).deleteStoryMemory(storyDir);
-    }
-
-    @Test
-    void deleteStory_rejectsActiveJobWith409_andTouchesNothing() throws Exception {
-        when(jobRegistry.isActiveForStory("20260902-story-0001")).thenReturn(true);
-
-        ResponseStatusException ex = assertThrows(ResponseStatusException.class,
-                () -> controller.deleteStory("20260902-story-0001"));
-
-        assertEquals(HttpStatus.CONFLICT, ex.getStatusCode());
-        // 守卫先于删除：有活动作业时不得删目录、不得清集合
-        verify(storyRepository, never()).deleteStory(any());
-        verify(storyMemoryService, never()).deleteStoryMemory(any());
-    }
-
-    @Test
-    void deleteStory_survivesMemoryClearFailure() throws Exception {
-        Path storyDir = Paths.get("/workspace/20260902-story-0001");
-        when(storyRepository.resolveStoryDirectory("20260902-story-0001")).thenReturn(storyDir);
-        when(jobRegistry.isActiveForStory("20260902-story-0001")).thenReturn(false);
-        // 集合清理内部 fail-soft（只 WARN 不抛）；即便它抛，删除结果也不该变红——
-        // 本用例锁定"目录删除是主体"这一语义
-        org.mockito.Mockito.doNothing().when(storyMemoryService).deleteStoryMemory(storyDir);
-
-        StoryManageController.DeleteStoryResult result = controller.deleteStory("20260902-story-0001");
-
-        assertTrue(result.deleted());
-        verify(storyRepository).deleteStory(storyDir);
+        verify(storyManageService, never()).createCheckpoint(any(), any());
     }
 }

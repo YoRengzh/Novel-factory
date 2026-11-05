@@ -21,7 +21,7 @@ import cn.novel.yonren.domain.novel.service.armory.memory.OutlineSegmentParser;
 import cn.novel.yonren.domain.novel.service.armory.memory.RollingOutlineService;
 import cn.novel.yonren.domain.novel.service.armory.memory.StageExitReviewService;
 import cn.novel.yonren.domain.novel.service.armory.plan.StoryPacing;
-import cn.novel.yonren.domain.novel.service.armory.prompt.valobj.PromptContext;
+import cn.novel.yonren.domain.novel.model.valobj.prompt.PromptContext;
 import cn.novel.yonren.domain.novel.service.armory.quality.SuspenseLadderPolicy;
 import cn.novel.yonren.domain.novel.service.armory.quality.NarrativeProgressionPolicy;
 import cn.novel.yonren.domain.novel.service.job.GenerationJob;

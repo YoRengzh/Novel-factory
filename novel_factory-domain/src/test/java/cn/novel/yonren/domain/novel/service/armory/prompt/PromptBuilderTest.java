@@ -7,9 +7,9 @@ import cn.novel.yonren.domain.novel.service.armory.prompt.strategy.HardConstrain
 import cn.novel.yonren.domain.novel.service.armory.prompt.strategy.HookTechniqueStrategy;
 import cn.novel.yonren.domain.novel.service.armory.prompt.strategy.PerspectiveDisciplineStrategy;
 import cn.novel.yonren.domain.novel.service.armory.prompt.strategy.PlotStructureStrategy;
-import cn.novel.yonren.domain.novel.service.armory.prompt.valobj.PromptContext;
-import cn.novel.yonren.domain.novel.service.armory.prompt.valobj.PromptRule;
-import cn.novel.yonren.types.enums.ChapterTypeVO;
+import cn.novel.yonren.domain.novel.model.valobj.prompt.PromptContext;
+import cn.novel.yonren.domain.novel.model.valobj.prompt.PromptRule;
+import cn.novel.yonren.types.enums.ChapterType;
 import cn.novel.yonren.types.enums.PromptScene;
 import cn.novel.yonren.types.exception.AppException;
 import org.junit.jupiter.api.Test;
@@ -151,7 +151,7 @@ class PromptBuilderTest {
                 "计划场景：硬约束/数量目标/结构规则必须加载到");
 
         PromptContext hookCtx = PromptContext.builder().theme("都市重生").style("年代成长")
-                .chapterType(ChapterTypeVO.CLIMAX).build();
+                .chapterType(ChapterType.CLIMAX).build();
         assertFalse(builder.buildSystemMessage(PromptScene.CHAPTER_CONTENT, hookCtx).isBlank(),
                 "正文场景：去 AI 味与视角纪律（System 位）必须加载到");
         assertFalse(builder.buildUserTail(PromptScene.CHAPTER_CONTENT, hookCtx).isBlank(),

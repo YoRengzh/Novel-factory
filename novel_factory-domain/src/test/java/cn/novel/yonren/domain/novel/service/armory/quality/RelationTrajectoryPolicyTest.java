@@ -13,8 +13,7 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
- * 关系轨迹回灌测试：11 章实测暴露"配角全是工具人、主角全程单机"后新增——
- * 与地点问题同根（观测不到就不会被修），RELATION 只记录不回灌等于没有。
+ * 关系轨迹回灌测试：11 章实测暴露"配角全是工具人、主角全程单机"后新增——* 与地点问题同根（观测不到就不会被修），RELATION 只记录不回灌等于没有。
  */
 class RelationTrajectoryPolicyTest {
 

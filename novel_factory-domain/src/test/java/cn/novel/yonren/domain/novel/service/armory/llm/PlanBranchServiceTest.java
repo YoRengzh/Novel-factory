@@ -3,9 +3,9 @@ package cn.novel.yonren.domain.novel.service.armory.llm;
 import cn.novel.yonren.domain.novel.adapter.llm.LlmGateway;
 import cn.novel.yonren.domain.novel.model.valobj.LlmCall;
 import cn.novel.yonren.domain.novel.model.valobj.StoryVO;
-import cn.novel.yonren.domain.novel.model.valobj.properties.StoryProperties;
+import cn.novel.yonren.domain.novel.config.StoryProperties;
 import cn.novel.yonren.domain.novel.service.armory.plan.ChapterPlanPromptService;
-import cn.novel.yonren.domain.novel.service.armory.prompt.valobj.PromptContext;
+import cn.novel.yonren.domain.novel.model.valobj.prompt.PromptContext;
 import cn.novel.yonren.domain.novel.service.job.GenerationJob;
 import cn.novel.yonren.types.exception.AppException;
 import org.junit.jupiter.api.BeforeEach;
@@ -98,8 +98,7 @@ class PlanBranchServiceTest {
 
     @Test
     void exploreAndPick_stripsChaptersSchemaFromBranchPrompts() {
-        // 规划 prompt 尾部携带 chapters schema 指令块时，分支调用必须剥离它——
-        // 否则显式 schema 是最强格式信号，模型必然无视"只输出方向"而输出完整章节计划
+        // 规划 prompt 尾部携带 chapters schema 指令块时，分支调用必须剥离它——// 否则显式 schema 是最强格式信号，模型必然无视"只输出方向"而输出完整章节计划
         String planPrompt = "规划正文若干要求\n\n" + ChapterPlanPromptService.PLAN_SCHEMA_MARKER
                 + ":\n{\"chapters\":[...]}";
         when(llmInvokeService.invoke(any(), any(), any(), anyString(), anyMap()))
@@ -161,7 +160,7 @@ class PlanBranchServiceTest {
     /**
      * **回归**：P1 上线后分支推演连续两个作业"进取线解析失败"。
      *
-     * <p>根因：`stripPlanSchema` 原先只从 schema 标记截尾，而「8.2 章级主线推进要求」与
+     * 根因：`stripPlanSchema` 原先只从 schema 标记截尾，而「8.2 章级主线推进要求」与
      * 「【章级主线推进】块」都在 schema **之前**，于是残留。那块是"第16章：… / 第17章：…"的
      * 逐章清单——比 schema 更具体——模型于是交回**章节计划数组**而不是分支推演要的方向对象
      * （日志里 4 条 {@code BeanOutputConverter} 解析失败的原始输出正是带 mainLineAdvance 的章节计划）。

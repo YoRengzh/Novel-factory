@@ -4,9 +4,9 @@ import cn.novel.yonren.domain.novel.adapter.llm.EmbeddingGateway;
 import cn.novel.yonren.domain.novel.adapter.repository.VectorStore;
 import cn.novel.yonren.domain.novel.model.valobj.ScoredVectorPoint;
 import cn.novel.yonren.domain.novel.model.valobj.StoryVO;
-import cn.novel.yonren.domain.novel.model.valobj.properties.ReferenceSelectorProperties;
-import cn.novel.yonren.domain.novel.service.armory.prompt.valobj.PromptContext;
-import cn.novel.yonren.types.enums.ChapterTypeVO;
+import cn.novel.yonren.domain.novel.config.ReferenceSelectorProperties;
+import cn.novel.yonren.domain.novel.model.valobj.prompt.PromptContext;
+import cn.novel.yonren.types.enums.ChapterType;
 import cn.novel.yonren.types.enums.PromptScene;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -104,7 +104,7 @@ class VectorReferenceRetrieverTest {
         when(vectorStore.search(anyString(), any(), anyInt())).thenReturn(List.of());
 
         PromptContext ctx = PromptContext.builder().theme("悬疑推理").style("刑侦")
-                .chapterNo(3).totalChapters(10).chapterType(ChapterTypeVO.NORMAL)
+                .chapterNo(3).totalChapters(10).chapterType(ChapterType.NORMAL)
                 .chapterBrief("真相初现；关键事件：翻案立案").build();
         retriever.retrieve(module(), PromptScene.CHAPTER_CONTENT, ctx);
 
@@ -122,7 +122,7 @@ class VectorReferenceRetrieverTest {
 
     private PromptContext contentCtx() {
         return PromptContext.builder().theme("悬疑推理").style("刑侦")
-                .chapterNo(3).totalChapters(10).chapterType(ChapterTypeVO.NORMAL).build();
+                .chapterNo(3).totalChapters(10).chapterType(ChapterType.NORMAL).build();
     }
 
     private StoryVO.Module module() {

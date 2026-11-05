@@ -1,6 +1,6 @@
 package cn.novel.yonren.domain.novel.service.armory.prompt;
 
-import cn.novel.yonren.domain.novel.model.valobj.properties.PromptBudgetProperties;
+import cn.novel.yonren.domain.novel.config.PromptBudgetProperties;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.lang3.StringUtils;

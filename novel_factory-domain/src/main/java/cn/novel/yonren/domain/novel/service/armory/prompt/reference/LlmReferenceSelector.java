@@ -1,9 +1,13 @@
 package cn.novel.yonren.domain.novel.service.armory.prompt.reference;
 
+import cn.novel.yonren.domain.novel.model.valobj.prompt.ReferenceSelection;
+
+import cn.novel.yonren.domain.novel.model.valobj.prompt.ReferenceIndexEntry;
+
 import cn.novel.yonren.domain.novel.adapter.llm.LlmGateway;
 import cn.novel.yonren.domain.novel.model.valobj.LlmCall;
 import cn.novel.yonren.domain.novel.model.valobj.StoryVO;
-import cn.novel.yonren.domain.novel.service.armory.prompt.valobj.PromptContext;
+import cn.novel.yonren.domain.novel.model.valobj.prompt.PromptContext;
 import cn.novel.yonren.types.enums.ModelScene;
 import cn.novel.yonren.types.enums.PromptScene;
 import com.fasterxml.jackson.core.json.JsonReadFeature;

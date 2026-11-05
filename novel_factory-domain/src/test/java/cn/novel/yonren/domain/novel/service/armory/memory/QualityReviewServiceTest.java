@@ -6,7 +6,7 @@ import cn.novel.yonren.domain.novel.model.entity.ChapterContentEntity;
 import cn.novel.yonren.domain.novel.model.entity.ChapterSummaryEntity;
 import cn.novel.yonren.domain.novel.model.valobj.LlmCall;
 import cn.novel.yonren.domain.novel.model.valobj.StoryVO;
-import cn.novel.yonren.domain.novel.model.valobj.properties.QualityReviewProperties;
+import cn.novel.yonren.domain.novel.config.QualityReviewProperties;
 import cn.novel.yonren.types.enums.ModelScene;
 import com.alibaba.fastjson2.JSON;
 import com.alibaba.fastjson2.JSONArray;
@@ -38,7 +38,7 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 /**
- * 全书质量评分测试（2026-09-27）：
+ * 全书质量评分测试：
  * 抽样均匀性、按窗口触发的门禁、趋势行内容、以及**全程 fail-soft**（模型异常/输出不可解析都不得抛出）。
  */
 class QualityReviewServiceTest {
@@ -294,7 +294,7 @@ class QualityReviewServiceTest {
         assertNotNull(new com.fasterxml.jackson.databind.ObjectMapper().readTree(line.getValue()));
     }
 
-    // ==================== 主观分与机械指标的背离自检（2026-10-10） ====================
+    // ==================== 主观分与机械指标的背离自检 ====================
 
     /** 模型给 dialogue=8（优秀档）的那版输出 */
     private static final String REVIEW_JSON_DIALOGUE_8 = "{\"reviews\":[{\"personaConsistency\":8,\"prose\":8,"
@@ -318,9 +318,8 @@ class QualityReviewServiceTest {
     /**
      * 背离必须留痕：机械判对白坍缩、主观却给 8 分以上。
      *
-     * <p>实测样本：第 96 章机械密度 4.4 次/千字（劣化线 6.0），而本服务给它 dialogue=8、问题 0 条。
-     * 分数本身只是读数，但"两把尺子对同一章给出相反结论"这件事必须落盘——
-     * 它说明该维度上主观尺子没有分辨力，不能拿它去驱动规划层调整。
+     * 实测样本：第 96 章机械密度 4.4 次/千字（劣化线 6.0），而本服务给它 dialogue=8、问题 0 条。
+     * 分数本身只是读数，但"两把尺子对同一章给出相反结论"这件事必须落盘——* 它说明该维度上主观尺子没有分辨力，不能拿它去驱动规划层调整。
      */
     @Test
     void divergenceBetweenSubjectiveAndMechanical_isRecorded() throws Exception {

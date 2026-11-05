@@ -1,5 +1,8 @@
 package cn.novel.yonren.domain.novel.service.armory.draft;
 
+import cn.novel.yonren.api.dto.SettingDraftRequestDTO;
+import cn.novel.yonren.api.dto.SettingDraftResponseDTO;
+import cn.novel.yonren.domain.novel.config.StoryProperties;
 import cn.novel.yonren.domain.novel.model.valobj.StoryVO;
 import cn.novel.yonren.domain.novel.service.armory.llm.LlmInvokeService;
 import cn.novel.yonren.types.enums.PromptScene;
@@ -46,7 +49,7 @@ class SettingDraftServiceTest {
     /** 完全不是 JSON（模型拒答/串到闲聊）：JsonRepair 也救不回来 */
     private static final String NOT_JSON = "抱歉，我无法按要求生成这份设定集。";
 
-    /** 可解析但 outline 为空 —— 属于"缺失字段"，应触发重试而非直接采用 */
+    /** 可解析但 outline 为空 ——属于"缺失字段"，应触发重试而非直接采用 */
     private static final String MISSING_OUTLINE = "{\"novelTitle\":\"示例书\",\"style\":\"冷硬悬疑，节奏紧\","
             + "\"worldSetting\":\"模型给的世界观\",\"perspective\":\"第三人称限知视角\",\"targetAudience\":\"男频\","
             + "\"tone\":\"压抑里留一线希望\",\"protagonist\":\"模型给的主人公\","
@@ -63,6 +66,7 @@ class SettingDraftServiceTest {
     @BeforeEach
     void setUp() {
         MockitoAnnotations.openMocks(this);
+        settingDraftService.setStoryProperties(new StoryProperties());
     }
 
     // ==================== 全量生成 ====================
@@ -254,8 +258,8 @@ class SettingDraftServiceTest {
 
         settingDraftService.draft(STORY_VO, request(null, null));
 
-        ArgumentCaptor<cn.novel.yonren.domain.novel.service.armory.prompt.valobj.PromptContext> ctxCaptor =
-                ArgumentCaptor.forClass(cn.novel.yonren.domain.novel.service.armory.prompt.valobj.PromptContext.class);
+        ArgumentCaptor<cn.novel.yonren.domain.novel.model.valobj.prompt.PromptContext> ctxCaptor =
+                ArgumentCaptor.forClass(cn.novel.yonren.domain.novel.model.valobj.prompt.PromptContext.class);
         verify(llmInvokeService).invoke(any(), any(), ctxCaptor.capture(), anyString(), any());
         // theme/style 进 PromptContext 才能让题材资料策略（GenreMaterialStrategy）路由到对应题材资料包
         assertEquals("都市异能", ctxCaptor.getValue().getTheme());
@@ -289,4 +293,74 @@ class SettingDraftServiceTest {
         return captor.getAllValues();
     }
 
+    // ==================== DTO 门面（分层重构：从 trigger 测试搬运） ====================
+
+    @Test
+    void draftDto_mapsEveryDomainFieldIntoResponse() {
+        stubLlm(FULL_DRAFT);
+        SettingDraftRequestDTO request = new SettingDraftRequestDTO();
+        request.setTheme("都市异能");
+
+        SettingDraftResponseDTO response = settingDraftService.draftDto(request);
+
+        assertEquals("都市异能", response.getTheme());
+        assertEquals("示例书", response.getNovelTitle());
+        assertEquals("冷硬悬疑，节奏紧", response.getStyle());
+        assertEquals("模型给的世界观", response.getWorldSetting());
+        assertEquals("第三人称限知视角", response.getPerspective());
+        assertEquals("男频", response.getTargetAudience());
+        assertEquals("压抑里留一线希望", response.getTone());
+        assertEquals("模型给的主人公", response.getProtagonist());
+        assertEquals("模型给的故事概述", response.getOutline());
+        assertEquals("让读者体验层层解谜的快感", response.getChapterGoal());
+        assertEquals(180, response.getTotalChapters());
+        assertEquals("以十七年前旧案牵引主线", response.getRationale());
+        // 服务语义：空 targets 归一为全部（Result.regenerated 的 javadoc）——本次全量生成的字段清单
+        assertEquals(List.of("novelTitle", "style", "worldSetting", "perspective", "targetAudience",
+                "tone", "protagonist", "outline", "chapterGoal", "totalChapters"), response.getRegenerated());
+    }
+
+    @Test
+    void draftDto_passesTargetsAndPreviousThroughVerbatim() {
+        stubLlm(FULL_DRAFT);
+        SettingDraftService spy = org.mockito.Mockito.spy(settingDraftService);
+        SettingDraftRequestDTO request = new SettingDraftRequestDTO();
+        request.setTheme("都市异能");
+        request.setExtraHints("不要系统流");
+        request.setTargets(List.of("outline"));
+        request.setPrevious(Map.of("worldSetting", "既有世界观"));
+
+        spy.draftDto(request);
+
+        ArgumentCaptor<SettingDraftService.DraftRequest> captor =
+                ArgumentCaptor.forClass(SettingDraftService.DraftRequest.class);
+        org.mockito.Mockito.verify(spy).draft(any(), captor.capture());
+        SettingDraftService.DraftRequest forwarded = captor.getValue();
+        assertEquals("都市异能", forwarded.theme());
+        assertEquals("不要系统流", forwarded.extraHints());
+        assertEquals(List.of("outline"), forwarded.targets());
+        assertEquals("既有世界观", forwarded.previous().get("worldSetting"));
+    }
+
+    @Test
+    void draftDto_carriesNullTargetsAndPreviousWithoutInventingDefaults() {
+        stubLlm(FULL_DRAFT);
+        SettingDraftService spy = org.mockito.Mockito.spy(settingDraftService);
+        SettingDraftRequestDTO request = new SettingDraftRequestDTO();
+        request.setTheme("悬疑推理");
+
+        spy.draftDto(request);
+
+        ArgumentCaptor<SettingDraftService.DraftRequest> captor =
+                ArgumentCaptor.forClass(SettingDraftService.DraftRequest.class);
+        org.mockito.Mockito.verify(spy).draft(any(), captor.capture());
+        // "全部重生成"要用 null 表达，不能在门面层擅自补一个全字段列表
+        assertNull(captor.getValue().targets());
+        assertNull(captor.getValue().previous());
+    }
+
+    @Test
+    void draftDto_withoutTheme_rejectedAsIllegalParameter() {
+        assertThrows(AppException.class, () -> settingDraftService.draftDto(new SettingDraftRequestDTO()));
+    }
 }

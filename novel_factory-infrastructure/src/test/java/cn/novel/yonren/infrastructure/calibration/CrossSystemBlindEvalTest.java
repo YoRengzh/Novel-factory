@@ -5,7 +5,7 @@ import cn.novel.yonren.domain.novel.model.valobj.StoryVO;
 import cn.novel.yonren.domain.novel.service.armory.LlmRuntimeConfig;
 import cn.novel.yonren.domain.novel.service.job.JobRegistry;
 import cn.novel.yonren.domain.novel.service.job.LlmBudgetFuse;
-import cn.novel.yonren.domain.novel.model.valobj.properties.StoryProperties;
+import cn.novel.yonren.domain.novel.config.StoryProperties;
 import cn.novel.yonren.infrastructure.gateway.SpringAiLlmGateway;
 import cn.novel.yonren.types.enums.ModelScene;
 import com.fasterxml.jackson.core.json.JsonReadFeature;

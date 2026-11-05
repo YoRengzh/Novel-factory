@@ -1,5 +1,7 @@
 package cn.novel.yonren.domain.novel.service.armory.prompt.reference;
 
+import cn.novel.yonren.domain.novel.model.valobj.prompt.ReferenceIndexEntry;
+
 import cn.novel.yonren.types.enums.PromptScene;
 import org.junit.jupiter.api.Test;
 
@@ -13,7 +15,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 /**
  * 资料分组测试：分组决定「哪些场景的索引里出现这份资料」。
  *
- * <p>动机：58 份资料平铺时 ref-select 要在长表里挑 3 份，选准率随条目数下降；
+ * 动机：58 份资料平铺时 ref-select 要在长表里挑 3 份，选准率随条目数下降；
  * 按场景先筛到十几二十行能显著收窄选择范围。这里钉住三条不变量：
  * ① 每份资料必有所属组（不能漏检）；② 每个场景至少能看见一组；
  * ③ 跨场景资料（技法类）不会因为分组而对正文场景消失。

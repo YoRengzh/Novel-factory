@@ -10,9 +10,9 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
- * 悬念档位推进规则测试（2026-09-22）。
+ * 悬念档位推进规则测试。
  *
- * <p>反例直接用真实病症：某批 6 章每章都是"发现线索 → 自我否定 → 回到原点"，
+ * 反例直接用真实病症：某批 6 章每章都是"发现线索 → 自我否定 → 回到原点"，
  * 档位始终趴在"一方起疑"上，而规划层还把它写成了要"确立"的叙事范式。
  * 档位表内容换成任何题材都不影响规则——这里用的是通用五档。
  */
@@ -290,7 +290,7 @@ class SuspenseLadderPolicyTest {
         assertEquals(1, SuspenseLadderPolicy.duplicateBeatViolations(beats).size());
     }
 
-    /** 同档位但写出了各章独有推进 —— 不违规（这是修复后期望的形态） */
+    /** 同档位但写出了各章独有推进 ——不违规（这是修复后期望的形态） */
     @Test
     @DisplayName("duplicateBeat：同档但描述不同不违规")
     void duplicateBeat_sameRungDifferentTextPasses() {

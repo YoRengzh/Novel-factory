@@ -4,7 +4,7 @@ import cn.novel.yonren.domain.novel.adapter.repository.IStoryRepository;
 import cn.novel.yonren.domain.novel.model.entity.ChapterPlanItemEntity;
 import cn.novel.yonren.domain.novel.model.entity.ChapterSummaryEntity;
 import cn.novel.yonren.domain.novel.model.valobj.StoryVO;
-import cn.novel.yonren.domain.novel.model.valobj.properties.StoryProperties;
+import cn.novel.yonren.domain.novel.config.StoryProperties;
 import cn.novel.yonren.domain.novel.service.armory.memory.ChapterMemoryService;
 import cn.novel.yonren.domain.novel.service.armory.memory.ChapterSummaryService;
 import cn.novel.yonren.domain.novel.service.armory.memory.StoryMemoryService;
@@ -139,7 +139,7 @@ class ChapterEditServiceTest {
     /**
      * 空正文在回流前即拒绝（不烧一次模型调用）。
      *
-     * <p><b>语义已变更</b>：旧实现用 1500 字质量线拦回流，但那同时卡住了人工编辑保存
+     * 语义已变更：旧实现用 1500 字质量线拦回流，但那同时卡住了人工编辑保存
      * （整章不足 1500 字就改不了）。现在保存与回流只要求非空，1500 仍是生成路径的门禁。
      */
     @Test

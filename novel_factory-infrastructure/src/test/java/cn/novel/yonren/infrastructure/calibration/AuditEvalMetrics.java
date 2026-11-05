@@ -12,14 +12,14 @@ import java.util.Set;
 /**
  * 审计噪声度量（纯函数，docs/enhancement-plan.md A1）：对同一样本的 k 次审计结果算稳定性指标。
  *
- * <p>四个指标，各对应一种"抽卡"症状：
- * <ul>
- *   <li><b>issue 条数 CV</b>——总量抖动（变异系数，0=完全稳定）；</li>
- *   <li><b>BLOCKING 出现率</b>——k 次里有多少次判出 BLOCKING；率不在 {0,1} 即翻车（出现率漂移）；</li>
- *   <li><b>结果集合 Jaccard</b>——按 (dimension,severity) 多重集的成对均值，衡量"找出的问题集合"
- *       稳不稳（description 措辞逐次漂移，不参与匹配）；</li>
- *   <li><b>分维度计数 CV</b>——哪个维度最抖，A2 目录化优先级据此排序。</li>
- * </ul>
+ * 四个指标，各对应一种"抽卡"症状：
+ *
+ *   issue 条数 CV——总量抖动（变异系数，0=完全稳定）；
+ *   BLOCKING 出现率——k 次里有多少次判出 BLOCKING；率不在 {0,1} 即翻车（出现率漂移）；
+ *   结果集合 Jaccard——按 (dimension,severity) 多重集的成对均值，衡量"找出的问题集合"
+ *       稳不稳（description 措辞逐次漂移，不参与匹配）；
+ *   分维度计数 CV——哪个维度最抖，A2 目录化优先级据此排序。
+ *
  * 空结果（两次都 0 条）视为完全稳定：Jaccard=1.0、CV=0——"都没发现问题"是可复现结论。
  */
 final class AuditEvalMetrics {

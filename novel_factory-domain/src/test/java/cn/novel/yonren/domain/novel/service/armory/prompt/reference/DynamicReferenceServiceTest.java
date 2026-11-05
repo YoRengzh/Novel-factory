@@ -1,12 +1,14 @@
 package cn.novel.yonren.domain.novel.service.armory.prompt.reference;
 
+import cn.novel.yonren.domain.novel.model.valobj.prompt.ReferenceIndexEntry;
+
 import cn.novel.yonren.domain.novel.model.valobj.StoryVO;
-import cn.novel.yonren.domain.novel.model.valobj.properties.ReferenceSelectorProperties;
+import cn.novel.yonren.domain.novel.config.ReferenceSelectorProperties;
 import cn.novel.yonren.domain.novel.service.armory.LlmRuntimeConfig;
 import cn.novel.yonren.domain.novel.service.armory.prompt.PromptRuleFileLoader;
-import cn.novel.yonren.domain.novel.service.armory.prompt.valobj.PromptContext;
-import cn.novel.yonren.domain.novel.service.armory.prompt.valobj.PromptRule;
-import cn.novel.yonren.types.enums.ChapterTypeVO;
+import cn.novel.yonren.domain.novel.model.valobj.prompt.PromptContext;
+import cn.novel.yonren.domain.novel.model.valobj.prompt.PromptRule;
+import cn.novel.yonren.types.enums.ChapterType;
 import cn.novel.yonren.types.enums.PromptScene;
 import cn.novel.yonren.types.exception.AppException;
 import org.junit.jupiter.api.BeforeEach;
@@ -87,8 +89,8 @@ class DynamicReferenceServiceTest {
         when(selector.select(any(), any(), any(), anyList()))
                 .thenReturn(List.of("dialogue-writing"));
 
-        service.selectAsRules(null, PromptScene.CHAPTER_CONTENT, contentCtx(ChapterTypeVO.NORMAL));
-        service.selectAsRules(null, PromptScene.CHAPTER_CONTENT, contentCtx(ChapterTypeVO.NORMAL));
+        service.selectAsRules(null, PromptScene.CHAPTER_CONTENT, contentCtx(ChapterType.NORMAL));
+        service.selectAsRules(null, PromptScene.CHAPTER_CONTENT, contentCtx(ChapterType.NORMAL));
 
         // 同 场景+题材+风格+章节类型+模型+索引 只调一次选择器
         verify(selector, times(1)).select(any(), any(), any(), anyList());
@@ -99,8 +101,8 @@ class DynamicReferenceServiceTest {
         when(selector.select(any(), any(), any(), anyList()))
                 .thenReturn(List.of("dialogue-writing"));
 
-        service.selectAsRules(null, PromptScene.CHAPTER_CONTENT, contentCtx(ChapterTypeVO.NORMAL));
-        service.selectAsRules(null, PromptScene.CHAPTER_CONTENT, contentCtx(ChapterTypeVO.CLIMAX));
+        service.selectAsRules(null, PromptScene.CHAPTER_CONTENT, contentCtx(ChapterType.NORMAL));
+        service.selectAsRules(null, PromptScene.CHAPTER_CONTENT, contentCtx(ChapterType.CLIMAX));
 
         verify(selector, times(2)).select(any(), any(), any(), anyList());
     }
@@ -110,10 +112,10 @@ class DynamicReferenceServiceTest {
         when(selector.select(any(), any(), any(), anyList()))
                 .thenReturn(List.of("dialogue-writing"));
 
-        service.selectAsRules(null, PromptScene.CHAPTER_CONTENT, contentCtx(ChapterTypeVO.NORMAL));
+        service.selectAsRules(null, PromptScene.CHAPTER_CONTENT, contentCtx(ChapterType.NORMAL));
         service.selectAsRules(null, PromptScene.CHAPTER_CONTENT, PromptContext.builder()
                 .theme("都市异能").style("刑侦")
-                .chapterNo(3).totalChapters(10).chapterType(ChapterTypeVO.NORMAL).build());
+                .chapterNo(3).totalChapters(10).chapterType(ChapterType.NORMAL).build());
 
         verify(selector, times(2)).select(any(), any(), any(), anyList());
     }
@@ -123,9 +125,9 @@ class DynamicReferenceServiceTest {
         when(selector.select(any(), any(), any(), anyList()))
                 .thenReturn(List.of("dialogue-writing"));
 
-        service.selectAsRules(null, PromptScene.CHAPTER_CONTENT, contentCtx(ChapterTypeVO.NORMAL, null));
-        service.selectAsRules(null, PromptScene.CHAPTER_CONTENT, contentCtx(ChapterTypeVO.NORMAL, "揭开古物来历"));
-        service.selectAsRules(null, PromptScene.CHAPTER_CONTENT, contentCtx(ChapterTypeVO.NORMAL, "揭开古物来历"));
+        service.selectAsRules(null, PromptScene.CHAPTER_CONTENT, contentCtx(ChapterType.NORMAL, null));
+        service.selectAsRules(null, PromptScene.CHAPTER_CONTENT, contentCtx(ChapterType.NORMAL, "揭开古物来历"));
+        service.selectAsRules(null, PromptScene.CHAPTER_CONTENT, contentCtx(ChapterType.NORMAL, "揭开古物来历"));
 
         // 章节要点参与缓存键：不同本章要点各选一次，同要点命中缓存
         verify(selector, times(2)).select(any(), any(), any(), anyList());
@@ -136,8 +138,8 @@ class DynamicReferenceServiceTest {
         when(selector.select(any(), any(), any(), anyList()))
                 .thenReturn(List.of("dialogue-writing"));
 
-        service.selectAsRules(module("https://api-a", "model-1"), PromptScene.CHAPTER_CONTENT, contentCtx(ChapterTypeVO.NORMAL));
-        service.selectAsRules(module("https://api-a", "model-2"), PromptScene.CHAPTER_CONTENT, contentCtx(ChapterTypeVO.NORMAL));
+        service.selectAsRules(module("https://api-a", "model-1"), PromptScene.CHAPTER_CONTENT, contentCtx(ChapterType.NORMAL));
+        service.selectAsRules(module("https://api-a", "model-2"), PromptScene.CHAPTER_CONTENT, contentCtx(ChapterType.NORMAL));
 
         verify(selector, times(2)).select(any(), any(), any(), anyList());
     }
@@ -163,10 +165,10 @@ class DynamicReferenceServiceTest {
         when(selector.select(any(), any(), any(), anyList()))
                 .thenReturn(List.of("dialogue-writing"));
 
-        service.selectAsRules(null, PromptScene.CHAPTER_CONTENT, contentCtx(ChapterTypeVO.NORMAL));
-        service.selectAsRules(null, PromptScene.CHAPTER_CONTENT, contentCtx(ChapterTypeVO.CLIMAX));
+        service.selectAsRules(null, PromptScene.CHAPTER_CONTENT, contentCtx(ChapterType.NORMAL));
+        service.selectAsRules(null, PromptScene.CHAPTER_CONTENT, contentCtx(ChapterType.CLIMAX));
         // 容量 1：NORMAL 键已被淘汰，重新请求需再次选择
-        service.selectAsRules(null, PromptScene.CHAPTER_CONTENT, contentCtx(ChapterTypeVO.NORMAL));
+        service.selectAsRules(null, PromptScene.CHAPTER_CONTENT, contentCtx(ChapterType.NORMAL));
 
         verify(selector, times(3)).select(any(), any(), any(), anyList());
     }
@@ -176,7 +178,7 @@ class DynamicReferenceServiceTest {
         when(selector.select(any(), any(), any(), anyList()))
                 .thenReturn(List.of("dialogue-writing"));
 
-        List<PromptRule> rules = service.selectAsRules(null, PromptScene.CHAPTER_CONTENT, contentCtx(ChapterTypeVO.NORMAL));
+        List<PromptRule> rules = service.selectAsRules(null, PromptScene.CHAPTER_CONTENT, contentCtx(ChapterType.NORMAL));
 
         assertEquals(1, rules.size());
         assertEquals("ref-dialogue-writing", rules.get(0).getName());
@@ -227,7 +229,7 @@ class DynamicReferenceServiceTest {
         when(retriever.retrieve(any(), any(), any()))
                 .thenReturn(List.of("dialogue-writing"));
 
-        List<PromptRule> rules = service.selectAsRules(null, PromptScene.CHAPTER_CONTENT, contentCtx(ChapterTypeVO.NORMAL));
+        List<PromptRule> rules = service.selectAsRules(null, PromptScene.CHAPTER_CONTENT, contentCtx(ChapterType.NORMAL));
 
         assertEquals(1, rules.size());
         assertEquals("ref-dialogue-writing", rules.get(0).getName());
@@ -242,7 +244,7 @@ class DynamicReferenceServiceTest {
 
         // 快速失败：向量链路任何失败（欠费/向量库/网络）都终止作业，绝不降级 LLM 选择
         AppException ex = assertThrows(AppException.class,
-                () -> service.selectAsRules(null, PromptScene.CHAPTER_CONTENT, contentCtx(ChapterTypeVO.NORMAL)));
+                () -> service.selectAsRules(null, PromptScene.CHAPTER_CONTENT, contentCtx(ChapterType.NORMAL)));
 
         assertTrue(ex.getInfo().contains("不降级"));
         verify(selector, never()).select(any(), any(), any(), anyList());
@@ -253,11 +255,11 @@ class DynamicReferenceServiceTest {
         return PromptContext.builder().theme("悬疑推理").style("刑侦").totalChapters(10).build();
     }
 
-    private PromptContext contentCtx(ChapterTypeVO chapterType) {
+    private PromptContext contentCtx(ChapterType chapterType) {
         return contentCtx(chapterType, null);
     }
 
-    private PromptContext contentCtx(ChapterTypeVO chapterType, String chapterBrief) {
+    private PromptContext contentCtx(ChapterType chapterType, String chapterBrief) {
         return PromptContext.builder().theme("悬疑推理").style("刑侦")
                 .chapterNo(3).totalChapters(10).chapterType(chapterType).chapterBrief(chapterBrief).build();
     }

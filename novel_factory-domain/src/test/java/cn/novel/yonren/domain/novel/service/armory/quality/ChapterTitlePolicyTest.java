@@ -15,7 +15,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 /**
  * 章节标题唯一性判据测试。
  *
- * <p>此前的空白：全书标题唯一性只靠 prompt 请求，无任何机械检查；长篇里"新的开始""风暴前夕"
+ * 此前的空白：全书标题唯一性只靠 prompt 请求，无任何机械检查；长篇里"新的开始""风暴前夕"
  * 这类模板标题会反复出现。本判据是 MINOR 档——检测只负责记账，根治靠把已用标题回灌规划层。
  */
 class ChapterTitlePolicyTest {

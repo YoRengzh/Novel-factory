@@ -1,11 +1,13 @@
 package cn.novel.yonren.domain.novel.service.armory.prompt.reference;
 
+import cn.novel.yonren.domain.novel.model.valobj.prompt.ReferenceIndexEntry;
+
 import cn.novel.yonren.domain.novel.model.valobj.StoryVO;
-import cn.novel.yonren.domain.novel.model.valobj.properties.ReferenceSelectorProperties;
+import cn.novel.yonren.domain.novel.config.ReferenceSelectorProperties;
 import cn.novel.yonren.domain.novel.service.armory.FeatureToggles;
 import cn.novel.yonren.domain.novel.service.armory.prompt.PromptRuleFileLoader;
-import cn.novel.yonren.domain.novel.service.armory.prompt.valobj.PromptContext;
-import cn.novel.yonren.domain.novel.service.armory.prompt.valobj.PromptRule;
+import cn.novel.yonren.domain.novel.model.valobj.prompt.PromptContext;
+import cn.novel.yonren.domain.novel.model.valobj.prompt.PromptRule;
 import cn.novel.yonren.types.enums.PromptScene;
 import cn.novel.yonren.types.enums.ResponseCode;
 import cn.novel.yonren.types.exception.AppException;

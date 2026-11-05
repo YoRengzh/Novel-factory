@@ -6,7 +6,7 @@ import cn.novel.yonren.domain.novel.model.entity.ChapterSummaryEntity;
 import cn.novel.yonren.domain.novel.model.entity.ForeshadowSettlementEntity;
 import cn.novel.yonren.domain.novel.model.entity.ArmoryCommandEntity;
 import cn.novel.yonren.domain.novel.model.entity.StoryContextEntity;
-import cn.novel.yonren.domain.novel.model.valobj.properties.StoryProperties;
+import cn.novel.yonren.domain.novel.config.StoryProperties;
 import cn.novel.yonren.domain.novel.service.armory.factory.DefaultArmoryFactory;
 import cn.novel.yonren.domain.novel.service.armory.memory.ChapterMemoryService;
 import cn.novel.yonren.domain.novel.service.job.GenerationJob;
@@ -51,6 +51,20 @@ public class StoryGenerateService {
 
     public StoryGenerateResultAggregate generate(ArmoryCommandEntity command) throws Exception {
         return generate(command, null);
+    }
+
+    /**
+     * DTO 门面（2026-11-05 分层重构）：同步调试端点的入口——装配在服务内完成
+     * （未显式传 storyVO 时用 yml 默认补齐），trigger 层只拿 DTO。
+     */
+    public cn.novel.yonren.api.dto.StoryGenerateResponseDTO generateDto(
+            cn.novel.yonren.api.dto.StoryGenerateRequestDTO request) throws Exception {
+        StoryGenerateResultAggregate result = generate(StoryCommandAssembler.toCommand(request, storyProperties));
+        cn.novel.yonren.api.dto.StoryGenerateResponseDTO response = new cn.novel.yonren.api.dto.StoryGenerateResponseDTO();
+        response.setChapterPlan(result.getChapterPlanAggregate());
+        response.setUsedPromptMap(result.getUsedPromptMap());
+        response.setStoryDirName(result.getStoryDirName());
+        return response;
     }
 
     /**

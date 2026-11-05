@@ -25,7 +25,7 @@ import java.util.Map;
  * 外置后：换题材换文件，代码零改动；增删词条即时生效。
  *
  * <p><b>按题材分组</b>：{@code [common]} 对所有题材生效，{@code [urban]}/{@code [fantasy]} 等
- * 按 {@code GenreTypeVO.code} 取用（与 {@code genres/} 素材目录同一套题材标识）。
+ * 按 {@code GenreType.code} 取用（与 {@code genres/} 素材目录同一套题材标识）。
  * 匹配口径是正文**逐字子串包含**，故词条须写得足够具体（「敲钟」能命中「上市敲钟」，
  * 而「股权」会误伤「股权结构」这类正常叙述）。
  */

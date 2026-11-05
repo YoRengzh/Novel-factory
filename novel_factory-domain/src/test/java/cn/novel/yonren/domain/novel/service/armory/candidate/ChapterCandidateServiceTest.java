@@ -5,10 +5,10 @@ import cn.novel.yonren.domain.novel.model.entity.ChapterContentEntity;
 import cn.novel.yonren.domain.novel.model.entity.ChapterPlanItemEntity;
 import cn.novel.yonren.domain.novel.model.entity.ChapterSummaryEntity;
 import cn.novel.yonren.domain.novel.model.entity.StyleStatEntity;
-import cn.novel.yonren.domain.novel.model.valobj.properties.StoryProperties;
-import cn.novel.yonren.domain.novel.service.armory.prompt.valobj.PromptContext;
-import cn.novel.yonren.domain.novel.service.armory.quality.GateResult;
-import cn.novel.yonren.domain.novel.service.armory.quality.GateResult.PassGrade;
+import cn.novel.yonren.domain.novel.config.StoryProperties;
+import cn.novel.yonren.domain.novel.model.valobj.prompt.PromptContext;
+import cn.novel.yonren.domain.novel.model.valobj.quality.GateResult;
+import cn.novel.yonren.domain.novel.model.valobj.quality.GateResult.PassGrade;
 import cn.novel.yonren.domain.novel.service.armory.quality.QualityGate;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -129,8 +129,7 @@ class ChapterCandidateServiceTest {
 
     @Test
     void challengerBelowLengthFloor_keepsIncumbent() {
-        // 字数下限：挑战者有效字 < 原稿 60% 直接机械出局，不进盲评——
-        // 实测：5 次采纳的挑战者全部比原稿短（ch15 砍半、ch19 -42%），盲评明令不评长短，
+        // 字数下限：挑战者有效字 < 原稿 60% 直接机械出局，不进盲评——// 实测：5 次采纳的挑战者全部比原稿短（ch15 砍半、ch19 -42%），盲评明令不评长短，
         // 短稿结构性占优，必须在盲评前拦下。原稿约 1600 有效字，挑战者约 270 有效字。
         String longIncumbent = "原稿正文，情节推进，细节扎实，对白自然。".repeat(100);
         chapterContent.setContent(longIncumbent);
@@ -153,8 +152,7 @@ class ChapterCandidateServiceTest {
     void invalidVerdict_keepsIncumbent() {
         when(llmInvokeService.invokeWithScene(any(), any(), any(), anyString(), any(), any(), anyString(), any()))
                 .thenReturn(RAW_CHALLENGER);
-        // 评审输出 winner=B（挑战稿被随机定在 A/B 之一）：无论盲排方向如何，用不指向 challenge 的桩不可行——
-        // 这里验证评审"不可用"路径（输出 winner=C 非法 → 保留原稿）与原稿不被替换
+        // 评审输出 winner=B（挑战稿被随机定在 A/B 之一）：无论盲排方向如何，用不指向 challenge 的桩不可行——// 这里验证评审"不可用"路径（输出 winner=C 非法 → 保留原稿）与原稿不被替换
         when(llmGateway.complete(any(), any())).thenReturn("{\"winner\":\"C\",\"reason\":\"无法判定\"}");
 
         GateResult result = serviceWithProperties().challenge(command, item, PromptContext.builder().build(),
@@ -265,8 +263,7 @@ class ChapterCandidateServiceTest {
 
     @Test
     void judgePrompt_carriesFactBaselineFromSummaries() {
-        // 盲评原先只拿到【章节计划 + 两稿正文】，既没有记忆也没有账本 ——
-        // 结构上不可能发现"身份映射被改写/认知状态提前升级/已确认事实被否定"，
+        // 盲评原先只拿到【章节计划 + 两稿正文】，既没有记忆也没有账本 ——// 结构上不可能发现"身份映射被改写/认知状态提前升级/已确认事实被否定"，
         // 只能比较文风，于是"更漂亮但事实错误"的稿子会被选中。
         // 本测试锁定：最近章节的摘要与三账本状态必须进入评审 prompt，且事实维度排在文风之前。
         when(llmInvokeService.invokeWithScene(any(), any(), any(), anyString(), any(), any(), anyString(), any()))
@@ -320,7 +317,7 @@ class ChapterCandidateServiceTest {
                 "开篇没有基线时 prompt 要显式说明「无既知事实约束」，而不是留空让模型自行假设");
     }
 
-    /** 2026-10-01：MINOR 条数不足门槛时不得触发——正是本批触发率爆到 100% 的根因 */
+    /** ：MINOR 条数不足门槛时不得触发——正是本批触发率爆到 100% 的根因 */
     @Test
     void minorResidueBelowThreshold_doesNotTrigger() {
         GateResult fewMinors = GateResult.of(List.of(), 5, 0); // 门槛默认 6
@@ -368,7 +365,7 @@ class ChapterCandidateServiceTest {
     /**
      * 默认配置下**只有 REVISED_PASS 触发候选**。
      *
-     * <p>依据：两批实测的采纳率分布为 REVISED_PASS 66.7% &gt; MINOR_RESIDUE 42.9% &gt; DEBT 0%，
+     * 依据：两批实测的采纳率分布为 REVISED_PASS 66.7% > MINOR_RESIDUE 42.9% > DEBT 0%，
      * 且 MINOR 条数无判别力（两批中位数均 6）、DEBT 三次触发零采纳。
      * 三条通道里只有 REVISED_PASS 是有效信号，所以其余两条默认关闭。
      */

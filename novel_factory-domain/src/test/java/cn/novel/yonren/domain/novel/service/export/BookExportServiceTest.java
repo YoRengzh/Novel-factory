@@ -1,5 +1,7 @@
 package cn.novel.yonren.domain.novel.service.export;
 
+import cn.novel.yonren.domain.novel.model.valobj.BookFormat;
+
 import cn.novel.yonren.domain.novel.adapter.repository.IStoryRepository;
 import cn.novel.yonren.domain.novel.model.entity.ChapterContentEntity;
 import cn.novel.yonren.domain.novel.model.entity.VolumeBlueprintEntity;
@@ -219,7 +221,7 @@ class BookExportServiceTest {
         assertTrue(e.getMessage().contains("第 2 章"), e.getMessage());
     }
 
-    // ==================== 分章 Word（docx）导出（2026-10-11） ====================
+    // ==================== 分章 Word（docx）导出 ====================
 
     /** docx 是标准 ZIP 包：DOM 解析锁 XML 可解析性（转义正确、无非法控制字符） */
     private static void assertWellFormedXml(byte[] docx, String entryName) throws Exception {

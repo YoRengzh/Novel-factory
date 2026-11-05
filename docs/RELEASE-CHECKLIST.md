@@ -143,6 +143,21 @@
 3. **上传 Release 时 exe 与 latest.yml 一起传**，不要改名。electron-updater 按
    `releases/download/<tag>/latest.yml` 读取版本与校验和；缺它必然 404
 
+### 包体积基线（2026-11-05）
+
+jar 从 65M 压到 56M，靠两处**明确浪费**的清除。改 pom 时不要回退这两项：
+
+| 项 | 位置 | 原因 |
+|---|---|---|
+| `lombok` 改 `provided` + repackage `excludes` | 各模块 pom + `novel_factory-app/pom.xml` | 编译期注解处理器，运行时零作用。**注意** spring-boot repackage 会把 provided 也纳入 `BOOT-INF/lib`，必须额外写 `<excludes>` |
+| 排除 `io.rest-assured:json-path` | `novel_factory-infrastructure/pom.xml` 的 `spring-ai-anthropic` | Spring AI 把测试框架误标为 compile，连带拖入 groovy/groovy-json 约 7.5M |
+
+发版前可自查：`unzip -l novel_factory-app/target/novel_factory-app.jar | grep -cE "groovy|lombok|rest-assured"` 应为 0。
+
+> 说明：测试类从未进入 jar（Maven `test` 作用域默认不进包）。发布物的大头是
+> Electron 运行时（Chromium ≈ 236M）与 jpackage 的 JDK runtime（≈ 127M），
+> 二者都不含项目测试文件。
+
 验收：
 
 - [ ] `dist/electron/latest.yml` 存在，`path:` 与安装包文件名逐字一致，`sha512`/`size` 有值

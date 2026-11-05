@@ -203,7 +203,7 @@ class StageExitReviewServiceTest {
 
     @Test
     void review_toleratesQuoteFormDifferenceInEvidence() {
-        // 记忆原文用全角 “固定搭档已生效”，模型引用改用半角双引号 —— 只差引号形态，事实同一
+        // 记忆原文用全角 “固定搭档已生效”，模型引用改用半角双引号 ——只差引号形态，事实同一
         StageBlueprintEntity stage = quotedStage();
         stubModel("{\"results\":["
                 + "{\"condition\":\"无月与软软结为固定队伍搭档\",\"met\":true,\"chapterNo\":6,"
@@ -218,7 +218,7 @@ class StageExitReviewServiceTest {
 
     @Test
     void review_toleratesAsciiSingleQuoteInEvidence() {
-        // 模型改用半角单引号引用同一句 —— 同属引号形态差异
+        // 模型改用半角单引号引用同一句 ——同属引号形态差异
         StageBlueprintEntity stage = quotedStage();
         stubModel("{\"results\":["
                 + "{\"condition\":\"无月与软软结为固定队伍搭档\",\"met\":true,\"chapterNo\":6,"
@@ -233,7 +233,7 @@ class StageExitReviewServiceTest {
 
     @Test
     void review_toleratesEllipsisJoinedSegmentsWithinSameChapter() {
-        // 模型用省略号把同一章内相距较远的两段原文压缩成一条引用 —— 各段都能在该章定位
+        // 模型用省略号把同一章内相距较远的两段原文压缩成一条引用 ——各段都能在该章定位
         StageBlueprintEntity stage = quotedStage();
         stubModel("{\"results\":["
                 + "{\"condition\":\"无月与软软结为固定队伍搭档\",\"met\":true,\"chapterNo\":6,"
@@ -249,7 +249,7 @@ class StageExitReviewServiceTest {
     @Test
     void review_crossChapterStitchedEvidenceStillUnmet() {
         // 两段都是**逐字真实**的原文（第一段在 ch6、第二段在 ch2），但用省略号拼成了一条。
-        // 放宽的是「表述差异」，不是「事实有无」—— 跨章拼接必须仍然拒收：
+        // 放宽的是「表述差异」，不是「事实有无」——跨章拼接必须仍然拒收：
         // 校验要求每一段都能在**你所填章号那一章**定位，第二段在 ch6 里找不到，故判未达成。
         StageBlueprintEntity stage = quotedStage();
         stubModel("{\"results\":["
@@ -282,7 +282,7 @@ class StageExitReviewServiceTest {
 
     @Test
     void review_unmetMultiPointConditionCarriesStructuralHint() {
-        // 对比型条件的证据天然分散在多章，核验只受单章一段连续原文 —— 未达成注记要点出这层原因
+        // 对比型条件的证据天然分散在多章，核验只受单章一段连续原文 ——未达成注记要点出这层原因
         StageBlueprintEntity stage = quotedStage();
         stubModel("{\"results\":["
                 + unmet(0) + ","

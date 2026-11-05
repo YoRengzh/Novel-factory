@@ -3,7 +3,7 @@ package cn.novel.yonren.domain.novel.service.armory.node;
 import cn.novel.yonren.domain.framework.StrategyHandler;
 import cn.novel.yonren.domain.novel.model.aggregate.StoryGenerateResultAggregate;
 import cn.novel.yonren.domain.novel.model.entity.ArmoryCommandEntity;
-import cn.novel.yonren.domain.novel.model.valobj.properties.StoryProperties;
+import cn.novel.yonren.domain.novel.config.StoryProperties;
 import cn.novel.yonren.domain.novel.service.armory.AbstractArmorySupport;
 import cn.novel.yonren.domain.novel.service.armory.factory.DefaultArmoryFactory;
 import cn.novel.yonren.domain.novel.service.armory.memory.RollingOutlineService;

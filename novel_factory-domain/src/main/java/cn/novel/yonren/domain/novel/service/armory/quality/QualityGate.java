@@ -1,5 +1,7 @@
 package cn.novel.yonren.domain.novel.service.armory.quality;
 
+import cn.novel.yonren.domain.novel.model.valobj.quality.GateResult;
+
 import cn.novel.yonren.domain.novel.model.entity.ArmoryCommandEntity;
 import cn.novel.yonren.domain.novel.model.entity.AuditResultEntity;
 import cn.novel.yonren.domain.novel.model.entity.ChapterContentEntity;
@@ -8,14 +10,14 @@ import cn.novel.yonren.domain.novel.model.entity.ChapterPlanItemEntity;
 import cn.novel.yonren.domain.novel.model.entity.ChapterSummaryEntity;
 import cn.novel.yonren.domain.novel.model.entity.StoryContextEntity;
 import cn.novel.yonren.domain.novel.model.entity.StyleStatEntity;
-import cn.novel.yonren.domain.novel.model.valobj.properties.StoryProperties;
+import cn.novel.yonren.domain.novel.config.StoryProperties;
 import cn.novel.yonren.domain.novel.service.armory.audit.AuditSampleService;
 import cn.novel.yonren.domain.novel.service.armory.audit.ChapterAuditService;
 import cn.novel.yonren.domain.novel.service.armory.memory.ChapterMemoryService;
 import cn.novel.yonren.domain.novel.service.armory.memory.ConsistencyIndexService;
 import cn.novel.yonren.domain.novel.service.armory.memory.StyleStatService;
 import cn.novel.yonren.domain.novel.service.armory.revise.ChapterReviseService;
-import cn.novel.yonren.types.enums.GenreTypeVO;
+import cn.novel.yonren.types.enums.GenreType;
 import jakarta.annotation.Resource;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.lang3.StringUtils;
@@ -539,11 +541,11 @@ public class QualityGate {
             return null;
         }
         var context = request.getStoryContextEntity();
-        GenreTypeVO genre = GenreTypeVO.match(context.getTheme(), context.getStyle());
+        GenreType genre = GenreType.match(context.getTheme(), context.getStyle());
         StringBuilder contract = new StringBuilder("【语言与时代语域检查】检查叙述和对白是否符合故事时代、世界设定及人物的年龄、身份、教育、职业与认知边界；")
                 .append("把无来源的学术报告腔、管理总结腔、互联网黑话、时代错位技术词或儿童不可能掌握的成熟抽象表达列为 aesthetic/character 问题。")
                 .append("修订时必须改写为角色可观察的动作、物件、生活经验和口语，不得只替换同义词。");
-        if (genre == GenreTypeVO.FANTASY) {
+        if (genre == GenreType.FANTASY) {
             contract.append("本题材为玄幻/仙侠：客观世界优先使用既有设定词；程序员术语只能在角色设定明确支持时作短促心理类比，不得充当世界事实。");
         }
         return contract.toString();

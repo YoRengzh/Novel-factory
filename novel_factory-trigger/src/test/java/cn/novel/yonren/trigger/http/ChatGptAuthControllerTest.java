@@ -28,7 +28,8 @@ class ChatGptAuthControllerTest {
         when(gateway.beginAuthorization("http://127.0.0.1:8081/api/auth/chatgpt/callback"))
                 .thenReturn(new ChatGptGateway.Authorization("https://auth.openai.com/authorize"));
 
-        ChatGptGateway.Authorization result = new ChatGptAuthController(gateway).start(request);
+        cn.novel.yonren.api.dto.ChatGptAuthorizationDTO result =
+                new ChatGptAuthController(gateway).start(request);
 
         assertEquals("https://auth.openai.com/authorize", result.url());
     }

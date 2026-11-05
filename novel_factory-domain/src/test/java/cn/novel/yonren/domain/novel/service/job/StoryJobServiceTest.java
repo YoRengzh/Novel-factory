@@ -50,7 +50,7 @@ class StoryJobServiceTest {
 
     private cn.novel.yonren.domain.novel.service.armory.quality.BatchHealthService batchHealthService;
 
-    private cn.novel.yonren.domain.novel.model.valobj.properties.StoryProperties storyProperties;
+    private cn.novel.yonren.domain.novel.config.StoryProperties storyProperties;
 
     private ThreadPoolExecutor executor;
     private StoryJobService storyJobService;
@@ -63,7 +63,7 @@ class StoryJobServiceTest {
         runPlanService = mock(RunPlanService.class);
         batchHealthService = mock(cn.novel.yonren.domain.novel.service.armory.quality.BatchHealthService.class);
         // 审批门默认关闭的配置对象：本测试类针对作业编排，审批流程另见 StoryJobServicePlanApprovalTest
-        storyProperties = new cn.novel.yonren.domain.novel.model.valobj.properties.StoryProperties();
+        storyProperties = new cn.novel.yonren.domain.novel.config.StoryProperties();
         executor = new ThreadPoolExecutor(1, 1, 60, TimeUnit.SECONDS,
                 new LinkedBlockingQueue<>(16), new ThreadPoolExecutor.AbortPolicy());
         storyJobService = new StoryJobService(storyGenerateService, jobRegistry, storyRepository, executor,
@@ -130,13 +130,13 @@ class StoryJobServiceTest {
         when(storyRepository.readChapterNumbers(any())).thenReturn(List.of(1, 2, 3));
         // ChapterWorker 走 4 参、StoryJobService 走 5 参：两处都桩上，避免静默返回 null 失去断言意义
         when(batchHealthService.assess(any(), any(), any()))
-                .thenReturn(new cn.novel.yonren.domain.novel.service.armory.quality.BatchHealthReport(
-                        3, List.of(), cn.novel.yonren.domain.novel.service.armory.quality.BatchHealthReport.Level.OK,
+                .thenReturn(new cn.novel.yonren.domain.novel.model.valobj.quality.BatchHealthReport(
+                        3, List.of(), cn.novel.yonren.domain.novel.model.valobj.quality.BatchHealthReport.Level.OK,
                         List.of()));
         when(storyRepository.readForeshadowSettlements(any())).thenReturn(List.of());
         when(batchHealthService.assess(any(), any(), any(), any(), any()))
-                .thenReturn(new cn.novel.yonren.domain.novel.service.armory.quality.BatchHealthReport(
-                        3, List.of(), cn.novel.yonren.domain.novel.service.armory.quality.BatchHealthReport.Level.OK,
+                .thenReturn(new cn.novel.yonren.domain.novel.model.valobj.quality.BatchHealthReport(
+                        3, List.of(), cn.novel.yonren.domain.novel.model.valobj.quality.BatchHealthReport.Level.OK,
                         List.of()));
         when(runPlanService.enabled()).thenReturn(true);
         // 第一次判继续、第二次判停止（否则会无限续批）

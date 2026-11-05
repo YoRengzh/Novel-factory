@@ -186,7 +186,11 @@ java -jar novel_factory-app/target/novel_factory-app.jar
 ```
 
 > 开发时想反复重启，用 `mvn install -DskipTests` 装齐 6 个模块一次，之后 `mvn -pl novel_factory-app spring-boot:run` 即可（改代码不用重打包）。
-> 完整测试套件：`mvn test`（1,562 个用例，1~2 分钟）。
+> 完整测试套件：`mvn test`（1,598 个用例，1~2 分钟）。
+> **CI**：push / PR 到 `main` 时 GitHub Actions 自动跑全量测试（`.github/workflows/ci.yml`），
+> 本地不必每次全量执行。CI 用 Maven Central（`.github/maven-ci-settings.xml`），本地仍走阿里云镜像。
+> 其中 `ArchBoundaryTest` 三条 ArchUnit 规则守护分层边界（trigger 不得触碰领域模型、
+> model 不得反向依赖 service/adapter/config、api 保持零工程模块依赖），破坏即构建失败。
 
 每批（界面默认 5 章）结束后看**批末体检报告**——30 项指标 + 可执行建议，这就是本系统的仪表盘。
 

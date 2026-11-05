@@ -152,7 +152,7 @@ public final class ChapterPlanChecks {
                 observations.add(0, ChapterPlanItemEntity.builder()
                         .chapterNo(no).suspenseBeat(summary.getSuspenseBeat()).mainLineAdvance(want)
                         .chapterType("transition".equalsIgnoreCase(summary.getChapterType())
-                                ? cn.novel.yonren.types.enums.ChapterTypeVO.TRANSITION : null)
+                                ? cn.novel.yonren.types.enums.ChapterType.TRANSITION : null)
                         .build());
             }
         }
@@ -218,7 +218,7 @@ public final class ChapterPlanChecks {
             // 避免违规信息里出现"第 0 章"这种无法定位的告警
             int displayNo = item.getChapterNo() == null ? i + 1 : item.getChapterNo();
             beats.add(new SuspenseLadderPolicy.Beat(displayNo, item.getSuspenseBeat(),
-                    item.getChapterType() == cn.novel.yonren.types.enums.ChapterTypeVO.TRANSITION,
+                    item.getChapterType() == cn.novel.yonren.types.enums.ChapterType.TRANSITION,
                     item.getChapterNo() != null && verified.contains(item.getChapterNo())));
         }
         List<String> issues = new ArrayList<>();

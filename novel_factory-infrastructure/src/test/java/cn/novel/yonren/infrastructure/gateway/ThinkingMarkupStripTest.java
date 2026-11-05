@@ -7,7 +7,7 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
- * 思考内容处理测试：中转站常把思考包在 &lt;think&gt; 里混进 content 返回，
+ * 思考内容处理测试：中转站常把思考包在 <think> 里混进 content 返回，
  * 不剥离会导致 JSON 场景解析失败、正文场景出现"模型自述"。
  */
 class ThinkingMarkupStripTest {

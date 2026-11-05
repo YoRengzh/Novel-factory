@@ -112,7 +112,7 @@ class SpringAiEmbeddingGatewayTest {
 
         String shortText = "短文本";
         // 构造**真正超限**的输入：原用例写死 3000 字却期望被截到 2000，
-        // 而 MAX_EMBED_INPUT_CHARS 在 已调到 8000 —— 断言早已过时（该测试长期没被跑到）
+        // 而 MAX_EMBED_INPUT_CHARS 在 已调到 8000 ——断言早已过时（该测试长期没被跑到）
         String overlongText = "长".repeat(SpringAiEmbeddingGateway.MAX_EMBED_INPUT_CHARS + 1000);
         gateway.embed(module, List.of(shortText, overlongText));
 

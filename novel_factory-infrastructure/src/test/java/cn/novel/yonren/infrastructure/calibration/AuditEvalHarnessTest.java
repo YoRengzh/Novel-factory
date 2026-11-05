@@ -1,5 +1,6 @@
 package cn.novel.yonren.infrastructure.calibration;
 
+import cn.novel.yonren.domain.novel.config.StoryProperties;
 import cn.novel.yonren.domain.novel.model.entity.AuditResultEntity;
 import cn.novel.yonren.domain.novel.model.entity.ChapterIssueEntity;
 import cn.novel.yonren.domain.novel.model.entity.ChapterPlanItemEntity;
@@ -12,6 +13,8 @@ import cn.novel.yonren.domain.novel.service.armory.audit.AuditPromptVariant;
 import cn.novel.yonren.domain.novel.service.armory.audit.ChapterAuditService;
 import cn.novel.yonren.domain.novel.service.armory.memory.ChapterMemoryService;
 import cn.novel.yonren.domain.novel.service.armory.memory.ForeshadowPriorityService;
+import cn.novel.yonren.domain.novel.service.job.JobRegistry;
+import cn.novel.yonren.domain.novel.service.job.LlmBudgetFuse;
 import cn.novel.yonren.infrastructure.gateway.SpringAiLlmGateway;
 import com.alibaba.fastjson2.JSON;
 import org.junit.jupiter.api.Test;
@@ -33,24 +36,24 @@ import java.util.stream.Stream;
 /**
  * 审计评测骨架（docs/enhancement-plan.md A1 噪声重放 + E2 变体 A/B；手动触发，消耗真实 LLM 配额）。
  *
- * <p>三种模式（{@code -Deval.mode}）：
- * <ol>
- *   <li><b>noise</b>（默认，A1）：同一 prompt 对每章跑 k 次 → 按维度翻转率报告
- *       （issue 条数 CV / BLOCKING 出现率 / 集合 Jaccard / 分维度 CV），落 audit-noise-report.md；</li>
- *   <li><b>ab</b>（E2）：当前变体（{@code -Daudit.prompt.variant}）对语料各跑 k 次，
- *       结果落 target/audit-ab-&lt;variant&gt;.jsonl——A、B 各跑一次本模式；</li>
- *   <li><b>ab-report</b>（E2）：合并两份 jsonl → 同表对照稳定性指标，落 audit-ab-report.md。</li>
- * </ol>
+ * 三种模式（{@code -Deval.mode}）：
  *
- * <p>语料：故事目录的 output-XXXX.json 计划 + chapters 正文 + summaries 账本
+ *   noise（默认，A1）：同一 prompt 对每章跑 k 次 → 按维度翻转率报告
+ *       （issue 条数 CV / BLOCKING 出现率 / 集合 Jaccard / 分维度 CV），落 audit-noise-report.md；
+ *   ab（E2）：当前变体（{@code -Daudit.prompt.variant}）对语料各跑 k 次，
+ *       结果落 target/audit-ab-<variant>.jsonl——A、B 各跑一次本模式；
+ *   ab-report（E2）：合并两份 jsonl → 同表对照稳定性指标，落 audit-ab-report.md。
+ *
+ *
+ * 语料：故事目录的 output-XXXX.json 计划 + chapters 正文 + summaries 账本
  * （与 ChapterAuditCalibrationTest 同源）。B 分支未落地（A2 之前与 A 等价）时，
  * ab-report 应显示零差异——这本身是骨架自检：管线无偏，之后测出的任何差异都归因于判据本身。
  *
- * <p>运行方式（项目根目录）：
- * <pre>
+ * 运行方式（项目根目录）：
+ *
  * mvn test -pl novel_factory-infrastructure -Dtest=AuditEvalHarnessTest -Daudit.eval=true \
  *   -Deval.mode=noise -Deval.story=20260905-story-0002 -Deval.k=3 -Deval.limit=5
- * </pre>
+ *
  */
 @EnabledIfSystemProperty(named = "audit.eval", matches = "true")
 class AuditEvalHarnessTest {
@@ -251,9 +254,9 @@ class AuditEvalHarnessTest {
 
     private ChapterAuditService newAuditService() {
         return new ChapterAuditService(new SpringAiLlmGateway(1, 20, 600, new LlmRuntimeConfig(),
-                new cn.novel.yonren.domain.novel.service.job.LlmBudgetFuse(
-                        new cn.novel.yonren.domain.novel.model.valobj.properties.StoryProperties(),
-                        new cn.novel.yonren.domain.novel.service.job.JobRegistry())));
+                new LlmBudgetFuse(
+                        new StoryProperties(),
+                        new JobRegistry())));
     }
 
     private String worstDimension(AuditEvalMetrics.SampleNoise noise) {

@@ -11,11 +11,10 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
- * 可核验文本测试（2026-09-22）。
+ * 可核验文本测试。
  *
- * <p>这个类针对的是一个实测踩过的假阴性：阶段退出条件要求"某动作被文本**明确描写**"
- * （如"角色壬食指轻叩桌面两下"），而 {@code summary} 按设计只记主干、明确排除动作细节——
- * 于是正文明明写着「指尖在桌面上无意识地轻叩了两下」，核验在摘要里找不到任何字样，只能判未达成。
+ * 这个类针对的是一个实测踩过的假阴性：阶段退出条件要求"某动作被文本**明确描写**"
+ * （如"角色壬食指轻叩桌面两下"），而 {@code summary} 按设计只记主干、明确排除动作细节——* 于是正文明明写着「指尖在桌面上无意识地轻叩了两下」，核验在摘要里找不到任何字样，只能判未达成。
  * {@code verifiableDetails} 就是为补这个粒度而加的。
  */
 class ChapterMemoryTextTest {

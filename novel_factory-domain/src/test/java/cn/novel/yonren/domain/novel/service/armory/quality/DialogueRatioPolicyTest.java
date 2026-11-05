@@ -11,7 +11,7 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
- * 对白两维判据测试（2026-09-23）：行级占比 + 轮次密度，阈值按题材切换。
+ * 对白两维判据测试：行级占比 + 轮次密度，阈值按题材切换。
  * 起因：都市校园恋爱那本占比 25%（勉强合格）但轮次密度只有 7.4/千字（同批 10.0-10.9），
  * 读者反馈"对话太少、张力不足"——单看占比抓不到。
  */

@@ -1,6 +1,5 @@
 package cn.novel.yonren.domain.novel.model.valobj;
 
-import cn.novel.yonren.domain.novel.service.export.BookFormat;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Data;

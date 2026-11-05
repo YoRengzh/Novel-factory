@@ -1,9 +1,11 @@
 package cn.novel.yonren.domain.novel.service.armory.quality;
 
+import cn.novel.yonren.domain.novel.model.valobj.quality.BatchHealthReport;
+
 import cn.novel.yonren.domain.novel.model.entity.ChapterSummaryEntity;
 import cn.novel.yonren.domain.novel.model.entity.QualityDebtEntity;
 import cn.novel.yonren.domain.novel.model.entity.StageBlueprintEntity;
-import cn.novel.yonren.types.enums.ChapterTypeVO;
+import cn.novel.yonren.types.enums.ChapterType;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.DeserializationFeature;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -39,8 +41,8 @@ class BatchHealthServiceTest {
             list.add(ChapterSummaryEntity.builder()
                     .chapterNo(ch)
                     .validChars(2200)
-                    .chapterType(ch == 2 || ch == 7 ? ChapterTypeVO.TRANSITION.getCode()
-                            : ChapterTypeVO.NORMAL.getCode())
+                    .chapterType(ch == 2 || ch == 7 ? ChapterType.TRANSITION.getCode()
+                            : ChapterType.NORMAL.getCode())
                     .placePoint(ch <= 3 ? "讲堂" : (ch <= 6 ? "后山禁地" : "议事厅"))
                     .characterStates(List.of(entry("陆沉", "exact")))
                     .build());
@@ -148,7 +150,7 @@ class BatchHealthServiceTest {
         for (int ch = 1; ch <= 12; ch++) {
             chapters.add(ChapterSummaryEntity.builder()
                     .chapterNo(ch).validChars(2200)
-                    .chapterType(ChapterTypeVO.NORMAL.getCode())
+                    .chapterType(ChapterType.NORMAL.getCode())
                     .placePoint("地点" + ch)   // 12 章 12 个地点
                     .characterStates(List.of(entry("陆沉", "exact")))
                     .build());
@@ -167,7 +169,7 @@ class BatchHealthServiceTest {
         for (int ch = 1; ch <= 12; ch++) {
             ChapterSummaryEntity s = healthyChapters(1).get(0);
             s.setChapterNo(ch);
-            s.setChapterType(ChapterTypeVO.NORMAL.getCode());
+            s.setChapterType(ChapterType.NORMAL.getCode());
             chapters.add(s);
         }
 
@@ -184,7 +186,7 @@ class BatchHealthServiceTest {
         for (int ch = 1; ch <= 12; ch++) {
             ChapterSummaryEntity s = healthyChapters(1).get(0);
             s.setChapterNo(ch);
-            s.setChapterType(ch <= 8 ? ChapterTypeVO.TRANSITION.getCode() : ChapterTypeVO.NORMAL.getCode());
+            s.setChapterType(ch <= 8 ? ChapterType.TRANSITION.getCode() : ChapterType.NORMAL.getCode());
             chapters.add(s);
         }
 
@@ -201,13 +203,13 @@ class BatchHealthServiceTest {
         for (int ch = 1; ch <= 10; ch++) {
             ChapterSummaryEntity s = healthyChapters(1).get(0);
             s.setChapterNo(ch);
-            s.setChapterType(ChapterTypeVO.NORMAL.getCode());
+            s.setChapterType(ChapterType.NORMAL.getCode());
             s.setValidChars(1000);              // 全部短
             chapters.add(s);
         }
         // 前 4 章改标过渡章：短但不计入分母
         for (int ch = 0; ch < 4; ch++) {
-            chapters.get(ch).setChapterType(ChapterTypeVO.TRANSITION.getCode());
+            chapters.get(ch).setChapterType(ChapterType.TRANSITION.getCode());
         }
 
         BatchHealthReport report = service.assess(chapters, List.of(), List.of());
@@ -286,7 +288,7 @@ class BatchHealthServiceTest {
             chapters.add(ChapterSummaryEntity.builder()
                     .chapterNo(ch)
                     .validChars(800)                                  // 低密度 → DEGRADED
-                    .chapterType(ChapterTypeVO.NORMAL.getCode())      // 无过渡章 → DEGRADED
+                    .chapterType(ChapterType.NORMAL.getCode())      // 无过渡章 → DEGRADED
                     .placePoint("地点" + ch)                           // 每章换场 → DEGRADED
                     .characterStates(List.of(entry("陆沉", "exact")))
                     .build());
@@ -320,8 +322,8 @@ class BatchHealthServiceTest {
         for (int ch = 1; ch <= 12; ch++) {
             ChapterSummaryEntity s = healthyChapters(1).get(0);
             s.setChapterNo(ch);
-            s.setChapterType((ch >= 3 && ch <= 5) ? ChapterTypeVO.TRANSITION.getCode()
-                    : ChapterTypeVO.NORMAL.getCode());
+            s.setChapterType((ch >= 3 && ch <= 5) ? ChapterType.TRANSITION.getCode()
+                    : ChapterType.NORMAL.getCode());
             chapters.add(s);
         }
 
@@ -342,8 +344,8 @@ class BatchHealthServiceTest {
         for (int ch = 1; ch <= 10; ch++) {
             ChapterSummaryEntity s = healthyChapters(1).get(0);
             s.setChapterNo(ch);
-            s.setChapterType((ch >= 2 && ch <= 6) ? ChapterTypeVO.TRANSITION.getCode()
-                    : ChapterTypeVO.NORMAL.getCode());
+            s.setChapterType((ch >= 2 && ch <= 6) ? ChapterType.TRANSITION.getCode()
+                    : ChapterType.NORMAL.getCode());
             chapters.add(s);
         }
 
@@ -709,7 +711,7 @@ class BatchHealthServiceTest {
 
         // 实测形态：过渡章 4170 有效字（邻章 2000）——低密度指标对此全程无感
         chapters.get(0).setValidChars(4170);
-        chapters.get(0).setChapterType(ChapterTypeVO.TRANSITION.getCode());
+        chapters.get(0).setChapterType(ChapterType.TRANSITION.getCode());
         chapters.get(1).setValidChars(3000);
         BatchHealthReport report = service.assess(chapters, List.of(), List.of());
 

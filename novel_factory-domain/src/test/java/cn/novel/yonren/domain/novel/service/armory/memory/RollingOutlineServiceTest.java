@@ -469,8 +469,7 @@ class RollingOutlineServiceTest {
 
     @Test
     void volumeAt_picksVolumeCoveringTheChapterNotTheNewest() {
-        // 批次跨卷边界：上一卷终点落在批次中间（300），新卷从 301 起——
-        // 第 150 章属于第 1 卷，若取最新卷会把第 2 卷方向提前泄给旧卷章节
+        // 批次跨卷边界：上一卷终点落在批次中间（300），新卷从 301 起——// 第 150 章属于第 1 卷，若取最新卷会把第 2 卷方向提前泄给旧卷章节
         List<VolumeBlueprintEntity> volumes = List.of(volume(1, 1, 300), volume(2, 301, 600));
         assertEquals(1, service.volumeAt(volumes, 150).getVolumeNo());
         assertEquals(1, service.volumeAt(volumes, 300).getVolumeNo());
@@ -725,8 +724,7 @@ class RollingOutlineServiceTest {
     /**
      * 阶段蓝图 prompt 必须真的索取 coreSuspense / suspenseLadder。
      * ⚠️ 这条测试守的是一个**静默失效**风险：档位表由蓝图产出，若蓝图 prompt 没要它，
-     * 档位表恒为 null，于是计划侧不注入锚块、校验侧直接跳过、体检也不出指标——
-     * 整条"治原地转圈"的链路会**一声不响地全部空转**，而人只看日志会以为它跑了。
+     * 档位表恒为 null，于是计划侧不注入锚块、校验侧直接跳过、体检也不出指标——* 整条"治原地转圈"的链路会**一声不响地全部空转**，而人只看日志会以为它跑了。
      */
     @Test
     void buildGenerationPrompt_requiresSuspenseLadder() {
@@ -746,7 +744,7 @@ class RollingOutlineServiceTest {
     /**
      * 悬念档位补采 prompt：只问两个字段、结构完整、示例用正确的键名。
      *
-     * <p>它存在的理由来自实测——同一条要求放进完整蓝图 prompt（十几个要求 + 长 schema）会被模型
+     * 它存在的理由来自实测——同一条要求放进完整蓝图 prompt（十几个要求 + 长 schema）会被模型
      * 静默省略，而短聚焦 prompt 服从率极高。因此这条 prompt 必须**很短且只问这两项**，
      * 别把上下文又堆回来（那等于把问题复制一遍）。
      */
@@ -843,8 +841,7 @@ class RollingOutlineServiceTest {
     }
 
     /**
-     * 时序锚注入（2026-10-04）：新书首段零摘要时，排期补采必须带设定兜底锚——
-     * 否则会产出"4岁主角无意识写出未来年份日期"这类违反时序锚的 intent
+     * 时序锚注入：新书首段零摘要时，排期补采必须带设定兜底锚——* 否则会产出"4岁主角无意识写出未来年份日期"这类违反时序锚的 intent
      * （实测：经【必须埋设】强压给计划与写手后，审校按锚判 BLOCKING，修订无法不丢事件地修复，整链死锁）。
      */
     @Test
@@ -966,8 +963,7 @@ class RollingOutlineServiceTest {
 
     /**
      * 主粮配额下限：学习/本金/程序不足 2/5 必须被拦。
-     * 动机：只有悬疑上限时，压出来的空间被关系/家庭吃掉而非回到主粮——
-     * 实测 106-120 十五章主粮 3/15（其中 1 章行政）且本金 0、程序 0。
+     * 动机：只有悬疑上限时，压出来的空间被关系/家庭吃掉而非回到主粮——* 实测 106-120 十五章主粮 3/15（其中 1 章行政）且本金 0、程序 0。
      */
     @Test
     void mainLineDiscipline_flagsHardLineQuotaShortfall() {

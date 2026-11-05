@@ -2,7 +2,6 @@ package cn.novel.yonren.trigger.http;
 
 import cn.novel.yonren.api.dto.LlmConfigDTO;
 import cn.novel.yonren.api.dto.LlmConfigSaveRequestDTO;
-import cn.novel.yonren.domain.novel.model.valobj.properties.StoryProperties;
 import cn.novel.yonren.domain.novel.service.armory.LlmRuntimeConfig;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -17,25 +16,18 @@ import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.eq;
-import static org.mockito.ArgumentMatchers.same;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 /**
  * LLM 配置端点测试：GET 返回含场景矩阵的全量视图；PUT 保存后回全量视图；
- * reset/resetScenes 语义透传（校验在 LlmRuntimeConfig）
+ * reset/resetScenes 语义透传（校验在 LlmRuntimeConfig）。
+ * 分层重构后：properties 已下沉 viewFull()（domain 内部注入）。
  */
 class LlmConfigControllerTest {
 
     @Mock
     private LlmRuntimeConfig llmRuntimeConfig;
-
-    @Mock
-    private StoryProperties storyProperties;
-
-    @Mock
-    private cn.novel.yonren.domain.novel.model.valobj.properties.ReferenceSelectorProperties referenceSelectorProperties;
 
     @InjectMocks
     private LlmConfigController controller;
@@ -43,8 +35,6 @@ class LlmConfigControllerTest {
     @BeforeEach
     void setUp() {
         MockitoAnnotations.openMocks(this);
-        // controller 的两个 view 调用点都会读 selector 静态模式——默认 stub 掉，个别用例再覆盖
-        when(referenceSelectorProperties.getMode()).thenReturn("vector");
     }
 
     @Test
@@ -55,8 +45,7 @@ class LlmConfigControllerTest {
         dto.setModel("runtime-model");
         dto.setHasKey(true);
         dto.setApiKeyMasked("sk-***key1");
-        when(referenceSelectorProperties.getMode()).thenReturn("vector");
-        when(llmRuntimeConfig.view(same(storyProperties), eq("vector"))).thenReturn(dto);
+        when(llmRuntimeConfig.viewFull()).thenReturn(dto);
 
         LlmConfigDTO result = controller.get();
 
@@ -64,7 +53,7 @@ class LlmConfigControllerTest {
         assertTrue(result.isConfigured());
         assertEquals("https://runtime.example.com", result.getBaseUrl());
         assertEquals("sk-***key1", result.getApiKeyMasked());
-        verify(llmRuntimeConfig).view(same(storyProperties), same("vector"));
+        verify(llmRuntimeConfig).viewFull();
     }
 
     @Test
@@ -79,7 +68,7 @@ class LlmConfigControllerTest {
         fullView.setBaseUrl("https://new.example.com");
         fullView.setModel("new-model");
         when(llmRuntimeConfig.save(any(LlmConfigSaveRequestDTO.class))).thenReturn(new LlmConfigDTO());
-        when(llmRuntimeConfig.view(same(storyProperties), eq("vector"))).thenReturn(fullView);
+        when(llmRuntimeConfig.viewFull()).thenReturn(fullView);
 
         LlmConfigDTO result = controller.save(request);
 
@@ -87,7 +76,7 @@ class LlmConfigControllerTest {
         assertEquals("new-model", result.getModel());
         verify(llmRuntimeConfig).save(request);
         // 保存后回全量视图（含场景矩阵），前端整页刷新当前生效状态
-        verify(llmRuntimeConfig).view(same(storyProperties), same("vector"));
+        verify(llmRuntimeConfig).viewFull();
     }
 
     @Test
@@ -99,7 +88,7 @@ class LlmConfigControllerTest {
         when(llmRuntimeConfig.save(any(LlmConfigSaveRequestDTO.class))).thenReturn(cleared);
         LlmConfigDTO fullView = new LlmConfigDTO();
         fullView.setConfigured(false);
-        when(llmRuntimeConfig.view(same(storyProperties), eq("vector"))).thenReturn(fullView);
+        when(llmRuntimeConfig.viewFull()).thenReturn(fullView);
 
         LlmConfigDTO result = controller.save(reset);
 
@@ -108,9 +97,9 @@ class LlmConfigControllerTest {
     }
 
     @Test
-    void get_storyPropertiesPassedThroughUnchanged() {
+    void get_viewFullEchoedUnchanged() {
         LlmConfigDTO dto = new LlmConfigDTO();
-        when(llmRuntimeConfig.view(same(storyProperties), eq("vector"))).thenReturn(dto);
+        when(llmRuntimeConfig.viewFull()).thenReturn(dto);
 
         assertSame(dto, controller.get());
     }

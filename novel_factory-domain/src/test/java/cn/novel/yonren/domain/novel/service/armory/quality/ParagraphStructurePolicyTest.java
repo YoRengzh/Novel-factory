@@ -9,7 +9,7 @@ import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
- * 段落结构兜底测试（2026-10-01）：复现第 1–10 章批次 ch2/ch10 的单段巨块。
+ * 段落结构兜底测试：复现第 1–10 章批次 ch2/ch10 的单段巨块。
  */
 class ParagraphStructurePolicyTest {
 
@@ -82,7 +82,7 @@ class ParagraphStructurePolicyTest {
     /**
      * 回归：本次修复的直接动机——单段巨块会让对白行占比失真。
      *
-     * <p>用真实形态：叙述为主、对白穿插。巨块（0 换行）时占比恒为 1.0；
+     * 用真实形态：叙述为主、对白穿插。巨块（0 换行）时占比恒为 1.0；
      * 重排后叙述段与对白段分开，占比应回落到对白实际占的份额。
      */
     @Test

@@ -7,7 +7,7 @@ import cn.novel.yonren.domain.novel.model.entity.ArmoryCommandEntity;
 import cn.novel.yonren.domain.novel.service.armory.AbstractArmorySupport;
 import cn.novel.yonren.domain.novel.service.armory.factory.DefaultArmoryFactory;
 import cn.novel.yonren.domain.novel.service.armory.plan.ChapterPlanChecks;
-import cn.novel.yonren.types.enums.ChapterTypeVO;
+import cn.novel.yonren.types.enums.ChapterType;
 import cn.novel.yonren.types.enums.ResponseCode;
 import cn.novel.yonren.types.exception.AppException;
 import jakarta.annotation.Resource;
@@ -47,7 +47,7 @@ public class ParseChapterPlanNode extends AbstractArmorySupport {
         if (chapterPlanAggregate.getChapters() != null) {
             for (var item : chapterPlanAggregate.getChapters()) {
                 if (item != null) {
-                    item.setChapterType(ChapterTypeVO.of(item.getChapterType() == null ? null : item.getChapterType().getCode()));
+                    item.setChapterType(ChapterType.of(item.getChapterType() == null ? null : item.getChapterType().getCode()));
                 }
             }
         }

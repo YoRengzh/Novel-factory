@@ -4,7 +4,7 @@ import cn.novel.yonren.domain.novel.model.entity.ChapterContentEntity;
 import cn.novel.yonren.domain.novel.model.entity.ChapterSummaryEntity;
 import cn.novel.yonren.domain.novel.model.entity.StageBlueprintEntity;
 import cn.novel.yonren.domain.novel.service.armory.quality.PlaceTrajectoryPolicy;
-import cn.novel.yonren.types.enums.ChapterTypeVO;
+import cn.novel.yonren.types.enums.ChapterType;
 import org.apache.commons.lang3.StringUtils;
 import org.springframework.stereotype.Service;
 
@@ -79,7 +79,7 @@ public class StageReportService {
         }
         int distinctPlaces = placeFreq.size();
         long transitionCount = stageSummaries.stream()
-                .filter(s -> ChapterTypeVO.of(s.getChapterType()).isTransition()).count();
+                .filter(s -> ChapterType.of(s.getChapterType()).isTransition()).count();
         if (distinctPlaces > 0) {
             sb.append("- 地点：本阶段出现 ").append(distinctPlaces).append(" 个不同地点（")
                     .append(String.format("%.2f", (double) distinctPlaces / chapterCount))

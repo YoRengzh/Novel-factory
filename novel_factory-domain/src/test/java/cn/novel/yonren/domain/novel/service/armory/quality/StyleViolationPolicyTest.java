@@ -12,12 +12,12 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 /**
  * 机械文风门禁测试。
  *
- * <p>覆盖两层：
- * <ol>
- *   <li><b>严重度分层</b>：程度性问题（副词密度/眼神套话/身体套话/章末升华）必须是 MINOR
- *       ——不触发修订也不触发候选；只有章节编号元信息泄露是 BLOCKING</li>
- *   <li><b>判据缺陷修复</b>：章末升华的 AND 判定与词表收窄、章节编号的对白豁免</li>
- * </ol>
+ * 覆盖两层：
+ *
+ *   严重度分层：程度性问题（副词密度/眼神套话/身体套话/章末升华）必须是 MINOR
+ *       ——不触发修订也不触发候选；只有章节编号元信息泄露是 BLOCKING
+ *   判据缺陷修复：章末升华的 AND 判定与词表收窄、章节编号的对白豁免
+ *
  */
 class StyleViolationPolicyTest {
 

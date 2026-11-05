@@ -129,8 +129,7 @@ class ForeshadowLedgerPressurePolicyTest {
         assertTrue(block.contains("净增上限 0 条"), "必须给净增上限：" + block);
         assertTrue(block.contains("每章新埋至多 2 条"), "必须给单章新埋上限：" + block);
         assertTrue(block.contains("优先回收"), "必须要求优先回收：" + block);
-        // 与规划 prompt「每章至多 1 条回收」打架的规则必须被显式放宽——
-        // 否则"净增 ≤0"叠加"每章埋 2"在规则层面不可满足，模型只会忽略整块警告
+        // 与规划 prompt「每章至多 1 条回收」打架的规则必须被显式放宽——// 否则"净增 ≤0"叠加"每章埋 2"在规则层面不可满足，模型只会忽略整块警告
         assertTrue(block.contains("回收吞吐放宽到每章 2 条"),
                 "高压期必须放宽回收上限，否则净增 ≤0 不可满足：" + block);
     }

@@ -1,6 +1,6 @@
 package cn.novel.yonren.domain.novel.model.entity;
 
-import cn.novel.yonren.types.enums.ChapterTypeVO;
+import cn.novel.yonren.types.enums.ChapterType;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Data;
@@ -44,7 +44,7 @@ public class ChapterPlanItemEntity {
     // 审计据此判"推进与声明不符"。格式自由文本（如"推进 2 周，至 XXXX 年 10 月下旬"）
     private String timeAdvance;
     //章节类型：normal 普通 / climax 高潮 / finale 卷末
-    private ChapterTypeVO chapterType;
+    private ChapterType chapterType;
 
     /**
      * **本章结束时核心悬念所处的档位**（2026-09-22 新增）：必须**逐字取自**阶段蓝图的

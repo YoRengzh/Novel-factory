@@ -1,16 +1,19 @@
 package cn.novel.yonren.domain.novel.service.job;
 
+import cn.novel.yonren.api.dto.ChapterPlanApprovalRequestDTO;
+import cn.novel.yonren.api.dto.JobStatusResponseDTO;
+import cn.novel.yonren.api.dto.StoryGenerateRequestDTO;
 import cn.novel.yonren.domain.novel.adapter.repository.IStoryRepository;
 import cn.novel.yonren.domain.novel.model.aggregate.ChapterPlanAggregate;
 import cn.novel.yonren.domain.novel.model.aggregate.StoryGenerateResultAggregate;
 import cn.novel.yonren.domain.novel.model.entity.ArmoryCommandEntity;
 import cn.novel.yonren.domain.novel.model.entity.ChapterSummaryEntity;
 import cn.novel.yonren.domain.novel.model.entity.QualityDebtEntity;
-import cn.novel.yonren.domain.novel.model.valobj.properties.StoryProperties;
+import cn.novel.yonren.domain.novel.config.StoryProperties;
 import cn.novel.yonren.domain.novel.service.armory.StoryGenerateService;
 import cn.novel.yonren.domain.novel.service.armory.factory.DefaultArmoryFactory;
 import cn.novel.yonren.domain.novel.service.armory.plan.ChapterPlanChecks;
-import cn.novel.yonren.domain.novel.service.armory.quality.BatchHealthReport;
+import cn.novel.yonren.domain.novel.model.valobj.quality.BatchHealthReport;
 import cn.novel.yonren.domain.novel.service.armory.quality.BatchHealthService;
 import cn.novel.yonren.types.enums.ResponseCode;
 import cn.novel.yonren.types.exception.AppException;
@@ -598,6 +601,71 @@ public class StoryJobService {
             msg = e.getClass().getName();
         }
         return msg.length() > 1000 ? msg.substring(0, 1000) : msg;
+    }
+
+    // ------------------------------------------------DTO 门面（trigger 层专用入口）
+
+    /**
+     * DTO 门面（2026-11-05 分层重构）：trigger 层不再触碰实体/聚合，
+     * 装配（StoryCommandAssembler）与状态 DTO 化都在本服务内完成。
+     * 既有实体签名方法保留——自动续批等 domain 内部路径仍走实体。
+     */
+
+    public JobStatusResponseDTO submitDto(StoryGenerateRequestDTO request) {
+        GenerationJob job = submit(cn.novel.yonren.domain.novel.service.armory.StoryCommandAssembler
+                .toCommand(request, storyProperties));
+        return toJobStatusDTO(job);
+    }
+
+    /** 作业状态查询；作业不存在返回 null（由 trigger 层映射 404） */
+    public JobStatusResponseDTO statusDto(String jobId) {
+        GenerationJob job = get(jobId);
+        return job == null ? null : toJobStatusDTO(job);
+    }
+
+    /** 协作取消；未知作业返回 null（由 trigger 层映射 404） */
+    public JobStatusResponseDTO cancelDto(String jobId) {
+        GenerationJob job = cancel(jobId);
+        return job == null ? null : toJobStatusDTO(job);
+    }
+
+    /** 章节计划裁决通过（可携带人工修订稿）；不在挂起态返回 null（由 trigger 层映射 409） */
+    public JobStatusResponseDTO approveChapterPlanDto(String jobId,
+                                                      ChapterPlanApprovalRequestDTO request) {
+        GenerationJob job = approveChapterPlan(jobId,
+                cn.novel.yonren.domain.novel.service.armory.StoryCommandAssembler.toChapterPlan(request));
+        return job == null ? null : toJobStatusDTO(job);
+    }
+
+    /** 章节计划裁决驳回；不在挂起态返回 null（由 trigger 层映射 409） */
+    public JobStatusResponseDTO rejectChapterPlanDto(String jobId) {
+        GenerationJob job = rejectChapterPlan(jobId);
+        return job == null ? null : toJobStatusDTO(job);
+    }
+
+    /** 作业状态 → DTO：15+ 字段拆装。仅挂起态透出计划（非挂起态前端拿到也无事可做） */
+    private JobStatusResponseDTO toJobStatusDTO(GenerationJob job) {
+        JobStatusResponseDTO dto = new JobStatusResponseDTO();
+        dto.setJobId(job.getJobId());
+        dto.setStatus(job.getStatus() == null ? null : job.getStatus().name());
+        dto.setStoryDirName(job.getStoryDirName());
+        dto.setRunDirName(job.getRunDirName());
+        dto.setCurrentStage(job.getCurrentStage());
+        dto.setCurrentChapter(job.getCurrentChapter());
+        dto.setTotalChapters(job.getTotalChapters());
+        dto.setStartedAtMs(job.getStartedAtMs());
+        dto.setFinishedAtMs(job.getFinishedAtMs());
+        dto.setErrorMessage(job.getErrorMessage());
+        dto.setChapterDurations(job.getChapterDurations());
+        dto.setAwaitingPlanApprovalAtMs(job.getAwaitingPlanApprovalAtMs());
+        dto.setPlanApprovalDeadlineMs(job.getPlanApprovalDeadlineMs());
+        dto.setApprovalRound(job.getApprovalRound());
+        dto.setHealthReport(job.getLastHealthReport());
+        // 仅挂起态透出计划：非挂起态前端拿到计划也无事可做，且避免把大对象挂在每次轮询上
+        if (job.isAwaitingApproval()) {
+            dto.setPendingChapterPlan(pendingChapterPlan(job.getJobId()));
+        }
+        return dto;
     }
 
     /**

@@ -2,14 +2,11 @@ package cn.novel.yonren.trigger.http;
 
 import cn.novel.yonren.api.dto.JobStatusResponseDTO;
 import cn.novel.yonren.api.dto.StoryGenerateRequestDTO;
-import cn.novel.yonren.domain.novel.model.valobj.properties.StoryProperties;
-import cn.novel.yonren.domain.novel.service.job.GenerationJob;
-import cn.novel.yonren.types.enums.JobStatus;
 import cn.novel.yonren.domain.novel.service.job.StoryJobService;
+import cn.novel.yonren.types.enums.ResponseCode;
 import cn.novel.yonren.types.exception.AppException;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
-import org.mockito.ArgumentCaptor;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.MockitoAnnotations;
@@ -23,15 +20,14 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 /**
- * 作业端点测试：提交/查询/取消与队列满 503、未知作业 404
+ * 作业端点 HTTP 层测试（分层重构后）：
+ * 业务断言由 domain 的 StoryJobService/StoryCommandAssembler 测试覆盖，
+ * 本类只验证 DTO 门面调用、状态码映射（503 队列满 / 404 未知作业 / 409 非挂起态裁决）。
  */
 class JobControllerTest {
 
     @Mock
     private StoryJobService storyJobService;
-
-    @Mock
-    private StoryProperties storyProperties;
 
     @InjectMocks
     private JobController jobController;
@@ -39,31 +35,30 @@ class JobControllerTest {
     @BeforeEach
     void setUp() {
         MockitoAnnotations.openMocks(this);
-        when(storyProperties.toStoryVO()).thenReturn(null);
     }
 
     @Test
-    void submit_returnsJobIdAndCreatedStatus() {
+    void submit_returnsDtoFromFacade() {
+        JobStatusResponseDTO dto = new JobStatusResponseDTO();
+        dto.setJobId("job-7");
+        dto.setStatus("CREATED");
+        when(storyJobService.submitDto(any())).thenReturn(dto);
+
         StoryGenerateRequestDTO request = new StoryGenerateRequestDTO();
         request.setNovel_title("灵气复苏后的外卖员");
         request.setResumeStoryDir("20260902-story-0001");
-        when(storyJobService.submit(any())).thenReturn(new GenerationJob("job-7"));
 
-        JobStatusResponseDTO dto = jobController.submit(request);
+        JobStatusResponseDTO result = jobController.submit(request);
 
-        assertEquals("job-7", dto.getJobId());
-        assertEquals("CREATED", dto.getStatus());
-
-        ArgumentCaptor<cn.novel.yonren.domain.novel.model.entity.ArmoryCommandEntity> captor =
-                ArgumentCaptor.forClass(cn.novel.yonren.domain.novel.model.entity.ArmoryCommandEntity.class);
-        verify(storyJobService).submit(captor.capture());
-        assertEquals("20260902-story-0001", captor.getValue().getResumeStoryDir());
+        assertEquals("job-7", result.getJobId());
+        assertEquals("CREATED", result.getStatus());
+        verify(storyJobService).submitDto(request);
     }
 
     @Test
     void submit_queueFull_throws503() {
-        when(storyJobService.submit(any()))
-                .thenThrow(new AppException("500", "作业队列已满，请稍后重试"));
+        when(storyJobService.submitDto(any()))
+                .thenThrow(new AppException(ResponseCode.UN_ERROR.getCode(), "作业队列已满，请稍后重试"));
 
         ResponseStatusException e = assertThrows(ResponseStatusException.class,
                 () -> jobController.submit(new StoryGenerateRequestDTO()));
@@ -72,27 +67,41 @@ class JobControllerTest {
     }
 
     @Test
-    void status_knownJob_mapsAllFields() {
-        GenerationJob job = new GenerationJob("job-8");
-        job.markRunning();
-        job.updateProgress("CHAPTER_GENERATION", 5, 24, "20260903-story-0001");
-        job.recordChapterDuration(5, 60000L);
-        when(storyJobService.get("job-8")).thenReturn(job);
+    void submit_activeJobConflict_throws409() {
+        when(storyJobService.submitDto(any()))
+                .thenThrow(new AppException(ResponseCode.ILLEGAL_PARAMETER.getCode(),
+                        "该故事已有运行中的作业，请等待完成或取消后再提交"));
 
-        JobStatusResponseDTO dto = jobController.status("job-8");
+        ResponseStatusException e = assertThrows(ResponseStatusException.class,
+                () -> jobController.submit(new StoryGenerateRequestDTO()));
 
-        assertEquals("job-8", dto.getJobId());
-        assertEquals("RUNNING", dto.getStatus());
-        assertEquals("CHAPTER_GENERATION", dto.getCurrentStage());
-        assertEquals(5, dto.getCurrentChapter());
-        assertEquals(24, dto.getTotalChapters());
-        assertEquals("20260903-story-0001", dto.getStoryDirName());
-        assertEquals(60000L, dto.getChapterDurations().get("5"));
+        assertEquals(HttpStatus.CONFLICT, e.getStatusCode());
+    }
+
+    @Test
+    void status_knownJob_returnsDto() {
+        JobStatusResponseDTO dto = new JobStatusResponseDTO();
+        dto.setJobId("job-8");
+        dto.setStatus("RUNNING");
+        dto.setCurrentStage("CHAPTER_GENERATION");
+        dto.setCurrentChapter(5);
+        dto.setTotalChapters(24);
+        dto.setStoryDirName("20260903-story-0001");
+        when(storyJobService.statusDto("job-8")).thenReturn(dto);
+
+        JobStatusResponseDTO result = jobController.status("job-8");
+
+        assertEquals("job-8", result.getJobId());
+        assertEquals("RUNNING", result.getStatus());
+        assertEquals("CHAPTER_GENERATION", result.getCurrentStage());
+        assertEquals(5, result.getCurrentChapter());
+        assertEquals(24, result.getTotalChapters());
+        assertEquals("20260903-story-0001", result.getStoryDirName());
     }
 
     @Test
     void status_unknownJob_throws404() {
-        when(storyJobService.get("nope")).thenReturn(null);
+        when(storyJobService.statusDto("nope")).thenReturn(null);
 
         ResponseStatusException e = assertThrows(ResponseStatusException.class,
                 () -> jobController.status("nope"));
@@ -101,26 +110,45 @@ class JobControllerTest {
     }
 
     @Test
-    void cancel_knownJob_returnsJob() {
-        GenerationJob job = new GenerationJob("job-9");
-        job.markRunning();
-        job.requestCancel();
-        job.markCancelling();
-        when(storyJobService.cancel("job-9")).thenReturn(job);
+    void cancel_knownJob_returnsDto() {
+        JobStatusResponseDTO dto = new JobStatusResponseDTO();
+        dto.setJobId("job-9");
+        dto.setStatus("CANCELLING");
+        when(storyJobService.cancelDto("job-9")).thenReturn(dto);
 
-        JobStatusResponseDTO dto = jobController.cancel("job-9");
+        JobStatusResponseDTO result = jobController.cancel("job-9");
 
-        assertEquals("job-9", dto.getJobId());
-        assertEquals(JobStatus.CANCELLING.name(), dto.getStatus());
+        assertEquals("job-9", result.getJobId());
+        assertEquals("CANCELLING", result.getStatus());
     }
 
     @Test
     void cancel_unknownJob_throws404() {
-        when(storyJobService.cancel("nope")).thenReturn(null);
+        when(storyJobService.cancelDto("nope")).thenReturn(null);
 
         ResponseStatusException e = assertThrows(ResponseStatusException.class,
                 () -> jobController.cancel("nope"));
 
         assertEquals(HttpStatus.NOT_FOUND, e.getStatusCode());
+    }
+
+    @Test
+    void approve_notAwaiting_throws409() {
+        when(storyJobService.approveChapterPlanDto(any(), any())).thenReturn(null);
+
+        ResponseStatusException e = assertThrows(ResponseStatusException.class,
+                () -> jobController.approveChapterPlan("job-1", null));
+
+        assertEquals(HttpStatus.CONFLICT, e.getStatusCode());
+    }
+
+    @Test
+    void reject_notAwaiting_throws409() {
+        when(storyJobService.rejectChapterPlanDto("job-1")).thenReturn(null);
+
+        ResponseStatusException e = assertThrows(ResponseStatusException.class,
+                () -> jobController.rejectChapterPlan("job-1"));
+
+        assertEquals(HttpStatus.CONFLICT, e.getStatusCode());
     }
 }

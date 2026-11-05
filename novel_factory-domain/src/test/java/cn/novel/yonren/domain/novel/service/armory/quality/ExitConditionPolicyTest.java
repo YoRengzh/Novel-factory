@@ -12,7 +12,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 /**
  * 退出条件原子化判据测试。
  *
- * <p>背景（162 章实测）：96 条退出条件里 75 条（78%）含"且/以及/同时"，整条判定让部分推进不可见，
+ * 背景（162 章实测）：96 条退出条件里 75 条（78%）含"且/以及/同时"，整条判定让部分推进不可见，
  * 是"同一条件被反复结转、单调不可达"的直接原因。
  */
 class ExitConditionPolicyTest {
@@ -119,7 +119,7 @@ class ExitConditionPolicyTest {
 
     @Test
     void multiPointFormReturnsNullForSingleSceneCondition() {
-        // 单场景条件没有结构性问题，未达成就是内容问题 —— 不该被盖上"结构性缺口"的帽子
+        // 单场景条件没有结构性问题，未达成就是内容问题 ——不该被盖上"结构性缺口"的帽子
         assertNull(ExitConditionPolicy.multiPointForm(
                 "文本中明确描写了角色癸与角色壬在实验室选拔赛上互相否决对方方案的完整冲突过程"));
         assertNull(ExitConditionPolicy.multiPointForm("主角突破至炼气九层"));

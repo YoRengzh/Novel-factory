@@ -63,7 +63,7 @@ public class ChapterSummaryEntity {
      *  "零角色互动"此前不可观测（地点有轨迹回灌，关系/互动零指标零回灌） */
     private Double dialogueRatio;
 
-    /** 题材（机械写入，GenreTypeVO.code）：体检的"对话驱动题材"阈值据此切换。
+    /** 题材（机械写入，GenreType.code）：体检的"对话驱动题材"阈值据此切换。
      *  落进摘要而非走参数，是为了让批末日志与 /health 端点的口径自动一致（观测层口径必须同一份） */
     private String storyGenre;
 
@@ -72,7 +72,7 @@ public class ChapterSummaryEntity {
     private Integer dialogueUtterances;
     // 本章计划的关键事件数（机械统计）：与 validChars 配合衡量"计划供给 vs 实际承载"
     private Integer keyEventCount;
-    // 本章章型（机械取自章节计划 ChapterTypeVO.code）：密度反馈据此豁免过渡章，老数据为 null
+    // 本章章型（机械取自章节计划 ChapterType.code）：密度反馈据此豁免过渡章，老数据为 null
     private String chapterType;
     // 本章结束时的**地点**（模型输出，与 timePoint 分开）：地点轨迹校准的机械可统计信号。
     // 此前只有 timePoint（"时间与地点"混在一串），按整串去重会把时间前缀算成不同地点；老数据为 null

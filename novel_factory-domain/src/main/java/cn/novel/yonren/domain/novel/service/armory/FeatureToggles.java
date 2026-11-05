@@ -1,10 +1,10 @@
 package cn.novel.yonren.domain.novel.service.armory;
 
 import cn.novel.yonren.api.dto.LlmConfigDTO;
-import cn.novel.yonren.domain.novel.model.valobj.properties.QualityReviewProperties;
-import cn.novel.yonren.domain.novel.model.valobj.properties.ReferenceSelectorProperties;
-import cn.novel.yonren.domain.novel.model.valobj.properties.StoryMemoryProperties;
-import cn.novel.yonren.domain.novel.model.valobj.properties.StoryProperties;
+import cn.novel.yonren.domain.novel.config.QualityReviewProperties;
+import cn.novel.yonren.domain.novel.config.ReferenceSelectorProperties;
+import cn.novel.yonren.domain.novel.config.StoryMemoryProperties;
+import cn.novel.yonren.domain.novel.config.StoryProperties;
 import lombok.Getter;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;

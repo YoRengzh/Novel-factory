@@ -3,10 +3,10 @@ package cn.novel.yonren.domain.novel.service.armory.node;
 import cn.novel.yonren.domain.novel.model.aggregate.ChapterPlanAggregate;
 import cn.novel.yonren.domain.novel.model.entity.ArmoryCommandEntity;
 import cn.novel.yonren.domain.novel.model.entity.ChapterPlanItemEntity;
-import cn.novel.yonren.domain.novel.model.valobj.properties.StoryProperties;
+import cn.novel.yonren.domain.novel.config.StoryProperties;
 import cn.novel.yonren.domain.novel.service.armory.factory.DefaultArmoryFactory;
 import cn.novel.yonren.domain.novel.service.job.GenerationJob;
-import cn.novel.yonren.types.enums.ChapterTypeVO;
+import cn.novel.yonren.types.enums.ChapterType;
 import cn.novel.yonren.types.enums.JobStatus;
 import cn.novel.yonren.types.exception.PlanApprovalSuspendedException;
 import org.junit.jupiter.api.BeforeEach;
@@ -155,7 +155,7 @@ class PlanApprovalGateNodeTest {
         DefaultArmoryFactory.DynamicContext ctx = context(job, false);
         List<ChapterPlanItemEntity> chapters = new ArrayList<>(List.of(ChapterPlanItemEntity.builder()
                 .chapterNo(1).title("第一章").goal("目标").keyEvents(List.of("事件"))
-                .chapterType(ChapterTypeVO.NORMAL).build()));
+                .chapterType(ChapterType.NORMAL).build()));
         ctx.setChapterPlanAggregate(ChapterPlanAggregate.builder().storyId("story-1").chapters(chapters).build());
 
         assertThrows(PlanApprovalSuspendedException.class, () -> node.doApply(command, ctx));

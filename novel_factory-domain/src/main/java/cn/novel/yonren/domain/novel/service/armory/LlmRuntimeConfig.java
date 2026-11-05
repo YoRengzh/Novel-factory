@@ -3,7 +3,8 @@ package cn.novel.yonren.domain.novel.service.armory;
 import cn.novel.yonren.api.dto.LlmConfigDTO;
 import cn.novel.yonren.api.dto.LlmConfigSaveRequestDTO;
 import cn.novel.yonren.domain.novel.model.valobj.StoryVO;
-import cn.novel.yonren.domain.novel.model.valobj.properties.StoryProperties;
+import cn.novel.yonren.domain.novel.config.ReferenceSelectorProperties;
+import cn.novel.yonren.domain.novel.config.StoryProperties;
 import cn.novel.yonren.types.enums.LlmProtocol;
 import cn.novel.yonren.types.enums.ModelScene;
 import com.alibaba.fastjson2.JSON;
@@ -187,6 +188,22 @@ public class LlmRuntimeConfig {
      * 为 null 时（单测/离线工具直接 new）跳过——那些场景本就不涉及运行时开关。
      */
     private FeatureToggles featureToggles;
+
+    /** 2026-11-05 分层重构注入：viewFull 的静态侧来源（trigger 层不再传 properties） */
+    private volatile StoryProperties storyProperties;
+
+    /** 资料选择器静态模式（viewFull 全量视图用；未注入时资料选择器生效值退化为纯覆盖判断） */
+    private volatile ReferenceSelectorProperties referenceSelectorProperties;
+
+    @Autowired(required = false)
+    void setStoryProperties(StoryProperties storyProperties) {
+        this.storyProperties = storyProperties;
+    }
+
+    @Autowired(required = false)
+    void setReferenceSelectorProperties(ReferenceSelectorProperties referenceSelectorProperties) {
+        this.referenceSelectorProperties = referenceSelectorProperties;
+    }
 
     public LlmRuntimeConfig() {
         this(DEFAULT_FILE);
@@ -1073,6 +1090,15 @@ public class LlmRuntimeConfig {
      */
     public LlmConfigDTO view(StoryProperties statics) {
         return view(statics, null);
+    }
+
+    /**
+     * DTO 门面（2026-11-05 分层重构）：trigger 层不再传 properties——
+     * 静态侧由本类注入的 yml 绑定补齐（FeatureToggles 同款模式），资料选择器模式同理。
+     */
+    public LlmConfigDTO viewFull() {
+        return view(storyProperties, referenceSelectorProperties == null
+                ? null : referenceSelectorProperties.getMode());
     }
 
     /**

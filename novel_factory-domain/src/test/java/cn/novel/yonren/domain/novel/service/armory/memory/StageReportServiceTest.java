@@ -3,7 +3,7 @@ package cn.novel.yonren.domain.novel.service.armory.memory;
 import cn.novel.yonren.domain.novel.model.entity.ChapterContentEntity;
 import cn.novel.yonren.domain.novel.model.entity.ChapterSummaryEntity;
 import cn.novel.yonren.domain.novel.model.entity.StageBlueprintEntity;
-import cn.novel.yonren.types.enums.ChapterTypeVO;
+import cn.novel.yonren.types.enums.ChapterType;
 import org.junit.jupiter.api.Test;
 
 import java.util.ArrayList;
@@ -17,7 +17,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 /**
  * 阶段节奏报告测试。
  *
- * <p>2026-09-16 起报告新增两个维度：**地点**（本阶段不同地点数 / 章均新地点）与**章型**
+ * 起报告新增两个维度：**地点**（本阶段不同地点数 / 章均新地点）与**章型**
  *（过渡章数）。此前报告只统字数/伏笔/账本，而"每章换场"正因为无人统计而无人校准。
  */
 class StageReportServiceTest {
@@ -48,8 +48,8 @@ class StageReportServiceTest {
                 content(1, 2000), content(2, 2000), content(3, 2000));
         List<ChapterSummaryEntity> summaries = new ArrayList<>();
         summaries.add(summary(1, "讲堂", null));
-        summaries.add(summary(2, "讲堂", ChapterTypeVO.TRANSITION.getCode()));
-        summaries.add(summary(3, "讲堂", ChapterTypeVO.NORMAL.getCode()));
+        summaries.add(summary(2, "讲堂", ChapterType.TRANSITION.getCode()));
+        summaries.add(summary(3, "讲堂", ChapterType.NORMAL.getCode()));
 
         String report = service.buildStageReport(stage(1, 3), summaries, contents);
 
@@ -79,8 +79,8 @@ class StageReportServiceTest {
         List<ChapterContentEntity> contents = List.of(
                 content(1, 2000), content(2, 2000), content(3, 2000));
         List<ChapterSummaryEntity> summaries = List.of(
-                summary(1, "讲堂", ChapterTypeVO.TRANSITION.getCode()),
-                summary(2, "讲堂", ChapterTypeVO.TRANSITION.getCode()),
+                summary(1, "讲堂", ChapterType.TRANSITION.getCode()),
+                summary(2, "讲堂", ChapterType.TRANSITION.getCode()),
                 summary(3, "讲堂", null));
 
         String report = service.buildStageReport(stage(1, 3), summaries, contents);

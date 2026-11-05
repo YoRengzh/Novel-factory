@@ -8,7 +8,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
  * OpenAI 协议 completionsPath 推导测试：baseUrl 带 /v1 时必须去掉重复的 /v1，
  * 否则会拼出 /v1/v1/chat/completions（实测 404）。
  *
- * <p>与 {@link ResponsesApiChatModelTest#endpoint_adaptsToV1AndHonorsCompletionsPath}
+ * 与 {@link ResponsesApiChatModelTest#endpoint_adaptsToV1AndHonorsCompletionsPath}
  * 同一适配承诺：三协议 + 模型列表都要"带不带 /v1 均可"。
  */
 class SpringAiLlmGatewayCompletionsPathTest {

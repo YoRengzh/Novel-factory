@@ -14,7 +14,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 /**
  * LLM 失败分类测试。
  *
- * <p>用例的真实报文均取自本项目实测日志（2026-09-15 归因）：
+ * 用例的真实报文均取自本项目实测日志（归因）：
  * 403 {@code AllocationQuota.FreeTierOnly}（额度用尽且账号仅允许免费额度）、
  * 403 {@code content_policy_violation}（内容审计命中）、
  * 400 {@code invalid_request_error}（参数被拒）、404 {@code model_not_found}（模型不存在）。

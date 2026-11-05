@@ -30,9 +30,9 @@ import cn.novel.yonren.domain.novel.service.armory.plan.ChapterPlanPromptService
 import cn.novel.yonren.domain.novel.service.armory.plan.ChapterPlanSegmentPlanner;
 import cn.novel.yonren.domain.novel.service.armory.quality.QualityGate;
 import cn.novel.yonren.domain.novel.service.armory.candidate.CandidateSampleService;
-import cn.novel.yonren.domain.novel.service.armory.quality.BatchHealthReport;
+import cn.novel.yonren.domain.novel.model.valobj.quality.BatchHealthReport;
 import cn.novel.yonren.domain.novel.service.armory.quality.BatchHealthService;
-import cn.novel.yonren.domain.novel.service.armory.quality.GateResult;
+import cn.novel.yonren.domain.novel.model.valobj.quality.GateResult;
 import cn.novel.yonren.domain.novel.service.armory.candidate.ChapterCandidateService;
 import cn.novel.yonren.domain.novel.service.job.GenerationJob;
 import org.junit.jupiter.api.BeforeEach;
@@ -151,7 +151,7 @@ class ChapterWorkerTest {
     @org.mockito.Spy
     private cn.novel.yonren.domain.novel.service.armory.prompt.PromptBudgetGuard promptBudgetGuard =
             new cn.novel.yonren.domain.novel.service.armory.prompt.PromptBudgetGuard(
-                    new cn.novel.yonren.domain.novel.model.valobj.properties.PromptBudgetProperties());
+                    new cn.novel.yonren.domain.novel.config.PromptBudgetProperties());
 
     /** 卷链语义：用真实实现（spy）——章号所属卷的选取由 RollingOutlineServiceTest 覆盖 */
     @org.mockito.Spy
@@ -215,7 +215,7 @@ class ChapterWorkerTest {
 
         String prompt = chapterWorker.buildChapterPrompt(
                 "【全局设定】都市校园", item, "【记忆前缀】账本末态", 9,
-                cn.novel.yonren.domain.novel.service.armory.contract.ChapterContract.of(item, null));
+                cn.novel.yonren.domain.novel.model.valobj.contract.ChapterContract.of(item, null));
 
         int facts = prompt.indexOf("【全局设定】都市校园");
         int memory = prompt.indexOf("【记忆前缀】账本末态");
@@ -246,7 +246,7 @@ class ChapterWorkerTest {
         ChapterPlanItemEntity item = ChapterPlanItemEntity.builder()
                 .chapterNo(1).title("开端").goal("目标")
                 .characters(List.of("林童")).keyEvents(List.of("事件")).endingHook("悬念").build();
-        var contract = cn.novel.yonren.domain.novel.service.armory.contract.ChapterContract.of(item, null);
+        var contract = cn.novel.yonren.domain.novel.model.valobj.contract.ChapterContract.of(item, null);
 
         String urban = chapterWorker.buildChapterPrompt("都市重生", item, null, 1, contract,
                 StoryContextEntity.builder().theme("都市重生").style("年代成长").build());
@@ -267,7 +267,7 @@ class ChapterWorkerTest {
                 .characters(List.of()).keyEvents(List.of()).endingHook("悬念").build();
 
         String prompt = chapterWorker.buildChapterPrompt("【全局设定】", item, null, 3,
-                cn.novel.yonren.domain.novel.service.armory.contract.ChapterContract.of(item, null));
+                cn.novel.yonren.domain.novel.model.valobj.contract.ChapterContract.of(item, null));
 
         assertTrue(prompt.startsWith("【全局设定】"), "无记忆前缀时全局设定仍排最前");
         assertTrue(prompt.contains("\n\n请根据以下第 3 章计划"), "事实层与任务层的分隔保持不变");
@@ -289,7 +289,7 @@ class ChapterWorkerTest {
                         .build());
 
         String prompt = chapterWorker.buildChapterPrompt("【全局设定】", item, null, 5,
-                cn.novel.yonren.domain.novel.service.armory.contract.ChapterContract.of(item, summaries));
+                cn.novel.yonren.domain.novel.model.valobj.contract.ChapterContract.of(item, summaries));
 
         assertTrue(prompt.contains("【认知边界·不得越界】"), "认知边界块必须注入约束层");
         assertTrue(prompt.contains("尚未确认无月的真实身份"), "边界内容来自账本");
@@ -297,7 +297,7 @@ class ChapterWorkerTest {
 
         // 账本里没有认知类记录时，不得凭空生成该块
         String bare = chapterWorker.buildChapterPrompt("【全局设定】", item, null, 5,
-                cn.novel.yonren.domain.novel.service.armory.contract.ChapterContract.of(item, null));
+                cn.novel.yonren.domain.novel.model.valobj.contract.ChapterContract.of(item, null));
         assertTrue(!bare.contains("【认知边界·不得越界】"), "没有认知记录时不应出现该块");
     }
 
@@ -434,7 +434,7 @@ class ChapterWorkerTest {
                 .storyId("story-1")
                 .chapters(new java.util.ArrayList<>(List.of(
                         ChapterPlanItemEntity.builder().chapterNo(1)
-                                .chapterType(cn.novel.yonren.types.enums.ChapterTypeVO.FINALE).build())))
+                                .chapterType(cn.novel.yonren.types.enums.ChapterType.FINALE).build())))
                 .build();
         DefaultArmoryFactory.DynamicContext ctx = DefaultArmoryFactory.DynamicContext.builder()
                 .chapterPlanAggregate(plan)
@@ -544,7 +544,7 @@ class ChapterWorkerTest {
                 .storyId("story-1")
                 .chapters(new java.util.ArrayList<>(List.of(
                         ChapterPlanItemEntity.builder().chapterNo(1)
-                                .chapterType(cn.novel.yonren.types.enums.ChapterTypeVO.FINALE).build())))
+                                .chapterType(cn.novel.yonren.types.enums.ChapterType.FINALE).build())))
                 .build();
         GenerationJob job = new GenerationJob("finale-pass");
         DefaultArmoryFactory.DynamicContext ctx = DefaultArmoryFactory.DynamicContext.builder()

@@ -14,10 +14,9 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
- * 伏笔排期打标测试（2026-10-02，P2b）。
+ * 伏笔排期打标测试（P2b）。
  *
- * <p>打标是整条 P2 链路的**枢纽**：没有它，排期表只是个落盘的死文件——
- * 清账过滤、段计划注入、漏收指标全都读不到 {@code scheduledPayoffChapter}。
+ * 打标是整条 P2 链路的**枢纽**：没有它，排期表只是个落盘的死文件——* 清账过滤、段计划注入、漏收指标全都读不到 {@code scheduledPayoffChapter}。
  */
 class ForeshadowScheduleServiceTest {
 
@@ -92,7 +91,7 @@ class ForeshadowScheduleServiceTest {
     }
 
     /**
-     * **短锚点回归**（2026-10-03，老书两批实测）：排期 intent 与摘要 seed 是两个模型的措辞，
+     * **短锚点回归**（老书两批实测）：排期 intent 与摘要 seed 是两个模型的措辞，
      * 同一件事实测被改写掉 1-2 个字——「老银镯子」(LCS=4) 在旧 6 字门槛下被误判 MISSED，
      * 而它**分毫不差埋在排期章上**。阈值降到 4 后此类必须命中。
      */
@@ -181,7 +180,7 @@ class ForeshadowScheduleServiceTest {
     /**
      * 阶段出口裁决判 DONE 的线必须回写 PAID——闭环的最后一段。
      *
-     * <p>只把 DONE 写进结算文件而不回写排期表，它下一段仍会以「逾期补收」再被下一次令：
+     * 只把 DONE 写进结算文件而不回写排期表，它下一段仍会以「逾期补收」再被下一次令：
      * 实测某条老线（第 5 章埋、原计划第 45 章收）在后续几十章仍被逐段下令补收，
      * 而它其实已在在中段兑现，只是 {@code matchPayoff} 认不出来。
      */

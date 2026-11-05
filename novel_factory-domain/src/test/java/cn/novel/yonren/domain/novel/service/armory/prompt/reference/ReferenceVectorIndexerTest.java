@@ -1,5 +1,7 @@
 package cn.novel.yonren.domain.novel.service.armory.prompt.reference;
 
+import cn.novel.yonren.domain.novel.model.valobj.prompt.ReferenceIndexEntry;
+
 import cn.novel.yonren.domain.novel.adapter.llm.EmbeddingGateway;
 import cn.novel.yonren.domain.novel.adapter.repository.VectorStore;
 import cn.novel.yonren.domain.novel.model.valobj.StoryVO;

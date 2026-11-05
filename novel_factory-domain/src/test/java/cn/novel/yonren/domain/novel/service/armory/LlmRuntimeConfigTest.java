@@ -3,7 +3,7 @@ package cn.novel.yonren.domain.novel.service.armory;
 import cn.novel.yonren.api.dto.LlmConfigDTO;
 import cn.novel.yonren.api.dto.LlmConfigSaveRequestDTO;
 import cn.novel.yonren.domain.novel.model.valobj.StoryVO;
-import cn.novel.yonren.domain.novel.model.valobj.properties.StoryProperties;
+import cn.novel.yonren.domain.novel.config.StoryProperties;
 import cn.novel.yonren.types.enums.ModelScene;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -72,7 +72,7 @@ class LlmRuntimeConfigTest {
 
         StoryVO.Module.ChatModel model = config.applyModel(module.getChatModel());
         assertEquals("runtime-model", model.getModel());
-        // maxTokens 是兜底语义（2026-10-23）：静态已配 8192 时全局 4096 不得覆盖它，
+        // maxTokens 是兜底语义：静态已配 8192 时全局 4096 不得覆盖它，
         // 否则全局一个数字会压掉各场景按其输出形态调过的上限（chapter-plan 32768 被腰斩即烧穿根因）
         assertEquals(Long.valueOf(8192L), model.getMaxTokens());
         // 未覆盖字段沿用静态
@@ -240,7 +240,7 @@ class LlmRuntimeConfigTest {
     /**
      * 兜底与全局主模型同名时必须回落到静态兜底：同名会让降级链塌缩成单站
      * （ModelFallbackChain 见同名直接返回单元素链），烧穿保护失去降级目标，
-     * 故障在调用方表现为"解析失败"——2026-10-25 chapter-plan 连烧两次空正文即此因。
+     * 故障在调用方表现为"解析失败"——chapter-plan 连烧两次空正文即此因。
      */
     @Test
     void fallbackApply_sameNameAsPrimary_fallsBackToStaticToKeepChainAlive() {

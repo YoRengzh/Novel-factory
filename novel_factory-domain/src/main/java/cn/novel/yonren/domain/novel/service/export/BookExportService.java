@@ -1,5 +1,7 @@
 package cn.novel.yonren.domain.novel.service.export;
 
+import cn.novel.yonren.domain.novel.model.valobj.BookFormat;
+
 import cn.novel.yonren.domain.novel.adapter.repository.IStoryRepository;
 import cn.novel.yonren.domain.novel.model.entity.ChapterContentEntity;
 import cn.novel.yonren.domain.novel.model.entity.VolumeBlueprintEntity;

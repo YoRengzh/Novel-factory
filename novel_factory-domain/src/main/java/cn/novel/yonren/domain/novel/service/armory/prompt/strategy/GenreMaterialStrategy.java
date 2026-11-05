@@ -2,9 +2,9 @@ package cn.novel.yonren.domain.novel.service.armory.prompt.strategy;
 
 import cn.novel.yonren.domain.novel.service.armory.PromptRuleStrategy;
 import cn.novel.yonren.domain.novel.service.armory.prompt.PromptRuleFileLoader;
-import cn.novel.yonren.domain.novel.service.armory.prompt.valobj.PromptContext;
-import cn.novel.yonren.domain.novel.service.armory.prompt.valobj.PromptRule;
-import cn.novel.yonren.types.enums.GenreTypeVO;
+import cn.novel.yonren.domain.novel.model.valobj.prompt.PromptContext;
+import cn.novel.yonren.domain.novel.model.valobj.prompt.PromptRule;
+import cn.novel.yonren.types.enums.GenreType;
 import cn.novel.yonren.types.enums.PromptScene;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Component;
@@ -47,14 +47,14 @@ public class GenreMaterialStrategy implements PromptRuleStrategy {
 
     @Override
     public List<PromptRule> load(PromptScene scene, PromptContext ctx) {
-        GenreTypeVO genre = GenreTypeVO.match(ctx.getTheme(), ctx.getStyle());
+        GenreType genre = GenreType.match(ctx.getTheme(), ctx.getStyle());
         List<PromptRule> rules = new ArrayList<>();
         for (MaterialEntry entry : ENTRIES) {
             if (entry.planOnly() && scene != PromptScene.CHAPTER_PLAN) {
                 continue;
             }
             // 无兜底的条目（genres 资料）在 DEFAULT 时不适用，直接跳过
-            if (!entry.fallbackDefault() && genre == GenreTypeVO.DEFAULT) {
+            if (!entry.fallbackDefault() && genre == GenreType.DEFAULT) {
                 continue;
             }
             String content = fileLoader.load(String.format(entry.pathPattern(), genre.getCode()));

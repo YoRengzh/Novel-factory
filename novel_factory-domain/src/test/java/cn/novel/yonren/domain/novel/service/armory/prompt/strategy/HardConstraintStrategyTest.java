@@ -1,7 +1,7 @@
 package cn.novel.yonren.domain.novel.service.armory.prompt.strategy;
 
 import cn.novel.yonren.domain.novel.service.armory.prompt.PromptRuleFileLoader;
-import cn.novel.yonren.domain.novel.service.armory.prompt.valobj.PromptRule;
+import cn.novel.yonren.domain.novel.model.valobj.prompt.PromptRule;
 import cn.novel.yonren.types.enums.PromptScene;
 import org.junit.jupiter.api.Test;
 
@@ -15,9 +15,9 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
 /**
- * 写作硬约束注入策略测试（2026-09-22 约束归层后新增）。
+ * 写作硬约束注入策略测试（约束归层后新增）。
  *
- * <p>背景：篇幅/对话的**数量目标**此前直接写在正文 prompt 里，模型为满足数量而注水；
+ * 背景：篇幅/对话的**数量目标**此前直接写在正文 prompt 里，模型为满足数量而注水；
  * 归层后数量目标移入 {@code rules/plan-targets.md} 并**只注入计划场景**，
  * 正文与修订只拿得到定性的 {@code hard-constraints.md}。
  * 这个分界必须锁住——一旦串了，等于绕一圈又回到"用数量驱动正文"。

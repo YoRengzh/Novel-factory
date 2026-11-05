@@ -10,7 +10,7 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
- * 大纲解析器测试（2026-10-05）：夹具取自新书《重启千禧》真实 chapterGoal 的代表性片段，
+ * 大纲解析器测试：夹具取自新书《重启千禧》真实 chapterGoal 的代表性片段，
  * 覆盖全部格式变体——单值/区间年龄、单值/区间年份、季节与上下半年后缀、无年龄段、卷头。
  * 通用性验收：完全无结构的自由大纲解析为空（fail-soft），消费端自动豁免。
  */

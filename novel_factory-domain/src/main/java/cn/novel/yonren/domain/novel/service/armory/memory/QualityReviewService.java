@@ -6,7 +6,7 @@ import cn.novel.yonren.domain.novel.model.entity.ChapterContentEntity;
 import cn.novel.yonren.domain.novel.model.entity.ChapterSummaryEntity;
 import cn.novel.yonren.domain.novel.model.valobj.LlmCall;
 import cn.novel.yonren.domain.novel.model.valobj.StoryVO;
-import cn.novel.yonren.domain.novel.model.valobj.properties.QualityReviewProperties;
+import cn.novel.yonren.domain.novel.config.QualityReviewProperties;
 import cn.novel.yonren.domain.novel.service.armory.quality.DialogueRatioPolicy;
 import cn.novel.yonren.types.enums.ModelScene;
 import cn.novel.yonren.types.utils.JsonParseFallback;

@@ -2,7 +2,7 @@ package cn.novel.yonren.domain.novel.service.armory.writer;
 
 import cn.novel.yonren.domain.novel.adapter.repository.IStoryRepository;
 import cn.novel.yonren.domain.novel.model.entity.ChapterContentEntity;
-import cn.novel.yonren.domain.novel.service.armory.quality.GateResult;
+import cn.novel.yonren.domain.novel.model.valobj.quality.GateResult;
 import com.alibaba.fastjson2.JSON;
 import jakarta.annotation.Resource;
 import lombok.extern.slf4j.Slf4j;

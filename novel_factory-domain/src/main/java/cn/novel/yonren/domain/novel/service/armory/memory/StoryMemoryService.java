@@ -11,7 +11,7 @@ import cn.novel.yonren.domain.novel.model.valobj.ScoredVectorPoint;
 import cn.novel.yonren.domain.novel.model.valobj.StoredPoint;
 import cn.novel.yonren.domain.novel.model.valobj.StoryVO;
 import cn.novel.yonren.domain.novel.model.valobj.VectorPoint;
-import cn.novel.yonren.domain.novel.model.valobj.properties.StoryMemoryProperties;
+import cn.novel.yonren.domain.novel.config.StoryMemoryProperties;
 import cn.novel.yonren.types.enums.ResponseCode;
 import cn.novel.yonren.types.exception.AppException;
 import cn.novel.yonren.domain.novel.service.armory.LlmRuntimeConfig;

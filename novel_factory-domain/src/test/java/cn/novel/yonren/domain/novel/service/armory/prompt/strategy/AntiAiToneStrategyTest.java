@@ -1,8 +1,8 @@
 package cn.novel.yonren.domain.novel.service.armory.prompt.strategy;
 
 import cn.novel.yonren.domain.novel.service.armory.prompt.PromptRuleFileLoader;
-import cn.novel.yonren.domain.novel.service.armory.prompt.valobj.PromptContext;
-import cn.novel.yonren.domain.novel.service.armory.prompt.valobj.PromptRule;
+import cn.novel.yonren.domain.novel.model.valobj.prompt.PromptContext;
+import cn.novel.yonren.domain.novel.model.valobj.prompt.PromptRule;
 import cn.novel.yonren.types.enums.PromptScene;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -17,7 +17,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 /**
  * 去 AI 味规则的**注入范围**测试。
  *
- * <p>此前的空白：{@code supports()} 恒真，7637 字符的正文文风判据进了所有 6 个场景（含两份蓝图），
+ * 此前的空白：{@code supports()} 恒真，7637 字符的正文文风判据进了所有 6 个场景（含两份蓝图），
  * 却没有任何测试断言"哪些场景该拿到哪些小节"。本次收窄正是因为缺少这层断言而长期未被发现。
  */
 class AntiAiToneStrategyTest {

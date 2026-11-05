@@ -25,8 +25,7 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 /**
- * LLM 网关测试：模型客户端缓存键必须区分 buildChatModel 固化的全部参数——
- * temperature 曾不在键内，同 model+maxTokens 不同温度的场景复用同一客户端，
+ * LLM 网关测试：模型客户端缓存键必须区分 buildChatModel 固化的全部参数——* temperature 曾不在键内，同 model+maxTokens 不同温度的场景复用同一客户端，
  * 先构建者的温度对后者生效（summary 0.2 vs chapter-content 0.5 碰撞）
  */
 class SpringAiLlmGatewayTest {
@@ -91,7 +90,7 @@ class SpringAiLlmGatewayTest {
 
     @Test
     void looksTruncatedJson_rejectsRealAccidentShapes() {
-        // 真实事故形态（llm-usage.jsonl 2026-10-19）：deepseek 备选 16383/16384 撞上限，
+        // 真实事故形态（llm-usage.jsonl ）：deepseek 备选 16383/16384 撞上限，
         // 残 JSON 死在中文引号中间——尾字符判不出来，必须真解析
         assertTrue(SpringAiLlmGateway.looksTruncatedJson(
                 "{\"chapters\":[{\"chapterNo\":1,\"goal\":\"…李默辩解：「我"));

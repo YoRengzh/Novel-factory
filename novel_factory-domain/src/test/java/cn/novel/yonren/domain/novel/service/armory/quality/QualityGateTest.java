@@ -1,5 +1,7 @@
 package cn.novel.yonren.domain.novel.service.armory.quality;
 
+import cn.novel.yonren.domain.novel.model.valobj.quality.GateResult;
+
 import cn.novel.yonren.domain.novel.model.entity.ArmoryCommandEntity;
 import cn.novel.yonren.domain.novel.model.entity.AuditResultEntity;
 import cn.novel.yonren.domain.novel.model.entity.ChapterContentEntity;
@@ -8,7 +10,7 @@ import cn.novel.yonren.domain.novel.model.entity.ChapterPlanItemEntity;
 import cn.novel.yonren.domain.novel.model.entity.ChapterSummaryEntity;
 import cn.novel.yonren.domain.novel.model.entity.RevisionDecisionEntity;
 import cn.novel.yonren.domain.novel.model.entity.StyleStatEntity;
-import cn.novel.yonren.domain.novel.model.valobj.properties.StoryProperties;
+import cn.novel.yonren.domain.novel.config.StoryProperties;
 import cn.novel.yonren.domain.novel.service.armory.audit.AuditSampleService;
 import cn.novel.yonren.domain.novel.service.armory.audit.ChapterAuditService;
 import cn.novel.yonren.domain.novel.service.armory.memory.ChapterMemoryService;
@@ -216,10 +218,9 @@ class QualityGateTest {
     }
 
     /**
-     * 跨章对白逐字重复必须是 BLOCKING 并真的驱动一次修订（2026-10-10）。
+     * 跨章对白逐字重复必须是 BLOCKING 并真的驱动一次修订。
      *
-     * <p>实测第 100 章与第 102 章一字不差问了同一句「那句话还会不会兑现？」，两句都留在了成稿里——
-     * 因为这类重复原先只进「风格警示」（下一章的软提示）与 MINOR 记账，没有任何一条能驱动修订。
+     * 实测第 100 章与第 102 章一字不差问了同一句「那句话还会不会兑现？」，两句都留在了成稿里——* 因为这类重复原先只进「风格警示」（下一章的软提示）与 MINOR 记账，没有任何一条能驱动修订。
      * 对白重复是读者最容易察觉的硬伤（人物像在复读），修法又机械（改这一句），所以升级为 BLOCKING。
      */
     @Test
@@ -454,8 +455,7 @@ class QualityGateTest {
 
     @Test
     void styleMinorAlone_doesNotRevise_butIsReportedAsMinor() {
-        // 严重度分层：纯程度性文风问题（身体套话复读）已降为 MINOR——
-        // 既不触发修订，也不计入 grade（不触发候选选优），但必须随结果返回供上层记债
+        // 严重度分层：纯程度性文风问题（身体套话复读）已降为 MINOR——// 既不触发修订，也不计入 grade（不触发候选选优），但必须随结果返回供上层记债
         audit.setEnabled(false);
         chapterContent.setContent("他喉结滚动，没接话。她转身要走，他又喉结滚动了一下。");
 
@@ -587,7 +587,7 @@ class QualityGateTest {
     /**
      * 对白轮次坍缩必须**落一条 MINOR 债**，而不是只打一条 WARN。
      *
-     * <p>实测第 96 章：4.4 次/千字（劣化线 6.0，同批其它章 12-27）。当时
+     * 实测第 96 章：4.4 次/千字（劣化线 6.0，同批其它章 12-27）。当时
      * {@code ContentDensityPolicy} 的预警（有效对话 <25 句）确实进了审校 prompt，但审校规则里
      * BLOCKING 仅限四类硬伤、MINOR 明写"只记录，不触发修订"——那条预警在设计上不会产生任何动作，
      * 原稿照样放行。落成质量债才会随记忆回灌到规划层与下一章 prompt，信号才不会被丢掉。
@@ -633,7 +633,7 @@ class QualityGateTest {
     }
 
     /**
-     * 正文级对话承载对账（2026-10-11）：计划声明了 dialogueScenes 的章，密度坍缩从 MINOR
+     * 正文级对话承载对账：计划声明了 dialogueScenes 的章，密度坍缩从 MINOR
      * 升级 BLOCKING——规划层已承诺对话承载，正文开不了腔是写手违约，必须进修订闭环；
      * 缺失的场景台词作为修订靶点随建议下发。实测第 110 章形态：声明两句、成文一句。
      */
@@ -713,7 +713,7 @@ class QualityGateTest {
     @Test
     void transitionChapter_withDeclaredScenes_stillExempt() {
         audit.setEnabled(false);
-        item.setChapterType(cn.novel.yonren.types.enums.ChapterTypeVO.TRANSITION);
+        item.setChapterType(cn.novel.yonren.types.enums.ChapterType.TRANSITION);
         item.setDialogueScenes(List.of("角色乙：「嗯。」"));
         StringBuilder longText = new StringBuilder("他把信纸摊开，折好，塞进信封，指腹把折痕压平。");
         for (int i = 0; i < 50; i++) {
@@ -791,10 +791,9 @@ class QualityGateTest {
     }
 
     /**
-     * 篇幅坍缩硬底线（2026-10-13）：有效字低于 800 的提纲式废稿记 BLOCKING 并进修订闭环。
+     * 篇幅坍缩硬底线：有效字低于 800 的提纲式废稿记 BLOCKING 并进修订闭环。
      *
-     * <p>实测第 136 章整章重写后终稿仅 674 有效字，却因"原 BLOCKING 已修复"而放行出厂——
-     * 首审的字数告警发生在重写之前、重写后没有任何环节复测终稿。本用例钉住"坍缩即 BLOCKING"。
+     * 实测第 136 章整章重写后终稿仅 674 有效字，却因"原 BLOCKING 已修复"而放行出厂——* 首审的字数告警发生在重写之前、重写后没有任何环节复测终稿。本用例钉住"坍缩即 BLOCKING"。
      */
     @Test
     void collapsedChapter_isBlocking_andDrivesRevision() {
@@ -820,9 +819,8 @@ class QualityGateTest {
     }
 
     /**
-     * 修订稿必须重新过篇幅底线（2026-10-13，136 章事故的直接补丁）：
-     * 首审因其它 BLOCKING 触发重写，重写稿虽修好了那些问题却只有 674 字——
-     * 旧实现在此闭环放行，本用例钉住"修订稿仍坍缩 ⇒ 不闭环"。
+     * 修订稿必须重新过篇幅底线（136 章事故的直接补丁）：
+     * 首审因其它 BLOCKING 触发重写，重写稿虽修好了那些问题却只有 674 字——* 旧实现在此闭环放行，本用例钉住"修订稿仍坍缩 ⇒ 不闭环"。
      */
     @Test
     void collapsedRevision_isNotAcceptedAsClosed() {

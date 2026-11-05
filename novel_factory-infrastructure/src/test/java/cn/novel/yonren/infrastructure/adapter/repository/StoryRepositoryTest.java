@@ -215,7 +215,7 @@ class StoryRepositoryTest {
      * "改了写入忘了改读取"（或反之）的**唯一防线**——值解析不出来不会报错，
      * 只会在前端点"继续写"时表现为"设定莫名其妙丢了"。
      *
-     * <p>书名故意含全角冒号，用来钉住"只按第一个 ASCII 冒号切分"这条口径。
+     * 书名故意含全角冒号，用来钉住"只按第一个 ASCII 冒号切分"这条口径。
      */
     @Test
     void storyBible_roundTripsThroughParser() throws Exception {

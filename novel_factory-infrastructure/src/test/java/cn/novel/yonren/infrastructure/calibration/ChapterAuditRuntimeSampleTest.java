@@ -54,7 +54,7 @@ class ChapterAuditRuntimeSampleTest {
         }
 
         ChapterAuditService auditService = new ChapterAuditService(new SpringAiLlmGateway(1, 20, 600, new LlmRuntimeConfig(), new cn.novel.yonren.domain.novel.service.job.LlmBudgetFuse(
-                        new cn.novel.yonren.domain.novel.model.valobj.properties.StoryProperties(),
+                        new cn.novel.yonren.domain.novel.config.StoryProperties(),
                         new cn.novel.yonren.domain.novel.service.job.JobRegistry())));
         StoryVO storyVO = loadStoryVO();
         int totalBlocking = 0;

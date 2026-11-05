@@ -1,0 +1,50 @@
+name: CI
+
+# 测试全量跑在 CI，本地不必每次全量执行（1598 个用例，约 2 分钟）。
+# 分层边界由 ArchBoundaryTest 三条 ArchUnit 规则守护，破坏即构建失败。
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          java-version: '17'
+          distribution: 'temurin'
+
+      # 缓存 ~/.m2：依赖不变时命中，省掉大部分下载时间
+      - name: Cache Maven repository
+        uses: actions/cache@v4
+        with:
+          path: ~/.m2/repository
+          key: ${{ runner.os }}-m2-${{ hashFiles('**/pom.xml') }}
+          restore-keys: |
+            ${{ runner.os }}-m2-
+
+      # 根 pom 的仓库指向阿里云 nexus（国内镜像）。CI 在境外访问可能不稳，
+      # 这里覆盖为 Maven Central，避免拉不到依赖导致假失败。
+      - name: Run tests
+        run: mvn -B -s .github/maven-ci-settings.xml test
+
+      - name: Upload test reports on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: surefire-reports
+          path: '**/target/surefire-reports/**'
+          retention-days: 7

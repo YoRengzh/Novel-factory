@@ -1,5 +1,7 @@
 package cn.novel.yonren.domain.novel.service.armory.plan;
 
+import cn.novel.yonren.domain.novel.model.valobj.plan.StoryDate;
+
 import cn.novel.yonren.domain.novel.model.entity.ChapterPlanItemEntity;
 import cn.novel.yonren.domain.novel.model.entity.ChapterSummaryEntity;
 import org.junit.jupiter.api.Test;
@@ -14,7 +16,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 /**
  * 时间排期验收测试：日期解析、相对链式推算、欠账计算、单调性校验。
  *
- * <p>夹具取自**生产实测**：238-242 章的计划合计推进 59 天，而摘要记录的时点只走 16 天，
+ * 夹具取自**生产实测**：238-242 章的计划合计推进 59 天，而摘要记录的时点只走 16 天，
  * 缺口 73%。此前三道关全部失效（单调性只写在提示词、审计只记 MINOR、写手看到的是"允许推进"），
  * 所以这个缺口从未被发现。
  */
@@ -73,7 +75,7 @@ class TimeAdvanceChecksTest {
 
     /**
      * 生产实测第 4 章："七月某日清晨至上午，第三天阻拦后"——旧实现把"某日"当数字解析，
-     * 拿链上基准拼出 2003年2月17日（年份来自污染链、月份与锚点矛盾）。
+     * 拿链上基准拼出 （年份来自污染链、月份与锚点矛盾）。
      * 模糊表述必须整条拒绝：宁可该章跳过验收，不可产出假值去判违规。
      */
     @Test

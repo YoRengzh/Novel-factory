@@ -343,8 +343,8 @@ class LlmRuntimeConfigProviderTest {
         StoryVO.Module module = new StoryVO.Module();
         module.setChatModel(staticChatModel());
         module.setSceneModels(Map.of("chapter-judge", judgeStatic));
-        cn.novel.yonren.domain.novel.model.valobj.properties.StoryProperties props =
-                new cn.novel.yonren.domain.novel.model.valobj.properties.StoryProperties();
+        cn.novel.yonren.domain.novel.config.StoryProperties props =
+                new cn.novel.yonren.domain.novel.config.StoryProperties();
         props.setModule(module);
 
         LlmConfigDTO.SceneView row = config.view(props).getScenes().stream()
@@ -386,7 +386,7 @@ class LlmRuntimeConfigProviderTest {
         assertNull(sceneModel.getApiKey());
     }
 
-    // ===== 回归：评审中实测到的三个缺陷（2026-10-27）=====
+    // ===== 回归：评审中实测到的三个缺陷=====
 
     /**
      * 回归 ①：旧版手动配置"只改模型"保存时，baseUrl 曾被静默清空
@@ -488,7 +488,7 @@ class LlmRuntimeConfigProviderTest {
         assertEquals("https://anth.example.com", module.getFallbackModel().getBaseUrl());
     }
 
-    // ===== 第二轮评审新增的两个缺陷（2026-10-27）=====
+    // ===== 第二轮评审新增的两个缺陷=====
 
     /**
      * 回归 ④：兜底与主模型同名但指向另一中转站时，旧守卫按"同名=无效"整条作废，
@@ -704,8 +704,8 @@ class LlmRuntimeConfigProviderTest {
         StoryVO.Module module = new StoryVO.Module();
         module.setChatModel(staticChatModel());
         module.setSceneModels(new LinkedHashMap<>());
-        cn.novel.yonren.domain.novel.model.valobj.properties.StoryProperties props =
-                new cn.novel.yonren.domain.novel.model.valobj.properties.StoryProperties();
+        cn.novel.yonren.domain.novel.config.StoryProperties props =
+                new cn.novel.yonren.domain.novel.config.StoryProperties();
         props.setModule(module);
         return config.view(props).getScenes().stream()
                 .filter(s -> sceneKey.equals(s.getKey())).findFirst().orElseThrow();

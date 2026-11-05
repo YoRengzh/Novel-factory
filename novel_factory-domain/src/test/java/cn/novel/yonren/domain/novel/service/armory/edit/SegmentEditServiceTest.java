@@ -12,7 +12,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 /**
  * 段落级编辑测试：三类动作的 prompt 差异、上下文截断方向、模型输出清洗。
  *
- * <p>只测纯函数（buildPrompt / cleanOutput）——真正的 LLM 调用在端到端冒烟里验证，
+ * 只测纯函数（buildPrompt / cleanOutput）——真正的 LLM 调用在端到端冒烟里验证，
  * 单测里打桩模型只会测到 mock 本身。
  */
 class SegmentEditServiceTest {

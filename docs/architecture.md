@@ -39,12 +39,18 @@ trigger 内部按角色分包，控制器只做「解析 → 调用 → 返回�
 
 | 包 | 职责 |
 |---|---|
-| `trigger.http` | `@RestController`：解析请求、调用领域服务、返回 DTO，不含业务规则 |
-| `trigger.assembler` | 请求 DTO ⇄ 领域对象（命令 / 聚合）；纯字段搬运 + 入口格式校验 |
+| `trigger.http` | `@RestController`：解析请求、调用领域服务、返回 DTO，不含业务规则；业务异常码（`AppException`）→ HTTP 状态在端点内集中映射 |
 | `trigger.web` | 与具体端点无关的 Servlet 层组件（跨站写请求守卫） |
 | `trigger.advice` | 统一异常出口：入参类错误码（0002/0003/0004）→ 400，其余 → 500；409/502/503 等端点特有意状态码仍由端点自己抛 |
 
-domain 的每个子包都带 `package-info.java`，写明「这个包放什么、入口类是谁、失败语义如何」。
+**trigger 只认 api DTO**：不得 import `domain.novel.model.*` 下的实体/值对象/聚合根，
+也不持有 `domain.novel.config.*` 的配置 bean。领域对象的读写、DTO 双向转换、命令装配（`StoryCommandAssembler`）
+全部归 domain 服务（如 `service/manage/StoryManageService`、`StoryJobService` 的 DTO 门面、`LlmRuntimeConfig.viewFull`）。
+该边界由 `novel_factory-trigger` 的 `ArchBoundaryTest` 三条 ArchUnit 规则强制守护，破坏即构建失败。
+
+domain 的 `model` 包是纯数据层：无 Spring 注解、无文件 IO，且不得反向依赖 `service`/`adapter`/`config`
+（规则 B 守护）。`service` 下的行为类（静态工具、策略、`@Component` 配置服务）不属于 `model`。
+`model` 包带 `package-info.java` 写明上述纪律；其余 domain 子包按需补充包注释。
 读陌生代码时先看包注释，通常能省掉一次从 controller 往下追的搜索。
 
 ## 2. 生成管线

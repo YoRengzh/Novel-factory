@@ -1,5 +1,8 @@
 package cn.novel.yonren.trigger.http;
 
+import cn.novel.yonren.api.dto.ChatGptAuthStatusDTO;
+import cn.novel.yonren.api.dto.ChatGptAuthorizationDTO;
+import cn.novel.yonren.api.dto.ChatGptModelOptionDTO;
 import cn.novel.yonren.domain.novel.adapter.llm.ChatGptGateway;
 import jakarta.servlet.http.HttpServletRequest;
 import org.springframework.http.MediaType;
@@ -26,24 +29,29 @@ public class ChatGptAuthController {
     }
 
     @GetMapping("/status")
-    public ChatGptGateway.AuthStatus status() {
-        return gateway.status();
+    public ChatGptAuthStatusDTO status() {
+        ChatGptGateway.AuthStatus s = gateway.status();
+        return s == null ? null : new ChatGptAuthStatusDTO(s.authorized(), s.email(), s.expiresAt());
     }
 
     @PostMapping("/start")
-    public ChatGptGateway.Authorization start(HttpServletRequest request) {
-        return gateway.beginAuthorization(callbackUri(request));
+    public ChatGptAuthorizationDTO start(HttpServletRequest request) {
+        ChatGptGateway.Authorization a = gateway.beginAuthorization(callbackUri(request));
+        return a == null ? null : new ChatGptAuthorizationDTO(a.url());
     }
 
     @GetMapping("/models")
-    public List<ChatGptGateway.ModelOption> models() {
-        return gateway.models();
+    public List<ChatGptModelOptionDTO> models() {
+        return gateway.models().stream()
+                .map(m -> new ChatGptModelOptionDTO(m.slug(), m.displayName()))
+                .toList();
     }
 
     @DeleteMapping
-    public ChatGptGateway.AuthStatus logout() {
+    public ChatGptAuthStatusDTO logout() {
         gateway.logout();
-        return gateway.status();
+        ChatGptGateway.AuthStatus s = gateway.status();
+        return s == null ? null : new ChatGptAuthStatusDTO(s.authorized(), s.email(), s.expiresAt());
     }
 
     @GetMapping(value = "/callback", produces = MediaType.TEXT_HTML_VALUE)

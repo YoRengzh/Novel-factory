@@ -1,6 +1,6 @@
 package cn.novel.yonren.domain.novel.model.entity;
 
-import cn.novel.yonren.domain.novel.model.jackson.CharacterNameListDeserializer;
+import cn.novel.yonren.types.utils.CharacterNameListDeserializer;
 import com.fasterxml.jackson.databind.annotation.JsonDeserialize;
 import lombok.AllArgsConstructor;
 import lombok.Builder;

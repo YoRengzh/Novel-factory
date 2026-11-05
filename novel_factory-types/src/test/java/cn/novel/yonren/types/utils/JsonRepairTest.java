@@ -199,7 +199,7 @@ class JsonRepairTest {
     void balanceUnclosed_braceInsideStringNotCounted() {
         // 字符串值里的 } 不应被当作结构闭合
         String bad = "{\"content\":\"他说}好\"}";
-        // 结构：{ content:"他说}好" }  —— 字符串内的 } 不影响括号配对，本已平衡
+        // 结构：{ content:"他说}好" }  ——字符串内的 } 不影响括号配对，本已平衡
         assertEquals(bad, JsonRepair.repair(bad));
     }
 

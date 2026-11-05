@@ -1,8 +1,11 @@
 package cn.novel.yonren.domain.novel.service.armory.draft;
 
+import cn.novel.yonren.api.dto.SettingDraftRequestDTO;
+import cn.novel.yonren.api.dto.SettingDraftResponseDTO;
+import cn.novel.yonren.domain.novel.config.StoryProperties;
 import cn.novel.yonren.domain.novel.model.valobj.StoryVO;
 import cn.novel.yonren.domain.novel.service.armory.llm.LlmInvokeService;
-import cn.novel.yonren.domain.novel.service.armory.prompt.valobj.PromptContext;
+import cn.novel.yonren.domain.novel.model.valobj.prompt.PromptContext;
 import cn.novel.yonren.types.enums.PromptScene;
 import cn.novel.yonren.types.enums.ResponseCode;
 import cn.novel.yonren.types.exception.AppException;
@@ -68,6 +71,52 @@ public class SettingDraftService {
                     (d, v) -> d.setTotalChapters(parseIntOrNull(v))));
 
     private final LlmInvokeService llmInvokeService;
+
+    /** 2026-11-05 分层重构注入：yml 模型配置在服务内补齐，trigger 层不再触碰 StoryProperties */
+    private StoryProperties storyProperties;
+
+    @jakarta.annotation.Resource
+    void setStoryProperties(StoryProperties storyProperties) {
+        this.storyProperties = storyProperties;
+    }
+
+    /**
+     * DTO 门面：请求/响应转换与配置补齐都在服务内完成（2026-11-05 分层重构）。
+     * 异常语义不变——题材为空 / targets 未知字段 → ILLEGAL_PARAMETER（trigger 映射 400）；
+     * 两次尝试均无可用 JSON → 其它 AppException（trigger 映射 502）。
+     */
+    public SettingDraftResponseDTO draftDto(SettingDraftRequestDTO request) {
+        DraftRequest domainRequest = new DraftRequest(
+                request.getTheme(),
+                request.getStyle(),
+                request.getTargetAudience(),
+                request.getTone(),
+                request.getPerspective(),
+                request.getExtraHints(),
+                request.getTargets(),
+                request.getPrevious());
+        Result result = draft(storyProperties.toStoryVO(), domainRequest);
+        return toResponseDTO(request.getTheme(), result);
+    }
+
+    private SettingDraftResponseDTO toResponseDTO(String theme, Result result) {
+        DraftOutput fields = result.fields();
+        SettingDraftResponseDTO dto = new SettingDraftResponseDTO();
+        dto.setTheme(theme);
+        dto.setNovelTitle(fields.getNovelTitle());
+        dto.setStyle(fields.getStyle());
+        dto.setWorldSetting(fields.getWorldSetting());
+        dto.setPerspective(fields.getPerspective());
+        dto.setTargetAudience(fields.getTargetAudience());
+        dto.setTone(fields.getTone());
+        dto.setProtagonist(fields.getProtagonist());
+        dto.setOutline(fields.getOutline());
+        dto.setChapterGoal(fields.getChapterGoal());
+        dto.setTotalChapters(fields.getTotalChapters());
+        dto.setRationale(fields.getRationale());
+        dto.setRegenerated(result.regenerated());
+        return dto;
+    }
 
     /**
      * 生成/重生成设定集草稿。

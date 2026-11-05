@@ -9,7 +9,7 @@ import cn.novel.yonren.domain.novel.service.armory.factory.DefaultArmoryFactory;
 import cn.novel.yonren.domain.novel.service.armory.llm.LlmInvokeService;
 import cn.novel.yonren.domain.novel.service.armory.memory.RollingOutlineService;
 import cn.novel.yonren.domain.novel.service.armory.plan.ChapterPlanSegmentPlanner;
-import cn.novel.yonren.domain.novel.service.armory.prompt.valobj.PromptContext;
+import cn.novel.yonren.domain.novel.model.valobj.prompt.PromptContext;
 import cn.novel.yonren.types.exception.AppException;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -37,7 +37,7 @@ import static org.mockito.Mockito.when;
 class CallChapterPlanLlmNodeTest {
 
     /**
-     * 合规计划夹具：双人名事件 + dialogueScenes 逐字声明——对话承载闸门（2026-10-10）上线后，
+     * 合规计划夹具：双人名事件 + dialogueScenes 逐字声明——对话承载闸门上线后，
      * 缺声明的计划会被打回重规划，单次调用断言的用例必须默认过全部闸门。
      * 事件文本以章号开头、模板片段 ≤8 字：两章间共享段不触"跨章场景重演"10 字判定线
      */

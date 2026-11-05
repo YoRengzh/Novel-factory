@@ -102,10 +102,9 @@ class GenerationJobTest {
     }
 
     /**
-     * 回归守卫（2026-09-27）：job-status.json 必须是**合法 JSON**。
+     * 回归守卫：job-status.json 必须是**合法 JSON**。
      * 实测缺陷：fastjson2 把 {@code Map<Integer,Long>} 的键写成不带引号的 {@code {1:114150}}，
-     * 文件扩展名是 .json，却让 Jackson / python json.load / jq 全部解析失败——
-     * 这类"文件看起来正常、只有标准解析器才报错"的问题最容易长期潜伏。
+     * 文件扩展名是 .json，却让 Jackson / python json.load / jq 全部解析失败——* 这类"文件看起来正常、只有标准解析器才报错"的问题最容易长期潜伏。
      */
     @Test
     void jobStatusSerializationIsStrictJson() throws Exception {
