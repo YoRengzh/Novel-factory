@@ -191,25 +191,25 @@ public class ChapterCandidateService {
     /**
      * 候选选优的触发判定。
      *
-     * <p><b>2026-10-01 修 DEBT 漏触发</b>：此前只认 {@code MINOR_RESIDUE} 与 {@code REVISED_PASS}
+     * 2026-10-01 修 DEBT 漏触发：此前只认 {@code MINOR_RESIDUE} 与 {@code REVISED_PASS}
      * 两种"低置信通过"，{@code DEBT}（修订耗尽仍有未修复 BLOCKING）落到 {@code default -> false}
      * 被直接跳过。而这恰恰是**最需要换一个写法**的章节——原稿已经在同一方向上改了两轮仍不收敛，
      * 说明问题不在措辞而在写法本身。
      *
-     * <p>实测代价：2026-10-01 批次 5 章**全部** DEBT，候选一次都没启动，
+     * 实测代价：2026-10-01 批次 5 章**全部** DEBT，候选一次都没启动，
      * 每章白跑 2 轮 revise + 2 轮 audit-verify（10 次 patch 共 53k token）后仍是同样的稿。
      *
-     * <p>仍受 {@code candidate.enabled} 总开关约束（见 {@link #challenge}），
+     * 仍受 {@code candidate.enabled} 总开关约束（见 {@link #challenge}），
      * 未配置第二模型族时不会空转。{@code DEBT} 无独立开关——它没有"要不要触发"的合理默认，
      * 只有一个正确答案：触发。
      *
-     * <p><b>2026-10-02：MINOR_RESIDUE 与 DEBT 双双关闭</b>（见 {@code CandidateProperties} 各自字段的注释）。
+     * 2026-10-02：MINOR_RESIDUE 与 DEBT 双双关闭（见 {@code CandidateProperties} 各自字段的注释）。
      * 本批实测的采纳率分布是唯一依据：
-     * <pre>
+     *
      *   REVISED_PASS   66.7%   ← 唯一有效的信号
      *   MINOR_RESIDUE  42.9%
      *   DEBT            0%     ← 纯烧钱
-     * </pre>
+     *
      * MINOR 关闭的理由是"条数门槛无判别力"（两批中位数均为 6，调门槛只是挪切点）；
      * DEBT 关闭的理由是"代价确定、收益 0/3"（挑战者与守卫者撞同一堵墙）。
      * 两个开关都保留，可在积累更多样本后重新打开。
@@ -318,8 +318,8 @@ public class ChapterCandidateService {
      * 候选盲评用的事实基线：最近若干章的剧情摘要 + 三账本状态串（与
      * {@code StageExitReviewService} 的可核验文本同源）。
      *
-     * <p><b>为什么必须补</b>：盲评原先只拿到【章节计划 + 两稿正文】，既没有记忆也没有账本，
-     * 因此<em>结构上不可能</em>发现"身份映射被改写""认知状态提前升级""已确认事实被否定"
+     * 为什么必须补：盲评原先只拿到【章节计划 + 两稿正文】，既没有记忆也没有账本，
+     * 因此结构上不可能发现"身份映射被改写""认知状态提前升级""已确认事实被否定"
      * 这类错误，只能比较文风——实测第 9、10 章的挑战者正是这样胜出的。
      * 补上基线后，评审才具备事实核对的依据。
      *
@@ -386,8 +386,8 @@ public class ChapterCandidateService {
     /**
      * 机械排序：先滤掉机械门禁命中的稿，再取有效字数最高者；全部命中返回 null。
      *
-     * <p>字数下限（2026-10-04）：挑战者有效字 &lt; 原稿 × {@link #CHALLENGER_MIN_LENGTH_RATIO}
-     * 或（原稿未达参考线时）&lt; 原稿自身长度即出局——盲评明令"不评长短"，
+     * 字数下限（2026-10-04）：挑战者有效字 < 原稿 × {@link #CHALLENGER_MIN_LENGTH_RATIO}
+     * 或（原稿未达参考线时）< 原稿自身长度即出局——盲评明令"不评长短"，
      * 短稿在盲评里结构性占优（11-20 章实测 5 次缩水采纳：ch15 -50%、ch19 -42%、ch20 -34%）。
      */
     private ChapterContentEntity mechanicalBest(List<ChapterContentEntity> challengers, int incumbentChars) {
@@ -408,11 +408,11 @@ public class ChapterCandidateService {
     /**
      * 重写专用的长度护栏：把"篇幅不得少于原稿"写进 prompt 尾部。
      *
-     * <p><b>为什么必须在 prompt 层说</b>：机械门禁只能**事后**拒稿——被拒的那一稿已经烧掉一次
+     * 为什么必须在 prompt 层说：机械门禁只能**事后**拒稿——被拒的那一稿已经烧掉一次
      * 重写调用（实测 36% 的挑战稿死在字数下限，等于三分之一的钱直接烧掉）。事前给出目标篇幅，
      * 是唯一能把这部分浪费变成有效产出的做法。
      *
-     * <p><b>为什么不定死数字</b>：给出"不少于原稿有效字"这个相对基准，模型才有可执行目标；
+     * 为什么不定死数字：给出"不少于原稿有效字"这个相对基准，模型才有可执行目标；
      * 同时要求"同等篇幅内提升质量"而非"扩写注水"，与去注水纪律一致。
      */
     private static String appendRewriteLengthGuard(String userPrompt, int incumbentChars) {

@@ -85,7 +85,7 @@ public class PlanBranchService {
     /**
      * 带作业载体的重载：两版方向稿与评审共 3 次调用，之间检查取消/熔断信号。
      *
-     * <p>为什么必须在这里检查：分支推演在 {@code ChapterPlanSegmentPlanner} 的重试循环**之前**
+     * 为什么必须在这里检查：分支推演在 {@code ChapterPlanSegmentPlanner} 的重试循环**之前**
      * 执行，三次调用串起来可达数分钟。{@code job} 为 null（同步调试路径）时全部检查跳过。
      */
     public String exploreAndPick(StoryVO storyVO, PromptContext ctx, String prompt,
@@ -116,7 +116,7 @@ public class PlanBranchService {
     /**
      * 分支推演期的取消/熔断检查：置位即抛异常，由作业层按 CANCELLED 收敛终态。
      *
-     * <p>注意与 {@link #tryInvokeDirection} 的 catch 分工：那里吞掉的是**供应商侧**调用失败
+     * 注意与 {@link #tryInvokeDirection} 的 catch 分工：那里吞掉的是**供应商侧**调用失败
      * （降级语义），取消是用户意图，绝不能被当成"这一稿失败"而静默回退到另一条分支继续烧 token
      */
     private static void throwIfCancelled(GenerationJob job, String label) {

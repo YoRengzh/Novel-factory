@@ -262,7 +262,7 @@ public class BuildStageBlueprintNode extends AbstractArmorySupport {
     /**
      * 强制跳接的滞后阈值（年）：只有 ≥ 此值才置 {@code jumpRequired}，触发段计划的 fail-closed 强制跳接。
      *
-     * <p><b>为什么是 2 而不是 1</b>：fail-closed 的代价是**整批终止**（段计划两次重规划仍不合格即抛异常）。
+     * 为什么是 2 而不是 1：fail-closed 的代价是**整批终止**（段计划两次重规划仍不合格即抛异常）。
      * 1 年的滞后在快进段里很常见（大纲用 5 章覆盖 1 年），要求"末章 timeAdvance 必须含预算年"会硬停批次；
      * 而这类小幅滞后完全可以用章后欠账回灌逐章追讨。只有 ≥2 年的结构性滞后
      * （真正的跨年快进段）才值得动用硬闸门。
@@ -272,13 +272,13 @@ public class BuildStageBlueprintNode extends AbstractArmorySupport {
     /**
      * 计算并写入追进度字段（transient，不落盘，每批重建）。
      *
-     * <p><b>滞后口径</b>：{@code 本阶段窗口自身要走的时间} − {@code 正文实际已走的时间}。
+     * 滞后口径：{@code 本阶段窗口自身要走的时间} − {@code 正文实际已走的时间}。
      * 前项走 {@link StoryPacing#pacedBudget} 的同一把尺子（只看窗口增量，不继承段末），
      * 后项取"阶段起点之前的年份锚"与"当前锚"之差。两者相减得年数，≥{@link #PACING_HARD_JUMP_YEARS}
      * 才置 {@code jumpRequired}——一年以内的滞后交给章后欠账回灌逐章追讨，
      * 不必动用 fail-closed 的强制跳接（那会卡批）。
      *
-     * <p>任一侧取不到数值（无锚点/大纲无年份/境界纪年）时全部置 null，消费端自然休眠，
+     * 任一侧取不到数值（无锚点/大纲无年份/境界纪年）时全部置 null，消费端自然休眠，
      * 与引入前行为一致——不臆造滞后。
      */
     private void wirePacingFields(StoryContextEntity storyContext,
@@ -331,7 +331,7 @@ public class BuildStageBlueprintNode extends AbstractArmorySupport {
     /**
      * 取指定章号**之前**（不含）最近一章的年份锚。
      *
-     * <p>用于计算"本阶段已经走了多久"：阶段起点之前的最后一章，其年份就是阶段开始时的故事时间。
+     * 用于计算"本阶段已经走了多久"：阶段起点之前的最后一章，其年份就是阶段开始时的故事时间。
      * 阶段尚未开始（起点之前没有章节）时返回 null，调用方按"已走 0 年"处理。
      */
     private static Integer latestYearBefore(List<ChapterSummaryEntity> summaries, Integer chapterNo) {
@@ -383,18 +383,18 @@ public class BuildStageBlueprintNode extends AbstractArmorySupport {
      * 校验规则：stageEndYear 必须含 4 位年份且 ≥ 重锚预算、≥ 上一阶段声明（单调递增）；
      * stageEndAge 同理。任一不合格即按重锚预算回填——无锚点/大纲段无数值标记时保持声明原样，不编造。
      *
-     * <p><b>跨段预算继承的连续性格挡（2026-10-26）</b>：预算基准取"阶段终点所在段"时，窗口一旦
+     * 跨段预算继承的连续性格挡（2026-10-26）：预算基准取"阶段终点所在段"时，窗口一旦
      * 跨过大纲段边界，就会把下一段的**整段**预算提前拉进本阶段。大纲里存在"快进段"（如
      * {@code 231-240章 2013年秋至2016年夏}、{@code 241-250章 2016年秋}）——它们用少数章节覆盖数年，
      * 于是 5 章的小阶段只要尾章落进下一段，下限就被抬到数年之后。
      *
-     * <p><b>单调下限改为取正文实际锚点（2026-10-26）</b>：声明是计划、不是事实。上一阶段把终点
+     * 单调下限改为取正文实际锚点（2026-10-26）：声明是计划、不是事实。上一阶段把终点
      * 声明到某年而正文没走到时，若拿该声明当永久下限，后续每个阶段都会被钳在它以上，
      * 年份链就此**单向棘轮**，再也回不到正文实际时间。锚点来自摘要 timePoint，是已发生的事实，
      * 用它做下限既能防倒退（正文真走到了，下限自然是那年），又不会把"没走到的计划"固化成下限。
      * 无锚点（老数据/摘要缺年份）时才退回上一阶段声明兜底，避免失去倒退保护。
      *
-     * <p><b>预算计价只看窗口自身增量</b>：见 {@link StoryPacing#pacedBudget}——不继承任何一段的
+     * 预算计价只看窗口自身增量：见 {@link StoryPacing#pacedBudget}——不继承任何一段的
      * 段末，故快进段的段末不会被提前记进本阶段；预算无上限，正文真走过去就照常放行。
      */
     private void repairStageEndFromOutline(ArmoryCommandEntity requestParameter,
@@ -527,14 +527,14 @@ public class BuildStageBlueprintNode extends AbstractArmorySupport {
     /**
      * **伏笔兑现排期表补采**：主 prompt 遗漏时补问一次，只问这一项。
      *
-     * <p>三步：①聚焦补采拿到本阶段新排期 → ②与上一版结转的活线条目**机械合并去重**
+     * 三步：①聚焦补采拿到本阶段新排期 → ②与上一版结转的活线条目**机械合并去重**
      * （模型看不见上一版全貌，必然重复排）→ ③追加进 {@code dynamicContext.foreshadowSchedules} 并落盘。
      *
-     * <p><b>质量校验（"至少 1 条跨阶段"）在这里判定</b>，不在 parse 里——
+     * 质量校验（"至少 1 条跨阶段"）在这里判定，不在 parse 里——
      * 它是补采质量问题而非格式问题：格式不合格整表退回，质量问题**重问一次**，
      * 仍不满足则**告警放行**（排期质量差不该让整批失败）。
      *
-     * <p>fail-soft：拿不到排期表时不阻断规划——此时全链路行为与引入 P2b 前完全一致
+     * fail-soft：拿不到排期表时不阻断规划——此时全链路行为与引入 P2b 前完全一致
      * （种子的 {@code scheduledPayoffChapter} 保持 null，清账过滤与漏收指标都不触发）。
      */
     private void repairForeshadowSchedule(ArmoryCommandEntity requestParameter,
@@ -633,12 +633,12 @@ public class BuildStageBlueprintNode extends AbstractArmorySupport {
     /**
      * **章级主线推进补采**：主 prompt 遗漏 {@code mainLineByChapter} 时补问一次，且只问这一项。
      *
-     * <p>与 {@link #repairSuspenseLadder} 同一套理由与形态：长 prompt 里的逐章数组会被静默省略，
+     * 与 {@link #repairSuspenseLadder} 同一套理由与形态：长 prompt 里的逐章数组会被静默省略，
      * 短聚焦 prompt 服从率高得多。**缺了两者的后果不同但同样静默**——
      * 缺档位表 ⇒ 纵向校验空转；缺章级推进 ⇒ 横向校验空转、段计划继续多章复用同一句描述。
      *
-     * <p>补采仍拿不到时**必须告警**：否则"跑了但没生效"与"没跑"事后无法区分。
-     * <b>不阻断规划</b>——本字段缺失只降级"章级推进校验"，不该让整批失败（fail-soft）。
+     * 补采仍拿不到时**必须告警**：否则"跑了但没生效"与"没跑"事后无法区分。
+     * 不阻断规划——本字段缺失只降级"章级推进校验"，不该让整批失败（fail-soft）。
      */
     private void repairMainLine(ArmoryCommandEntity requestParameter,
                                 DefaultArmoryFactory.DynamicContext dynamicContext,
@@ -910,7 +910,7 @@ public class BuildStageBlueprintNode extends AbstractArmorySupport {
     /**
      * 去重比较用的归一化：剥离引号/书名号类包裹字符并去掉空白。
      *
-     * <p><b>治什么</b>：同一条约束的两份文本仅差一对引号——
+     * 治什么：同一条约束的两份文本仅差一对引号——
      * 模型写了「…必须是已封存状态余波…」，机械兜底的原文本是「…必须是『已封存』状态余波…」，
      * 双向包含在引号处断开 ⇒ 同一约束被登记两次（静默期条目在 stage16 就重复了一对）。
      * 引号是模型对同一概念的排版噪声，不承载语义差异，比较前剥离即可；
@@ -927,14 +927,14 @@ public class BuildStageBlueprintNode extends AbstractArmorySupport {
      * 结转任务机械兜底：上一版标记为"进行中"的任务，若模型输出的 carriedTasks 里既没有
      * 同名条目、也没有判为完成/放弃的记录，则原样补回（不信任模型的一次服从）。
      *
-     * <p><b>治什么</b>：prompt 第 3 条要求"对上一版每条未完成任务逐条结转……严禁静默丢弃"，
+     * 治什么：prompt 第 3 条要求"对上一版每条未完成任务逐条结转……严禁静默丢弃"，
      * 但提示词此前**根本没渲染上一版 carriedTasks**（只渲染了 tasks/exitResults/stageReport），
      * 模型只能凭近章摘要重猜 ⇒ 注入的约定事件（"面邀必须兑现""附加赛必须完成"）在换版时蒸发。
      * 实测：第 14 阶段注入的附加赛任务在第 15 阶段 carriedTasks 中消失，而系统侧零告警。
      * 提示词已同步补齐输入（见 RollingOutlineService 渲染处）；此处再加一道机械闸——
      * 与 {@link #mergeUnmetExitConditions} 同款：不把可靠性押在一次服从上。
      *
-     * <p>补回条目一律标"进行中"并注明来源，供阶段末复核与人工复盘；
+     * 补回条目一律标"进行中"并注明来源，供阶段末复核与人工复盘；
      * 与已有条目按内容双向包含去重，避免与模型自己写的措辞略异版本重复登记。
      */
     private void mergeMissingCarriedTasks(StageBlueprintEntity previous, StageBlueprintEntity blueprint) {
@@ -976,11 +976,11 @@ public class BuildStageBlueprintNode extends AbstractArmorySupport {
     /**
      * 冻结线越权观测
      *
-     * <p>prompt 第 3.1 条已明令"含静默/冻结字样的结转条目不得排进 tasks/exitConditions/档位/章级推进"，
+     * prompt 第 3.1 条已明令"含静默/冻结字样的结转条目不得排进 tasks/exitConditions/档位/章级推进"，
      * 此处机械兜底观测模型是否仍越权。判定口径刻意宽松（关键词命中即报），因为它的产物是
      * 一条 WARN 日志、不是拦截动作——宁可多报几条供人工扫一眼，也不要漏掉真越权。
      *
-     * <p><b>为什么不拦截</b>：冻结线措辞是自由文本，"哪个 task 越了哪条线"的机械判定必然误伤
+     * 为什么不拦截：冻结线措辞是自由文本，"哪个 task 越了哪条线"的机械判定必然误伤
      * （如"冻结"可能出现在与冻结线无关的技术描述里）；而该情形的后果在正文侧可见
      * （新事实凭空出现 → 与既有定案冲突 → 一致性指标与人工复盘能抓到）。
      * 实测第 16 阶段：结转清单明写虹镇静默期"严禁新实物/新追查"，
@@ -1088,11 +1088,11 @@ public class BuildStageBlueprintNode extends AbstractArmorySupport {
     /**
      * 悬念档位表**聚焦补采**：主 prompt 遗漏这两项时再问一次，且**只问这两个字段**。
      *
-     * <p>设计依据来自实测：同一条要求放在完整蓝图 prompt（十几个要求 + 长 schema）里会被静默省略，
+     * 设计依据来自实测：同一条要求放在完整蓝图 prompt（十几个要求 + 长 schema）里会被静默省略，
      * 而单独用短 prompt 问则 100% 给出且质量合格（5 档、可观察表述）。
      * 所以可靠性靠"缺了就补问"，不靠"要求写得够醒目"——后者对长 prompt 无效。
      *
-     * <p>补采也拿不到时**必须告警**：此时推进闸门与 suspenseHold 指标都会静默失效，
+     * 补采也拿不到时**必须告警**：此时推进闸门与 suspenseHold 指标都会静默失效，
      * 而日志若不留痕，事后无从判断"到底跑了没跑"。
      */
     private void repairSuspenseLadder(ArmoryCommandEntity requestParameter,

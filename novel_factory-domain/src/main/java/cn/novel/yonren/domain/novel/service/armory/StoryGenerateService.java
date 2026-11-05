@@ -80,7 +80,7 @@ public class StoryGenerateService {
      * 供章节计划审批门挂起后**续跑剩余阶段**使用：挂起期间上下文（storyDir/runDir/蓝图链/
      * 计划分段/故事上下文）原样保留在内存，恢复时无需从磁盘重建，也不会重复烧规划 token。
      *
-     * <p>注意：本重载**不重复**执行续写预载与完结上限收敛——这两步已在首次进入时作用于同一上下文，
+     * 注意：本重载**不重复**执行续写预载与完结上限收敛——这两步已在首次进入时作用于同一上下文，
      * 重跑会重复预载记忆并可能因目录已建而改变语义
      */
     public StoryGenerateResultAggregate generate(ArmoryCommandEntity command, GenerationJob job,
@@ -246,7 +246,7 @@ public class StoryGenerateService {
     /**
      * 续写时从 bible **强制回填**人物档案（与 {@link #restoreStoryFeatures} 同款理由：bible 是唯一权威）。
      *
-     * <p>为什么必须由后端回填、而不是依赖前端把该字段原样带回来：漏带不会报错，只会表现为
+     * 为什么必须由后端回填、而不是依赖前端把该字段原样带回来：漏带不会报错，只会表现为
      * "人物代词与既定事实悄悄消失"——而它正是防代词/班级写错的那道锚。
      * bible 没有这一行（老故事）时不动作，保持既有行为。
      */

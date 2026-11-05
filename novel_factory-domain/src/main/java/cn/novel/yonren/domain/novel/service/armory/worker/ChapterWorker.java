@@ -578,7 +578,7 @@ public class ChapterWorker {
             // 注入下一章的【偏差警示】块。复用 pendingConflicts 这条现成通道——
             // 它本来就是"上一章的问题，下一章必须修正"的传递载体（语义与账本冲突一致）。
             //
-            // <p>为什么必须**章后立刻**回灌，而不是等批末体检：体检只能报警，来不及修正；
+            // 为什么必须**章后立刻**回灌，而不是等批末体检：体检只能报警，来不及修正；
             // 而时间欠账是会**累积**的（实测某段 5 章：计划 59 天、正文 16 天，四章连续欠 87 天），
             // 越晚发现越难追回。逐章回灌让写手在下一章就补，欠账不会滚成雪球。
             String timeArrears = timeAdvanceArrears(item, summaries, globalNo);
@@ -1015,10 +1015,10 @@ public class ChapterWorker {
     /**
      * 本章的时间欠账（计划声明的目标日期 vs 摘要记录的实到日期）。
      *
-     * <p>只针对**刚写完的这一章**做比较，产出可直接注入下一章【偏差警示】的文案；
+     * 只针对**刚写完的这一章**做比较，产出可直接注入下一章【偏差警示】的文案；
      * 无欠账或日期无法定位时返回 null（不臆造）。
      *
-     * <p>为什么逐章比对而不是整段扫：欠账会累积，逐章回灌才能让写手在下一章就补；
+     * 为什么逐章比对而不是整段扫：欠账会累积，逐章回灌才能让写手在下一章就补；
      * 整段扫只能在段末发现，那时已无法修正。
      */
     private String timeAdvanceArrears(ChapterPlanItemEntity item, List<ChapterSummaryEntity> summaries, int globalNo) {
@@ -1379,10 +1379,10 @@ public class ChapterWorker {
     /**
      * 节拍生成用的**前情上下文**：最近 2 章的剧情摘要（2026-09-22）。
      *
-     * <p><b>为什么必须给</b>：节拍 prompt 的要求 3 早就写着"第一拍必须无缝承接上一章结尾"，
+     * 为什么必须给：节拍 prompt 的要求 3 早就写着"第一拍必须无缝承接上一章结尾"，
      * 但此前它只拿到本章计划——**指令承诺了它做不到的事**，模型只能凭空想象上一章。
      *
-     * <p>⚠️ **只取最近 2 章、只取摘要**：节拍需要的是"上一章结尾在哪、当前状态如何"，
+     * ⚠️ **只取最近 2 章、只取摘要**：节拍需要的是"上一章结尾在哪、当前状态如何"，
      * 不是全量设定。把整段记忆前缀（实测可达 9000+ 字）塞进去会让每章的节拍调用成本翻几倍。
      *
      * @return 上下文文本；无历史章时返回 null（prompt 会跳过该块）
@@ -1408,12 +1408,12 @@ public class ChapterWorker {
 
     /**
      * 组装正文 prompt —— **四层结构**（2026-09-22 拆分重构，输出与拆分前逐字节一致）：
-     * <ol>
-     *   <li>{@link #renderFacts} 事实层：全局设定 + 记忆前缀（含账本末态红线）——先知道世界与前情；</li>
-     *   <li>{@link #renderContract} 任务层：本章计划条目，即本章唯一的核心戏剧任务；</li>
-     *   <li>{@link #renderContinuityConstraints} 约束层：承接上一章与账本一致性——不可违背的事实纪律；</li>
-     *   <li>{@link #renderWritingGuidance} 表现层：写法建议与输出格式——可让步性最高的一层。</li>
-     * </ol>
+     *
+     *   · {@link #renderFacts} 事实层：全局设定 + 记忆前缀（含账本末态红线）——先知道世界与前情；
+     *   · {@link #renderContract} 任务层：本章计划条目，即本章唯一的核心戏剧任务；
+     *   · {@link #renderContinuityConstraints} 约束层：承接上一章与账本一致性——不可违背的事实纪律；
+     *   · {@link #renderWritingGuidance} 表现层：写法建议与输出格式——可让步性最高的一层。
+     *
      * 分层只改变组织方式，不改变内容与顺序；包级可见以便测试锁定输出。
      */
     String buildChapterPrompt(String storyContext, ChapterPlanItemEntity item, String memoryPrefix,
@@ -1590,7 +1590,7 @@ public class ChapterWorker {
     /**
      * 已用情节模式块（正文层）：委托 {@link UsedPatternPolicy}，与规划层共用同一实现。
      *
-     * <p>此前这里有一份私有实现（"最近 5 章摘要前 80 字 + 首个节拍 goal→结果"），
+     * 此前这里有一份私有实现（"最近 5 章摘要前 80 字 + 首个节拍 goal→结果"），
      * 规划层则完全没有对应块——重复的源头在规划层，正文层再劝也拦不住。
      * 现两处共用同一实现，避免"规划说没重复、正文说重复"的口径分裂
      * （项目里已因"两份判据各自演化"出过几次问题）。窗口沿用 5 章，与改造前一致，便于对照。

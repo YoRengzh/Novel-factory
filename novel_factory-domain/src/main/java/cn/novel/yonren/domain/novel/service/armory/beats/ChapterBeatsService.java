@@ -22,7 +22,7 @@ import java.util.List;
  * 把本章计划拆解为 3-5 个有序节拍（地点/在场角色/核心冲突/对白/信息增量/篇幅占比），
  * 注入正文 prompt 要求逐拍扩写——治"计划太粗导致模型即兴注水"的根因。
  *
- * <p>{@code dialogue} 与 {@code infoGain} 一样是**显式供给项**：只给"冲突/动作"时，
+ * {@code dialogue} 与 {@code infoGain} 一样是**显式供给项**：只给"冲突/动作"时，
  * "他把信折好塞进信封"是合法的一拍，写手据此就能交出一整章动作分解（实测有效对话个位数句，
  * 同批其它章 12-27 句）。对白必须成为节拍表的一项，写手才有可执行的东西。
  *
@@ -94,12 +94,12 @@ public class ChapterBeatsService {
     /**
      * 节拍是否带来状态变化——信息增量判据。
      *
-     * <p>口径与 {@link #renderBeatsPrompt} 的扩写纪律同源：{@code infoGain} 的语义本就是
+     * 口径与 {@link #renderBeatsPrompt} 的扩写纪律同源：{@code infoGain} 的语义本就是
      * 「新信息 / 状态变化 / 关系变化」（见 {@code ChapterBeatsEntity.Beat#infoGain} 注释），
      * 因此非空即视为本拍有增量。**没有增量的拍应当并入相邻拍，而不是原地扩写凑篇幅。**
      *
-     * <p>⚠️ 这里**不新增字段**：{@code stateChange} 的语义已由 {@code infoGain} 承载，
-     * 真正缺的一直是<em>机械校验</em>——此前只在 prompt 里要求过，代码里没有任何检查
+     * ⚠️ 这里**不新增字段**：{@code stateChange} 的语义已由 {@code infoGain} 承载，
+     * 真正缺的一直是机械校验——此前只在 prompt 里要求过，代码里没有任何检查
      * （典型的"指标已有、只是没动作"）。
      */
     public static boolean hasStateChange(ChapterBeatsEntity.Beat beat) {
@@ -109,7 +109,7 @@ public class ChapterBeatsService {
     /**
      * 本拍是否提供了对白供给（见 {@link ChapterBeatsEntity.Beat#getDialogue()}）。
      *
-     * <p>与 {@link #hasStateChange} 的差别值得记一笔：{@code infoGain} 是必填字段，
+     * 与 {@link #hasStateChange} 的差别值得记一笔：{@code infoGain} 是必填字段，
      * 模型总会填点什么，那条机械检查实测从未触发；{@code dialogue} 是**允许留空**的字段，
      * 留空才携带信息——全章留空说明这一章只有流程、没有戏。
      */
@@ -128,7 +128,7 @@ public class ChapterBeatsService {
     /**
      * 渲染节拍块，{@code enforceOrder} 决定节拍是"必须逐拍照做"还是"仅建议顺序"。
      *
-     * <p><b>为什么要这个开关</b>（2026-10-09）：{@code GenerationMode.enforcesBeats()} 早就写好了
+     * 为什么要这个开关（2026-10-09）：{@code GenerationMode.enforcesBeats()} 早就写好了
      * 也写了单测，但**生产代码从未调用**——FREE（契约完整 + 节拍可用）本意是"节拍只作建议顺序，
      * 把场景划分与对白比例的自由还给模型"，实际拼出来的却是"以下节拍为建议顺序"紧跟
      * "请逐拍扩写，不要跳过或合并"（后者更靠后、更具体，实际生效）。于是"自由写作"名不副实，
@@ -185,7 +185,7 @@ public class ChapterBeatsService {
     /**
      * 组装节拍 prompt。
      *
-     * <p>⚠️ {@code contextText}（前情上下文）**必须给**：要求 3 早就写着"第一拍必须无缝承接上一章结尾"，
+     * ⚠️ {@code contextText}（前情上下文）**必须给**：要求 3 早就写着"第一拍必须无缝承接上一章结尾"，
      * 但此前 prompt 里根本没有上一章的任何内容——**指令承诺了模型做不到的事**，
      * 于是它只能凭空想象上一章发生了什么（或干脆忽略这条要求）。
      *
@@ -246,7 +246,7 @@ public class ChapterBeatsService {
     /**
      * 把顶层裸数组包成 {@code {"beats":[...]}} 后重试解析。
      *
-     * <p>只在首个非空白字符是 {@code '['} 时生效；剥离 markdown 围栏后判断，
+     * 只在首个非空白字符是 {@code '['} 时生效；剥离 markdown 围栏后判断，
      * 避免 ```json 开头的裸数组漏网。仍失败返回 null（调用方 fail-soft 降级）。
      */
     private ChapterBeatsEntity convertWrappedArray(String raw) {

@@ -90,7 +90,7 @@ public class ChapterSummaryService {
     /**
      * 带时间锚的重载（2026-10-13）：timePoint 要求写出年份后，模型必须知道**当前故事年份**。
      *
-     * <p><b>为什么必须给锚</b>：实测第 136 章正文只写"三月十七号"（年份在前章），
+     * 为什么必须给锚：实测第 136 章正文只写"三月十七号"（年份在前章），
      * 摘要模型据此猜成"2010年3月17日"，而正典是 2011 年——该摘要一旦入库即成为下一章的
      * 时序锚，年份错位会自我固化（并且污染"进度对齐"体检的口径）。
      * 锚由调用方用历史摘要渲染（{@code ConsistencyIndexService.renderTimeAnchor}），
@@ -439,14 +439,14 @@ public class ChapterSummaryService {
     /**
      * 为本章伏笔种子分配**稳定 ID**（2026-10-13）：格式 {@code F{埋设章号}-{序号}}。
      *
-     * <p><b>为什么在机械层分配</b>：ID 是记账凭据，模型的职责是语义判断（这是不是伏笔、
+     * 为什么在机械层分配：ID 是记账凭据，模型的职责是语义判断（这是不是伏笔、
      * 算不算已兑现），记账归机械层——与 excerpt 子串校验、账本核销同一分工。
      * 模型只需在回收时回抄 ID，机械层做集合差集，不再依赖措辞匹配。
      *
-     * <p><b>为什么格式取"章号-序号"而非全局自增</b>：它同时编码了埋设章（账本排序与滞留计算的依据）
+     * 为什么格式取"章号-序号"而非全局自增：它同时编码了埋设章（账本排序与滞留计算的依据）
      * 与本章内顺序，且**天然幂等**——同一章重跑摘要会得到同样的 ID，不会因重试而产生 ID 漂移。
      *
-     * <p>已带 ID 的条目不重编（续写/重试场景保持稳定）；老数据无 ID 时下游全部回退文本匹配。
+     * 已带 ID 的条目不重编（续写/重试场景保持稳定）；老数据无 ID 时下游全部回退文本匹配。
      */
     private void assignForeshadowIds(ChapterSummaryEntity summary) {
         if (summary.getChapterNo() == null || summary.getForeshadowSeeds() == null) {
@@ -484,7 +484,7 @@ public class ChapterSummaryService {
     /**
      * 回收清单的机械兜底：去空白、去重，并统计有多少条**在待收账本里找不到**（措辞漂移）。
      *
-     * <p><b>刻意不丢弃未命中条目</b>：真实兑现的措辞可能与账本不完全一致（账本核销用的是
+     * 刻意不丢弃未命中条目：真实兑现的措辞可能与账本不完全一致（账本核销用的是
      * "互相包含"口径，见 {@code ChapterMemoryService.buildPendingForeshadowDetailed}），
      * 误删等于永久丢掉一次回收——而回收一旦丢失，该线就再也不会关账。
      * 未命中只作**观测信号**：它是"摘要把事件经过写成了自己的话、而不是逐字沿用账中描述"的
@@ -523,7 +523,7 @@ public class ChapterSummaryService {
     /**
      * 最近一次 {@code sanitizeResolved} 的失配事实（null = 未发生失配）。
      *
-     * <p>用字段而非返回值传递：{@code sanitizeResolved} 在 {@code summarize} 内部被调用，
+     * 用字段而非返回值传递：{@code sanitizeResolved} 在 {@code summarize} 内部被调用，
      * 改动其签名会波及既有调用点；本字段只由调用方在 {@code summarize} 返回后读取一次，
      * 语义是"本次摘要是否发生了账本失配"，单线程逐章生成下无竞争。
      */
@@ -543,12 +543,12 @@ public class ChapterSummaryService {
     /**
      * 与账本核销同口径：**ID 命中优先，文本互相包含回退**。
      *
-     * <p>2026-10-13 起账本清单带 {@code [F7-2] } 前缀（见
+     * 2026-10-13 起账本清单带 {@code [F7-2] } 前缀（见
      * {@code ChapterMemoryService.buildForeshadowContextListWithIds}），故：
-     * <ul>
-     *   <li>登记值是 ID 形态（{@code [F7-2]} / {@code F7-2}）时——与账本条目的 ID 前缀精确比对；</li>
-     *   <li>否则剥掉账本行的 ID 前缀后走既有双向 contains。</li>
-     * </ul>
+     *
+     *   · 登记值是 ID 形态（{@code [F7-2]} / {@code F7-2}）时——与账本条目的 ID 前缀精确比对；
+     *   · 否则剥掉账本行的 ID 前缀后走既有双向 contains。
+     *
      * 不剥离前缀直接比对会让**所有**文本回退路径都失配（账本行现在以 "[" 开头），
      * 把失配告警刷成噪声、并掩盖真实的措辞漂移。
      */
@@ -637,22 +637,22 @@ public class ChapterSummaryService {
      * 那是模型换句重述的账本旧线，{@code filterRestatedForeshadows} 只挡 new 侧，
      * 不挡的话重述会借补齐通道绕过过滤重新入账。
      *
-     * <p><b>为什么必须补</b>：下游账本（{@code ChapterMemoryService.buildPendingForeshadowDetailed}）
+     * 为什么必须补：下游账本（{@code ChapterMemoryService.buildPendingForeshadowDetailed}）
      * **只读 {@code foreshadowingNew}**，种子读得再多也只服务于原文引用/重要度/ID。
      * 实测第 1-140 章有 133 条种子在 new 里找不到对应条目——其中大部分是 VOID 出账的正常残留，
      * 但仍有真伏笔因此**对账本完全不可见**：不待回收、不注入规划、拿不到 ID、永远不会被安排回收。
      * 模型偶尔只填 seeds 忘填 new（两个字段分别输出），此前无任何校验兜住。
      *
-     * <p><b>为什么不反向做</b>（把 new 里缺失的条目补进 seeds）：seed 携带 excerpt/importance/
+     * 为什么不反向做（把 new 里缺失的条目补进 seeds）：seed 携带 excerpt/importance/
      * resolvable 等**埋设现场事实**，机械层凭空造不出来；补出的种子只有 content，
      * 反而会污染后续校验。缺 new 是"登记遗漏"，缺 seed 是"证据不足"，两者不对称。
      *
-     * <p><b>为什么只补 resolvable=TRUE</b>：prompt 明确要求 {@code resolvable=false} 的条目
+     * 为什么只补 resolvable=TRUE：prompt 明确要求 {@code resolvable=false} 的条目
      * **不应出现在 new 里**（那是氛围/状态，不承担兑现义务）；补进去会直接违反不变式。
      * {@code resolvable=null}（老数据/模型漏标）同样不补——"宁可漏判不要误判"，
      * 且未标注占比已有专门指标盯着（{@code ForeshadowSpanPolicy.unlabeledRate}）。
      *
-     * <p><b>为什么不去重种子与 new 的数量差</b>：VOID 出账只清 new、不清 seeds
+     * 为什么不去重种子与 new 的数量差：VOID 出账只清 new、不清 seeds
      * （见 {@code stripVoidedForeshadows} 的契约——种子保留埋设痕迹供复盘）。
      * 故"seeds 多于 new"是**设计内的常态**，本方法只按内容做集合补齐，不推断缺口来源。
      */
@@ -720,7 +720,7 @@ public class ChapterSummaryService {
     /**
      * 最近一次 {@link #syncSeedsIntoNew} 的补齐事实（null = 未发生补齐）。
      *
-     * <p>与 {@link #lastLedgerMismatch} 同款约定：字段传递、调用方在 summarize 返回后读取一次，
+     * 与 {@link #lastLedgerMismatch} 同款约定：字段传递、调用方在 summarize 返回后读取一次，
      * 单线程逐章生成下无竞争。
      */
     private volatile SeedNewSync lastSeedNewSync;
@@ -741,7 +741,7 @@ public class ChapterSummaryService {
      * 判定走 EvidenceMatch 统一分档（逐字 → 归一化 → 省略号分段 → 短语覆盖），
      * 用于吸收模型惯用的「...」压缩引用与引号/空白差异；完全定位不到的仍移出三账本状态、
      * 转入 pendingFacts（待裁决，不入账本前缀，随 summaries 落盘）。
-     * 未填 evidence（降级路径/模型未遵从）→ <b>同样转入 pendingFacts 待裁决</b>（2026-09-16 修正：
+     * 未填 evidence（降级路径/模型未遵从）→ 同样转入 pendingFacts 待裁决（2026-09-16 修正：
      * 原实现直接入账，等于"不写引文就绕过整道门"，且物品/势力条目因缺 sourceAccount 会在
      * 裁决回写时被错写到角色账本）。本方法只作用于本章新生成的摘要，不回溯历史数据，
      * 故不存在"旧摘要被二次过滤"的兼容问题
@@ -861,19 +861,19 @@ public class ChapterSummaryService {
      * **数值型事实的机械兜底**：正文里出现了带经济/计量单位的数字，而本章一致性事实里
      * 没有任何 NUMBER 条目覆盖它时，按正文原句回填一条。
      *
-     * <p><b>治什么</b>：摘要模型偶尔整章不输出 {@code consistencyFacts}（实测某章正文明确写了
+     * 治什么：摘要模型偶尔整章不输出 {@code consistencyFacts}（实测某章正文明确写了
      * 「七块二跌到三块出头」并据此做了持币决策，但该章 facts 为空）——于是这条最关键的数值锚
      * 在账本里不存在，后续章节的写手看不到它，只能自己编一个量级（实测后文把同一资产
      * 写成「十七块跌到九块」，与原文的「三块出头」差了一个量级，且此后这个错值反而成了正典）。
      *
-     * <p><b>为什么只兜底"经济/计量"类数字</b>：普通叙述里的数字（年份、年龄、楼层、页码）
+     * 为什么只兜底"经济/计量"类数字：普通叙述里的数字（年份、年龄、楼层、页码）
      * 本就大量出现，全量回填会把账本灌满噪声。限定在带单位且单位属于价格/数量/金额这一族，
      * 才能既覆盖"资产价格/持仓/金额"这类真正需要跨章一致的事实，又不误伤日常叙述。
      *
-     * <p><b>为什么回填而不只是告警</b>：告警只在日志里，下一章照样看不到；回填后它会进入
+     * 为什么回填而不只是告警：告警只在日志里，下一章照样看不到；回填后它会进入
      * 一致性索引与三账本，真正参与后续章节的生成。证据取正文原句，天然通过 EvidenceMatch。
      *
-     * <p>只补"未覆盖"的：本章已有 NUMBER 事实时，说明模型已做登记，机械层不重复也不改写
+     * 只补"未覆盖"的：本章已有 NUMBER 事实时，说明模型已做登记，机械层不重复也不改写
      * （改写会覆盖模型更准确的语义归类，比如它可能已把该数字归到更贴切的 subject 下）。
      */
     private void backfillNumericFacts(ChapterSummaryEntity summary, String content) {
@@ -940,7 +940,7 @@ public class ChapterSummaryService {
     /**
      * 带单位的数字：价格/数量/金额。刻意只认这些单位——年份、年龄、楼层等日常数字不进账本。
      *
-     * <p>覆盖两种口语形态：① {@code 17块 / 3.5元 / 两百枚}；② {@code 七块二 / 三块出头}
+     * 覆盖两种口语形态：① {@code 17块 / 3.5元 / 两百枚}；② {@code 七块二 / 三块出头}
      * （中文价格常用"块"后接角位或模糊后缀）。第二类必须单独认，否则「七块二跌到三块出头」
      * 这种最典型的价格叙述会被整句漏掉——实测事故原文正是这个形态。
      */
@@ -953,7 +953,7 @@ public class ChapterSummaryService {
      * 与 {@link #NUMERIC_WITH_UNIT} 是**与**关系——单有数字（"走了三里路"）或单有经济词
      * （"他说起行情"）都不够，避免把无关叙述写进账本。
      *
-     * <p>判定窗口见 {@link #hasEconomicContextNear}：允许落在相邻句，因为真实对话里
+     * 判定窗口见 {@link #hasEconomicContextNear}：允许落在相邻句，因为真实对话里
      * 价格数字与"这是什么"常常分属两句。
      */
     private static final java.util.regex.Pattern ECONOMIC_CONTEXT = java.util.regex.Pattern.compile(

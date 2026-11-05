@@ -14,23 +14,23 @@ import java.util.Map;
 /**
  * 角色名字列表的容错反序列化器（2026-10-01 实测后新增）。
  *
- * <p><b>为什么需要</b>：`ChapterBeatsEntity.Beat.characters` 声明为 {@code List<String>}，
- * 但模型经常输出<b>对象数组</b>，把"角色名:角色身份"塞进去：
- * <pre>
+ * 为什么需要：`ChapterBeatsEntity.Beat.characters` 声明为 {@code List<String>}，
+ * 但模型经常输出对象数组，把"角色名:角色身份"塞进去：
+ *
  * "characters": [ {"主角甲":"婴儿"}, {"角色甲":"父亲"}, {"角色乙":"母亲"} ]
- * </pre>
+ *
  * 期望 {@code ["主角甲","角色甲","角色乙"]}，实际收到对象 ⇒ Jackson 反序列化抛异常
  * ⇒ {@code BeanOutputConverter.convert} 失败 ⇒ 整章节拍丢失、降级为无节拍直写（SCAFFOLDED）。
  * 实测第 1–10 章批次第 4 章即因此降级（连抛 5 次解析错误）。
  *
- * <p><b>容错策略</b>（只取能确定的部分，绝不猜）：
- * <ul>
- *   <li>字符串元素 → 原样保留；</li>
- *   <li>对象元素 → 取<b>键</b>（键是角色名，值是身份描述）——这正是模型想表达的语义；</li>
- *   <li>纯值对象（如 {@code {"name":"主角甲"}}）→ 优先取 {@code name} 等常见键的值；</li>
- *   <li>数组元素 → 递归展开；</li>
- *   <li>null → 跳过。</li>
- * </ul>
+ * 容错策略（只取能确定的部分，绝不猜）：
+ *
+ *   · 字符串元素 → 原样保留；
+ *   · 对象元素 → 取键（键是角色名，值是身份描述）——这正是模型想表达的语义；
+ *   · 纯值对象（如 {@code {"name":"主角甲"}}）→ 优先取 {@code name} 等常见键的值；
+ *   · 数组元素 → 递归展开；
+ *   · null → 跳过。
+ *
  * 提示词侧同时给出正例，两条腿并行——模型这种行为很常见，光靠提示词治不干净。
  */
 public class CharacterNameListDeserializer extends JsonDeserializer<List<String>> {

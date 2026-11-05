@@ -31,7 +31,7 @@ public record GateResult(List<ChapterIssueEntity> unresolvedBlocking, PassGrade 
 
     /**
      * 工厂：带机械文风 MINOR 的重载。
-     * <b>grade 只用 minorCount 推导</b>，mechanicalMinor 仅随结果传递供上层记债/统计。
+     * grade 只用 minorCount 推导，mechanicalMinor 仅随结果传递供上层记债/统计。
      */
     public static GateResult of(List<ChapterIssueEntity> unresolvedBlocking, int minorCount,
                                 List<ChapterIssueEntity> mechanicalMinor, int reviseRounds) {

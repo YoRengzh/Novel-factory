@@ -85,7 +85,7 @@ public class SpringAiLlmGateway implements LlmGateway {
     private final ConcurrentHashMap<String, ChatModel> chatModelCache = new ConcurrentHashMap<>();
 
     /**
-     * 出网请求工厂（连接/读取超时）：RestClient.builder() 与 JDK HttpClient 默认均<b>不设超时</b>，
+     * 出网请求工厂（连接/读取超时）：RestClient.builder() 与 JDK HttpClient 默认均不设超时，
      * 供应商静默不回包时调用线程会永久阻塞（表现为作业卡死且无任何异常/重试）。
      * 这里统一注入超时，把"永久挂住"转成"超时异常 → 走既有瞬时失败重试"
      */
@@ -490,12 +490,12 @@ public class SpringAiLlmGateway implements LlmGateway {
      * OpenAI 协议的 completionsPath 推导：baseUrl 已带 /v1 时返回 /chat/completions，
      * 否则返回空串（交由 OpenAiApi 默认的 /v1/chat/completions）。
      *
-     * <p><b>为什么需要它</b>：OpenAiApi 的默认路径固定拼 /v1/chat/completions，用户把
+     * 为什么需要它：OpenAiApi 的默认路径固定拼 /v1/chat/completions，用户把
      * baseUrl 写成 https://api.example.com/v1（OpenAI 客户端与多数中转站文档的常见写法）时
      * 会得到 /v1/v1/chat/completions → 404。与 {@code ResponsesApiChatModel.responsesEndpoint}、
      * {@code ModelListClient} 的"带不带 /v1 均可"保持同一适配承诺。
      *
-     * <p>返回空串而不是 /v1/chat/completions：后者会覆盖 OpenAiApi 的内部默认值，
+     * 返回空串而不是 /v1/chat/completions：后者会覆盖 OpenAiApi 的内部默认值，
      * 让"默认路径"与"显式路径"两条分支产生分歧，后续改默认值时会漏改一处。
      */
     static String openAiCompletionsPath(String baseUrl) {
@@ -508,17 +508,17 @@ public class SpringAiLlmGateway implements LlmGateway {
 
     /**
      * Anthropic Messages 协议（/v1/messages）客户端。与 OpenAI 路径的协议差异：
-     * <ul>
-     *   <li>max_tokens 是<b>必填</b>参数——配置留空时给 {@link #ANTHROPIC_DEFAULT_MAX_TOKENS}，
-     *       没法像 OpenAI 那样"留空=不下发"；</li>
-     *   <li>无 response_format JSON mode（JSON 场景靠 prompt 约束，本就是项目的基线手段）；</li>
-     *   <li>enable_thinking / x-cmd-zdr / DashScope 注入是 OpenAI 路径专属，此处不适用。
-     *       思考改由原生 ThinkingConfig 表达，且<b>必须在每次调用时裁决</b>（见
+     *
+     *   · max_tokens 是必填参数——配置留空时给 {@link #ANTHROPIC_DEFAULT_MAX_TOKENS}，
+     *       没法像 OpenAI 那样"留空=不下发"；
+     *   · 无 response_format JSON mode（JSON 场景靠 prompt 约束，本就是项目的基线手段）；
+     *   · enable_thinking / x-cmd-zdr / DashScope 注入是 OpenAI 路径专属，此处不适用。
+     *       思考改由原生 ThinkingConfig 表达，且必须在每次调用时裁决（见
      *       {@link #anthropicCallOptions}）：Spring AI 的 runtime options 合并规则是
      *       "非空字段覆盖默认"，若思考固化在 defaultOptions，带小 maxTokens 的调用
-     *       （选择器/摘要）合并后会出现 max_tokens &lt; budget_tokens 的非法组合被 400；</li>
-     *   <li>温度上限 1.0 的全局校验与 Anthropic 官方一致，无需特判。</li>
-     * </ul>
+     *       （选择器/摘要）合并后会出现 max_tokens < budget_tokens 的非法组合被 400；
+     *   · 温度上限 1.0 的全局校验与 Anthropic 官方一致，无需特判。
+     *
      */
     private AnthropicChatModel buildAnthropicChatModel(StoryVO.Module.AiApi api, StoryVO.Module.ChatModel selected) {
         String baseUrl = StringUtils.defaultString(api.getBaseUrl());
@@ -567,7 +567,7 @@ public class SpringAiLlmGateway implements LlmGateway {
 
     /**
      * 剥离混进正文的思考标记。部分中转站不把思考放进 reasoning_content，
-     * 而是用 &lt;think&gt;…&lt;/think&gt;（或 &lt;thinking&gt;）包在 content 里返回。
+     * 而是用 <think>…</think>（或 <thinking>）包在 content 里返回。
      * 不剥离的后果：正文里出现大段推理文字，JSON 场景直接解析失败、正文场景出现"模型自述"。
      * 只剥标记块，不碰正常文本；无标记时零开销（indexOf 判断先走）。
      */
@@ -733,13 +733,13 @@ public class SpringAiLlmGateway implements LlmGateway {
     /**
      * 把响应体读进内存、提取思考内容，再以可重复读取的包装返回。
      *
-     * <p><b>为什么必须在这里做</b>：Spring AI 1.0.0 的 {@code OpenAiApi.ChatCompletionMessage}
+     * 为什么必须在这里做：Spring AI 1.0.0 的 {@code OpenAiApi.ChatCompletionMessage}
      * 没有 {@code reasoning_content} 字段，供应商返回的思考内容会被 Jackson 静默丢弃——正文不受污染，
      * 但调用方也拿不到任何思考信号（长度、占用 token），烧穿判定只能靠 usage 反推。
      * 在这一层提取，既补上观测信号，又能剥掉混进 content 的思考标记。
      * anthropicShape=true 时按 /messages 的 content[] thinking 块解析（见 extractAnthropicReasoning）。
      *
-     * <p><b>代价</b>：响应体全量读入内存。项目全部调用都是非流式（chatModel.call），
+     * 代价：响应体全量读入内存。项目全部调用都是非流式（chatModel.call），
      * 单章正文量级几十 KB，可接受；若将来引入流式必须改成增量扫描。
      */
     private ClientHttpResponse bufferAndExtractReasoning(ClientHttpResponse response, boolean anthropicShape) {
@@ -806,15 +806,15 @@ public class SpringAiLlmGateway implements LlmGateway {
     /**
      * Anthropic /messages 响应的思考剥离与提取（真机联调实证的必要性，2026-10-26）：
      * Spring AI 1.0.0 的 {@code AnthropicChatModel.toChatResponse} 会把 content[] 里的
-     * thinking 块<b>也包装成一个 Generation</b>（AssistantMessage 的正文取 thinking 字段），
+     * thinking 块也包装成一个 Generation（AssistantMessage 的正文取 thinking 字段），
      * 且思考块排在首位——网关 {@code response.getResult()} 取第一个结果，拿到的将是
-     * <b>思考文本而非正文</b>（实测 deepseek-v4.1-flash 经 anthropic 中转：正文=思考自言自语，
+     * 思考文本而非正文（实测 deepseek-v4.1-flash 经 anthropic 中转：正文=思考自言自语，
      * responseChars 与 reasoningChars 完全相等）。因此在拦截器里重写 content：
-     * <ul>
-     *   <li>丢弃 thinking / redacted_thinking 块（思考字符数先记入 ReasoningCapture 供观测与记账）；</li>
-     *   <li>多个 text 块合并为单块（Spring AI 每块一个 Generation，网关只取首个，多块会静默丢正文）；</li>
-     *   <li>纯思考响应（无 text 块）→ content 置空数组，交给网关按"空回复"走换站/fail-soft。</li>
-     * </ul>
+     *
+     *   · 丢弃 thinking / redacted_thinking 块（思考字符数先记入 ReasoningCapture 供观测与记账）；
+     *   · 多个 text 块合并为单块（Spring AI 每块一个 Generation，网关只取首个，多块会静默丢正文）；
+     *   · 纯思考响应（无 text 块）→ content 置空数组，交给网关按"空回复"走换站/fail-soft。
+     *
      * 与 OpenAI 路径同款哲学："交给 Spring AI 的永远是干净正文"。
      * Anthropic 的 usage 只报 input/output tokens，不单独上报思考 token——判据④（思考占比）
      * 对该协议天然缺失，烧穿判定退回判据①③（撞上限/空正文）仍可用
@@ -977,16 +977,16 @@ public class SpringAiLlmGateway implements LlmGateway {
     }
 
     /**
-     * Anthropic 的每调用级 options：思考与温度必须按<b>本次生效的上限</b>整体裁决，
+     * Anthropic 的每调用级 options：思考与温度必须按本次生效的上限整体裁决，
      * 不能拆开覆盖——Spring AI 合并规则是"runtime 非空字段压过 defaultOptions"，
      * 任何只覆盖一半的组合都可能拼出 API 拒绝的请求：
-     * <ul>
-     *   <li>thinking budget ≥1024 且必须 &lt; max_tokens：budget 取本次生效上限的一半，
-     *       上限不足 2048 的调用（选择器/摘要）直接不开思考；</li>
-     *   <li>思考开启时 temperature 只允许 1.0：显式写 1.0 压过配置温度，
-     *       否则 defaultOptions 里的温度（若固化）与思考组合必 400；</li>
-     *   <li>maxTokens 每次都带：Messages API 必填，且 budget 依赖它保持一致。</li>
-     * </ul>
+     *
+     *   · thinking budget ≥1024 且必须 < max_tokens：budget 取本次生效上限的一半，
+     *       上限不足 2048 的调用（选择器/摘要）直接不开思考；
+     *   · 思考开启时 temperature 只允许 1.0：显式写 1.0 压过配置温度，
+     *       否则 defaultOptions 里的温度（若固化）与思考组合必 400；
+     *   · maxTokens 每次都带：Messages API 必填，且 budget 依赖它保持一致。
+     *
      */
     static AnthropicChatOptions anthropicCallOptions(StoryVO.Module.ChatModel selected, LlmCall call) {
         int effectiveMax = call != null && call.getMaxTokens() != null ? call.getMaxTokens()

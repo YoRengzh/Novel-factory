@@ -94,14 +94,14 @@ public final class ForeshadowSpanPolicy {
     /**
      * 为一条回收登记找最匹配的埋设种子：**ID 全等优先，其次归一化全等，最后最长公共子串**。
      *
-     * <p><b>ID 优先是关键路径</b>：账本渲染带 {@code [F7-2]} 前缀、模型回抄 ID 销账
+     * ID 优先是关键路径：账本渲染带 {@code [F7-2]} 前缀、模型回抄 ID 销账
      * （见 {@code ChapterMemoryService.buildForeshadowContextListWithIds}），而回抄的 ID 里
      * **不含任何语义内容**——只做文本全等/子串匹配时，这类回收在体检口径里
      * 配不上任何埋设，该线永远停在"在途"。实测第 143-149 章的 ID 回抄回收**全部漏配**，
      * 在途数被单调虚高。账本侧早已 ID 感知（{@code ChapterMemoryService.isResolved}），
      * 指标侧漏改是纯粹的口径分裂。
      *
-     * <p>ID 形态但无对应埋设时**不回退文本**：一条纯 ID 的回收登记不含语义，
+     * ID 形态但无对应埋设时**不回退文本**：一条纯 ID 的回收登记不含语义，
      * 拿 {@code [F142-1]} 去做子串匹配只会撞出噪声（老数据无 ID 的线由文本路径覆盖）。
      * 带前缀又带描述的形态（{@code [F7-2] 描述}）在 ID 未命中时用**剩余描述**回退文本匹配。
      *
@@ -158,7 +158,7 @@ public final class ForeshadowSpanPolicy {
     /**
      * 已被回收登记命中的埋设种子集合（按 record 值相等判定）。
      *
-     * <p>与 {@link #spans} 共用 {@link #matchSeedIndex}——两处若各持一套配对逻辑，
+     * 与 {@link #spans} 共用 {@link #matchSeedIndex}——两处若各持一套配对逻辑，
      * "寿命跨度算作已回收"与"在途统计算作未回收"会对同一条线给出相反结论。
      */
     private static Set<Seed> closedSeeds(List<ChapterSummaryEntity> summaries, List<Seed> seeds) {
@@ -207,7 +207,7 @@ public final class ForeshadowSpanPolicy {
      * 该不该给规划层发反馈：样本足够且短命占比超线。
      * 返回 false 时不注入 prompt——**欠采样与健康态都不该唠叨**。
      *
-     * <p>样本取自 {@link #feedbackSpans}（严格口径不足时退回宽松口径）——
+     * 样本取自 {@link #feedbackSpans}（严格口径不足时退回宽松口径）——
      * 用严格口径会让"老数据全未标注"的故事**永久失明**，治本通道静默失效。
      */
     public static boolean shouldAdvise(List<ChapterSummaryEntity> summaries) {
@@ -284,7 +284,7 @@ public final class ForeshadowSpanPolicy {
     /**
      * 单章**严格口径**的埋设条数：声明了兑现义务（{@code resolvable=TRUE}）且未被弃置的种子数。
      *
-     * <p>供"流量统计"（伏笔账压力块的最近净增）与"存量读数"（{@link #pending}）共用同一把尺——
+     * 供"流量统计"（伏笔账压力块的最近净增）与"存量读数"（{@link #pending}）共用同一把尺——
      * 两份实现稍有差异就会出现"净增为 0 却在途上涨"的自相矛盾。
      */
     public static int strictSeedCount(ChapterSummaryEntity summary, Collection<String> voided) {

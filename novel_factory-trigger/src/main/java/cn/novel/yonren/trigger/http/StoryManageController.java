@@ -41,11 +41,11 @@ import java.util.List;
 /**
  * 故事库端点：列表 / 章节浏览 / 章节编辑（编辑触发摘要回流）。无鉴权（localhost 个人使用）。
  *
- * <p>2026-11-05 分层重构后本类只做两件事：HTTP 语义（路由/参数/响应头）与
+ * 2026-11-05 分层重构后本类只做两件事：HTTP 语义（路由/参数/响应头）与
  * {@link AppException} → HTTP 状态的映射；业务逻辑与实体触碰全部在
  * {@link StoryManageService}（domain）。
  *
- * <p>⚠️ 所有映射注解必须显式写参数名（如 {@code @PathVariable("storyDirName")}）：
+ * ⚠️ 所有映射注解必须显式写参数名（如 {@code @PathVariable("storyDirName")}）：
  * 根 pom 钉的 maven-compiler-plugin 3.0 未开 {@code -parameters}，Spring 拿不到反射参数名，
  * 省略名字会在运行期抛 IllegalArgumentException（编译期无任何征兆）。
  */

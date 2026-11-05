@@ -7,16 +7,16 @@ import java.util.List;
 /**
  * 章节计划裁决请求体：镜像 {@code ChapterPlanAggregate} 结构。
  *
- * <p>用法：把 {@code GET /api/jobs/{jobId}} 返回的 {@code pendingChapterPlan} 原样取回、
+ * 用法：把 {@code GET /api/jobs/{jobId}} 返回的 {@code pendingChapterPlan} 原样取回、
  * 按需修改后 POST 到 {@code /api/jobs/{jobId}/chapter-plan/approve}。
  *
- * <p>语义约定：
- * <ul>
- *   <li>{@code chapters} 为 null 或空 → 视为"认可 AI 原版"，后端采纳原计划；</li>
- *   <li>{@code chapters} 非空 → 视为人工修订稿，后端会重新做结构机械校验
- *       （章数、起始编号连续、编号唯一、title/goal/keyEvents 非空），校验不过返回 400 且保持挂起；</li>
- *   <li>{@code storyId} 可空，留空则沿用原计划的值。</li>
- * </ul>
+ * 语义约定：
+ *
+ *   · {@code chapters} 为 null 或空 → 视为"认可 AI 原版"，后端采纳原计划；
+ *   · {@code chapters} 非空 → 视为人工修订稿，后端会重新做结构机械校验
+ *       （章数、起始编号连续、编号唯一、title/goal/keyEvents 非空），校验不过返回 400 且保持挂起；
+ *   · {@code storyId} 可空，留空则沿用原计划的值。
+ *
  */
 @Data
 public class ChapterPlanApprovalRequestDTO {

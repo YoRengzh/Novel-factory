@@ -28,7 +28,7 @@ public final class ChapterGoalWindowPolicy {
      * 按当前章号裁剪章节带目标。
      *
      * @param chapterGoal      原始章节目标全文，可为 null/空
-     * @param currentChapterNo 下一待写章号（&lt;=0 时不裁剪）
+     * @param currentChapterNo 下一待写章号（<=0 时不裁剪）
      * @return 裁剪后的文本；无法解析或裁不出内容时返回原文
      */
     public static String window(String chapterGoal, int currentChapterNo) {

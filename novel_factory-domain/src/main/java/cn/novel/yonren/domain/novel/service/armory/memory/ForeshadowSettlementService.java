@@ -257,11 +257,11 @@ public class ForeshadowSettlementService {
     /**
      * 逾期排期线：归一 intent → **逾期章数**（PLANTED、回收章已过阶段末章、且不在"长线在养"）。
      *
-     * <p>带距离而不是只带一个集合：裁决要判"这是被写忘了的线、还是有意慢慢养的长线"，
+     * 带距离而不是只带一个集合：裁决要判"这是被写忘了的线、还是有意慢慢养的长线"，
      * 而主要依据就是逾期了多久（实测逾期分布正好两簇：仍在推进的条目 11-22 章、
      * 真正卡死的 48-74 章）。只给"已逾期"三个字，模型没有可判定的数字。
      *
-     * <p>在养条目排除在外：否则它们每阶段又被送回裁决，可能在 RECOVER 与 PARKED 之间反复横跳。
+     * 在养条目排除在外：否则它们每阶段又被送回裁决，可能在 RECOVER 与 PARKED 之间反复横跳。
      */
     private static Map<String, Integer> overdueIntents(List<ForeshadowScheduleEntity> schedules, int stageEndNo) {
         if (schedules == null || schedules.isEmpty() || stageEndNo <= 0) {
@@ -287,7 +287,7 @@ public class ForeshadowSettlementService {
     /**
      * 候选并集：BREAKER 档 ∪ 逾期排期线。
      *
-     * <p>逾期排期线即使没到 BREAKER 档也必须送审——它的"该收未收"是**计划事实**，
+     * 逾期排期线即使没到 BREAKER 档也必须送审——它的"该收未收"是**计划事实**，
      * 不该由滞留时长决定要不要审。已在 BREAKER 里出现过的（按归一文本比对）不重复加。
      */
     private static List<ForeshadowPriorityService.ScoredForeshadow> withOverdueScheduled(

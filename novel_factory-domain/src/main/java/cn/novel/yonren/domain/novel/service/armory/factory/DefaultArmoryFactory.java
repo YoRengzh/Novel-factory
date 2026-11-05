@@ -30,15 +30,15 @@ import java.util.Map;
 /**
  * 规则树工厂。
  *
- * <p><b>树的合法入口只有两个</b>（2026-09-29 登记为显式契约，新增入口必须先在此登记）：
- * <ol>
- *   <li><b>完整树入口</b>：{@code armoryStrategyHandler().apply(command, dynamicContext)}——
- *       从 RootNode 顺序走完全部节点；</li>
- *   <li><b>树腰入口</b>：{@code StoryGenerateService.resumeAfterPlanApproval}——
+ * 树的合法入口只有两个（2026-09-29 登记为显式契约，新增入口必须先在此登记）：
+ *
+ *   · 完整树入口：{@code armoryStrategyHandler().apply(command, dynamicContext)}——
+ *       从 RootNode 顺序走完全部节点；
+ *   · 树腰入口：{@code StoryGenerateService.resumeAfterPlanApproval}——
  *       审批挂起后从正文生成节点续跑剩余阶段。前提：DynamicContext 来自挂起现场
- *       <em>原样保留</em>（含已批准计划/蓝图链/分段边界/故事上下文），规划段不会重跑。
- *       上下文残缺时该方法快速失败。</li>
- * </ol>
+ *       原样保留（含已批准计划/蓝图链/分段边界/故事上下文），规划段不会重跑。
+ *       上下文残缺时该方法快速失败。
+ *
  * 在规划段节点内新增的任何逻辑，树腰入口不会执行——依赖这一点做设计决策时务必想清楚。
  */
 @Service
@@ -54,9 +54,9 @@ public class DefaultArmoryFactory {
     /**
      * 规则树执行过程中的动态上下文，节点间传递中间数据。
      *
-     * <p><b>字段不变式表</b>（2026-09-29 规约：新增字段必须先在此登记，写明写入者/时机、
+     * 字段不变式表（2026-09-29 规约：新增字段必须先在此登记，写明写入者/时机、
      * 读取者与关键约定；本类是三方共享黑板，时序耦合靠这张表而非人脑记忆维护）：
-     * <pre>
+     *
      * | 字段                     | 写入者/时机                                      | 读取者               | 关键约定 |
      * |--------------------------|--------------------------------------------------|----------------------|----------|
      * | storyContextEntity       | BuildStoryContextNode；enforceChapterLimit 树前可截断 chapterCount | 树内全部 | 截断是**故意的契约**（完结保护），非脏写 |
@@ -82,7 +82,7 @@ public class DefaultArmoryFactory {
      * | maxChapterCount          | StoryGenerateService（sticky cap）               | 蓝图预算/Persist     | 落盘后不可抬高 |
      * | planApproved             | 审批通过/续跑时置位                              | 审批门               | 置位后门直通 |
      * | creativeNotes            | StoryGenerateService 从 command 复制             | 三个规划 prompt      | 作者指令，进 prompt 顶部不裁剪 |
-     * </pre>
+     *
      */
     @Data
     @Builder

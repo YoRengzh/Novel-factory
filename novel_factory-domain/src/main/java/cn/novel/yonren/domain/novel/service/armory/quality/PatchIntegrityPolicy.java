@@ -49,7 +49,7 @@ public final class PatchIntegrityPolicy {
     /**
      * 综合校验：两条判据各自与允许损失额比较。
      *
-     * <p>额度必须**分开计**：把实体损失并进事件额度，等于把事件额度悄悄放宽——两者性质不同
+     * 额度必须**分开计**：把实体损失并进事件额度，等于把事件额度悄悄放宽——两者性质不同
      * （事件是剧情骨架，实体/数字是事实锚），能容忍的程度也不同。
      *
      * @param allowedEventLoss  允许丢失的关键事件条数（修订链路 1；密度挤水 0）
@@ -67,7 +67,7 @@ public final class PatchIntegrityPolicy {
     /**
      * 原稿覆盖、补丁后不覆盖的关键事件（原稿本就未覆盖的不计入——修订无从恢复从未存在的内容）。
      *
-     * <p>入参是**原稿/补丁稿原文**，归一化在本方法内完成：让调用方自己归一化是留给后人踩的坑
+     * 入参是**原稿/补丁稿原文**，归一化在本方法内完成：让调用方自己归一化是留给后人踩的坑
      * （漏归一化不会报错，只会让判据静默变松）。
      */
     public static List<String> lostEvents(String original, String patched, List<String> keyEvents) {
@@ -114,7 +114,7 @@ public final class PatchIntegrityPolicy {
     /**
      * 从正文提取数字串锚（≥{@value #MIN_NUMBER_ANCHOR_LENGTH} 位、去重、限量）。
      *
-     * <p>数字是年代文里最硬的事实（考场号、年份、时间、金额），丢一个就是事实错误；
+     * 数字是年代文里最硬的事实（考场号、年份、时间、金额），丢一个就是事实错误；
      * 而"只出现一次的实体整段消失"正是密度补丁最容易犯、又最难被发现的那种损失。
      */
     public static List<String> numberAnchors(String content) {

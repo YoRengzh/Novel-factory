@@ -55,7 +55,7 @@ public class PromptBudgetGuard {
         /**
          * 重复意象警示：全书累计超频的具体意象（物件/符号被反复用作情绪或记忆锚点）点名 + 替换方向。
          *
-         * <p>与 {@link #USED_PATTERN_BLACKLIST} 是同一族的两个尺度：那个管**结构重复**
+         * 与 {@link #USED_PATTERN_BLACKLIST} 是同一族的两个尺度：那个管**结构重复**
          * （"主角微动作→旁人惊叹"这类抽象套路，靠摘要的语义标注识别）；本块管**字面重复**
          * （同一个具体符号被反复用，靠外置词表的逐字扫描识别，零 token 成本）。
          * 两者都属"行为指导块"，同档 4。词条来自 {@code assets/config/repetition-watchlist.txt}，

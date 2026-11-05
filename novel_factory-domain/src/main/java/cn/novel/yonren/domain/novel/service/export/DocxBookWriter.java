@@ -14,13 +14,13 @@ import java.util.zip.ZipOutputStream;
  * 手写最小 OOXML（.docx）装订器：docx 本质是「ZIP + XML」，用 java.util.zip 直接产出，
  * 不为「标题 + 段落」的纯文本装订引入 POI 十余 MB 的依赖树。
  *
- * <p>分章导出下本类只装订两种<b>独立文档</b>：章文件（章标题 = Heading1 该文件的大纲顶层，
+ * 分章导出下本类只装订两种独立文档：章文件（章标题 = Heading1 该文件的大纲顶层，
  * 正文按行拆段、空行跳过、保留段首全角缩进）与书名页文件（BookTitle 居中大字 + 元信息段）。
  * 每个文档都是完整的最小 OOXML 包（Word/WPS 可直接打开）：{@code [Content_Types].xml}、
  * {@code _rels/.rels}、{@code word/document.xml}、{@code word/styles.xml}、
  * {@code word/_rels/document.xml.rels}——五个条目缺一不可。
  *
- * <p>健壮性：文本过 XML 转义并剔除 XML 1.0 非法控制字符（防"Word 打不开需恢复"）；
+ * 健壮性：文本过 XML 转义并剔除 XML 1.0 非法控制字符（防"Word 打不开需恢复"）；
  * 包结构与可解析性由 BookExportServiceTest 解包断言锁定。
  */
 final class DocxBookWriter {
@@ -152,7 +152,7 @@ final class DocxBookWriter {
     }
 
     /**
-     * XML 转义 + 非法字符防御：&lt; &gt; &amp; " ' 五实体；XML 1.0 不允许的控制字符
+     * XML 转义 + 非法字符防御：< > & " ' 五实体；XML 1.0 不允许的控制字符
      * （0x00-0x1F 除 \t）直接剔除——正文里混进一个控制符就是"文件损坏需恢复"，宁缺勿坏
      */
     private static String escape(String text) {

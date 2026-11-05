@@ -221,7 +221,7 @@ public interface IStoryRepository {
     /**
      * 读回 {@code memory/quality-trend.jsonl} 的全部行（**最新一窗在末位**）。
      *
-     * <p>补这个读入口的原因：此前该文件是**只写不读**的——每 10 章花一次
+     * 补这个读入口的原因：此前该文件是**只写不读**的——每 10 章花一次
      * 强模型抽 3 章打分，分数落盘后没有任何一处消费，等于信息买回来了直接扔掉。
      * 文件缺失返回空表（新故事尚未触发评分）；单行损坏跳过（观测文件允许尾部半行）。
      */
@@ -330,11 +330,11 @@ public interface IStoryRepository {
     /**
      * **删除整个故事目录**（故事库的删除操作，不可恢复）。
      *
-     * <p>写语义：持该故事的**每故事锁**执行——删除是最重的写操作，不持锁会与正在落盘的
+     * 写语义：持该故事的**每故事锁**执行——删除是最重的写操作，不持锁会与正在落盘的
      * 章节写入竞争（半个目录被删、写操作继续创建新文件）。调用方负责在删除前确认该故事
      * **没有运行中的作业**（{@code JobRegistry.isActiveForStory}），仓储层看不到作业状态。
      *
-     * <p>storyDir 为 resolveStoryDirectory 校验后的路径对象（校验已保证它位于 workspace 下且
+     * storyDir 为 resolveStoryDirectory 校验后的路径对象（校验已保证它位于 workspace 下且
      * 是直接子目录，不会误删 workspace 之外的路径）
      */
     void deleteStory(Path storyDir) throws Exception;

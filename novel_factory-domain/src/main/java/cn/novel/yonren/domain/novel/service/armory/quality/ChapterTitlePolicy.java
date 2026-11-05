@@ -82,7 +82,7 @@ public final class ChapterTitlePolicy {
     /**
      * 渲染【已用章节标题】提示块（回灌规划层）；无任何历史标题返回 null。
      *
-     * <p>一次规划段只注入一次，成本可接受（章均标题 8~12 字）；这是本判据<b>治本的那一半</b>——
+     * 一次规划段只注入一次，成本可接受（章均标题 8~12 字）；这是本判据治本的那一半——
      * 检测只能事后记账，把清单摆到起名那一刻才能真的少重复。
      */
     public static String renderUsedTitles(List<ChapterSummaryEntity> history) {

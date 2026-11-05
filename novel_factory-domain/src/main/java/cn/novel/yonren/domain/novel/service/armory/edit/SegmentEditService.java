@@ -16,16 +16,16 @@ import java.util.Map;
 /**
  * 段落级文本编辑：选中一段正文，让 AI 只改这一段——润色 / 扩写 / 续写。
  *
- * <p><b>与整章修订的分工</b>：整章修订（{@code ChapterReviseService}）跑的是带账本、伏笔、
+ * 与整章修订的分工：整章修订（{@code ChapterReviseService}）跑的是带账本、伏笔、
  * 风格统计的完整 prompt，一次调用等于重写一章，成本与耗时都是整章量级。本服务面向"我就想
  * 把这一句写顺"的轻量诉求：短 prompt、小输出上限、不读账本、不落盘。
  *
- * <p><b>为什么不复用 CHAPTER_REVISE 场景</b>：该场景的 prompt 规则注入（反 AI 腔、视角纪律、
+ * 为什么不复用 CHAPTER_REVISE 场景：该场景的 prompt 规则注入（反 AI 腔、视角纪律、
  * 硬约束）恰恰是段落编辑需要的，所以仍然走同一 {@link PromptScene} 拿规则；差异只在
  * userPrompt 更短、maxTokens 更小。这样"改写质量口径"与整章修订保持一致，不会出现
  * "整章很干净、单段很 AI"的分裂。
  *
- * <p><b>输出契约</b>：只回传替换片段，前端做 diff 对照由用户确认。服务本身不写盘——
+ * 输出契约：只回传替换片段，前端做 diff 对照由用户确认。服务本身不写盘——
  * 写盘走既有 PUT 章节接口，从而复用它的摘要回流与运行中作业互斥检查。
  */
 @Slf4j
@@ -182,7 +182,7 @@ public class SegmentEditService {
      * 清洗模型输出：解 JSON 包裹、去代码围栏、去包裹引号、去"以下是改写结果"之类的引导语。
      * 段落编辑的输出形态很窄，机械清洗比让模型自纠更可靠。
      *
-     * <p><b>为什么必须解 JSON</b>：网关对 OpenAI 协议的所有调用都强制
+     * 为什么必须解 JSON：网关对 OpenAI 协议的所有调用都强制
      * {@code responseFormat=JSON_OBJECT}（治正文/摘要的截断不闭合），模型因此会返回
      * {@code {"text":"..."}} 而不是纯文本。不解包的话整串 JSON 会被当成改写结果塞回正文。
      */
@@ -225,7 +225,7 @@ public class SegmentEditService {
      * 从 JSON 对象里取出正文：按常见键名优先级找第一个非空字符串值。
      * 不是合法 JSON、或找不到字符串字段时原样返回（交给后续清洗继续处理）。
      *
-     * <p>键名不限于 text——不同模型对 JSON Mode 的 schema 理解各异，实测出现过
+     * 键名不限于 text——不同模型对 JSON Mode 的 schema 理解各异，实测出现过
      * content / result / edited / output 等写法，统一按候选列表依次尝试。
      */
     static String unwrapJsonText(String text) {

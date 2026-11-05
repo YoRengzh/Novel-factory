@@ -3,7 +3,7 @@ package cn.novel.yonren.domain.novel.service.export;
 /**
  * 阿拉伯数字 → 中文数字（1-9999）：卷号渲染用（"第 12 卷" → "第十二卷"）。
  *
- * <p>全项目已有的是<b>中文 → 阿拉伯</b>的解析器（OutlineSegmentParser / StoryPacing），
+ * 全项目已有的是中文 → 阿拉伯的解析器（OutlineSegmentParser / StoryPacing），
  * 没有反向转换，故自建。规则：10-19 记「十」不记「一十」（十/十一/十九）；
  * 中间的零位插「零」（一百零五 / 一千零五）；120 记「一百二十」。
  * 超出范围返回阿拉伯数字兜底——卷数不可能越界，兜底只为不抛异常。

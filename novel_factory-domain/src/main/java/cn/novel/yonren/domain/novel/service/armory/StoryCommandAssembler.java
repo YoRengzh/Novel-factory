@@ -20,7 +20,7 @@ import java.util.regex.Pattern;
  * DTO → 领域命令装配（trigger 层工具）：同步与异步两个 controller 共用，
  * storyVO 未显式传入时用 yml 默认配置补齐；worldId 在此做入口校验（集合名约束）
  *
- * <p>无状态、纯函数式（静态方法 + 私有构造），因此不做 Spring Bean，
+ * 无状态、纯函数式（静态方法 + 私有构造），因此不做 Spring Bean，
  * 避免为一次字段搬运和格式校验引入容器生命周期。
  */
 public final class StoryCommandAssembler {
@@ -89,7 +89,7 @@ public final class StoryCommandAssembler {
      * 章节计划裁决请求 → 领域聚合（DTO 适配）。
      * 返回 null 表示"未携带修订稿"（chapters 为空），由领域层采纳 AI 原版计划。
      *
-     * <p>{@code chapterType} 用 {@link ChapterType#of} 容错解析：未识别值降级 NORMAL，
+     * {@code chapterType} 用 {@link ChapterType#of} 容错解析：未识别值降级 NORMAL，
      * 避免前端传 "NORMAL"/"普通" 之类的变体导致整次裁决 400
      */
     public static ChapterPlanAggregate toChapterPlan(ChapterPlanApprovalRequestDTO request) {

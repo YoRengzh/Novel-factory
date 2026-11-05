@@ -219,7 +219,7 @@ public class ChapterAuditService {
 
     /**
      * 实验判据段（变体 B，{@code -Daudit.prompt.variant=B}，A2 目录化）：
-     * 在 A 的 severity 标准之上，把七维度从"抽象名词"升级为<b>编号判据目录 + 三态锚样例</b>——
+     * 在 A 的 severity 标准之上，把七维度从"抽象名词"升级为编号判据目录 + 三态锚样例——
      * 把模型从"自由裁量"变成"对号入座"：MINOR 必须标注触发的判据编号，颗粒度才可对齐、
      * 噪声（AuditEvalHarnessTest 的 flip rate）才可按编号归因。样例全部一句话、borderline 钉死 MINOR。
      * 判据语义与 severity 白名单严格对齐：BLOCKING 仍仅限四类硬伤，目录不新增 BLOCKING 通道。
@@ -378,11 +378,11 @@ public class ChapterAuditService {
     /**
      * 修订验证结果：{@code unfixed} 是"仍未修复"的子集，{@code degraded} 表示**这次验证根本没跑成**。
      *
-     * <p>把两者分开是必须的（2026-09-30）：原先"验证失败"被并入"未修复"，
+     * 把两者分开是必须的（2026-09-30）：原先"验证失败"被并入"未修复"，
      * 于是**基础设施抖动（网关异常/超时）会被记成质量债**，而质量债会回灌给写手当作
      * "你上一章犯的错"——那是给模型下错误指令。验证没跑成 ≠ 没修好。
      *
-     * <p>保守偏向不变：{@code degraded=true} 时 {@code unfixed} 仍原样带回上一轮全部 BLOCKING
+     * 保守偏向不变：{@code degraded=true} 时 {@code unfixed} 仍原样带回上一轮全部 BLOCKING
      * （不放行未验证的稿），差别只在于调用方**不得把它记成质量债**。
      */
     public record FixVerification(List<ChapterIssueEntity> unfixed, boolean degraded) {
@@ -400,12 +400,12 @@ public class ChapterAuditService {
      * 二轮翻案即"修订拉锯"。改为逐条验证上一轮 BLOCKING 是否已修复：任务窄、判据明，
      * 判定稳定性远高于开放式重审。
      *
-     * <p>保守语义：<b>未确认已修复 = 仍未修复</b>——模型输出缺条目、验证调用解析失败
+     * 保守语义：未确认已修复 = 仍未修复——模型输出缺条目、验证调用解析失败
      * 均按 UNFIXED 处理并留痕（复核的失败模式应偏向"多修一轮"而非"漏放 BLOCKING"，
      * 与审校侧"宁可漏报不可错报"是同一条保守哲学在复核层的镜像）。
      * 返回仍未修复的子集（原 issue 对象原样返回）；全部修复返回空列表。
      *
-     * <p>失败语义（2026-09-30 修正，此前文档与实现相反）：**不抛异常**。两次尝试均无法解析、
+     * 失败语义（2026-09-30 修正，此前文档与实现相反）：**不抛异常**。两次尝试均无法解析、
      * 或调用本身异常时，返回 {@code degraded=true} 并原样带回全部 BLOCKING——内容侧仍按
      * "视为未修复"保守处理（不放行未验证的稿），但调用方必须把"未验证"与"确认未修复"分开，
      * **不得记入质量债**（记债会把基础设施抖动写成内容缺陷，再回灌给写手）。

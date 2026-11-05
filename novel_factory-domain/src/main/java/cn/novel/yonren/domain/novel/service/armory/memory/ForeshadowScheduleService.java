@@ -67,7 +67,7 @@ public class ForeshadowScheduleService {
     /**
      * 把本章新埋的 seed 与**窗口内待埋**的排期项配对。
      *
-     * <p>匹配口径与仓库其它处一致：精确相等优先，退最长公共子串 ≥ {@value #MATCH_MIN_CHARS}。
+     * 匹配口径与仓库其它处一致：精确相等优先，退最长公共子串 ≥ {@value #MATCH_MIN_CHARS}。
      * 一条排期项只认领一个 seed（先到先得），避免"一条意图吸走多个种子"。
      */
     private int matchPlant(ChapterSummaryEntity summary, List<ForeshadowScheduleEntity.ScheduleItem> items,
@@ -160,16 +160,16 @@ public class ForeshadowScheduleService {
     /**
      * 把阶段出口裁决的结果回写到排期表：{@code DONE} → 置 PAID，{@code PARKED} → 记长线在养。
      *
-     * <p><b>闭环的最后一段</b>：裁决说"这条线已在第 X 章完成"，排期项就必须真的关掉。
+     * 闭环的最后一段：裁决说"这条线已在第 X 章完成"，排期项就必须真的关掉。
      * 只把 DONE 写进结算文件而不回写排期表，它下一段仍会以「逾期补收」再被下令一次——
      * 那正是"藏物/记号纸反复出现"的机制本身。一条线可能早已在在中段兑现，只是
      * {@link #matchPayoff} 认不出来（那边只比对摘要里的短句，见该方法注释）。
      *
-     * <p><b>PARKED 是另一半</b>：有些线判 DONE 不对（它确实还没兑现），
+     * PARKED 是另一半：有些线判 DONE 不对（它确实还没兑现），
      * 判 RECOVER 也不对（没有可指定的回收章，只会被每段催一遍）。它们在排期项上打
      * {@code parkedAtChapter} 标记——保留追踪、但不再进逾期补收/挂起，也不再被送回裁决。
      *
-     * <p>匹配口径用**归一化 intent 精确相等**：裁决的 content 来自账本、排期项的 intent 来自蓝图，
+     * 匹配口径用**归一化 intent 精确相等**：裁决的 content 来自账本、排期项的 intent 来自蓝图，
      * 两者实测逐字相同；不相等就静默跳过——宁可不回写，也不能把另一条线误判为已兑现
      * （误关会永久丢掉一条真伏笔，代价不可逆）。
      *

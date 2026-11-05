@@ -26,23 +26,23 @@ import java.util.Map;
 /**
  * 段计划规划器：一次规划一段（startChapter..endChapter）的章节计划，是惰性分段规划的执行体。
  *
- * <p><b>为什么分段规划</b>：批次开头一次性规划整批会让后段计划基于过旧的记忆——
+ * 为什么分段规划：批次开头一次性规划整批会让后段计划基于过旧的记忆——
  * 写手已经写出了新的事实，而计划还停在批次开始时的设想。改为推进到段边界时用**最新记忆**
  * 规划下一段（见 {@code ChapterWorker#planNextSegment}），后段计划才不陈旧。
  *
- * <p><b>全流程</b>（{@link #planSegment}）：
- * <ol>
- *   <li><b>调用与降级</b>：{@link #invokeWithFallback} 解析失败重试至 {@link #MAX_ATTEMPTS} 次；
- *       分支推演（{@code plan.branches>1}）时多版生成、自评风险后择优；全败抛 AppException
- *       （计划是整批的地基，缺失无法继续——与蓝图/卷的 fail-soft 不同）。</li>
- *   <li><b>编号校正与结构校验</b>：模型输出段内编号（从 1 起）时平移为全局编号；
- *       {@code validateSegmentStructure} 校验条数、连续性、标题齐备。</li>
- *   <li><b>软闸门 + 一次带反馈重规划</b>：主线推进、对话承载等闸门违规时，把违规原文回注给
- *       规划模型让它自己修（一次机会）；仍不过则**不阻断**，把遗留违规经
- *       {@link PlannedSegment#residualGateIssues} 交给下游注入正文 prompt 作硬约束。</li>
- * </ol>
+ * 全流程（{@link #planSegment}）：
  *
- * <p><b>失败哲学</b>：结构问题（条数/编号）硬失败——半张计划比没有更危险，会让逐章循环取到错位条目；
+ *   · 调用与降级：{@link #invokeWithFallback} 解析失败重试至 {@link #MAX_ATTEMPTS} 次；
+ *       分支推演（{@code plan.branches>1}）时多版生成、自评风险后择优；全败抛 AppException
+ *       （计划是整批的地基，缺失无法继续——与蓝图/卷的 fail-soft 不同）。
+ *   · 编号校正与结构校验：模型输出段内编号（从 1 起）时平移为全局编号；
+ *       {@code validateSegmentStructure} 校验条数、连续性、标题齐备。
+ *   · 软闸门 + 一次带反馈重规划：主线推进、对话承载等闸门违规时，把违规原文回注给
+ *       规划模型让它自己修（一次机会）；仍不过则**不阻断**，把遗留违规经
+ *       {@link PlannedSegment#residualGateIssues} 交给下游注入正文 prompt 作硬约束。
+ *
+ *
+ * 失败哲学：结构问题（条数/编号）硬失败——半张计划比没有更危险，会让逐章循环取到错位条目；
  * 内容问题（推进弱、对白少）软处理——宁可这一段推进弱一点，也不要因规划僵持让整批失败。
  */
 @Service
@@ -84,7 +84,7 @@ public class ChapterPlanSegmentPlanner {
     /**
      * 带伏笔账数据的重载：伏笔净增闸门（高压期）需要历史摘要与结算台账来判定在途水位。
      *
-     * <p>与 {@code rosterNames} 同款——都由调用方从上下文提取后显式传入，规划器不依赖上下文对象，
+     * 与 {@code rosterNames} 同款——都由调用方从上下文提取后显式传入，规划器不依赖上下文对象，
      * 便于单测直接构造。两个参数可为 null（无数据时该闸门按"非高压期"跳过，行为与引入前一致）。
      */
     public PlannedSegment planSegment(StoryVO storyVO, PromptContext ctx, String prompt,
@@ -101,7 +101,7 @@ public class ChapterPlanSegmentPlanner {
     /**
      * 带作业载体的重载：规划期每两次模型调用之间检查取消/熔断信号。
      *
-     * <p>为什么需要：本方法一次调用最多串起 9 次 LLM 请求（分支推演 3 次 + 按方向生成 2 次 +
+     * 为什么需要：本方法一次调用最多串起 9 次 LLM 请求（分支推演 3 次 + 按方向生成 2 次 +
      * 单稿降级重试 2 次 + 带反馈重规划 2 次），单次请求可达数分钟。入口处的一次检查
      * （{@code CallChapterPlanLlmNode}）挡不住这条内部链路——实测用户点取消后仍等了约 8 分钟才停。
      * {@code job} 为 null（同步调试路径）时全部检查跳过，行为与引入前一致。
@@ -389,7 +389,7 @@ public class ChapterPlanSegmentPlanner {
      * 规划期协作取消/熔断检查：置位即抛异常，由作业层 catch 按 CANCELLED 收敛终态
      * （与 {@code CallChapterPlanLlmNode} / {@code planNextSegment} 同款语义）。
      *
-     * <p>抛在重试轮次**头部**而非请求之后：已发出的一次请求无法撤回，但下一轮不再发。
+     * 抛在重试轮次**头部**而非请求之后：已发出的一次请求无法撤回，但下一轮不再发。
      * 这不是"当前章做完再停"，规划期尚未产出任何章节，停下就是零损失。
      */
     private static void throwIfCancelled(GenerationJob job, String label, int attempt, int maxAttempts) {
@@ -444,7 +444,7 @@ public class ChapterPlanSegmentPlanner {
     /**
      * **上一段遗留的待收线索**：截止 {@code beforeChapter} 之前已埋、尚未回收的伏笔内容。
      *
-     * <p>供"跳月不得吞线"闸门使用——跳月章必须交代的正是这些线。
+     * 供"跳月不得吞线"闸门使用——跳月章必须交代的正是这些线。
      * 只取最近 {@value #OPEN_THREADS_LOOKBACK} 条（按埋设章倒序）：更早的线要么已进长线在养、
      * 要么已在阶段出口被裁决，不该由一次跳月负责交代；不设上限会让跳月章被要求交代几十条，
      * 闸门变成"永远过不了"。

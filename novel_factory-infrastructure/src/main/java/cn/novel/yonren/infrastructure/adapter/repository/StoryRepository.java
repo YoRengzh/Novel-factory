@@ -224,7 +224,7 @@ public class StoryRepository implements IStoryRepository {
     /**
      * 回收超出保留上限的 run 目录（按最后修改时间保留最新 {@value #RUN_RETENTION} 个）。
      *
-     * <p>与检查点清理同款环形回收：保留量足以回看近期批次即可，
+     * 与检查点清理同款环形回收：保留量足以回看近期批次即可，
      * 失败仅告警——观测产物清理不该反噬生成主流程。
      */
     private void pruneRunDirectories(Path recordRoot) {
@@ -267,7 +267,7 @@ public class StoryRepository implements IStoryRepository {
     /**
      * 写章节计划到 runDir/chapter-plan.yml（供人工审阅/裁决）。
      *
-     * <p>⚠️ 这里是**逐字段手写**的 YAML，不是对象序列化——**新增计划字段时必须同步加进来**，
+     * ⚠️ 这里是**逐字段手写**的 YAML，不是对象序列化——**新增计划字段时必须同步加进来**，
      * 否则该字段在留档里静默消失（实测踩过：`suspenseBeat` 有值、闸门也校验了，
      * 但留档文件里查不到，一度被误判成"模型没回填"）。
      */

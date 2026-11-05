@@ -29,18 +29,18 @@ import java.util.List;
 /**
  * OpenAI Responses 协议（POST /v1/responses）的 API Key 通道实现，网关按 protocol=responses 分派到此类。
  *
- * <p>不用 Spring AI 升级（1.1.x 才有官方 Responses 支持）：本项目在 1.0.0 上钉了大量拦截器行为
+ * 不用 Spring AI 升级（1.1.x 才有官方 Responses 支持）：本项目在 1.0.0 上钉了大量拦截器行为
  * （reasoning_content 提取、enable_thinking 自愈注入），升级重验成本远高于这~两百行。
  * 网关的烧穿判定/降级链/记账只依赖 ChatResponse/Usage 抽象——本类把
  * Responses 响应翻译成同构的 ChatResponse，全部机制原样复用：
- * <ul>
- *   <li>usage.output_tokens_details.reasoning_tokens 直接喂 {@link SpringAiLlmGateway.ReasoningCapture}
- *       ——判据④（思考占预算 80%）原生支持，比 chat/completions 路径还干净；</li>
- *   <li>maxTokens → max_output_tokens；temperature 仅显式配置时下发
- *       （gpt-5 系拒绝 temperature≠1，与既有"null=不干预"语义天然兼容）；</li>
- *   <li>store:false（中转站场景不需要服务端留存）；非流式（stream:false 是标准行为，
- *       OAuth 通道的 SSE 是 ChatGPT 后端的要求，API Key 通道无此约束）。</li>
- * </ul>
+ *
+ *   · usage.output_tokens_details.reasoning_tokens 直接喂 {@link SpringAiLlmGateway.ReasoningCapture}
+ *       ——判据④（思考占预算 80%）原生支持，比 chat/completions 路径还干净；
+ *   · maxTokens → max_output_tokens；temperature 仅显式配置时下发
+ *       （gpt-5 系拒绝 temperature≠1，与既有"null=不干预"语义天然兼容）；
+ *   · store:false（中转站场景不需要服务端留存）；非流式（stream:false 是标准行为，
+ *       OAuth 通道的 SSE 是 ChatGPT 后端的要求，API Key 通道无此约束）。
+ *
  */
 final class ResponsesApiChatModel implements ChatModel {
 

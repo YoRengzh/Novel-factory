@@ -76,7 +76,7 @@ public class LlmRuntimeConfig {
          * candidate / ledgerAdjudicate / qualityReview / referenceSelector / storyMemory），
          * value = 是否开启。null 或未出现的 key 一律回退 yml 静态值。
          *
-         * <p>为什么要覆盖：安装包用户改不了 jar 内的 novel-generation.yml，而这些开关决定
+         * 为什么要覆盖：安装包用户改不了 jar 内的 novel-generation.yml，而这些开关决定
          * 每章要额外跑几次模型调用（审校/段落审校/修订/候选重写/账本裁决…）。默认全开是
          * 质量优先档，但单章耗时会翻数倍——必须让用户自己能在"质量/速度"之间选。
          */
@@ -475,11 +475,11 @@ public class LlmRuntimeConfig {
     /**
      * 校验场景/兜底的中转站引用都存在于本次保存后的注册表。
      *
-     * <p>为什么不静默丢弃：丢弃后该场景会静默回落到全局端点，而界面仍显示"已选站"——
+     * 为什么不静默丢弃：丢弃后该场景会静默回落到全局端点，而界面仍显示"已选站"——
      * 用户看到的是 A、实际走 B，属于最难排查的一类配置错位。保存时直接拒绝，
      * 前端能立刻提示"该站不存在"。全局 providerId 的 {@link #mergeProviderId} 同款处理。
      *
-     * <p>删除中转站的路径：前端删除时会把引用一并清掉（见 deleteProvider），
+     * 删除中转站的路径：前端删除时会把引用一并清掉（见 deleteProvider），
      * 因此正常 UI 操作不会撞到这条；它兜住的是直接调 API / 并发保存等异常路径。
      */
     private static void validateSceneProviders(Overlay next) {
@@ -784,7 +784,7 @@ public class LlmRuntimeConfig {
 
     /**
      * apiKey 覆盖落到 module（baseUrl + apiKey + protocol）；无覆盖原样返回。
-     * 字段优先级：全局中转站 &gt; 手动覆盖（baseUrl/protocol/apiKey 字段）&gt; yml 静态——
+     * 字段优先级：全局中转站 > 手动覆盖（baseUrl/protocol/apiKey 字段）> yml 静态——
      * 选中中转站后地址密钥协议立即跟着走；手动字段保留为"中转站没配某字段时的补位"高级逃生口
      */
     public StoryVO.Module applyApi(StoryVO.Module module) {
@@ -851,7 +851,7 @@ public class LlmRuntimeConfig {
     /**
      * model/maxTokens 覆盖到已解析的场景模型（unified 或 scene）；无覆盖原样返回。
      *
-     * <p><b>maxTokens 是兜底而非覆盖</b>（2026-10-23）：selected 已带值（场景 yml 的
+     * maxTokens 是兜底而非覆盖（2026-10-23）：selected 已带值（场景 yml 的
      * max-tokens，或回落的 chat-model.max-tokens）时一律尊重它，全局值只在 selected
      * 没有上限时补位。此前是全局无条件覆盖，代价实测可见：全局填 16384 会把
      * chapter-plan 的 32768 腰斩，强制思考模型必然烧穿（completionTokens=16384/16384、
@@ -881,7 +881,7 @@ public class LlmRuntimeConfig {
     /**
      * 全局兜底模型覆盖落到 module（独立分区，与场景覆盖互不影响）。
      *
-     * <p>为什么单独一个方法而不是并进 applyModel：兜底是"所有场景共用的一份配置"，
+     * 为什么单独一个方法而不是并进 applyModel：兜底是"所有场景共用的一份配置"，
      * 与"本次调用是哪个场景"无关——并进场景感知路径会让每个场景各拿一份，
      * 也就退回了被收敛掉的按场景配置。无覆盖时原样返回。
      */
@@ -950,9 +950,9 @@ public class LlmRuntimeConfig {
 
     /**
      * 场景感知的模型覆盖：先按全局覆盖合成（applyModel(selected)），再叠加该场景的覆盖条目——
-     * 按字段优先级 场景覆盖 &gt; 全局覆盖 &gt; 静态。场景未配置覆盖时与全局路径完全一致。
+     * 按字段优先级 场景覆盖 > 全局覆盖 > 静态。场景未配置覆盖时与全局路径完全一致。
      *
-     * <p>场景级 API 开关关闭（sceneApiEnabled=false）时，场景自带的 base-url/api-key/completionsPath
+     * 场景级 API 开关关闭（sceneApiEnabled=false）时，场景自带的 base-url/api-key/completionsPath
      * 一律抹掉（置 null）——网关据此回落全局 ai-api，实现"一个地址密钥打天下"。
      * 注意：只抹地址密钥，不抹模型名（开关管的是"走哪个端点"，不是"用哪个模型"）
      */
@@ -1196,10 +1196,10 @@ public class LlmRuntimeConfig {
     /**
      * 运行时兜底是否为"与全局主模型同名"的无效配置（applyFallback 与 toFallbackView 共用）。
      *
-     * <p>同名会让 ModelFallbackChain 直接返回单元素链，烧穿保护失去降级目标；同时静态兜底
+     * 同名会让 ModelFallbackChain 直接返回单元素链，烧穿保护失去降级目标；同时静态兜底
      * 存在且是异族模型时才有回落价值，否则不如保持原样（避免把兜底清空）。
      *
-     * <p><b>同名但不同供应商不算无效</b>（2026-10-27 实测）：兜底选了另一个中转站时，
+     * 同名但不同供应商不算无效（2026-10-27 实测）：兜底选了另一个中转站时，
      * 即使模型名相同，实际也是另一路端点/账号——拦掉它会把模型名换成静态兜底，
      * 却仍保留用户选的中转站地址密钥协议，拼出"静态模型 + 异站供应商"的错配请求。
      * 因此只有"同名且同端点"才判无效。

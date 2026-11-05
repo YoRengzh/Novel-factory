@@ -13,13 +13,13 @@ import java.util.Set;
 /**
  * 触发层统一异常出口：把 {@link AppException} 的异常码翻译成 HTTP 状态码，一处定义。
  *
- * <p>判断标准只有一条——**这个错误是不是请求本身的错**：
+ * 判断标准只有一条——**这个错误是不是请求本身的错**：
  * {@code 0002 非法参数 / 0003 参数为空 / 0004 参数重复} 属于入参类，前端改了就能重发，映射 400；
  * 其余（{@code 0001 未知失败}、队列满等）归服务端，映射 500。
  * 状态码 409/502/503 这类**端点特有语义**（同一故事已有作业、上游模型没给出可用结果）
  * 仍由各端点自行决定，本类不猜。
  *
- * <p>刻意只接管 {@code AppException}：{@code ResponseStatusException} 与其它运行时异常
+ * 刻意只接管 {@code AppException}：{@code ResponseStatusException} 与其它运行时异常
  * 继续交给 Spring 的默认解析，保持响应体形状与历史行为一致。
  * 新增端点不应再手写 {@code catch (AppException e) -> 400} 样板，直接抛给本类即可。
  */

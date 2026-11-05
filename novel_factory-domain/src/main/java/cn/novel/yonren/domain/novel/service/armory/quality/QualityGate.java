@@ -493,11 +493,11 @@ public class QualityGate {
     /**
      * 本书台词引号的主流风格是否为弯引号（2026-10-13，供 {@link DialogueRatioPolicy#checkQuoteStyleDrift}）。
      *
-     * <p>数据源是 {@link StyleStatEntity#getUsedDialogueLines()}——历史章节的对白句（含引号）。
+     * 数据源是 {@link StyleStatEntity#getUsedDialogueLines()}——历史章节的对白句（含引号）。
      * 取不到足够样本时返回 {@code null}，检测整体跳过：新书前几章还没有历史，
      * 此时"主流"尚未形成，报漂移只会误伤。
      *
- * <p><b> 规范由「」改为“”后的口径调整</b>：prompt 层（hard-constraints.md /
+ *  规范由「」改为“”后的口径调整：prompt 层（hard-constraints.md /
      * plan-targets.md / ChapterBeatsService / ChapterWorker）已统一要求双引号，但历史章节
      * 全是「」。纯历史统计会把主流永远钉在旧写法上，导致**遵守新规的每一章都被判"漂移"**——
      * 那等于用质检去对抗规则本身。故此处直接返回 {@code true}（主流=双引号）：
@@ -595,7 +595,7 @@ public class QualityGate {
     /**
      * 人物档案锚（代词与既定事实），注入审校 guard。
      *
-     * <p><b>为什么必须给审校</b>（2026-10-10）：正文把女主角色庚写成「他」连写了三章，而审校
+     * 为什么必须给审校（2026-10-10）：正文把女主角色庚写成「他」连写了三章，而审校
      * 只有 MINOR 叙事问题、一条 BLOCKING 都没报——不是它没看见，而是**没有可对照的锚**：
      * 账本里既没有"角色庚是女"也没有"她报另一班"，判"事实矛盾"无从下嘴。
      * 给了锚之后，代词写错、班级/亲属写错就落在审校规则既有的「事实矛盾」类里，可判 BLOCKING。
@@ -615,11 +615,11 @@ public class QualityGate {
     /**
      * 跨章对白逐字重复（机械，2026-10-10）：本章有台词与早期章节一字不差 → 每句一条 BLOCKING。
      *
-     * <p><b>口径只认精确相等</b>（去空白后）：这条要进 BLOCKING 驱动修订，误报的代价是白改一稿；
+     * 口径只认精确相等（去空白后）：这条要进 BLOCKING 驱动修订，误报的代价是白改一稿；
      * 而"同一句台词隔几章一字不差地又出现"本身就是硬伤，放宽口径会把正常呼应也扫进来。
      * 近重复（改一两个字）仍走风格警示那条软通道，不进这里。
      *
-     * <p>{@code styleStat} 在本章 merge 之前传进来（ChapterWorker 的调用顺序），所以索引里
+     * {@code styleStat} 在本章 merge 之前传进来（ChapterWorker 的调用顺序），所以索引里
      * 只有历史章节的对白——本章自己不会跟自己撞。
      */
     private List<ChapterIssueEntity> dialogueRepeatIssues(ChapterContentEntity chapterContent,
@@ -649,11 +649,11 @@ public class QualityGate {
     /**
      * 章内整句重复（机械）：同一句在本章内部一字不差地出现两次以上 → 每句一条 BLOCKING。
      *
-     * <p><b>为什么进 BLOCKING 而不是 MINOR</b>：相邻整句复制是读者一眼可见的硬伤
+     * 为什么进 BLOCKING 而不是 MINOR：相邻整句复制是读者一眼可见的硬伤
      * （"这段写了两遍"），修法极其机械（删掉重复的那一遍），定向修订的成本远低于留在成稿里的代价。
      * 与跨章对白重复同一处置逻辑（{@link #dialogueRepeatIssues}）。
      *
-     * <p>口径只认精确相等（去空白后），短句不判——近重复与短句复用走风格警示的软通道。
+     * 口径只认精确相等（去空白后），短句不判——近重复与短句复用走风格警示的软通道。
      */
     private List<ChapterIssueEntity> intraChapterRepeatIssues(ChapterContentEntity chapterContent) {
         if (chapterContent == null || StringUtils.isBlank(chapterContent.getContent())) {
@@ -683,20 +683,20 @@ public class QualityGate {
      * 对白轮次坍缩（机械，P1）：轮次密度低于题材劣化线时记一条问题——严重度按「计划是否
      * 声明过对话承载」分流（2026-10-11）：
      *
-     * <ul>
-     *   <li><b>声明了 dialogueScenes</b>：规划层已经承诺"这些事件以对话承载"（对话承载闸门
-     *       放行），正文仍开不了腔就是<b>写手违约</b>——记 BLOCKING 进修订闭环，缺失清单由
-     *       {@link DialoguePresencePolicy#missingScenes} 识别并作为修订靶点下发（实测第 110 章
-     *       形态：声明两句、成文一句，「嗯」被降级成点头——计划层闸门管不到正文兑现）。</li>
-     *   <li><b>未声明</b>：根因在规划层没给料，照旧记 MINOR 落债回灌。</li>
-     * </ul>
      *
-     * <p><b>三处必须同源</b>：体检的 {@code dialogueCollapseShare}、规划层的【对白坍缩反馈】、
+     *   · 声明了 dialogueScenes：规划层已经承诺"这些事件以对话承载"（对话承载闸门
+     *       放行），正文仍开不了腔就是写手违约——记 BLOCKING 进修订闭环，缺失清单由
+     *       {@link DialoguePresencePolicy#missingScenes} 识别并作为修订靶点下发（实测第 110 章
+     *       形态：声明两句、成文一句，「嗯」被降级成点头——计划层闸门管不到正文兑现）。
+     *   · 未声明：根因在规划层没给料，照旧记 MINOR 落债回灌。
+     *
+     *
+     * 三处必须同源：体检的 {@code dialogueCollapseShare}、规划层的【对白坍缩反馈】、
      * 这里的质量债，都用 {@link DialogueRatioPolicy#densityDegraded} 这同一根线。口径一旦分叉，
      * 就会出现"体检说崩了、债里没记、规划层没收到"的分裂——本项目在"两份 LCS 阈值不一致"
      * 上已经吃过同类亏。
      *
-     * <p>过渡章豁免、短样本豁免（与 {@code DialogueRatioPolicy} 的其它检测同款：宁可漏报不误伤）。
+     * 过渡章豁免、短样本豁免（与 {@code DialogueRatioPolicy} 的其它检测同款：宁可漏报不误伤）。
      * 题材取自摘要的机械字段 storyGenre，与体检口径一致。
      */
     private static List<ChapterIssueEntity> dialogueDensityCollapse(ChapterPlanItemEntity item,
@@ -790,7 +790,7 @@ public class QualityGate {
     /**
      * 未修复 BLOCKING 清单的**内容指纹**：供修订循环做"无进展检测"。
      *
-     * <p>取描述文本（trim + 去空白）排序后拼接——多重集语义：
+     * 取描述文本（trim + 去空白）排序后拼接——多重集语义：
      * 条数相同但换了问题（说明修订有推进）不会被误判为无进展；
      * 而同一条问题在措辞上仅差空白时仍算同一问题。
      * 描述为空时退用 dimension+evidence 兜底（机械类问题可能只有 evidence）。

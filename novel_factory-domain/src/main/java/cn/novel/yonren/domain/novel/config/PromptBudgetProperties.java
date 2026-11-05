@@ -15,14 +15,14 @@ import org.springframework.stereotype.Component;
 public class PromptBudgetProperties {
 
     /**
-     * 正文前缀总量上限（字符）；&lt;=0 关闭总额约束（退化为逐块直拼）。
+     * 正文前缀总量上限（字符）；<=0 关闭总额约束（退化为逐块直拼）。
      * 定标口径为"按各块封顶与典型体量推算"（2026-09-28 重估，见 yml 注释），非实测；
      * 真实余量以装配日志的占比字段判定——长期 ≥90% 即需回查膨胀来源而非调大本值
      */
     private int totalPrefixChars = 18000;
 
     /**
-     * 章节计划"输入段"（故事设定 + 记忆前缀）总量上限（字符）；&lt;=0 关闭约束。
+     * 章节计划"输入段"（故事设定 + 记忆前缀）总量上限（字符）；<=0 关闭约束。
      * 规划 prompt 的固定要求与 schema 段不参与裁剪（规划契约不可丢），故此处只约束会随连载增长的输入段
      */
     private int planPrefixChars = 20000;

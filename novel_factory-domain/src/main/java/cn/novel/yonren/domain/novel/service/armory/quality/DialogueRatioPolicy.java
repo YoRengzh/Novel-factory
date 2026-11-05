@@ -29,7 +29,7 @@ public final class DialogueRatioPolicy {
     /**
      * 提取全部对白片段（**含引号本身**）——仓库内"什么算一句对白"的唯一定义。
      *
-     * <p>跨章对白查重（{@code StyleStatService}）必须与轮次统计用同一份口径，
+     * 跨章对白查重（{@code StyleStatService}）必须与轮次统计用同一份口径，
      * 否则会出现"同一句对白在一处算重复、在另一处不计入"的分裂——本项目已在两份 LCS 口径上吃过同类亏。
      */
     public static List<String> utterances(String content) {
@@ -198,13 +198,13 @@ public final class DialogueRatioPolicy {
      * 引号风格漂移检测（机械，MINOR）：本章台词几乎全用弯引号 {@code “”}
      * 而本书主流是直角引号 {@code 「」}。
      *
-     * <p><b>为什么单独判</b>：两种引号在中文小说里都合法，{@link #checkFormatCollapse}
+     * 为什么单独判：两种引号在中文小说里都合法，{@link #checkFormatCollapse}
      * 与 {@link #utteranceCount} 也都认（正则同时覆盖），所以**任何现有检测都不会报**——
      * 但同一本书里混用是读者一眼可见的排版不一致。实测某书一章整章重写稿：台词引号
      * 几乎全用弯引号，而其余各章全部用直角引号（全书仅此一章例外）——换模型重写时写手带回了
      * 自己的排版习惯，而那一章的前缀预算 99% 打满、文风指纹块被裁掉（风格锚不在场）。
      *
-     * <p><b>口径从严（宁漏勿滥）</b>：非 transition 章、篇幅 ≥ {@value #QUOTE_STYLE_MIN_CHARS}、
+     * 口径从严（宁漏勿滥）：非 transition 章、篇幅 ≥ {@value #QUOTE_STYLE_MIN_CHARS}、
      * 台词数 ≥ {@value #QUOTE_STYLE_MIN_UTTERANCES}，且弯引号占比 ≥ 80% 才判——
      * 单章里偶用弯引号作强调、或引文旁注不算漂移。MINOR 落债回灌（不触发修订：
      * 为改引号重写整章不成比例；根因在 prompt 侧的风格锚缺失，已由文风指纹提档缓解）。

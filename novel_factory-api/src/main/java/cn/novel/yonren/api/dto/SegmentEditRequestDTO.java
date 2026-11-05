@@ -6,7 +6,7 @@ import lombok.Data;
  * 段落级文本编辑请求（POST /api/stories/{storyDirName}/chapters/{chapterNo}/segment-edit）：
  * 用户在正文里选中一段文字，要求 AI 只改这一段——润色 / 扩写 / 续写。
  *
- * <p><b>为什么不复用整章修订</b>：整章修订走 CHAPTER_REVISE 场景的完整 prompt（含账本、伏笔、
+ * 为什么不复用整章修订：整章修订走 CHAPTER_REVISE 场景的完整 prompt（含账本、伏笔、
  * 风格统计等大块上下文），单次成本与耗时都在"整章"量级；用户只是想把一句话写顺，等 2 分钟
  * 换回一整章改写并不划算。这里单独走一次短 prompt 调用，只回传替换片段，不落盘、不动账本。
  */

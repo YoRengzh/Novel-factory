@@ -52,11 +52,11 @@ public final class UsedPatternPolicy {
     /**
      * 渲染【已用情节模式】块；窗口与全书清单**都为空**时返回 null（首发不注入）。
      *
-     * <p>注意判据是"两者皆空"而非"窗口为空"：全书形态清单不受窗口约束，
+     * 注意判据是"两者皆空"而非"窗口为空"：全书形态清单不受窗口约束，
      * 若沿用旧判据，在"窗口空但历史有展示形态"的场合（新书早期、长跳段）会让最有价值的
      * 跨段去重信息一起消失——而那恰恰是最需要它的时刻。
      *
-     * @param beforeChapterNo 只统计章号 <b>小于</b> 该值的章节（本章/本段尚未发生的不能算"已用"）
+     * @param beforeChapterNo 只统计章号 小于 该值的章节（本章/本段尚未发生的不能算"已用"）
      * @param lookback        回看章数；&le;0 时用 {@link #BODY_LOOKBACK}
      */
     public static String render(List<ChapterSummaryEntity> summaries, int beforeChapterNo, int lookback) {
@@ -208,10 +208,10 @@ public final class UsedPatternPolicy {
     /**
      * **全书**（本章之前）已用过的能力展示形态清单，去重后按章号升序。
      *
-     * <p><b>为什么不能用窗口</b>：窗口统计答的是"最近有没有密集展示"，而跨段重复（两章同类高光相隔 9 章）需要的是"历史上用过哪些路数"——两者是不同的问法。
+     * 为什么不能用窗口：窗口统计答的是"最近有没有密集展示"，而跨段重复（两章同类高光相隔 9 章）需要的是"历史上用过哪些路数"——两者是不同的问法。
      * 形态短语本身很短（8-16 字），全书累计也只有几十条，直接列给模型比让它自己回忆可靠。
      *
-     * <p>去重按短语原文：同一形态在不同章重复标注（措辞完全相同）只列一次，
+     * 去重按短语原文：同一形态在不同章重复标注（措辞完全相同）只列一次，
      * 因为要点名的是"路数"而不是"次数"（次数由窗口统计负责）。
      */
     private static List<String> allShowcaseForms(List<ChapterSummaryEntity> summaries, int beforeChapterNo) {

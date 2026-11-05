@@ -94,7 +94,7 @@ public final class PlaceTrajectoryPolicy {
     /**
      * 渲染【地点轨迹】块（回灌规划层）；无任何地点信息返回 null（老数据没 timePoint 时不注入）。
      *
-     * <p>无论是否超预算都会注入：规划层此前<em>完全看不到</em>地点信息，
+     * 无论是否超预算都会注入：规划层此前完全看不到地点信息，
      * 先把它摆出来才有"复用已建立地点"的可能；超预算时再追加一句警示。
      */
     public static String renderTrajectory(List<ChapterSummaryEntity> summaries) {

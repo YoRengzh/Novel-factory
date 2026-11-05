@@ -97,11 +97,11 @@ public class DynamicReferenceService {
     /**
      * 按场景裁剪索引：只保留该场景用得上的资料分组。
      *
-     * <p>收益：ref-select 的索引表从 58 行降到十几二十行，模型选择更聚焦。
+     * 收益：ref-select 的索引表从 58 行降到十几二十行，模型选择更聚焦。
      * 代价：跨组资料（如技法组的 de-ai-principles 对计划场景也有用）不会出现在该场景——
      * 因此 {@link ReferenceGroup#groupsFor} 每个场景都配了不止一组，且未列出的场景给全量。
      *
-     * <p>三组开关（FeatureToggles 的 referenceGroup*）关闭时该组整体不参与选择，
+     * 三组开关（FeatureToggles 的 referenceGroup*）关闭时该组整体不参与选择，
      * 用于"省 token / 降耗时"——关掉题材组后设定阶段只靠模型自身常识。
      */
     private List<ReferenceIndexEntry> filterByScene(List<ReferenceIndexEntry> index, PromptScene scene) {

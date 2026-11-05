@@ -441,10 +441,10 @@ public class StoryJobService {
      * 自动续批：本批正常完成后，若 RunPlan 判定该继续（未达标 / 未超批数上限 / 批末体检未达停线），
      * 克隆命令再投一个子作业接着写。
      *
-     * <p><b>放在终态之后</b>：当前作业的 COMPLETED 已经落定，续批只是"再开一个作业"，
+     * 放在终态之后：当前作业的 COMPLETED 已经落定，续批只是"再开一个作业"，
      * 与当前作业的成败解耦——续批失败不会把一批成功的成果标成失败。
      *
-     * <p><b>fail-soft</b>：读盘/体检/投递的任何异常都只告警。续批是增强件，
+     * fail-soft：读盘/体检/投递的任何异常都只告警。续批是增强件，
      * 绝不能反噬已完成批次的终态（与预算熔断、检查点落盘同一原则）。
      */
     private void scheduleNextBatchIfNeeded(ArmoryCommandEntity command, GenerationJob job,
@@ -518,12 +518,12 @@ public class StoryJobService {
     /**
      * 批末体检结论（带**批次窗口**）：{@code [batchStart, batchEnd]} 内的章节才参与判停。
      *
-     * <p><b>为什么判停必须窗口化</b>：指标此前在全书历史上计算，于是"这本书写得健不健康"
+     * 为什么判停必须窗口化：指标此前在全书历史上计算，于是"这本书写得健不健康"
      * 与"这一批写得健不健康"被混为一谈——早期批次的坏账会把 overall 永久压在停线上
      *（自动续批永久停机，且旧债后来全清也恢复不了）；反向的"这批突然劣化"则会被
      * 大量历史好数据稀释到看不出。全书口径仍可用于观测（{@code batchStart<=0} 即全量）。
      *
-     * <p>窗口只过滤**章节级**数据（摘要/质量债）；阶段蓝图是全书长期锚（数量少、语义为"方向"），
+     * 窗口只过滤**章节级**数据（摘要/质量债）；阶段蓝图是全书长期锚（数量少、语义为"方向"），
      * 不受窗口约束——过滤掉它会让"阶段规划覆盖"类指标失真。
      */
     private BatchHealthReport assessHealth(String storyDirName, int batchStart, int batchEnd) {

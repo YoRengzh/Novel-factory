@@ -34,7 +34,7 @@ public class ReferenceSelectorProperties {
     /**
      * 选择模式：llm = LLM 读索引选择；vector = 向量语义检索。
      *
-     * <p><b>vector 模式失败时快速失败终止作业，不降级回 llm</b>（见 {@code DynamicReferenceService}）：
+     * vector 模式失败时快速失败终止作业，不降级回 llm（见 {@code DynamicReferenceService}）：
      * llm 选择质量明显差于向量检索，静默降级会让作业在一整批低质量注入下跑完，
      * 而"资料注错了"从产出上几乎看不出来——比停下来更贵。
      */

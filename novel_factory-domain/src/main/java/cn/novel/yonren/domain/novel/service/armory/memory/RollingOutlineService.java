@@ -49,12 +49,12 @@ public class RollingOutlineService {
     /**
      * **章级主线推进的排期窗**（章，2026-10-02）。
      *
-     * <p>阶段长度被 {@link #MIN_STAGE_LENGTH}/{@link #MAX_STAGE_LENGTH} 钳制在 30-80 章
+     * 阶段长度被 {@link #MIN_STAGE_LENGTH}/{@link #MAX_STAGE_LENGTH} 钳制在 30-80 章
      * （批次不足时才截断到批次末），一次产出 80 条章级推进不现实——输出过长易被
      * {@code finish_reason=length} 静默截断。故只要求覆盖阶段开头的有界窗口，
      * 批次跑完若有余量，由下一版蓝图续写（与滚动大纲的既有哲学一致）。
      *
-     * <p>取 15 = 3 个标准段（段长 5 章），够覆盖一次续写的批次量。
+     * 取 15 = 3 个标准段（段长 5 章），够覆盖一次续写的批次量。
      */
     public static final int MAINLINE_WINDOW = 15;
     /** 阶段进入护栏条数上限 */
@@ -110,16 +110,16 @@ public class RollingOutlineService {
     /**
      * 组装**悬念档位补采 prompt**（2026-09-22）。
      *
-     * <p><b>为什么需要补采</b>：档位表是"主线推进闸门"的唯一标尺，但在完整蓝图 prompt 里
+     * 为什么需要补采：档位表是"主线推进闸门"的唯一标尺，但在完整蓝图 prompt 里
      * 它只是第 11 条要求——实测模型会在长 prompt 里**静默省略**这两个字段
      * （同批用短聚焦 prompt 探针则 100% 给出：5 档、全是可观察表述）。
      * 若就此放过，档位表恒为 null，锚块不注入、校验跳过、指标不出——整条推进链路**一声不响地空转**。
      * 所以缺了就**再问一次，只问这两个字段**（短 prompt 服从率高），而不是把可靠性押在一次服从上。
      *
-     * <p>输入用"故事大纲 + 本阶段目标/任务"即可：档位表描述的是主线悬念的推进阶段，
+     * 输入用"故事大纲 + 本阶段目标/任务"即可：档位表描述的是主线悬念的推进阶段，
      * 不需要完整上下文；prompt 越短，模型越不会漏字段。
      *
-     * <p><b>时序锚（2026-10-04）</b>：档位/里程碑同样会产出"婴儿写数论"式超龄表述，
+     * 时序锚（2026-10-04）：档位/里程碑同样会产出"婴儿写数论"式超龄表述，
      * 补采短 prompt 也不例外——与主蓝图同口径注入锚，新书首段用设定兜底。
      */
     public String buildSuspenseLadderRepairPrompt(StoryContextEntity storyContext,
@@ -198,12 +198,12 @@ public class RollingOutlineService {
     /**
      * 组装**章级主线推进补采 prompt**（2026-10-02）。
      *
-     * <p><b>为什么又是"聚焦补采"</b>：与 {@code suspenseLadder} 同样的理由——
+     * 为什么又是"聚焦补采"：与 {@code suspenseLadder} 同样的理由——
      * 那条字段当年放在完整蓝图 prompt 里（十几个要求 + 长 schema）会被模型**静默省略**，
      * 最后靠"只问这两个字段"的短 prompt 才稳定。**可靠性来自"缺了就补问"，不来自"要求写得够醒目"。**
      * 章级推进更是个逐章数组，放在长 prompt 里被省略的概率只会更高。
      *
-     * <p>输入带**已确定的档位表**：章级推进必须与档位相容（不得出现档位倒退），
+     * 输入带**已确定的档位表**：章级推进必须与档位相容（不得出现档位倒退），
      * 否则两张表会互相打架——校验侧却是各自独立跑的，冲突要到很晚才暴露。
      */
     public String buildMainLineRepairPrompt(StoryContextEntity storyContext, StageBlueprintEntity blueprint,
@@ -325,7 +325,7 @@ public class RollingOutlineService {
      * 治两个方向——"整段滑进暗线、主角学习线蒸发"（上限）与"压掉暗线后空间被关系/家庭
      * 吃掉、硬核主粮仍缺席"（下限，实测 106-120 主粮 3/15、本金 0、程序 0）。
      *
-     * <p>返回违规清单（空 = 通过）。执法通道与聚焦补采同款：调用方（BuildStageBlueprintNode）
+     * 返回违规清单（空 = 通过）。执法通道与聚焦补采同款：调用方（BuildStageBlueprintNode）
      * 据此**带反馈重问一次**，仍不过则 WARN 留痕——蓝图层没有重试循环，
      * 下游还有段计划的对话承载闸门作第二道兜底。
      */
@@ -455,7 +455,7 @@ public class RollingOutlineService {
     /**
      * 伏笔排期补采结果（只含这一个字段）。
      *
-     * <p>⚠️ 分量名必须**逐字等于 prompt 里给的 JSON key**（{@code foreshadowSchedule}）——
+     * ⚠️ 分量名必须**逐字等于 prompt 里给的 JSON key**（{@code foreshadowSchedule}）——
      * 叫 {@code schedule} 会让 Jackson 找不到属性、整个 patch 反序列化为 null，
      * 而调用方只会看到"补采没拿到结果"，根因极难追。（与 {@code MainLinePatch.mainLineByChapter} 同款约定。）
      */
@@ -466,12 +466,12 @@ public class RollingOutlineService {
     /**
      * 组装**伏笔兑现排期表补采 prompt**（P2b）。
      *
-     * <p>同为**聚焦补采**：排期表是个逐条对象数组，放在长 prompt 里被静默省略的概率只会比档位表更高。
+     * 同为**聚焦补采**：排期表是个逐条对象数组，放在长 prompt 里被静默省略的概率只会比档位表更高。
      *
-     * <p><b>核心要求是"至少 1 条跨阶段"</b>——这是治「段计划视野 5 章 ⇒ 只能本段内埋本段内收」
+     * 核心要求是"至少 1 条跨阶段"——这是治「段计划视野 5 章 ⇒ 只能本段内埋本段内收」
      * 的唯一结构性手段。不写死这条，排期表会退化成"把本来就会收的线登记一遍"。
      *
-     * <p><b>时序锚（2026-10-04）</b>：新书 1-5 章实测，无锚的排期补采会产出
+     * 时序锚（2026-10-04）：新书 1-5 章实测，无锚的排期补采会产出
      * "4岁主角无意识写出2026年日期"这类违反时序锚的 intent——它经【必须埋设】强压给计划与写手后，
      * 审校按锚判 BLOCKING，修订无法在不丢事件的前提下修复，整链死锁。锚在此处是源头闸门。
      */
@@ -536,11 +536,11 @@ public class RollingOutlineService {
     /**
      * 解析排期表补采输出；不可用返回 null（调用方告警，不让缺失静默通过）。
      *
-     * <p>逐条机械校验：章号齐全、{@code plant} 落在阶段区间内、{@code payoff > plant}、
+     * 逐条机械校验：章号齐全、{@code plant} 落在阶段区间内、{@code payoff > plant}、
      * {@code payoff <= hardTotal}。任一条不合格即整表退回（半张表比没有更危险：
      * 打标会因章号错位而大面积漏配）。
      *
-     * <p>⚠️ **"至少 1 条跨阶段"不在这里判定**——那是"补采质量"问题而非"格式"问题，
+     * ⚠️ **"至少 1 条跨阶段"不在这里判定**——那是"补采质量"问题而非"格式"问题，
      * 由调用方决定是重问一次还是告警放行（见 {@code BuildStageBlueprintNode}）。
      */
     public ForeshadowSchedulePatch parseForeshadowSchedulePatch(String raw, StageBlueprintEntity blueprint,
@@ -597,7 +597,7 @@ public class RollingOutlineService {
     /**
      * 排期表**链式结转 + 去重**（P2b）。
      *
-     * <p>新版补采的条目与上一版结转的活线条目会撞车（模型看不见上一版的全貌），
+     * 新版补采的条目与上一版结转的活线条目会撞车（模型看不见上一版的全貌），
      * 故按 **intent 归一文本去重，保留结转版**——结转条目带着 {@code status} 履历
      * （已 PLANTED 的线不该被打回 PLANNED，否则打标会重来一遍）。
      */
@@ -636,7 +636,7 @@ public class RollingOutlineService {
     /**
      * 解析章级主线推进补采输出；不可用返回 null——调用方据此告警，不让缺失静默通过。
      *
-     * <p>校验口径：条目非空、且章号**连续覆盖排期窗**才认。
+     * 校验口径：条目非空、且章号**连续覆盖排期窗**才认。
      * 部分覆盖（如只给了前 3 章的条目）按不可用处理——半张表比没有更危险：
      * 校验会因"缺章"不断驳回，而模型每次补采都只给前几条。
      */

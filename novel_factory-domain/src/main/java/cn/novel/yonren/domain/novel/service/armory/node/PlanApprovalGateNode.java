@@ -15,19 +15,19 @@ import org.springframework.stereotype.Service;
 /**
  * 章节计划审批门（human-in-the-loop）。
  *
- * <p>位置：{@code ValidateChapterPlanNode} 与 {@code GenerateChapterContentNode} 之间——
+ * 位置：{@code ValidateChapterPlanNode} 与 {@code GenerateChapterContentNode} 之间——
  * 此时计划已解析并通过结构校验、正文一章未写，是唯一"拦得住"的时点。
  *
- * <p><b>开启时</b>：先把本章计划落盘（复用正文节点的检查点逻辑），再把作业转为
+ * 开启时：先把本章计划落盘（复用正文节点的检查点逻辑），再把作业转为
  * {@code AWAITING_APPROVAL} 并抛出 {@link PlanApprovalSuspendedException} —— 这是控制信号而非错误，
- * worker 捕获后<b>不置失败、直接归还线程</b>，等人工裁决或超时后再重新入队续跑剩余阶段。
+ * worker 捕获后不置失败、直接归还线程，等人工裁决或超时后再重新入队续跑剩余阶段。
  *
- * <p><b>为什么不是真阻塞</b>：{@code jobExecutor} 是单线程池（避免 LLM 并发花费与故事目录竞争），
+ * 为什么不是真阻塞：{@code jobExecutor} 是单线程池（避免 LLM 并发花费与故事目录竞争），
  * 在工作线程里 {@code await} 十分钟会把全部排队作业（含自续批子作业）一起冻住。
  *
- * <p><b>关闭时</b>（默认）：{@code get()} 直连正文生成节点，节点链与历史行为逐字节一致。
+ * 关闭时（默认）：{@code get()} 直连正文生成节点，节点链与历史行为逐字节一致。
  *
- * <p><b>局限</b>：跨阶段批次的章节计划是"惰性分段"的——本节点只拦到首段计划，
+ * 局限：跨阶段批次的章节计划是"惰性分段"的——本节点只拦到首段计划，
  * 后续段在正文推进到段边界时才由 worker 即时规划，因此那部分天然无法预先裁决。
  * 单段批次（批大小 ≤ 阶段跨度）则是完整计划，这也是本门价值最大的场景。
  */
@@ -72,7 +72,7 @@ public class PlanApprovalGateNode extends AbstractArmorySupport {
     /**
      * 是否挂起等待人工裁决。
      *
-     * <p>请求级开关优先（2026-09-26）：{@code autoApprovePlan=true} 时本批直接透传、不挂起。
+     * 请求级开关优先（2026-09-26）：{@code autoApprovePlan=true} 时本批直接透传、不挂起。
      * 语义为"**只能放宽不能收紧**"——它无法让 yml 关闭的门重新生效，避免请求参数
      * 悄悄改掉配置侧"要审"的意图。跳过会打日志，观测层据此区分"人主动跳过"与"配置就没开"
      */
@@ -117,7 +117,7 @@ public class PlanApprovalGateNode extends AbstractArmorySupport {
      * 执行挂起。返回 false 表示状态迁移失败（多为并发取消已把作业推向 CANCELLING/CANCELLED），
      * 此时不挂起、直接放行——用户已经取消，不该再弹审批。
      *
-     * <p>落盘先于状态迁移：挂起期间前端与人工都要能在 runDir 读到计划；
+     * 落盘先于状态迁移：挂起期间前端与人工都要能在 runDir 读到计划；
      * 检查点自身 fail-soft（写失败仅告警），与正文节点的既有语义一致
      */
     private boolean suspendForApproval(DefaultArmoryFactory.DynamicContext dynamicContext) {

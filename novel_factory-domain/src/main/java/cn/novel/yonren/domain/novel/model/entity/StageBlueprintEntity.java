@@ -79,22 +79,22 @@ public class StageBlueprintEntity {
     /**
      * **章级主线推进**（2026-10-02 新增）：本阶段**逐章**的主线推进，段计划必须逐字落地。
      *
-     * <p><b>为什么需要它</b>：{@link #suspenseLadder} 是"粗进度条"——3-6 档要覆盖 5-80 章的阶段
+     * 为什么需要它：{@link #suspenseLadder} 是"粗进度条"——3-6 档要覆盖 5-80 章的阶段
      * （阶段长度被 {@code MIN_STAGE_LENGTH=30 / MAX_STAGE_LENGTH=80} 钳制，批次不足时截断）。
      * 于是必然出现"多章共用同一档"：实测第 11-15 章五章回填同一档位，
      * **不是模型偷懒，是档位表本身没有能力区分它们**。
      *
-     * <p>两者是**两个维度**，不可互相替代：
-     * <ul>
-     *   <li>{@code suspenseLadder} + 章计划 {@code suspenseBeat}：纵向——"走到第几格了"（序比较，防缺失/倒退）</li>
-     *   <li>{@code mainLineByChapter} + 章计划 {@code mainLineAdvance}：横向——"这一章主线做了什么"（防多章雷同）</li>
-     * </ul>
+     * 两者是**两个维度**，不可互相替代：
      *
-     * <p><b>为什么只覆盖一个有界窗口</b>：阶段可长达 80 章，一次产出 80 条不现实（易截断）。
+     *   · {@code suspenseLadder} + 章计划 {@code suspenseBeat}：纵向——"走到第几格了"（序比较，防缺失/倒退）
+     *   · {@code mainLineByChapter} + 章计划 {@code mainLineAdvance}：横向——"这一章主线做了什么"（防多章雷同）
+     *
+     *
+     * 为什么只覆盖一个有界窗口：阶段可长达 80 章，一次产出 80 条不现实（易截断）。
      * 故只要求覆盖 {@code startChapter .. min(endChapter, startChapter + MAINLINE_WINDOW - 1)}，
      * 批次跑完若有余量，由下一版蓝图续写——与滚动大纲的既有哲学一致。
      *
-     * <p>老数据为 null，注入与校验一律跳过（**留痕日志**，不静默）。
+     * 老数据为 null，注入与校验一律跳过（**留痕日志**，不静默）。
      */
     private List<MainLineBeat> mainLineByChapter;
 
@@ -124,7 +124,7 @@ public class StageBlueprintEntity {
      * 退出条件核验结果：达成须给出可机械校验的证据（章节号 + 该章摘要内的连续原文引用），
      * 证据校验失败按未达成处理（宁严勿松）；核验服务失败时整体为 null（回退模型自评结转）。
      *
-     * <p>2026-09-16 起核验按<em>原子子句</em>粒度进行（{@code ExitConditionPolicy.splitAtoms}）：
+     * 2026-09-16 起核验按原子子句粒度进行（{@code ExitConditionPolicy.splitAtoms}）：
      * 复合条件（78% 的实测条件含"且/以及/同时"）只有全部分句达成才算整条达成，
      * {@code metAtoms}/{@code totalAtoms} 让"部分推进"可见，{@code note} 精确指出还差哪个分句。
      */

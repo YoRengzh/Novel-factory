@@ -46,7 +46,7 @@ public class RunPlanService {
     /**
      * 续批配置的**有限性校验**：开启自动续批时，至少要有一样东西能让它停下来。
      *
-     * <p><b>为什么必须校验</b>：三个独立配置的默认值叠加后形成"无人值守 + 无目标 + 无上限"——
+     * 为什么必须校验：三个独立配置的默认值叠加后形成"无人值守 + 无目标 + 无上限"——
      * {@code targetChapters} 默认 null（且 constraints 未开时 {@link #targetChapters()} 也返回 null，
      * "达标"判停消失）、{@code maxBatches} 默认 0（不限）、budget 两阈值默认 null（不熔断）。
      * 此时唯一的停线是批末体检 CRITICAL，而体检本身是 fail-soft 的（读取失败即跳过判停）。

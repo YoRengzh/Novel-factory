@@ -6,16 +6,16 @@ import java.util.Map;
 /**
  * story-bible.txt 的反向解析：把「标签: 值」纯文本读回结构化字段。
  *
- * <p><b>为什么需要它</b>：前端要"接着上次的末尾继续写"，就必须把初次提交时的整套设定重新组装出来
- * ——{@code ValidateUserInputNode} 对 11 个字段做全非空校验，<em>续写同样要走一遍</em>。
+ * 为什么需要它：前端要"接着上次的末尾继续写"，就必须把初次提交时的整套设定重新组装出来
+ * ——{@code ValidateUserInputNode} 对 11 个字段做全非空校验，续写同样要走一遍。
  * 而 bible 是这些设定唯一被持久化下来的地方（{@code story-meta.json} 只存总章数），
  * 且写入时"仅首次生效"、后续续写绝不覆盖，因此它是续写时最可信的来源。
  *
- * <p>⚠️ <b>标签常量必须与 {@code StoryRepository#buildBibleContent} 的写入逐字一致</b>——
+ * ⚠️ 标签常量必须与 {@code StoryRepository#buildBibleContent} 的写入逐字一致——
  * 两边共用本类的常量正是为了消除"改了写入、忘了读取"这类静默失配：值解析不出来不会报错，
  * 只会在续写时表现为"设定莫名其妙丢了"。
  *
- * <p>解析保持宽容：未知标签忽略、缺失标签为 null（老故事可能由更早版本写入，标签集合未必齐全），
+ * 解析保持宽容：未知标签忽略、缺失标签为 null（老故事可能由更早版本写入，标签集合未必齐全），
  * 兜底策略交由调用方决定。
  */
 public final class StoryBibleParser {
@@ -32,7 +32,7 @@ public final class StoryBibleParser {
      * 主要人物档案（代词与既定事实）：如「角色丙（男，用「他」）；角色庚（女，用「她」）；角色己（女，用「她」）」
      * ＋既定事实（班级/年级/亲属/住址）。
      *
-     * <p><b>为什么需要单独一条</b>：正文把某女性角色写成了「他」，连错数章 三章；
+     * 为什么需要单独一条：正文把某女性角色写成了「他」，连错数章 三章；
      * 而账本里既没有"该角色是女"的事实、也没有可判定的锚，审计想判"事实矛盾"都无从对照。
      * 性别与志愿这类**跨章不变的设定**必须由作者在 bible 里声明一次，靠模型从正文推断只会复制已有的错。
      */
@@ -54,7 +54,7 @@ public final class StoryBibleParser {
     /**
      * 解析结果：缺失字段为 {@code null}（不做默认值填充）。
      *
-     * <p>{@code hasCheatMechanism} 区分三态：{@code null} = bible 里没写（老故事），
+     * {@code hasCheatMechanism} 区分三态：{@code null} = bible 里没写（老故事），
      * {@code false} = 明确声明"没有金手指"——这两者语义不同，不能合并。
      */
     public record Snapshot(String novelTitle, String theme, String style, String worldSetting,
@@ -92,7 +92,7 @@ public final class StoryBibleParser {
     /**
      * 按「标签: 值」切分。
      *
-     * <p>只按<em>第一个 ASCII 冒号</em>切分：值本身可能含冒号，用 {@code split(":")} 会把值截断。
+     * 只按第一个 ASCII 冒号切分：值本身可能含冒号，用 {@code split(":")} 会把值截断。
      * 中文全角冒号「：」不参与切分（书名如《道诡：理智尽头是疯狂》正是全角，天然安全）。
      */
     private static Map<String, String> parseToMap(String bibleText) {

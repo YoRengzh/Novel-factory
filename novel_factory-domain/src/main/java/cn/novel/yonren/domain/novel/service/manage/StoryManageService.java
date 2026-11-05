@@ -50,10 +50,10 @@ import java.util.List;
  * 故事库应用服务：从 trigger 的 StoryManageController 下沉而来的读写编排
  * （2026-11-05 分层重构——controller 只留 HTTP 语义，实体触碰全部归本服务）。
  *
- * <p>沿用仓内既有模式：domain 服务直接吞吐 api DTO（SegmentEditService / UserAssetStore 同款），
+ * 沿用仓内既有模式：domain 服务直接吞吐 api DTO（SegmentEditService / UserAssetStore 同款），
  * 配置经构造期注入（CheckpointService / ChapterEditService 内部 toStoryVO 同款）。
  *
- * <p>异常约定：业务校验失败抛 {@link AppException}（带 {@link ResponseCode}），
+ * 异常约定：业务校验失败抛 {@link AppException}（带 {@link ResponseCode}），
  * 由 controller 映射为对应 HTTP 状态；其余异常按 500 处理。
  */
 @Slf4j
@@ -118,7 +118,7 @@ public class StoryManageService {
     /**
      * 续写准备：把已有故事的整套设定读回来（数据源是 story-bible.txt），并附上"已经写到哪儿了"。
      *
-     * <p>为什么必须由服务端给：续写要走和首发完全相同的入参校验
+     * 为什么必须由服务端给：续写要走和首发完全相同的入参校验
      * （ValidateUserInputNode 对 11 个字段全非空），而设定字段在服务端只存在于 bible 里——
      * 这是它们唯一被持久化的地方（story-meta 只存总章数）。
      * 取不到的字段通过 {@code missingFields} 明确点名，让用户不用猜"到底缺哪个"。
@@ -234,7 +234,7 @@ public class StoryManageService {
     /**
      * 人工保存正文：保留既有标题，正文写盘后按需触发记忆回流（重跑摘要 + 重建向量索引）。
      *
-     * <p>人工保存只要求非空：1500 字是生成路径的质量门禁，不该驳回用户的手改
+     * 人工保存只要求非空：1500 字是生成路径的质量门禁，不该驳回用户的手改
      * （实测段落级润色后保存被这条 400 挡掉，整章不足 1500 字就改不了）。
      */
     public ChapterSaveResponseDTO saveChapter(String storyDirName, int chapterNo, ChapterSaveRequestDTO request) {
@@ -276,10 +276,10 @@ public class StoryManageService {
     /**
      * 段落级文本编辑：选中一段正文，让 AI 只改这一段（润色 / 扩写 / 续写）。
      *
-     * <p><b>为什么不落盘</b>：返回的是"建议片段"，前端做对照让用户确认后再走既有的
+     * 为什么不落盘：返回的是"建议片段"，前端做对照让用户确认后再走既有的
      * 保存路径——那条路径已含摘要回流与运行中作业互斥检查，这里另开写盘通道会让两套一致性机制分叉。
      *
-     * <p><b>为什么校验 selectedText 是否在正文里</b>：接口在本机无鉴权，不校验会让它
+     * 为什么校验 selectedText 是否在正文里：接口在本机无鉴权，不校验会让它
      * 退化成"任意文本改写代理"，消耗额度却不产生写作价值。
      */
     public cn.novel.yonren.api.dto.SegmentEditResponseDTO segmentEdit(String storyDirName, int chapterNo,
@@ -550,13 +550,13 @@ public class StoryManageService {
     /**
      * **删除故事**（故事库的删除操作，不可恢复）：删故事目录 + 清该故事独占的记忆向量集合。
      *
-     * <p><b>为什么先守卫作业</b>：运行中/审批挂起的作业持有该故事的路径与上下文，
+     * 为什么先守卫作业：运行中/审批挂起的作业持有该故事的路径与上下文，
      * 删目录后它会继续往不存在的目录写（甚至重建出半个目录）。有活动作业时直接 409，
      * 让用户先等完成或取消——这与回滚端点的守卫同款。
      *
-     * <p>删除顺序：**先删目录、再清集合**。目录是用户可见的主体，先做；
+     * 删除顺序：**先删目录、再清集合**。目录是用户可见的主体，先做；
      * 集合清理是 fail-soft（deleteStoryMemory 内部只 WARN），失败不影响删除结果。
-     * 共享的世界观集合 novel-world-&lt;worldId&gt; 不动——同世界观下可能有其它故事在引用。
+     * 共享的世界观集合 novel-world-<worldId> 不动——同世界观下可能有其它故事在引用。
      */
     public DeleteStoryResponseDTO deleteStory(String storyDirName) {
         if (jobRegistry.isActiveForStory(storyDirName)) {

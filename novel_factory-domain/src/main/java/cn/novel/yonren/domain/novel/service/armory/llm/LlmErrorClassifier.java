@@ -25,9 +25,9 @@ public final class LlmErrorClassifier {
 
         /**
          * 供应商侧内部故障（500 / engine abort / InternalError.Algo）：
-         * 重试同一模型大概率再撞一次（长时间思考跑到一半被上游掐断），<b>换模型更有效</b>。
+         * 重试同一模型大概率再撞一次（长时间思考跑到一半被上游掐断），换模型更有效。
          *
-         * <p>2026-09-30 新增：此前 500 落到 {@link #UNKNOWN}（modelLevel=false），
+         * 2026-09-30 新增：此前 500 落到 {@link #UNKNOWN}（modelLevel=false），
          * 于是"思考模型被上游 abort"永远不触发降级链——而这恰恰是思考模型最常见的失败。
          */
         UPSTREAM_INTERNAL("供应商内部故障（换模型比原样重试更有效）", true, true),
