@@ -50,6 +50,19 @@ public final class ChapterLengthPolicy {
     public static boolean meetsMinimum(String content) {
         return effectiveCharacterCount(content) >= MINIMUM_EFFECTIVE_CHARACTERS;
     }
+
+    /**
+     * 人工编辑保存的最低要求：非空即可，不套 1500 字的生成质量线。
+     *
+     * <p><b>为什么保存不能用生成的门禁</b>：1500 是防模型注水的质量下限，但它同时卡住了人工编辑——
+     * 用户只想改一句话，却因为整章不足 1500 字被拒绝保存（实测段落级润色后保存直接 400）。
+     * 人工编辑是用户的显式意图，不该被质量门禁驳回；空正文才是真正的非法输入。
+     *
+     * <p>生成路径仍用 {@link #meetsMinimum}，两套门禁各管各的场景。
+     */
+    public static boolean meetsEditMinimum(String content) {
+        return content != null && !content.isBlank();
+    }
     /** 篇幅是否坍缩到"不成篇"（提纲式废稿）；空内容返回 false——空稿是另一条链路的问题，此处不重复记账 */
     public static boolean isCollapsed(String content) {
         if (content == null || content.isBlank()) {

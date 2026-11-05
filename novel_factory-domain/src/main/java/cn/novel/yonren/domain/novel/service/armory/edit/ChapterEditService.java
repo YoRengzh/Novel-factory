@@ -50,9 +50,10 @@ public class ChapterEditService {
                 return new ReflowResult(false, false,
                         "章节号 " + chapterNo + " 越界（共 " + summaries.size() + " 章）");
             }
-            if (!ChapterLengthPolicy.meetsMinimum(newContent)) {
-                return new ReflowResult(false, false,
-                        "正文有效字符不足 " + ChapterLengthPolicy.MINIMUM_EFFECTIVE_CHARACTERS + " 字，已拒绝保存");
+            // 与保存路径同口径：非空即可回流。1500 字是生成质量线，
+            // 人工编辑保存后不该再被它拦一次（否则正文已落盘、摘要却永远不更新）
+            if (!ChapterLengthPolicy.meetsEditMinimum(newContent)) {
+                return new ReflowResult(false, false, "正文为空，跳过回流");
             }
 
             ChapterPlanItemEntity item = storyRepository.readChapterPlanItem(storyDir, chapterNo);

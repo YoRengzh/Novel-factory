@@ -1244,6 +1244,11 @@
     }
 
     // 粘贴只保留纯文本，避免从外部粘贴时把样式/超链接带进来污染正文
+    // 用户手改正文：内容可能变了事实，保存时按需回流（保守处理，避免账本与正文脱节）
+    contentEdit.addEventListener('input', function () {
+        chapterFactsChanged = true;
+    });
+
     contentEdit.addEventListener('paste', function (e) {
         e.preventDefault();
         const text = (e.clipboardData || window.clipboardData).getData('text/plain');
@@ -1259,16 +1264,29 @@
         }
     });
 
-    btnEdit.addEventListener('click', function () {
+    /**
+     * 进入编辑态（唯一入口）：btnEdit 与段落级编辑「采用改写」都走这里。
+     * 之前段落编辑自己手动切元素可见性、漏了 editing class 与焦点，
+     * 导致视觉上不是编辑态、而 maybeShowSegmentToolbar 又按编辑态判断 → 工具条不再出现。
+     */
+    function enterChapterEditMode(preserveText) {
         contentReadonly.classList.add('hidden');
         contentEdit.classList.remove('hidden');
-        contentEdit.textContent = contentReadonly.textContent;
+        if (!preserveText) {
+            contentEdit.textContent = contentReadonly.textContent;
+        }
         btnEdit.classList.add('hidden');
         btnSave.classList.remove('hidden');
         btnCancelEdit.classList.remove('hidden');
         saveResult.classList.add('hidden');
         chapterViewDiv.classList.add('editing');
         focusAtEnd(contentEdit);
+        // 记录进入时的内容：保存时兜底对比，防 input 事件漏报
+        chapterSnapshotOnEnter = contentEdit.innerText || '';
+    }
+
+    btnEdit.addEventListener('click', function () {
+        enterChapterEditMode(false);
     });
 
     btnCancelEdit.addEventListener('click', function () {
@@ -1279,6 +1297,8 @@
         btnSave.classList.add('hidden');
         btnCancelEdit.classList.add('hidden');
         saveResult.classList.add('hidden');
+        chapterFactsChanged = false;   // 取消编辑 = 改动作废，不留下回流意图
+        chapterSnapshotOnEnter = null;
     });
 
     // 保存结果提示：必须保留基类 save-result，否则 .save-result.warning/success/error
@@ -1302,10 +1322,28 @@
         btnCancelEdit.disabled = true;
         saveResult.classList.add('hidden');
         saveResult.textContent = '';
+        // 正文来源按当前状态取：编辑态读 contentEdit，阅读态（段落级改动后）读 contentReadonly。
+        // 之前固定读 contentEdit，阅读态保存会拿到编辑框里的旧内容。
+        var inEditMode = !contentEdit.classList.contains('hidden');
+        // 两种状态统一用 innerText：textContent 不反映渲染空白（段落末尾换行/空格折叠），
+        // 同一章在两种状态下取值会不一致，导致保存格式漂移 + 快照误判。
+        var currentText = inEditMode ? contentEdit.innerText : contentReadonly.innerText;
+        // 兜底：input 事件可能漏报（IME 组合输入等），内容真变了就必须回流
+        if (!chapterFactsChanged && chapterSnapshotOnEnter != null
+                && currentText !== chapterSnapshotOnEnter) {
+            chapterFactsChanged = true;
+        }
+        var needReflow = chapterFactsChanged;
+        if (!needReflow) {
+            // 无回流时保存是毫秒级，不需要进度提示；有回流才提示"较慢"
+            showSaveResult('warning', '正在保存…');
+        } else {
+            showSaveResult('warning', '正在保存并重算摘要（这一步会调用模型，可能需要几分钟，请勿关闭窗口）…');
+        }
         fetch(API_BASE + '/api/stories/' + encodeURIComponent(currentStoryDir) + '/chapters/' + currentChapterNo, {
             method: 'PUT',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ content: contentEdit.innerText })
+            body: JSON.stringify({ content: currentText, reflow: needReflow })
         })
         .then(function (r) {
             if (r.status === 409) throw new Error('该故事有运行中的作业，请等待完成后再编辑');
@@ -1333,6 +1371,10 @@
                 btnEdit.classList.remove('hidden');
                 btnSave.classList.add('hidden');
                 btnCancelEdit.classList.add('hidden');
+                chapterFactsChanged = false;   // 已保存，回流意图消费完毕
+                chapterSnapshotOnEnter = null;
+                chapterHasUnsavedEdits = false;
+                syncChapterSaveButton();
                 if (warning) {
                     showSaveResult('warning', '正文已保存' + savedMsg + '，记忆回流未完成：' + warning);
                 } else {
@@ -1701,6 +1743,10 @@
             contentEdit.classList.add('hidden');
             contentReadonly.classList.remove('hidden');
             saveResult.classList.add('hidden');
+            // 换章：清掉上一章的段落级改动状态（未保存的改动只对原章有效）
+            chapterHasUnsavedEdits = false;
+            chapterFactsChanged = false;
+            chapterSnapshotOnEnter = null;
             updateChapterNavigation();
             // 章节切换后回到新章节开头，避免沿用上一章的滚动位置。
             chapterViewTitle.scrollIntoView({ behavior: 'auto', block: 'start' });
@@ -1728,6 +1774,19 @@
     let segmentSelection = null;
     /** 最近一次 AI 改写结果 */
     let segmentResult = null;
+    /**
+     * 本次编辑是否已改掉情节事实（决定保存时是否重跑摘要回流）。
+     * 润色/扩写只改表达不改事实 → false（跳过回流，省几分钟）；
+     * 续写引入新内容 → true；用户手改正文（进编辑态后输入）也置 true。
+     */
+    let chapterFactsChanged = false;
+    /**
+     * 进入编辑态时的正文快照：保存时与当前内容对比。
+     * 兜底 input 事件漏报（IME 组合输入、脚本改值等边界）——只要内容真的变了就回流。
+     */
+    let chapterSnapshotOnEnter = null;
+    /** 阅读态下是否有未保存的段落级改动（工具条改完不强制进编辑态，靠它提示保存） */
+    let chapterHasUnsavedEdits = false;
 
     const SEGMENT_MIN_CHARS = 8;      // 太短的选中（几个字）不值得花一次模型调用
     const SEGMENT_MAX_CHARS = 2000;   // 过长就不是"段落"了，引导用户改用整章修订
@@ -1845,6 +1904,8 @@
         // 续写是"追加"语义：保留原文，把新内容接在选中片段之后；
         // 润色/扩写是"替换"语义：模型回传的是完整段落，直接替换选中片段。
         // 两种语义必须分开——统一按替换处理会把续写的原句删掉，统一按追加处理会让改写内容重复。
+        // 续写引入新内容 = 事实变了，必须回流；润色/扩写只改表达，跳过回流省几分钟
+        chapterFactsChanged = segmentResult.action === 'continue';
         const inserted = segmentResult.action === 'continue'
             ? segmentSelection.text + segmentResult.editedText
             : segmentResult.editedText;
@@ -1855,16 +1916,43 @@
         // 编辑框同步：用户接下来点「编辑」时看到的就是替换后的正文
         if (contentEdit) contentEdit.textContent = replaced;
         closeSegmentDialog();
-        // 直接进入编辑态，让「保 存」按钮可见——否则阅读态只有「编 辑」一个入口，
-        // 用户替换完还得先点「编 辑」才能保存，多一步且容易误以为改动已落盘
-        contentReadonly.classList.add('hidden');
-        if (contentEdit) contentEdit.classList.remove('hidden');
-        if (btnEdit) btnEdit.classList.add('hidden');
-        if (btnSave) btnSave.classList.remove('hidden');
-        const btnCancelEdit = document.getElementById('btn-cancel-edit');
-        if (btnCancelEdit) btnCancelEdit.classList.remove('hidden');
-        showToast('已' + (segmentResult.action === 'continue' ? '追加' : '替换')
-            + '，点「保 存」写回章节（会触发摘要回流）');
+
+        // 关键：采用后**留在阅读态**，不进入 contenteditable 编辑态。
+        // 之前强制进编辑态，而编辑态会禁用浮动工具条（maybeShowSegmentToolbar 首道判断），
+        // 于是用户改完一处必须先保存才能改下一处——实测"润色完不能再润色/续写"即此因。
+        // 现在正文已就地更新，可以继续选中别的段落连续操作；需要手改时再点「编 辑」。
+        markChapterDirty();
+
+        showToast(segmentResult.action === 'continue'
+            ? '已追加续写（记得点「保 存」写回，会重算摘要）'
+            : '已替换选中片段（记得点「保 存」写回，不重算摘要）');
+    }
+
+    /**
+     * 标记本章有未保存的改动：显示「保 存」按钮，但不切到 contenteditable。
+     * 段落级编辑的连续操作需要留在阅读态（工具条只在阅读态可用）。
+     */
+    function markChapterDirty() {
+        chapterHasUnsavedEdits = true;
+        syncChapterSaveButton();
+        if (btnEdit) btnEdit.classList.remove('hidden');   // 「编辑」仍可用，供用户手改
+        if (saveResult) {
+            saveResult.className = 'save-result warning';
+            saveResult.textContent = '有未保存的改动（点「保 存」写回章节）';
+            saveResult.classList.remove('hidden');
+        }
+    }
+
+    /**
+     * 保存按钮显隐唯一驱动点：有未保存改动 → 显示且可点；已保存/取消/换章 → 隐藏。
+     * 之前按钮显隐是各处分支直接写死，chapterHasUnsavedEdits 标记形同虚设。
+     */
+    function syncChapterSaveButton() {
+        if (!btnSave) return;
+        btnSave.classList.toggle('hidden', !chapterHasUnsavedEdits);
+        if (chapterHasUnsavedEdits) {
+            btnSave.disabled = false;   // 上一次保存可能置过 disabled，新改动要恢复可点
+        }
     }
 
     /** 调用后端做一次段落编辑 */
@@ -4054,6 +4142,14 @@
     if (btnCheckUpdate) {
         btnCheckUpdate.addEventListener('click', checkUpdate);
     }
+
+    // ===== 浮动返回按钮：给宿主卡片加让位 class =====
+    // 按钮是 fixed 定位（脱离文档流），卡片需要加宽左内边距，否则按钮会压在正文上。
+    // 用 JS 显式挂 class 而不是 CSS :has()——Electron 内置 Chromium 版本不一。
+    document.querySelectorAll('.btn-back-floating').forEach(function (btn) {
+        var card = btn.closest('.content-card');
+        if (card) card.classList.add('with-floating-back');
+    });
 
     // ===== 初始化 =====
     var savedTheme = 'night';

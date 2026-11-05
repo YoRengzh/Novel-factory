@@ -35,6 +35,7 @@ import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -305,25 +306,53 @@ class StoryManageControllerTest {
         assertEquals(content, captor.getValue().get(0).getContent());
     }
 
+    /**
+     * 短正文现在可以保存（语义已变更）。
+     *
+     * <p>旧实现用 1500 字生成质量线拦人工保存，导致整章不足 1500 字就改不了——
+     * 实测段落级润色后保存直接 400。现在人工保存只要求非空，1500 仍是生成路径门禁。
+     */
     @Test
-    void saveChapter_shortContent_returns400WithoutWriting() throws Exception {
+    void saveChapter_shortContent_nowAllowed() throws Exception {
         Path storyDir = Paths.get("/workspace/20260902-story-0001");
         when(storyRepository.resolveStoryDirectory("20260902-story-0001")).thenReturn(storyDir);
         when(jobRegistry.isActiveForStory("20260902-story-0001")).thenReturn(false);
         ChapterContentEntity existing = new ChapterContentEntity();
         existing.setChapterNo(1);
         existing.setTitle("原标题");
-        existing.setContent("足够长的原正文，不应被覆盖");
+        existing.setContent("原正文");
         when(storyRepository.readChapter(storyDir, 1)).thenReturn(existing);
+        when(chapterEditService.reflow(storyDir, 1, "短正文"))
+                .thenReturn(new ChapterEditService.ReflowResult(true, false, null));
 
         ChapterSaveRequestDTO request = new ChapterSaveRequestDTO();
         request.setContent("短正文");
 
-        ResponseStatusException e = assertThrows(ResponseStatusException.class,
-                () -> controller.saveChapter("20260902-story-0001", 1, request));
-        assertEquals(HttpStatus.BAD_REQUEST, e.getStatusCode());
-        assertTrue(e.getReason().contains("1500"));
-        verify(storyRepository, never()).writeChapters(eq(storyDir), any());
+        ChapterSaveResponseDTO dto = controller.saveChapter("20260902-story-0001", 1, request);
+
+        assertTrue(dto.isSaved(), "短正文不再被 1500 字线拒绝");
+        verify(storyRepository).writeChapters(eq(storyDir), any());
+    }
+
+    /** reflow=false 时跳过回流：段落级润色/扩写不改事实，重算摘要是纯浪费（实测几分钟） */
+    @Test
+    void saveChapter_reflowFalse_skipsReflow() throws Exception {
+        Path storyDir = Paths.get("/workspace/20260902-story-0001");
+        when(storyRepository.resolveStoryDirectory("20260902-story-0001")).thenReturn(storyDir);
+        when(jobRegistry.isActiveForStory("20260902-story-0001")).thenReturn(false);
+        ChapterContentEntity existing = new ChapterContentEntity();
+        existing.setChapterNo(1);
+        existing.setTitle("原标题");
+        when(storyRepository.readChapter(storyDir, 1)).thenReturn(existing);
+
+        ChapterSaveRequestDTO request = new ChapterSaveRequestDTO();
+        request.setContent("润色后的正文");
+        request.setReflow(false);
+
+        ChapterSaveResponseDTO dto = controller.saveChapter("20260902-story-0001", 1, request);
+
+        assertTrue(dto.isSaved());
+        assertFalse(dto.isSummaryUpdated(), "跳过回流时摘要不更新");
         verify(chapterEditService, never()).reflow(any(), anyInt(), any());
     }
 

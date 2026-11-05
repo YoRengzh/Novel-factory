@@ -5,7 +5,18 @@ import lombok.Data;
 @Data
 public class ChapterSaveRequestDTO {
 
-    /** 人工编辑后的整章正文（保存后触发摘要回流，保持账本/向量索引与正文一致） */
+    /** 人工编辑后的整章正文 */
     private String content;
+
+    /**
+     * 是否触发记忆回流（重跑摘要 + 重建向量索引）。
+     * <ul>
+     *   <li>缺省/null = true：保持旧行为，整章手改后重算摘要；</li>
+     *   <li>false = 只落盘不回流：段落级润色/扩写不改情节事实，重算摘要是纯浪费
+     *       （一次 LLM 摘要 + 向量重建，实测要几分钟）；</li>
+     *   <li>续写引入了新内容，必须传 true 或省略，否则账本会与正文脱节。</li>
+     * </ul>
+     */
+    private Boolean reflow;
 
 }

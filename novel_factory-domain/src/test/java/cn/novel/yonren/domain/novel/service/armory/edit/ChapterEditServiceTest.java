@@ -136,16 +136,37 @@ class ChapterEditServiceTest {
         assertTrue(result.summaryUpdated());
     }
 
+    /**
+     * 空正文在回流前即拒绝（不烧一次模型调用）。
+     *
+     * <p><b>语义已变更</b>：旧实现用 1500 字质量线拦回流，但那同时卡住了人工编辑保存
+     * （整章不足 1500 字就改不了）。现在保存与回流只要求非空，1500 仍是生成路径的门禁。
+     */
     @Test
-    void reflow_shortContent_rejectedBeforeSummary(@TempDir Path storyDir) throws Exception {
+    void reflow_blankContent_rejectedBeforeSummary(@TempDir Path storyDir) throws Exception {
         when(storyRepository.readChapterSummaries(storyDir)).thenReturn(new ArrayList<>(List.of(
                 ChapterSummaryEntity.builder().chapterNo(1).build())));
 
-        ChapterEditService.ReflowResult result = service.reflow(storyDir, 1, "短正文");
+        ChapterEditService.ReflowResult result = service.reflow(storyDir, 1, "   ");
 
         assertFalse(result.summaryUpdated());
-        assertTrue(result.warning().contains("1500"));
+        assertTrue(result.warning().contains("为空"), "空正文才拒绝，短正文不再拦");
         verify(chapterSummaryService, never()).summarize(any(), any(), any(), anyInt(), any(), any());
         verify(storyRepository, never()).writeChapterSummaries(any(), any());
+    }
+
+    /** 短正文（不足 1500 字）现在允许回流：人工编辑不该被生成质量线驳回 */
+    @Test
+    void reflow_shortContent_nowAllowed(@TempDir Path storyDir) throws Exception {
+        when(storyRepository.readChapterSummaries(storyDir)).thenReturn(new ArrayList<>(List.of(
+                ChapterSummaryEntity.builder().chapterNo(1).build())));
+        when(chapterMemoryService.renderLedgerPrompt(anyList())).thenReturn("");
+        when(chapterMemoryService.buildForeshadowContextListWithIds(anyList(), anyInt())).thenReturn(List.of());
+        when(chapterSummaryService.summarize(any(), any(), any(), anyInt(), any(), any()))
+                .thenReturn(ChapterSummaryEntity.builder().chapterNo(1).summary("ok").build());
+
+        ChapterEditService.ReflowResult result = service.reflow(storyDir, 1, "短正文也能回流");
+
+        assertTrue(result.summaryUpdated(), "短正文不再被拒绝");
     }
 }

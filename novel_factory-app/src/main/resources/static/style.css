@@ -712,6 +712,56 @@ textarea { resize: vertical; line-height: 1.7; }
 
 .btn-back:hover { color: var(--text); border-color: var(--text-secondary); }
 
+/* 返回按钮固定到左上角：章节列表/正文可能很长，滚到底部时也要能一键退出。
+   用 fixed 而非 sticky——sticky 只在父容器内粘，滚出 content-card 就失效了。
+
+   位置（实测）：.app-header 高 54px + border-bottom 1px → 分界线在 55px。
+   按钮顶部紧贴分界线（top 55px），水平放在引星图标（left 48px）的左下方（left 24px）。
+   宽 45px → 右边界 69px，正文左边界 127px，留 58px 间隙，完全不遮挡。
+   改 left/padding 时必须同步 .content-card.with-floating-back 的 padding-left。 */
+.btn-back-floating {
+    position: fixed;
+    top: 55px;                    /* 紧贴页头分界线（54px 高 + 1px 边框） */
+    left: 0;                      /* 与「通知」按钮左边缘对齐（它也是 left:0 + border-left:none） */
+    z-index: 40;
+    background: var(--panel);
+    /* 左侧无边框：与通知按钮同款贴边处理，避免多出 1px 错位 */
+    border: 1px solid var(--line-strong);
+    border-left: none;
+    border-top: none;             /* 上边框去掉：与分界线贴合，不出现双线 */
+    border-radius: 0 0 4px 0;     /* 只圆右下角，贴合左边缘 */
+    box-shadow: 0 4px 14px rgba(0, 0, 0, 0.22);
+    /* 去掉箭头后收窄：只留"返回"两字，占地最小 */
+    padding: 4px 8px;
+    opacity: 0.94;
+    /* 不参与 flex 布局的 gap，避免把标题推得更远 */
+    flex: 0 0 auto;
+}
+
+.btn-back-floating:hover {
+    background: var(--panel-2);
+    border-color: var(--accent);
+    color: var(--accent);
+    opacity: 1;
+}
+
+/* 浮动按钮脱离了文档流，标题需要让出左侧空间，避免被压住 */
+.list-header.has-floating-back {
+    padding-left: 52px;      /* 按钮去掉箭头后约 46px 宽，留一点间隙即可 */
+}
+
+/* 正文/目录卡片加宽左内边距：给浮动按钮让出空间，按钮右边界不越过正文左边界。
+   不用 :has()——Electron 内置 Chromium 版本不一，靠 JS 给卡片加 class 更稳。 */
+.content-card.with-floating-back {
+    padding-left: 78px;
+}
+
+@media (max-width: 720px) {
+    .btn-back-floating { top: 55px; left: 12px; padding: 4px 6px; }
+    .list-header.has-floating-back { padding-left: 48px; }
+    .content-card.with-floating-back { padding-left: 64px; }
+}
+
 /* ---- 章节阅读（衬线 · 阅读宽度收束） ---- */
 .chapter-actions {
     display: flex;

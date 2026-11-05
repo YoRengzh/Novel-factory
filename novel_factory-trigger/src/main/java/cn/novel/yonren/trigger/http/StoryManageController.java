@@ -438,9 +438,10 @@ public class StoryManageController {
             throw new ResponseStatusException(HttpStatus.CONFLICT,
                     "该故事有运行中的作业，请等待完成后再编辑");
         }
-        if (!ChapterLengthPolicy.meetsMinimum(request.getContent())) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
-                    "正文有效字符不足 " + ChapterLengthPolicy.MINIMUM_EFFECTIVE_CHARACTERS + " 字");
+        // 人工保存只要求非空：1500 字是生成路径的质量门禁，不该驳回用户的手改
+        // （实测段落级润色后保存被这条 400 挡掉，整章不足 1500 字就改不了）
+        if (!ChapterLengthPolicy.meetsEditMinimum(request.getContent())) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "正文不能为空");
         }
         Path storyDir = resolveStoryDir(storyDirName);
         try {
@@ -455,9 +456,19 @@ public class StoryManageController {
             throw new ResponseStatusException(HttpStatus.INTERNAL_SERVER_ERROR, "正文保存失败：" + e.getMessage());
         }
 
-        ChapterEditService.ReflowResult reflow = chapterEditService.reflow(storyDir, chapterNo, request.getContent());
+        // 记忆回流（重跑摘要 + 重建向量索引）是整章级的 LLM 调用，实测要几分钟。
+        // 段落级润色/扩写不改情节事实，重算摘要是纯浪费——前端传 reflow=false 跳过；
+        // 续写引入了新内容，必须回流，否则账本与正文脱节。
         ChapterSaveResponseDTO dto = new ChapterSaveResponseDTO();
         dto.setSaved(true);
+        if (Boolean.FALSE.equals(request.getReflow())) {
+            dto.setSummaryUpdated(false);
+            dto.setPartial(false);
+            log.info("正文已保存（第{}章），按请求跳过记忆回流（段落级润色/扩写不改事实）", chapterNo);
+            return dto;
+        }
+
+        ChapterEditService.ReflowResult reflow = chapterEditService.reflow(storyDir, chapterNo, request.getContent());
         dto.setSummaryUpdated(reflow.summaryUpdated());
         dto.setPartial(reflow.partial());
         dto.setWarning(reflow.warning());
