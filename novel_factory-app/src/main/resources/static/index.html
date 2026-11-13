@@ -412,7 +412,7 @@
                     <div class="section-label" data-page-node-id="sSR1Tmu4uw419PZ0mJdSw5">SCENE MODELS</div>
                     <h2 class="section-title" data-page-node-id="m1nbxq44CG3VtAfwuNTpcf">场景模型</h2>
                     <p class="settings-hint" data-page-node-id="bZref5VnUGT8zfPHK2oAmJ">
-                        <b>说明</b>：每个生成场景可独立指定模型 / 输出上限 / 采样温度，以及<b>走哪个中转站</b>（留空 = 跟随全局）。优先级：场景覆盖 &gt; 全局覆盖（05 设置里的接入配置）&gt; 程序内置配置（场景条目缺项回落统一模型）。覆盖输入留空 = 清除该字段覆盖、回退下一层。保存即生效、跨重启保留。
+                        <b>说明</b>：每个生成场景可独立指定模型 / 输出上限 / 采样温度，以及<b>走哪个中转站</b>（留空 = 跟随全局）。优先级：场景覆盖 &gt; 全局覆盖（05 设置里的接入配置）&gt; 程序内置配置（场景条目缺项回落统一模型）。启用场景级 API 后，模型下拉优先展示该行所选中转站的模型；只有“跟随全局”才使用全局站的列表。<b>选站只决定地址、密钥和协议，不会自动选模型</b>：模型留空仍继承下层模型名，换站后请确认所需模型。“内置默认”列仅供参考，不代表覆盖后的实际配置。保存即生效、跨重启保留。
                     </p>
                     <div class="scene-api-switch" data-page-node-id="ScApiSwitchRow1">
                         <label class="switch-label" for="scene_api_enabled">
@@ -421,7 +421,8 @@
                         </label>
                         <span class="settings-hint scene-api-hint" id="scene-api-hint">
                             关闭时：所有场景强制走 05 设置里「模型接入」选中的中转站，场景选站一律不生效；
-                            打开时：每个场景可在下方各行选自己的中转站（留空 = 跟随全局）。
+                            打开时：每个场景可在下方各行选自己的中转站，模型列表以所选站为准（留空 = 跟随全局）。
+                            ChatGPT 订阅接入使用独立模型列表，不使用中转站 API。
                         </span>
                     </div>
                     <div id="scene-unified-note" class="scene-unified-note hidden" data-page-node-id="R8r8J8KJS0zgnDVcNVYCyZ"></div>

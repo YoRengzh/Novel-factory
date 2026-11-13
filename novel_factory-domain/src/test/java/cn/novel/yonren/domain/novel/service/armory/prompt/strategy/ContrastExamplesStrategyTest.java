@@ -31,9 +31,8 @@ class ContrastExamplesStrategyTest {
 
         assertEquals(1, rules.size());
         String content = rules.get(0).getContent();
-        assertTrue(content.contains("对照片例库"));
-        assertTrue(content.contains("✗"), "应含坏例");
-        assertTrue(content.contains("✓"), "应含好例");
+        assertTrue(content.contains("待审"), "应含待审表达");
+        assertTrue(content.contains("可选处理"), "应含可选处理");
         assertEquals(PromptRule.InjectPosition.USER_TAIL, rules.get(0).getInjectPosition());
     }
 }

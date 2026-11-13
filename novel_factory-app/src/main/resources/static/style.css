@@ -1577,6 +1577,16 @@ body.day input {
     min-width: 260px;
 }
 .model-dropdown.visible { display: block; }
+.model-dropdown .model-dropdown-status {
+    padding: 10px 12px;
+    font-size: 12px;
+    line-height: 1.5;
+    color: var(--muted, #94a3b8);
+}
+.model-dropdown .model-dropdown-status button {
+    display: block;
+    margin-top: 8px;
+}
 .model-dropdown .model-option {
     padding: 8px 12px;
     cursor: pointer;

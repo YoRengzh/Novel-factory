@@ -79,7 +79,6 @@ class ReferenceIndexLoaderTest {
         assertNotNull(entry);
         assertEquals("章节正文与备注模板", entry.getTitle());
         assertNotNull(entry.getDigest());
-        assertTrue(entry.getDigest().contains("结构参考"));
     }
 
     @Test

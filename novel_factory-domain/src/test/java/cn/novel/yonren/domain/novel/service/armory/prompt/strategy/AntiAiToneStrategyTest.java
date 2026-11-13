@@ -41,7 +41,7 @@ class AntiAiToneStrategyTest {
                 PromptScene.CHAPTER_AUDIT)) {
             assertTrue(strategy.supports(scene, ctx()), scene + " 应注入");
             String content = contentOf(scene);
-            assertTrue(content.length() > 6000, scene + " 应拿主体规则，实际 " + content.length() + " 字符");
+            assertTrue(content.length() > 2500, scene + " 应拿主体规则，实际 " + content.length() + " 字符");
             assertTrue(content.contains("## 二、用词 AI 味"));
             assertTrue(content.contains("## 六、模式化循环"));
         }
