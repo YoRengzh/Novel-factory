@@ -12,6 +12,7 @@ import cn.novel.yonren.domain.novel.model.valobj.StoryVO;
 import cn.novel.yonren.domain.novel.config.StoryProperties;
 import cn.novel.yonren.domain.novel.service.armory.factory.DefaultArmoryFactory;
 import cn.novel.yonren.domain.novel.service.armory.memory.ChapterMemoryService;
+import cn.novel.yonren.domain.novel.service.armory.memory.ConsistencyIndexService;
 import cn.novel.yonren.domain.novel.service.job.GenerationJob;
 import cn.novel.yonren.types.exception.AppException;
 import org.junit.jupiter.api.BeforeEach;
@@ -27,6 +28,8 @@ import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -366,23 +369,63 @@ class StoryGenerateServiceTest {
      * 后端必须回填这些事实锚，不能依赖前端携带字段，否则漏传会静默丢失约束。
      */
     @Test
-    void generate_resumeRestoresCharacterProfilesFromBible() throws Exception {
+    void generate_resumeRejectsAmbiguousBibleBeforeStrategy() throws Exception {
+        String roster = "角色己（女，用「她」）";
         ArmoryCommandEntity command = ArmoryCommandEntity.builder()
                 .resumeStoryDir("20260831-story-0001")
                 .storyContextEntity(StoryContextEntity.builder().novel_title("甲").build())
+                .storyVO(new StoryVO())
                 .build();
         Path storyDir = Paths.get("docs/workspace/stories/20260831-story-0001");
-        String roster = "角色己（女，用「她」）。既定事实：角色己报名志愿另一班";
         when(storyRepository.resolveStoryDirectory("20260831-story-0001")).thenReturn(storyDir);
-        when(storyRepository.readStoryBible(storyDir))
-                .thenReturn("小说名称: 甲\n主要人物: " + roster + "\n");
-        when(storyRepository.readChapterSummaries(storyDir)).thenReturn(List.of());
-        when(storyRepository.readChapterNumbers(storyDir)).thenReturn(List.of());
+        when(storyRepository.readStoryBible(storyDir)).thenReturn(String.join("\n",
+                "小说名称: 甲",
+                "主要人物: " + roster,
+                "主要人物: " + roster,
+                "存在金手指: true",
+                "存在金手指: true",
+                "金手指名称: 回溯",
+                "金手指使用间隔: 3"));
+
+        AppException exception = assertThrows(AppException.class, () -> storyGenerateService.generate(command));
+
+        assertEquals(cn.novel.yonren.types.enums.ResponseCode.ILLEGAL_PARAMETER.getCode(), exception.getCode());
+        assertTrue(exception.getInfo().contains("STORY_BIBLE_AMBIGUOUS"));
+        assertTrue(exception.getInfo().contains("主要人物"));
+        assertFalse(exception.getInfo().contains(roster), "异常不能回显设定正文");
+        verify(armoryFactory, never()).armoryStrategyHandler();
+        verify(storyRepository, never()).readChapterSummaries(any());
+    }
+
+    @Test
+    void generate_resumeRestoresMultilineMechanismIdentifierForExistingChecks() throws Exception {
+        ArmoryCommandEntity command = ArmoryCommandEntity.builder()
+                .resumeStoryDir("20260831-story-0001")
+                .storyContextEntity(StoryContextEntity.builder().novel_title("甲").build())
+                .storyVO(new StoryVO())
+                .build();
+        Path storyDir = Paths.get("docs/workspace/stories/20260831-story-0001");
+        when(storyRepository.resolveStoryDirectory("20260831-story-0001")).thenReturn(storyDir);
+        when(storyRepository.readStoryBible(storyDir)).thenReturn(String.join("\n",
+                "存在金手指: true",
+                "金手指名称: 回声之钥",
+                "每夜仅能启用一次",
+                "金手指使用间隔: 3"));
+        stubResumePreload(storyDir, 50);
         stubStrategyReturn();
 
         storyGenerateService.generate(command);
 
-        assertEquals(roster, command.getStoryContextEntity().getCharacterProfiles(),
-                "人物档案必须从 bible 回填，不能依赖前端带回来");
+        StoryVO.StoryFeatures features = command.getStoryVO().getFeatures();
+        assertNotNull(features);
+        assertEquals("回声之钥", features.getCheatMechanismName(),
+                "多行说明不能并入机制检测标识");
+        assertEquals(3, features.getCheatUsageInterval());
+        assertTrue(new ConsistencyIndexService().mentionsMechanism(
+                "角色甲转动回声之钥，锁舌弹开。", command.getStoryVO()),
+                "首行名称仍能命中既有使用检测");
+        assertTrue(new ConsistencyIndexService().describesMechanism(
+                "回声之钥的原理依靠既有结构传递信号并留下痕迹。" + "装置记录每次启用。".repeat(5),
+                command.getStoryVO()), "含换行的原始说明不能破坏原理检测");
     }
 }

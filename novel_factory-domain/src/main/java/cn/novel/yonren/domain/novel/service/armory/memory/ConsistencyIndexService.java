@@ -82,8 +82,14 @@ public class ConsistencyIndexService {
 
     /** 显式配置的机制名；未配置返回 null（调用方回退默认名表） */
     private String mechanismName(StoryVO storyVO) {
-        return storyVO == null || storyVO.getFeatures() == null
+        String configured = storyVO == null || storyVO.getFeatures() == null
                 ? null : storyVO.getFeatures().getCheatMechanismName();
+        if (configured == null) {
+            return null;
+        }
+        // 首行是机制标识；后续行可为说明，不能并入正文匹配名称。
+        String identifier = configured.split("\\R", 2)[0].trim();
+        return identifier.isEmpty() ? null : identifier;
     }
 
     /**

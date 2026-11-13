@@ -171,6 +171,19 @@ class ConsistencyIndexServiceTest {
         assertTrue(service.mechanismIssues(disabled, summaries, 3, "代码视界").isEmpty());
     }
 
+    @Test
+    void multilineMechanismNameUsesOnlyFirstLineAsIdentifier() {
+        StoryVO story = mechanismStory("回声之钥\n每夜仅能启用一次", 3);
+        String usage = "角色甲转动回声之钥，锁舌弹开。";
+        String explanation = "回声之钥的原理依靠既有结构传递信号并留下痕迹。"
+                + "装置记录每次启用。".repeat(5);
+
+        assertTrue(service.mentionsMechanism(usage, story));
+        assertTrue(service.describesMechanism(explanation, story));
+        assertTrue(service.mechanismUsageIssues(List.of(), story, 3, usage).isEmpty(),
+                "后续说明不能让实际使用被误报为超期");
+    }
+
     private StoryVO mechanismStory(String name, int interval) {
         StoryVO story = new StoryVO();
         StoryVO.StoryFeatures features = new StoryVO.StoryFeatures();

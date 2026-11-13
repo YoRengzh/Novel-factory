@@ -20,6 +20,7 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 /**
@@ -110,6 +111,19 @@ class StoryManageHttpContractTest {
         when(storyManageService.deleteStory(DIR))
                 .thenThrow(new AppException(ResponseCode.ACTIVE_JOB_CONFLICT.getCode(), "有运行中的作业"));
         mvc.perform(post("/api/stories/{d}/delete", DIR)).andExpect(status().isConflict());
+    }
+
+    @Test
+    void storyBibleAmbiguity_returnsStructuredDiagnosticWithoutSettingText() throws Exception {
+        when(storyManageService.resume(DIR)).thenThrow(new AppException(
+                ResponseCode.ILLEGAL_PARAMETER.getCode(),
+                "STORY_BIBLE_AMBIGUOUS: 设定字段边界存在歧义 [Diagnostic[code=DUPLICATE_LABEL, label=世界观, firstLineNumber=2, lineNumber=4]]"));
+
+        mvc.perform(get("/api/stories/{d}/resume", DIR))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value(ResponseCode.ILLEGAL_PARAMETER.getCode()))
+                .andExpect(jsonPath("$.message").value(org.hamcrest.Matchers.containsString("STORY_BIBLE_AMBIGUOUS")))
+                .andExpect(jsonPath("$.message").value(org.hamcrest.Matchers.containsString("世界观")));
     }
 
     @Test

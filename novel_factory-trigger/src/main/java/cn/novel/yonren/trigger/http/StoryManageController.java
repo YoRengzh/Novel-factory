@@ -96,6 +96,10 @@ public class StoryManageController {
         try {
             return storyManageService.resume(storyDirName);
         } catch (AppException e) {
+            // 可修正的入参错误交全局 advice 输出结构化诊断，不能被默认错误页过滤。
+            if (ResponseCode.ILLEGAL_PARAMETER.getCode().equals(e.getCode())) {
+                throw e;
+            }
             throw new ResponseStatusException(statusOf(e), e.getInfo());
         } catch (Exception e) {
             log.error("续写信息读取失败：{}", storyDirName, e);

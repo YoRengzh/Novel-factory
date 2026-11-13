@@ -484,6 +484,74 @@ class StoryManageServiceTest {
     }
 
     @Test
+    void resume_preservesMultiParagraphSettingFields() throws Exception {
+        String outline = "第一段：旧港封锁仍在继续。\n\n关键发展:物证比对指向旧仓库\n\n结局方向：旧案重开";
+        String goal = "1-5章 重启调查\n6-10章 证据闭环";
+        String world = "沿海旧港\n\n  潮汐与封锁令改变居民作息";
+        String bible = String.join("\n",
+                "小说名称: 示例书",
+                "小说类型: 悬疑推理",
+                "小说格调: 冷硬悬疑",
+                "世界观: " + world,
+                "叙述视角: 第三人称限知视角",
+                "目标读者: 男频",
+                "语气基调: 压抑克制",
+                "主人公: 林昭，沉物打捞人",
+                "故事概述: " + outline,
+                "章节数量: 5",
+                "章节目标: " + goal,
+                "世界ID: novel-shared-01");
+        when(storyRepository.resolveStoryDirectory(DIR)).thenReturn(STORY_DIR);
+        when(storyRepository.readStoryBible(STORY_DIR)).thenReturn(bible);
+        when(storyRepository.readChapterNumbers(STORY_DIR)).thenReturn(List.of(1, 2));
+        when(storyRepository.readStoryMeta(STORY_DIR)).thenReturn(null);
+
+        StoryResumeDTO dto = service.resume(DIR);
+
+        assertEquals(world, dto.getSetting().getWorldSetting());
+        assertEquals(outline, dto.getSetting().getOutline());
+        assertEquals(goal, dto.getSetting().getChapterGoal());
+        assertTrue(dto.getMissingFields().isEmpty());
+        assertEquals(3, dto.getNextChapterNo());
+    }
+
+    @Test
+    void resume_rejectsAmbiguousBibleWithoutExposingSettingText() throws Exception {
+        when(storyRepository.resolveStoryDirectory(DIR)).thenReturn(STORY_DIR);
+        when(storyRepository.readStoryBible(STORY_DIR)).thenReturn(String.join("\n",
+                "小说名称: 示例书",
+                "世界观: 第一候选",
+                "叙述视角: 第三人称",
+                "世界观: 第二候选"));
+
+        AppException ex = assertThrows(AppException.class, () -> service.resume(DIR));
+
+        assertEquals(cn.novel.yonren.types.enums.ResponseCode.ILLEGAL_PARAMETER.getCode(), ex.getCode());
+        assertTrue(ex.getInfo().contains("STORY_BIBLE_AMBIGUOUS"));
+        assertTrue(ex.getInfo().contains("世界观"));
+        assertFalse(ex.getInfo().contains("第一候选"), "诊断不能回显设定正文");
+        assertFalse(ex.getInfo().contains("第二候选"));
+        verify(storyRepository, never()).readChapterNumbers(any());
+    }
+
+    @Test
+    void resume_rejectsDuplicateMetadataLabelsBeforeBuildingSetting() throws Exception {
+        when(storyRepository.resolveStoryDirectory(DIR)).thenReturn(STORY_DIR);
+        when(storyRepository.readStoryBible(STORY_DIR)).thenReturn(String.join("\n",
+                "小说名称: 示例书",
+                "章节数量: 5",
+                "章节目标: 第一目标",
+                "章节数量: 8",
+                "世界ID: novel-shared-01"));
+
+        AppException ex = assertThrows(AppException.class, () -> service.resume(DIR));
+
+        assertEquals(cn.novel.yonren.types.enums.ResponseCode.ILLEGAL_PARAMETER.getCode(), ex.getCode());
+        assertTrue(ex.getInfo().contains("章节数量"));
+        assertTrue(ex.getInfo().contains("章节目标"), "可能被截断的相邻字段也必须报告");
+    }
+
+    @Test
     void deleteStory_removesDirectoryAndClearsMemoryCollection() throws Exception {
         when(storyRepository.resolveStoryDirectory(DIR)).thenReturn(STORY_DIR);
         when(jobRegistry.isActiveForStory(DIR)).thenReturn(false);

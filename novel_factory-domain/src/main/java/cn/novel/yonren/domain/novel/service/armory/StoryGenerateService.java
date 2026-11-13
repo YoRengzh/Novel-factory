@@ -198,8 +198,15 @@ public class StoryGenerateService {
         Path storyDir = storyRepository.resolveStoryDirectory(resumeStoryDir);
         dynamicContext.setStoryDir(storyDir);
         String bible = storyRepository.readStoryBible(storyDir);
-        restoreStoryFeatures(command, bible);
-        restoreCharacterProfiles(command, bible);
+        // 生成入口也必须拒绝歧义，不能把重复字段当作老数据缺失后继续生成。
+        StoryBibleParser.ParseResult parsed = StoryBibleParser.parseDiagnostic(bible);
+        if (parsed.hasAmbiguities()) {
+            throw new AppException(ResponseCode.ILLEGAL_PARAMETER.getCode(),
+                    "STORY_BIBLE_AMBIGUOUS: 设定字段边界存在歧义 " + parsed.diagnostics());
+        }
+        StoryBibleParser.Snapshot settings = parsed.snapshot();
+        restoreStoryFeatures(command, settings);
+        restoreCharacterProfiles(command, settings);
 
         List<ChapterSummaryEntity> history = storyRepository.readChapterSummaries(storyDir);
         dynamicContext.setChapterSummaries(new ArrayList<>(history));
@@ -250,29 +257,27 @@ public class StoryGenerateService {
      * "人物代词与既定事实悄悄消失"——而它正是防代词/班级写错的那道锚。
      * bible 没有这一行（老故事）时不动作，保持既有行为。
      */
-    private void restoreCharacterProfiles(ArmoryCommandEntity command, String bible) {
-        if (command == null || command.getStoryContextEntity() == null || bible == null || bible.isBlank()) {
+    private void restoreCharacterProfiles(ArmoryCommandEntity command, StoryBibleParser.Snapshot settings) {
+        if (command == null || command.getStoryContextEntity() == null || settings == null) {
             return;
         }
-        String profiles = StoryBibleParser.parse(bible).characters();
+        String profiles = settings.characters();
         if (profiles != null && !profiles.isBlank()) {
             command.getStoryContextEntity().setCharacterProfiles(profiles);
         }
     }
 
-    private void restoreStoryFeatures(ArmoryCommandEntity command, String bible) {
+    private void restoreStoryFeatures(ArmoryCommandEntity command, StoryBibleParser.Snapshot settings) {
         if (command == null || command.getStoryVO() == null || command.getStoryVO().getFeatures() != null
-                || bible == null || bible.isBlank()) return;
-        // 解析委托 StoryBibleParser：标签与切分规则和写入侧（appendBibleLine，ASCII 冒号）共用同一份
-        StoryBibleParser.Snapshot snapshot = StoryBibleParser.parse(bible);
+                || settings == null) return;
         // 三态：null = bible 未声明金手指（老故事）→ 不恢复，保持 features 为 null
-        if (snapshot.hasCheatMechanism() == null) return;
+        if (settings.hasCheatMechanism() == null) return;
         cn.novel.yonren.domain.novel.model.valobj.StoryVO.StoryFeatures features =
                 new cn.novel.yonren.domain.novel.model.valobj.StoryVO.StoryFeatures();
-        features.setHasCheatMechanism(snapshot.hasCheatMechanism());
-        features.setCheatMechanismName(snapshot.cheatMechanismName());
+        features.setHasCheatMechanism(settings.hasCheatMechanism());
+        features.setCheatMechanismName(settings.mechanismIdentifier());
         // 未写/无法解析时沿用原默认间隔 3
-        features.setCheatUsageInterval(snapshot.cheatUsageInterval() != null ? snapshot.cheatUsageInterval() : 3);
+        features.setCheatUsageInterval(settings.cheatUsageInterval() != null ? settings.cheatUsageInterval() : 3);
         command.getStoryVO().setFeatures(features);
     }
 

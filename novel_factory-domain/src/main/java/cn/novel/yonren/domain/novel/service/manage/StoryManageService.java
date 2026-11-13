@@ -121,10 +121,19 @@ public class StoryManageService {
      * （ValidateUserInputNode 对 11 个字段全非空），而设定字段在服务端只存在于 bible 里——
      * 这是它们唯一被持久化的地方（story-meta 只存总章数）。
      * 取不到的字段通过 {@code missingFields} 明确点名，让用户不用猜"到底缺哪个"。
+     *
+     * 旧版纯文本没有转义，重复标签或段内同名小标题会让字段边界不可判定。
+     * 此时拒绝恢复而不是静默挑一个值：错误只带标签和行号，不回显用户设定正文。
      */
     public StoryResumeDTO resume(String storyDirName) {
         Path storyDir = resolveStoryDir(storyDirName);
-        StoryBibleParser.Snapshot bible = StoryBibleParser.parse(repo(() -> storyRepository.readStoryBible(storyDir)));
+        StoryBibleParser.ParseResult parsed = StoryBibleParser.parseDiagnostic(
+                repo(() -> storyRepository.readStoryBible(storyDir)));
+        if (parsed.hasAmbiguities()) {
+            throw new AppException(ResponseCode.ILLEGAL_PARAMETER.getCode(),
+                    "STORY_BIBLE_AMBIGUOUS: 设定字段边界存在歧义 " + parsed.diagnostics());
+        }
+        StoryBibleParser.Snapshot bible = parsed.snapshot();
 
         List<Integer> numbers = repo(() -> storyRepository.readChapterNumbers(storyDir));
         // 不依赖返回顺序：取最大值当末章章号——中间有缺号或乱序都不影响"下一章从哪写"
@@ -146,7 +155,7 @@ public class StoryManageService {
         setting.setWorldId(bible.worldId());
         setting.setMaxChapterCount(readMaxChapterCount(storyDir, storyDirName));
         setting.setHasCheatMechanism(bible.hasCheatMechanism());
-        setting.setCheatMechanismName(bible.cheatMechanismName());
+        setting.setCheatMechanismName(bible.mechanismIdentifier());
         setting.setCheatUsageInterval(bible.cheatUsageInterval());
 
         StoryResumeDTO dto = new StoryResumeDTO();

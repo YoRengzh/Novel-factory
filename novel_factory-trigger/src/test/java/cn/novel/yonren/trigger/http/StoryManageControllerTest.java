@@ -102,6 +102,20 @@ class StoryManageControllerTest {
         assertEquals(HttpStatus.INTERNAL_SERVER_ERROR, e.getStatusCode());
     }
 
+    /** 设定歧义交全局 advice 输出可定位错误，不再转换成默认错误页异常。 */
+    @Test
+    void appExceptionMapping_storyBibleAmbiguous_delegatesToAdvice() {
+        when(storyManageService.resume(DIR)).thenThrow(new AppException(
+                ResponseCode.ILLEGAL_PARAMETER.getCode(),
+                "STORY_BIBLE_AMBIGUOUS: 设定字段边界存在歧义 [Diagnostic[code=DUPLICATE_LABEL, label=世界观, firstLineNumber=2, lineNumber=4]]"));
+
+        AppException e = assertThrows(AppException.class, () -> controller.resume(DIR));
+
+        assertEquals(ResponseCode.ILLEGAL_PARAMETER.getCode(), e.getCode());
+        assertTrue(e.getInfo().contains("STORY_BIBLE_AMBIGUOUS"));
+        assertTrue(e.getInfo().contains("世界观"));
+    }
+
     @Test
     void unknownException_mapsTo500() {
         when(storyManageService.listStories()).thenThrow(new IllegalStateException("仓储崩了"));
