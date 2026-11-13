@@ -81,6 +81,73 @@ public interface IStoryRepository {
      */
     void writeChapterSummaries(Path storyDir, List<ChapterSummaryEntity> summaries) throws Exception;
 
+    /**
+     * 原子提交一章正文与记忆：先落恢复日志，再按日志写入正文、摘要与派生状态，最后删除日志。
+     *
+     * <p>任何一步中断都留下完整日志，下次读取记忆前由 {@link #recoverChapterCommit} 补完，
+     * 不会出现"正文已换、摘要还是上一章"的半一致状态。正文与摘要必须同章，否则直接拒绝。
+     */
+    void commitChapter(Path storyDir, ChapterContentEntity chapter, List<ChapterSummaryEntity> summaries,
+                       List<StageBlueprintEntity> updatedBlueprints) throws Exception;
+
+    /**
+     * 原子提交一章正文与完整记忆状态（摘要、一致性索引、质量债、风格、伏笔账、蓝图链）。
+     * 状态中的摘要必须覆盖到本章且编号连续。
+     */
+    void commitChapter(Path storyDir, ChapterContentEntity chapter, cn.novel.yonren.domain.novel.model.valobj.work.ChapterCommitState state)
+            throws Exception;
+
+    /**
+     * 补完上一次未完成的章节提交；没有日志时什么都不做。
+     *
+     * <p>读取正式记忆（续写预载）之前必须调用：日志残留意味着上次提交中断，
+     * 不补完就读会拿到与正文不匹配的账本。日志损坏或与磁盘状态冲突时硬失败，不静默丢弃。
+     */
+    void recoverChapterCommit(Path storyDir) throws Exception;
+
+    /**
+     * 正式历史章号（升序）。当前实现与物理章号一致；保留独立入口，
+     * 使后续接入"已保存未提交尾章"时阅读路径与正式历史边界可以分开。
+     */
+    default List<Integer> readCommittedChapterNumbers(Path storyDir) throws Exception {
+        return readChapterNumbers(storyDir);
+    }
+
+    /**
+     * 计算当前正式历史的依据指纹：故事设定、编辑纪元、摘要、蓝图、伏笔账与正式章号的联合摘要。
+     * 生成中的稿件必须带着它；依据变了就不能再按旧稿提交。
+     */
+    String chapterWorkBasis(Path storyDir) throws Exception;
+
+    /**
+     * 读取某章的正文接受记录；没有记录返回 null。记录只对该章那一版稿件有效。
+     */
+    cn.novel.yonren.domain.novel.model.valobj.work.ChapterAcceptance readChapterAcceptance(Path storyDir, int chapterNo)
+            throws Exception;
+
+    /** 最早受影响的章节，以及该范围的摘要是否已经重新落盘。 */
+    record PendingChapterEdit(int fromChapter, boolean summariesReady) {
+    }
+
+    /**
+     * 读取待回流的正式编辑标记；没有待办返回 null，文件损坏硬失败。
+     * 标记存在表示正文已改而摘要/索引尚未跟上，后续生成必须先回流。
+     */
+    PendingChapterEdit readPendingChapterEdit(Path storyDir) throws Exception;
+
+    /**
+     * 写待回流标记；传 null 表示正文、摘要与派生索引已同步。
+     */
+    void writePendingChapterEdit(Path storyDir, PendingChapterEdit pending) throws Exception;
+
+    /**
+     * 保存人工编辑的正式章节：正文、接受记录与待回流标记一并原子落盘。
+     *
+     * <p>与生成提交共用同一条恢复日志：中途失败不会只改正文而不记待办，
+     * 否则摘要会永久停留在旧版本且没有任何标记提示。
+     */
+    void saveHumanEdit(Path storyDir, ChapterContentEntity chapter, PendingChapterEdit pending) throws Exception;
+
     /** 写跨章一致性索引到 memory/consistency-index.json，不替代三账本。 */
     void writeConsistencyIndex(Path storyDir, ConsistencyIndexEntity index) throws Exception;
 

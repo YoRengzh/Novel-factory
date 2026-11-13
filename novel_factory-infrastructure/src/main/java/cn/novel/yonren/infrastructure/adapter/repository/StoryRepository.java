@@ -17,6 +17,9 @@ import cn.novel.yonren.domain.novel.model.entity.StageBlueprintEntity;
 import cn.novel.yonren.domain.novel.model.entity.StoryContextEntity;
 import cn.novel.yonren.domain.novel.model.entity.VolumeBlueprintEntity;
 import cn.novel.yonren.domain.novel.model.valobj.StoryVO;
+import cn.novel.yonren.domain.novel.model.valobj.work.ChapterAcceptance;
+import cn.novel.yonren.domain.novel.model.valobj.work.ChapterCommitState;
+import cn.novel.yonren.domain.novel.model.valobj.work.ChapterManuscript;
 import cn.novel.yonren.domain.novel.service.armory.factory.DefaultArmoryFactory;
 import cn.novel.yonren.domain.novel.service.job.GenerationJob;
 import cn.novel.yonren.types.enums.ResponseCode;
@@ -39,8 +42,12 @@ import java.nio.charset.StandardCharsets;
 import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
+import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.locks.ReentrantLock;
 import java.util.regex.Pattern;
@@ -329,6 +336,415 @@ public class StoryRepository implements IStoryRepository {
         if (summaries == null || summaries.isEmpty()) return;
         Path file = storyDir.resolve(StorageKeys.MEMORY_DIR).resolve(StorageKeys.SUMMARIES_FILE);
         withStoryLock(storyDir, () -> writeStringAtomic(file, JSON.toJSONString(summaries)));
+    }
+
+    @Override
+    public void commitChapter(Path storyDir, ChapterContentEntity chapter, List<ChapterSummaryEntity> summaries,
+                              List<StageBlueprintEntity> updatedBlueprints) throws IOException {
+        ChapterCommit commit = new ChapterCommit(chapter, summaries, updatedBlueprints, null, null, null, null);
+        if (!commit.hasMatchingSummary()) {
+            throw new IllegalArgumentException("章节提交缺少同章正文或摘要");
+        }
+        withStoryLock(storyDir, () -> {
+            recoverChapterCommitLocked(storyDir);
+            Path journal = storyDir.resolve(StorageKeys.CHAPTER_COMMIT_FILE);
+            ChapterCommit guarded = guardCommit(storyDir, commit);
+            writeStringAtomic(journal, chapterCommitJson(guarded));
+            applyChapterCommit(storyDir, journal, guarded);
+        });
+    }
+
+    @Override
+    public void commitChapter(Path storyDir, ChapterContentEntity chapter, ChapterCommitState state) throws IOException {
+        ChapterCommit commit = new ChapterCommit(chapter, null, null, state, null, null, null);
+        if (!commit.hasMatchingSummary()) {
+            throw new IllegalArgumentException("章节提交缺少同章正文或摘要");
+        }
+        if (state != null && state.summaries() != null) {
+            for (int index = 0; index < state.summaries().size(); index++) {
+                ChapterSummaryEntity summary = state.summaries().get(index);
+                if (summary == null || !Objects.equals(summary.getChapterNo(), index + 1)) {
+                    throw new IllegalArgumentException("正式摘要编号不连续");
+                }
+            }
+        }
+        withStoryLock(storyDir, () -> {
+            recoverChapterCommitLocked(storyDir);
+            Path journal = storyDir.resolve(StorageKeys.CHAPTER_COMMIT_FILE);
+            ChapterCommit guarded = guardCommit(storyDir, commit);
+            writeStringAtomic(journal, chapterCommitJson(guarded));
+            applyChapterCommit(storyDir, journal, guarded);
+        });
+    }
+
+    @Override
+    public void recoverChapterCommit(Path storyDir) throws IOException {
+        withStoryLock(storyDir, () -> recoverChapterCommitLocked(storyDir));
+    }
+
+    /**
+     * 补完未完成的章节提交。没有日志说明上一次提交已完成，直接返回。
+     *
+     * <p>未知 schema 一律拒绝：把未来版本或损坏的日志当成当前格式重放，
+     * 会用错误的字段组合覆盖正文与账本，比停下来更贵。
+     */
+    private void recoverChapterCommitLocked(Path storyDir) throws IOException {
+        Path journal = storyDir.resolve(StorageKeys.CHAPTER_COMMIT_FILE);
+        if (Files.notExists(journal)) {
+            return;
+        }
+        ChapterCommit commit;
+        try {
+            JSONObject json = JSON.parseObject(Files.readString(journal, StandardCharsets.UTF_8));
+            if (json == null) {
+                throw new IllegalArgumentException("章节提交日志为空");
+            }
+            String schema = json.getString("schema");
+            if (schema != null && !"CHAPTER_COMMIT_V1".equals(schema)) {
+                throw new IllegalArgumentException("未知章节日志类型：" + schema);
+            }
+            commit = JSON.parseObject(json.toJSONString(), ChapterCommit.class);
+        } catch (RuntimeException e) {
+            throw new IOException("章节提交日志无法读取：" + journal, e);
+        }
+        if (commit == null || !commit.hasMatchingSummary()) {
+            throw new IOException("章节提交日志缺少同章正文或摘要：" + journal);
+        }
+        applyChapterCommit(storyDir, journal, commit);
+        log.info("已恢复未完成的章节提交：{} 第 {} 章", storyDir.getFileName(), commit.chapter().getChapterNo());
+    }
+
+    private void applyChapterCommit(Path storyDir, Path journal, ChapterCommit commit) throws IOException {
+        validateCommitGuard(storyDir, commit);
+        validateCommitAcceptance(commit);
+        if (commit.edit() != null) {
+            // 待回流标记必须先于正文替换写入：同一日志重放时，任何中间态都带着"摘要待重建"的凭据。
+            writePendingChapterEditLocked(storyDir, commit.edit());
+        }
+        var physicalChapter = readChapter(storyDir, commit.chapter().getChapterNo());
+        if (physicalChapter == null || !ChapterManuscript.of(commit.chapter()).equals(ChapterManuscript.of(physicalChapter))) {
+            writeChapters(storyDir, List.of(commit.chapter()));
+        }
+        if (commit.state() != null) {
+            applyChapterState(storyDir, commit.state());
+        } else {
+            writeChapterSummaries(storyDir, commit.summaries());
+            if (commit.updatedBlueprints() != null) {
+                writeStageBlueprints(storyDir, commit.updatedBlueprints());
+            }
+        }
+        if (commit.acceptance() != null) {
+            writeChapterAcceptance(storyDir, commit.chapter().getChapterNo(), commit.acceptance());
+        }
+        if (commit.edit() != null) {
+            writeStringAtomic(workFile(storyDir, StorageKeys.CHAPTER_WORK_EPOCH_FILE), commit.epoch());
+        }
+        Files.delete(journal);
+    }
+
+    /**
+     * 章节提交日志。旧调用（只有正文与摘要）与新调用（整包记忆状态）共用同一格式，
+     * 未使用的字段为 null，读取侧按原语义分支。
+     */
+    private record ChapterCommit(ChapterContentEntity chapter, List<ChapterSummaryEntity> summaries,
+                                 List<StageBlueprintEntity> updatedBlueprints, ChapterCommitState state,
+                                 ChapterAcceptance acceptance, PendingChapterEdit edit, String epoch,
+                                 CommitGuard guard) {
+        private ChapterCommit(ChapterContentEntity chapter, List<ChapterSummaryEntity> summaries,
+                              List<StageBlueprintEntity> updatedBlueprints, ChapterCommitState state,
+                              ChapterAcceptance acceptance, PendingChapterEdit edit, String epoch) {
+            this(chapter, summaries, updatedBlueprints, state, acceptance, edit, epoch, null);
+        }
+
+        private boolean hasMatchingSummary() {
+            if (chapter == null || chapter.getChapterNo() == null) {
+                return false;
+            }
+            if (edit != null) {
+                return acceptance != null && epoch != null
+                        && ChapterManuscript.of(chapter).hash().equals(acceptance.manuscriptHash());
+            }
+            List<ChapterSummaryEntity> entries = state == null ? summaries : state.summaries();
+            if (entries == null || entries.isEmpty()) {
+                return false;
+            }
+            ChapterSummaryEntity latest = entries.get(entries.size() - 1);
+            return latest != null && chapter.getChapterNo().equals(latest.getChapterNo())
+                    && (acceptance == null || !latest.isPartial()
+                        && latest.getSummary() != null && !latest.getSummary().isBlank()
+                        && chapter.getContent() != null && !chapter.getContent().isBlank()
+                        && ChapterManuscript.of(chapter).hash().equals(acceptance.manuscriptHash()));
+        }
+    }
+
+    /** 提交前的磁盘快照：重放时据此判断正文、章号与依据文件是否被外部改动。 */
+    private record CommitGuard(String oldBodyHash, List<Integer> physicalNumbers, Map<String, String> sourceHashes) {
+    }
+
+    private static String chapterCommitJson(ChapterCommit commit) {
+        JSONObject json = (JSONObject) JSON.toJSON(commit);
+        json.put("schema", "CHAPTER_COMMIT_V1");
+        return json.toJSONString();
+    }
+
+    private ChapterCommit guardCommit(Path storyDir, ChapterCommit commit) throws IOException {
+        var disk = readChapter(storyDir, commit.chapter().getChapterNo());
+        Map<String, String> sources = new java.util.LinkedHashMap<>();
+        for (Path source : basisSources(storyDir)) {
+            sources.put(relativeKey(storyDir, source),
+                    Files.notExists(source) ? "-" : ChapterManuscript.digest(Files.readString(source, StandardCharsets.UTF_8)));
+        }
+        for (int chapterNo : readChapterNumbers(storyDir)) {
+            if (chapterNo == commit.chapter().getChapterNo()) continue;
+            String file = String.format("%s%04d%s", StorageKeys.CHAPTER_FILE_PREFIX, chapterNo, StorageKeys.CHAPTER_FILE_SUFFIX);
+            sources.put(StorageKeys.CHAPTER_DIR + "/" + file,
+                    ChapterManuscript.digest(Files.readString(storyDir.resolve(StorageKeys.CHAPTER_DIR).resolve(file),
+                            StandardCharsets.UTF_8)));
+        }
+        var guard = new CommitGuard(disk == null ? null : ChapterManuscript.of(disk).hash(),
+                readChapterNumbers(storyDir), sources);
+        return new ChapterCommit(commit.chapter(), commit.summaries(), commit.updatedBlueprints(), commit.state(),
+                commit.acceptance(), commit.edit(), commit.epoch(), guard);
+    }
+
+    private void validateCommitGuard(Path storyDir, ChapterCommit commit) throws IOException {
+        var guard = commit.guard();
+        if (guard == null) {
+            return; // 旧日志没有守卫字段，按原契约恢复
+        }
+        var disk = readChapter(storyDir, commit.chapter().getChapterNo());
+        String hash = disk == null ? null : ChapterManuscript.of(disk).hash();
+        if (!Objects.equals(hash, guard.oldBodyHash())
+                && !Objects.equals(hash, ChapterManuscript.of(commit.chapter()).hash())) {
+            throw new IllegalStateException("正式提交正文被外部修改，拒绝覆盖");
+        }
+        var physical = readChapterNumbers(storyDir);
+        var after = new ArrayList<>(guard.physicalNumbers());
+        if (!after.contains(commit.chapter().getChapterNo())) {
+            after.add(commit.chapter().getChapterNo());
+            after.sort(Integer::compareTo);
+        }
+        if (!physical.equals(guard.physicalNumbers()) && !physical.equals(after)) {
+            throw new IllegalStateException("正式提交历史章号已变化，拒绝重放");
+        }
+        Map<String, String> targets = new HashMap<>();
+        ChapterCommitState state = commit.state();
+        putCommitTarget(targets, StorageKeys.SUMMARIES_FILE,
+                state == null ? commit.summaries() : state.summaries(), true);
+        putCommitTarget(targets, StorageKeys.ROLLING_OUTLINE_FILE,
+                state == null ? commit.updatedBlueprints() : state.stages(), true);
+        if (state != null) {
+            putCommitTarget(targets, StorageKeys.VOLUME_FILE, state.volumes(), true);
+            putCommitTarget(targets, StorageKeys.FORESHADOW_SCHEDULE_FILE, state.schedules(), true);
+            putCommitTarget(targets, StorageKeys.FORESHADOW_SETTLEMENT_FILE, state.settlements(), true);
+        }
+        if (commit.edit() != null) {
+            targets.put(StorageKeys.MEMORY_DIR + "/" + StorageKeys.CHAPTER_WORK_EPOCH_FILE,
+                    ChapterManuscript.digest(commit.epoch()));
+        }
+        for (var entry : guard.sourceHashes().entrySet()) {
+            Path source = storyDir.resolve(entry.getKey());
+            String actual = Files.notExists(source) ? "-"
+                    : ChapterManuscript.digest(Files.readString(source, StandardCharsets.UTF_8));
+            if (!actual.equals(entry.getValue()) && !actual.equals(targets.get(entry.getKey()))) {
+                throw new IllegalStateException("正式提交依据文件被外部修改，拒绝重放：" + entry.getKey());
+            }
+        }
+    }
+
+    private static void putCommitTarget(Map<String, String> targets, String file, List<?> value, boolean skipEmpty) {
+        if (value != null && (!skipEmpty || !value.isEmpty())) {
+            targets.put(StorageKeys.MEMORY_DIR + "/" + file, ChapterManuscript.digest(JSON.toJSONString(value)));
+        }
+    }
+
+    /** 接受记录只对它所记录的稿件版本有效；换稿或改标题都必须重新接受。 */
+    private static void validateCommitAcceptance(ChapterCommit commit) {
+        var acceptance = commit.acceptance();
+        if (acceptance == null) {
+            return;
+        }
+        if (acceptance.method() == null) {
+            throw new IllegalStateException("正式提交接受方式缺失");
+        }
+        if (acceptance.manuscriptHash() == null
+                || !acceptance.manuscriptHash().equals(ChapterManuscript.of(commit.chapter()).hash())) {
+            throw new IllegalStateException("正式提交接受记录与正文版本不一致");
+        }
+        if (acceptance.planHash() != null && commit.state() == null && commit.summaries() == null) {
+            throw new IllegalStateException("正式提交接受记录缺少对应的计划与摘要");
+        }
+    }
+
+    private void applyChapterState(Path storyDir, ChapterCommitState state) throws IOException {
+        writeChapterSummaries(storyDir, state.summaries());
+        writeConsistencyIndex(storyDir, state.consistency());
+        writeQualityDebts(storyDir, state.debts());
+        writeStyleStat(storyDir, state.style());
+        writeStyleFingerprints(storyDir, state.fingerprints());
+        writeForeshadowSchedule(storyDir, state.schedules());
+        writeForeshadowSettlements(storyDir, state.settlements());
+        writeStageBlueprints(storyDir, state.stages());
+        writeVolumes(storyDir, state.volumes());
+    }
+
+    private static String relativeKey(Path storyDir, Path source) {
+        return storyDir.relativize(source).toString().replace('\\', '/');
+    }
+
+    private static Path workFile(Path storyDir, String file) {
+        return storyDir.resolve(StorageKeys.MEMORY_DIR).resolve(file);
+    }
+
+    /** 依据来源：设定、编辑纪元、摘要、蓝图、伏笔账与正式章号共同决定"这一稿是否还能提交"。 */
+    private static List<Path> basisSources(Path storyDir) {
+        return List.of(storyDir.resolve(StorageKeys.STORY_BIBLE_FILE),
+                workFile(storyDir, StorageKeys.CHAPTER_WORK_EPOCH_FILE),
+                workFile(storyDir, StorageKeys.SUMMARIES_FILE),
+                workFile(storyDir, StorageKeys.ROLLING_OUTLINE_FILE),
+                workFile(storyDir, StorageKeys.VOLUME_FILE),
+                workFile(storyDir, StorageKeys.FORESHADOW_SCHEDULE_FILE),
+                workFile(storyDir, StorageKeys.FORESHADOW_SETTLEMENT_FILE));
+    }
+
+    @Override
+    public String chapterWorkBasis(Path storyDir) throws IOException {
+        final String[] result = new String[1];
+        withStoryLock(storyDir, () -> result[0] = chapterWorkBasisLocked(storyDir, readChapterNumbers(storyDir)));
+        return result[0];
+    }
+
+    private String chapterWorkBasisLocked(Path storyDir, List<Integer> formalNumbers) throws IOException {
+        StringBuilder input = new StringBuilder();
+        for (Path path : basisSources(storyDir)) {
+            input.append(Files.notExists(path) ? "-"
+                    : ChapterManuscript.digest(Files.readString(path, StandardCharsets.UTF_8))).append('\n');
+        }
+        input.append(formalNumbers);
+        return ChapterManuscript.digest(input.toString());
+    }
+
+    private record AcceptedChapter(ChapterAcceptance acceptance) {
+    }
+
+    private Map<Integer, AcceptedChapter> chapterAcceptances(Path storyDir) throws IOException {
+        Path file = workFile(storyDir, StorageKeys.CHAPTER_ACCEPTANCES_FILE);
+        if (Files.notExists(file)) {
+            return new LinkedHashMap<>();
+        }
+        try {
+            var records = JSON.parseObject(Files.readString(file, StandardCharsets.UTF_8),
+                    new com.alibaba.fastjson2.TypeReference<LinkedHashMap<Integer, AcceptedChapter>>() { });
+            return records == null ? new LinkedHashMap<>() : records;
+        } catch (RuntimeException e) {
+            throw new AppException(ResponseCode.UN_ERROR.getCode(), "章节接受记录损坏：" + file);
+        }
+    }
+
+    @Override
+    public ChapterAcceptance readChapterAcceptance(Path storyDir, int chapterNo) throws IOException {
+        final ChapterAcceptance[] result = new ChapterAcceptance[1];
+        withStoryLock(storyDir, () -> {
+            var records = chapterAcceptances(storyDir);
+            AcceptedChapter record = records.get(chapterNo);
+            if (record == null) {
+                return;
+            }
+            var acceptance = record.acceptance();
+            if (acceptance == null) {
+                return; // 记录结构不完整：按"无验收"处理，不伪造依据状态
+            }
+            // 更晚的人工编辑发生在更靠前的章节，说明该章依据已漂移：记录仍有效，但不能当作当前结论。
+            boolean historyChanged = records.entrySet().stream()
+                    .filter(entry -> entry.getKey() < chapterNo)
+                    .map(entry -> entry.getValue().acceptance())
+                    .filter(Objects::nonNull)
+                    .anyMatch(previous -> previous.method() == ChapterAcceptance.Method.HUMAN_EDIT
+                            && previous.acceptedAtMs() >= acceptance.acceptedAtMs());
+            result[0] = historyChanged ? acceptance.withBasisChanged() : acceptance;
+        });
+        return result[0];
+    }
+
+    private void writeChapterAcceptance(Path storyDir, int chapterNo, ChapterAcceptance acceptance) throws IOException {
+        var records = chapterAcceptances(storyDir);
+        AcceptedChapter previous = records.get(chapterNo);
+        if (previous != null && !Objects.equals(previous.acceptance(), acceptance)) {
+            writeStringAtomic(workFile(storyDir, "chapter-work-history/acceptance-" + chapterNo + "-"
+                    + ChapterManuscript.digest(JSON.toJSONString(previous)) + ".json"), JSON.toJSONString(previous));
+        }
+        records.put(chapterNo, new AcceptedChapter(acceptance));
+        writeStringAtomic(workFile(storyDir, StorageKeys.CHAPTER_ACCEPTANCES_FILE), JSON.toJSONString(records));
+    }
+
+    @Override
+    public PendingChapterEdit readPendingChapterEdit(Path storyDir) throws IOException {
+        final PendingChapterEdit[] result = new PendingChapterEdit[1];
+        withStoryLock(storyDir, () -> result[0] = readPendingChapterEditLocked(storyDir));
+        return result[0];
+    }
+
+    private PendingChapterEdit readPendingChapterEditLocked(Path storyDir) throws IOException {
+        Path file = pendingChapterEditFile(storyDir);
+        if (Files.notExists(file)) {
+            return null;
+        }
+        PendingChapterEdit pending;
+        try {
+            pending = JSON.parseObject(Files.readString(file, StandardCharsets.UTF_8), PendingChapterEdit.class);
+        } catch (RuntimeException e) {
+            throw new IOException("章节回流标记无法读取：" + file, e);
+        }
+        if (pending == null || pending.fromChapter() < 1) {
+            throw new IOException("章节回流标记无效：" + file);
+        }
+        return pending;
+    }
+
+    @Override
+    public void writePendingChapterEdit(Path storyDir, PendingChapterEdit pending) throws IOException {
+        withStoryLock(storyDir, () -> writePendingChapterEditLocked(storyDir, pending));
+    }
+
+    private void writePendingChapterEditLocked(Path storyDir, PendingChapterEdit pending) throws IOException {
+        Path file = pendingChapterEditFile(storyDir);
+        if (pending == null) {
+            Files.deleteIfExists(file);
+        } else {
+            writeStringAtomic(file, JSON.toJSONString(pending));
+        }
+    }
+
+    private Path pendingChapterEditFile(Path storyDir) {
+        return storyDir.resolve(StorageKeys.MEMORY_DIR).resolve(StorageKeys.PENDING_CHAPTER_EDIT_FILE);
+    }
+
+    @Override
+    public void saveHumanEdit(Path storyDir, ChapterContentEntity chapter, PendingChapterEdit pending) throws IOException {
+        withStoryLock(storyDir, () -> {
+            recoverChapterCommitLocked(storyDir);
+            if (chapter == null || chapter.getChapterNo() == null || pending == null || pending.fromChapter() < 1
+                    || pending.fromChapter() > chapter.getChapterNo()) {
+                throw new IllegalArgumentException("正式编辑缺少有效的待回流范围");
+            }
+            ChapterManuscript manuscript = ChapterManuscript.of(chapter);
+            PendingChapterEdit previous = readPendingChapterEditLocked(storyDir);
+            // 多次编辑取最早受影响章：后面的章节都建立在它之上，摘要必须从那里重建。
+            PendingChapterEdit edit = new PendingChapterEdit(previous == null ? pending.fromChapter()
+                    : Math.min(previous.fromChapter(), pending.fromChapter()), false);
+            ChapterAcceptance acceptance = new ChapterAcceptance(ChapterAcceptance.Method.HUMAN_EDIT,
+                    manuscript.hash(), chapterWorkBasisLocked(storyDir, readChapterNumbers(storyDir)), null, null,
+                    "local-author", "正式章节手工保存", System.currentTimeMillis());
+            ChapterCommit commit = new ChapterCommit(manuscript.toChapter(), null, null, null, acceptance, edit,
+                    UUID.randomUUID().toString());
+            if (!commit.hasMatchingSummary()) {
+                throw new IllegalArgumentException("正式编辑缺少正文与接受记录");
+            }
+            Path journal = storyDir.resolve(StorageKeys.CHAPTER_COMMIT_FILE);
+            ChapterCommit guarded = guardCommit(storyDir, commit);
+            writeStringAtomic(journal, chapterCommitJson(guarded));
+            applyChapterCommit(storyDir, journal, guarded);
+        });
     }
 
     @Override
@@ -1068,6 +1484,8 @@ public class StoryRepository implements IStoryRepository {
     public void restoreCheckpoint(Path storyDir, String checkpointId) throws IOException {
         final int[] restoredCount = new int[1];
         withStoryLock(storyDir, () -> {
+            // 先补完未完成的提交，否则回滚会与残留日志竞争：日志在回滚后被重放，会把回滚点之后的正文写回来。
+            recoverChapterCommitLocked(storyDir);
             Path metaPath = checkpointDirOf(storyDir, checkpointId).resolve(StorageKeys.CHECKPOINT_META_FILE);
             if (!Files.exists(metaPath)) {
                 throw new AppException(ResponseCode.UN_ERROR.getCode(), "检查点不存在：" + checkpointId);
@@ -1203,6 +1621,11 @@ public class StoryRepository implements IStoryRepository {
         }
         Path memory = storyDir.resolve(StorageKeys.MEMORY_DIR);
         addIfExists(sources, memory.resolve(StorageKeys.SUMMARIES_FILE));
+        // 提交底座资产必须随快照还原：待回流标记丢失会让回滚后的正文没有"摘要待重建"凭据，
+        // 验收记录丢失会让已提交章节重新失去准入依据。
+        addIfExists(sources, pendingChapterEditFile(storyDir));
+        addIfExists(sources, workFile(storyDir, StorageKeys.CHAPTER_WORK_EPOCH_FILE));
+        addIfExists(sources, workFile(storyDir, StorageKeys.CHAPTER_ACCEPTANCES_FILE));
         addIfExists(sources, memory.resolve(StorageKeys.CONSISTENCY_INDEX_FILE));
         addIfExists(sources, memory.resolve(StorageKeys.ROLLING_OUTLINE_FILE));
         addIfExists(sources, memory.resolve(StorageKeys.VOLUME_FILE));

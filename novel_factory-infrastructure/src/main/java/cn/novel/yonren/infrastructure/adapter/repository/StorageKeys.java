@@ -22,6 +22,17 @@ class StorageKeys {
     static final String CHAPTER_FILE_PREFIX = "chapter-";
     static final String CHAPTER_FILE_SUFFIX = ".txt";
     static final String SUMMARIES_FILE = "summaries.json";
+    /**
+     * 章节提交恢复日志：正文、摘要与派生状态先写日志再落盘，中断后据此补完。
+     * 位于故事根目录（不进 memory/），因为它是跨 chapters/ 与 memory/ 的事务凭据。
+     */
+    static final String CHAPTER_COMMIT_FILE = ".chapter-commit.json";
+    /** 正式编辑待回流标记：正文已改，摘要与派生索引尚未跟上。 */
+    static final String PENDING_CHAPTER_EDIT_FILE = "pending-chapter-edit.json";
+    /** 各章接受记录（正文哈希、计划哈希与依据指纹），与正文版本一同校验。 */
+    static final String CHAPTER_ACCEPTANCES_FILE = "chapter-acceptances.json";
+    /** 编辑纪元：人工改动正式章节时推进，参与依据指纹，使旧稿不能跨编辑提交。 */
+    static final String CHAPTER_WORK_EPOCH_FILE = "chapter-work-epoch";
     static final String CONSISTENCY_INDEX_FILE = "consistency-index.json";
     static final String QUALITY_DEBT_FILE = "quality-debts.json";
     static final String FORESHADOW_SETTLEMENT_FILE = "foreshadow-settlements.json";

@@ -208,6 +208,9 @@ public class StoryGenerateService {
         restoreStoryFeatures(command, settings);
         restoreCharacterProfiles(command, settings);
 
+        // 先补完上次中断的提交再读记忆：日志残留说明正文已换、账本可能还没跟上。
+        // 没有日志时是空操作，不改变既有续写行为。
+        storyRepository.recoverChapterCommit(storyDir);
         List<ChapterSummaryEntity> history = storyRepository.readChapterSummaries(storyDir);
         dynamicContext.setChapterSummaries(new ArrayList<>(history));
         dynamicContext.setConsistencyIndex(storyRepository.readConsistencyIndex(storyDir));
