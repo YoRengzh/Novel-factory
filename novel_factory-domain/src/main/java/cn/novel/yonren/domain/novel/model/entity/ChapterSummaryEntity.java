@@ -29,6 +29,22 @@ public class ChapterSummaryEntity {
     private List<StateEntry> characterStates;
     // 本章关键配角的独立行为轨迹；旧摘要缺省为空，兼容既有 summaries.json
     private List<CharacterBeat> characterBeats;
+    /**
+     * 人物状态增量（已通过证据与身份校验）。身份、章号与稿件哈希由代码绑定，
+     * 模型只提供人物、种类、事项、状态、取值、证据与获知方式。
+     * 旧摘要缺省为空，天然兼容既有 summaries.json。
+     */
+    private List<cn.novel.yonren.domain.novel.model.valobj.character.CharacterEffect> characterEffects;
+    /**
+     * 证据或身份校验未通过的人物状态增量：隔离而不入权威状态，供复盘与人工确认。
+     * 与 pendingFacts 同一取舍——宁可留待核对，也不把无法定位的表述当成事实。
+     */
+    private List<cn.novel.yonren.domain.novel.model.valobj.character.CharacterEffect> pendingCharacterEffects;
+    /**
+     * 本章正文哈希：人物状态重建时据此确认增量确实属于这一版正文。
+     * 旧摘要缺省为 null，此时该章人物增量不参与重建（无法确认来源就不使用）。
+     */
+    private String manuscriptHash;
     // 本章状态发生变化（或首次出现）的关键物品（法宝/金手指等）
     private List<StateEntry> itemStates;
     // 本章状态发生变化（或首次出现）的势力/组织

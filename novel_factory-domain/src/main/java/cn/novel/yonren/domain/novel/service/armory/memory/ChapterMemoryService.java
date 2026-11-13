@@ -847,13 +847,18 @@ public class ChapterMemoryService {
     }
 
     /**
-     * 渲染当前三账本（角色/物品/势力）文本，作为摘要一致性校验与审校账本比对基准
+     * 渲染当前三账本（角色/物品/势力）文本，作为摘要一致性校验与审校账本比对基准。
+     *
+     * <p>三账本只记"当前状态"，回答不了"这个人是否知道某件事、答应过什么、打算做什么"。
+     * 追加人物状态投影补上这一层：认知与承诺分开陈述，未解决条目明确标注不得当作确定知识。
+     * 旧摘要没有人物增量时投影为空串，行为与引入前一致。
      */
     public String renderLedgerPrompt(List<ChapterSummaryEntity> summaries) {
         StringBuilder sb = new StringBuilder();
         appendLedgerPromptLines(sb, "角色", buildCharacterLedger(summaries));
         appendLedgerPromptLines(sb, "物品", buildLedger(summaries, ChapterSummaryEntity::getItemStates));
         appendLedgerPromptLines(sb, "势力", buildLedger(summaries, ChapterSummaryEntity::getFactionStates));
+        sb.append(CharacterStateProjector.render(summaries, null, null));
         return sb.length() == 0 ? null : sb.toString();
     }
 

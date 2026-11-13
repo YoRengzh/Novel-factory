@@ -503,6 +503,34 @@ class ChapterWorkerTest {
     }
 
     @Test
+    void generateAll_bindsManuscriptHashAndRejectsUnlocatableCharacterEvidence() throws Exception {
+        // 人物状态增量必须绑定到具体正文版本；定位不到证据的条目转 pending，不进权威状态。
+        when(qualityGate.auditAndReviseIfEnabled(any(), any(), any(), anyList(), any(), anyInt(), any()))
+                .thenReturn(GateResult.of(List.of(), 0, 0));
+        when(chapterSummaryService.summarize(any(), any(), anyString(), anyInt(), anyString(), anyList(), any()))
+                .thenAnswer(inv -> ChapterSummaryEntity.builder()
+                        .chapterNo(inv.getArgument(3)).summary("摘要")
+                        .characterEffects(new java.util.ArrayList<>(List.of(
+                                new cn.novel.yonren.domain.novel.model.valobj.character.CharacterEffect(
+                                        "角色甲",
+                                        cn.novel.yonren.domain.novel.model.valobj.character.CharacterEffect.Kind.GOAL,
+                                        "复仇", cn.novel.yonren.domain.novel.model.valobj.character.CharacterEffect.State.ESTABLISHED,
+                                        "向宗门复仇", "正文里根本不存在的句子", null, null))))
+                        .build());
+        DefaultArmoryFactory.DynamicContext ctx = context(null);
+
+        chapterWorker.generateAll(command(), ctx);
+
+        for (ChapterSummaryEntity s : ctx.getChapterSummaries()) {
+            assertNotNull(s.getManuscriptHash(), "摘要必须携带本章正文哈希，否则人物增量无法确认来源");
+            assertFalse(s.getManuscriptHash().isBlank());
+            assertTrue(s.getCharacterEffects() == null || s.getCharacterEffects().isEmpty(),
+                    "证据无法在正文定位的条目不得进入权威人物状态");
+            assertNotNull(s.getPendingCharacterEffects(), "被拒条目应隔离到 pending 供核对");
+        }
+    }
+
+    @Test
     @SuppressWarnings("unchecked")
     void generateAll_mechanicalStyleMinor_isRecordedAsDebt() throws Exception {
         // 严重度分层的配套要求：降档后的文风 MINOR 不触发修订、不触发候选、不计入 grade，

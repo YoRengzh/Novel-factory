@@ -553,6 +553,14 @@ public class ChapterWorker {
                     contract != null && StringUtils.isNotBlank(contract.knowledgeBoundary()));
             // 悬念档位也落盘：体检要统计"主线是否原地打转"（读盘重算那条路看不到内存里的计划）
             summary.setSuspenseBeat(item.getSuspenseBeat());
+            // 人物状态增量必须绑定到具体正文版本：重建时靠哈希确认增量属于这一版稿，
+            // 否则编辑或重生成之后会把旧稿的人物状态当成当前事实。
+            var manuscript = cn.novel.yonren.domain.novel.model.valobj.work.ChapterManuscript.of(chapterContent);
+            summary.setManuscriptHash(manuscript.hash());
+            // 证据与身份由代码重算：模型给的人物、事项、取值、证据保留，characterId/factId/effectId/
+            // 章号/哈希一律以本地正文为准。定位不到证据或状态迁移非法的条目转 pending，不进权威状态。
+            cn.novel.yonren.domain.novel.service.armory.memory.CharacterStateProjector.bind(
+                    summary, manuscript, summaries);
             summaries.add(summary);
 
             // 伏笔排期打标P2b）：本章新埋的种子与排期表配对，回填 scheduledPayoffChapter，
