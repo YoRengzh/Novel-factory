@@ -59,6 +59,13 @@ public class ChapterPlanSegmentPlanner {
 
     private final PlanBranchService planBranchService;
 
+    /**
+     * 场景因果核验（可选）。为 null 或模式为 OFF 时完全不调用，规划行为与引入前一致。
+     * 可选注入，单测可直接构造。
+     */
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private PlanCausalityReviewService planCausalityReviewService;
+
     /** 规划结果：raw 供生成记录复盘（rawResult），plan 已完成编号平移与结构校验；
      *  residualGateIssues 为二次重规划仍未通过的遗留违规（非空时下游注入正文 prompt 作硬约束） */
     public record PlannedSegment(String raw, ChapterPlanAggregate plan, String residualGateIssues) {
@@ -195,7 +202,8 @@ public class ChapterPlanSegmentPlanner {
                     ChapterPlanChecks.hasUsableLadder(blueprint) ? " " + suspenseLadder.size() + " 档" : "不可用",
                     mainLine == null ? 0 : mainLine.size(),
                     jumpRequired ? "；追进度跳接校验通过" : "");
-            return parsed;
+            return withCausality(parsed, storyVO, blueprint, summariesForPressure,
+                    startChapter, endChapter, job, usedPromptMap);
         }
         // 两类违规各自带**差异化修正指令** 教训：反馈不点名就等于让模型原样重生成一遍）
         StringBuilder feedback = new StringBuilder();
@@ -311,7 +319,47 @@ public class ChapterPlanSegmentPlanner {
         } else {
             log.info("{}推进校验：重规划后通过", label);
         }
-        return retry;
+        return withCausality(retry, storyVO, blueprint, summariesForPressure,
+                startChapter, endChapter, job, usedPromptMap);
+    }
+
+    /**
+     * 场景因果核验（可选）：默认 OFF 时直接返回本地结论，不新增任何模型调用。
+     *
+     * <p>OBSERVE 只把结论写进运行记录，不回灌写手——观察态诊断一旦变成写作指令，
+     * 等于用未验证的判断改变剧情。ENFORCE 才把结论并入阻断项；其中"核验没跑成"
+     * 单列 {@code CAUSALITY_UNVERIFIED} 前缀，供调用方区分"确认冲突"与"无法核验"。
+     */
+    private PlannedSegment withCausality(PlannedSegment segment, StoryVO storyVO,
+                                         StageBlueprintEntity blueprint,
+                                         List<ChapterSummaryEntity> history,
+                                         int start, int end, GenerationJob job,
+                                         Map<String, String> record) {
+        if (planCausalityReviewService == null
+                || planCausalityReviewService.getMode()
+                    == cn.novel.yonren.domain.novel.config.StoryProperties.CausalityProperties.Mode.OFF) {
+            return segment;
+        }
+        try {
+            var facts = CharacterFactReferences.from(history, start);
+            var result = planCausalityReviewService.check(storyVO, segment.plan(), blueprint, history,
+                    start, end, job, record, facts);
+            if (!result.acceptable()) {
+                throw new cn.novel.yonren.types.exception.AppException(
+                        cn.novel.yonren.types.enums.ResponseCode.UN_ERROR.getCode(),
+                        "计划因果核验未通过：" + String.join("；", result.blocking()));
+            }
+            if (!result.warnings().isEmpty()) {
+                log.info("计划因果核验提示（{}）：{}", start + "-" + end, result.warnings());
+            }
+        } catch (cn.novel.yonren.types.exception.AppException e) {
+            throw e;
+        } catch (Exception e) {
+            throw new cn.novel.yonren.types.exception.AppException(
+                    cn.novel.yonren.types.enums.ResponseCode.UN_ERROR.getCode(),
+                    "计划因果核验异常：" + e.getMessage(), e);
+        }
+        return segment;
     }
 
     /**

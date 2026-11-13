@@ -163,6 +163,14 @@ story:
     # 体检分级达到该档即停止自动续批，交人工过问：WATCH / DEGRADED / CRITICAL
     stop-on-health-level: CRITICAL
 
+  # 场景因果核验：检查场景结果所依赖的必要前提（人物已有认知、设备能力、交易责任）。
+  # OFF = 完全不调用，零成本；OBSERVE = 照常核验但结论只记日志，不改变计划；
+  # ENFORCE = 结论可驳回计划。失败降级同按模式分流：ENFORCE 下"核验没跑成"也算阻断，
+  # OBSERVE 下只记一条警告——基础设施故障不该被当成内容缺陷，也不该静默通过。
+  causality:
+    plan-mode: OFF
+    audit-mode: OFF
+
   # 全书总章数上限（完结保护）：enforce-chapter-limit=true 时强制 max-chapter-count，
   # 续写偏移达到上限即拒绝生成（故事已完结）；本批超出的章节数会被自动截断
   constraints:

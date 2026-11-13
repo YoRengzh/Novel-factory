@@ -163,7 +163,8 @@ public class ChapterPlanPromptService {
                     .append(" 章一个不少，未排满即输出不完整，宁可把'收束章'提前也要把批次排满。");
         }
         sb.append("\n2. chapterNo 从 ").append(startNo).append(" 开始连续递增")
-                .append("\n3. 每章只描述本章目标、关键事件和结尾悬念；endingHook 必须是具体的未决点/悬念/引爆引线，")
+                .append("\n3. 每章输出 schemaVersion=2 的 scenes 场景计划，并保留章级 goal 与 endingHook；")
+                .append("endingHook 必须是具体的未决点/悬念/引爆引线，")
                 .append("严禁用\"本章结束\"或总结性表述收尾，严禁无钩子结尾")
                 .append(renderWorldLanguageRule(dynamicContext))
                 .append("\n5. 若前情记忆带有【伏笔账·待回收】:标【硬】的条目，本章计划必须逐条显式评估——")
@@ -307,22 +308,14 @@ public class ChapterPlanPromptService {
                 .append("它豁免'关键事件 ≥ 3'，但仍须落在已建立的地点里，并带来一处实质变化。");
         sb.append("\n\n【冲突编排指令】【禁止对称出场】多方势力交锋时，严禁让他们像开会一样同时到达并轮流发言")
                 .append("必须制造信息差和时间差（例如：一方暗中潜伏，一方迟到，一方只派低阶试探），让冲突呈现非对称性和意外感");
-        // 事件密度：keyEvents 是写手的供给清单——示例只给 2 条时，
-        // 模型稳定交付 3 条/章（正文 1100-1400 字），供给不足直接变成正文注水或独白章。
-        // 示例条数就是有效 schema（教训 #1），示例与要求同步提到 4 条基准。
-        // 加 dialogueScenes：散文规则"至少 2 条对话承载"无人执法（第 105 章 0 条照样放行），
-        // 声明 + 机械校验才是执法通道（见 ChapterPlanChecks.validateDialogueCarriage）
-        sb.append("\n\n【事件密度】每章 keyEvents 3-5 条：normal 章以 **4 条**为基准（其中**至少 "
-                        + ChapterPlanChecks.DIALOGUE_SCENES_MIN + " 条**由对话承载、逐字复制进 dialogueScenes，"
-                        + "并写明谁对谁、围绕什么分歧），")
-                .append("transition 章可 2-3 条；条数不足的章，写手只能靠注水或独白凑篇幅。")
-                // 场面级要求：实测同一章重跑一次，字数掉 30%、对白掉 70%——
-                // 计划供给（4 条事件、250 字）两轮逐字相同，差别只在"事件被写成一场戏还是被一句话交代"。
-                // 计划的写法直接决定正文的写法：一句话的事件，正文里只会被展开成一句过渡叙述。
-                .append("**每条 keyEvent 必须写到「场面」级**：在场人物 + 起因或分歧 + 落点或结果（如"
-                        + "「甲在人前当众质问乙某事，乙给出承诺但附带一个交换条件，两人不欢而散」），"
-                        + "**禁止**写成「谁做了什么」的一句话"
-                        + "（如「乙承诺处理某事」）——后者在正文里只能被展开成一句过渡叙述。")
+        // 事件密度：场景是写手的供给清单。此前按 keyEvents 条数要求，是因为事件就是计划本体；
+        // v2 改为场景后，条数配额会与「不设固定场数」直接冲突，因此只保留"每场必须写到场面级"。
+        // 供给不足的后果仍然成立：场景写薄了，正文里只会被展开成一句过渡叙述。
+        sb.append("\n\n【场景密度】不设固定场数：一个完整的独处事件或一场长交流都可以承载本章。")
+                .append("**每场必须写到「场面」级**：在场人物 + 起因或分歧 + 落点或结果（如"
+                        + "「甲在人前当众质问乙某事，乙给出承诺但附带一个交换条件，两人不欢而散」），")
+                .append("**禁止**把场景写成「谁做了什么」的一句话")
+                .append("（如「乙承诺处理某事」）——后者在正文里只能被展开成一句过渡叙述。")
                 // 补：去掉时间配额后实测平均字数从 2213 跌到 1246（-44%）。
                 // 模型把"不注水"误读成了"少写"——它不再写过渡，但也把场景内部的展开一并省掉。
                 // 必须明确：**精简的是过渡，不是场景本身**；场景该铺展时仍要铺展。
@@ -341,11 +334,56 @@ public class ChapterPlanPromptService {
                 .append("**时间是情节的背景，不是每章的任务**——一个下午能写完的章，就让它停在那天；")
                 .append("不要为了“推进时间”而插入过夜/赶路/季节更替等无信息过渡。")
                 .append("唯一的硬约束：不得与已确立的时间线矛盾（例如主角已上高中，就不能写“小学三年级”）。");
+        sb.append("\n\n【场景编排】scenes 是唯一生成源，不设固定场数、事件条数、对白场数或危机缓冲比例。")
+                .append("一个完整的独处事件或一场长交流都可以承载本章。")
+                .append("每场提供稳定且章内唯一的 id、characters、intention、resistance、entryStates、outcome、function、milestoneRefs、location、time。")
+                .append("intention 写人物此刻要做什么，resistance 写实际阻力或明确无外部阻力，")
+                .append("outcome 写场景结束的具体状态，function 写该场的叙事作用。")
+                .append("承接、留白可以作为叙事作用；静场 function 使用过渡/消化/余韵/静场或 TRANSITION/DIGESTION/AFTERGLOW/QUIET 原词。")
+                .append("这些静场可无外部阻力，其他推进场景 resistance 写实际阻力或人物内心的不确定性；")
+                .append("outcome 可以是承接或安静闭合的状态，不要求每场新增冲突或转折。")
+                .append("location/time 是选填背景，无事实引用时 entryStates=[]，无里程碑推进时 milestoneRefs=[]；")
+                .append("不为填写字段编造事实、地点或日期。")
+                .append("goal/endingHook 保留章级，不用它们替代 scenes。characters/keyEvents/dialogueScenes 由系统从 scenes 派生，")
+                .append("禁止双份独立生成；下文提到关键事件、goal/keyEvents 或 dialogueScenes 的兼容规则均落实在 scenes 内，")
+                .append("不再另写事件数组。dialogueScenes 可为空且只作 derived 兼容视图。")
+                .append("多方冲突的出场顺序、信息差与时间差按情境决定，不强制非对称。")
+                .append("先由人物已知信息、目标、当前压力与可用资源决定行动，再形成场景结果；既成事实与能力限制高于预想情节。")
+                .append("可选 causality 提供 actors（character/want/pressure/knowledgeRefs/resources/belief）、")
+                .append("steps（actor/action/responder/response/because/requires）、terms 与 constraints。")
+                .append("knowledgeRefs 仅引用上方人物 factId，belief 可以错误而不改变世界事实；")
+                .append("constraints 用真实 FactReference 描述物品/世界能力前提。")
+                .append("steps 只写决定性行动及回应，because 说明为什么改变决定，requires 引用依赖事实；")
+                .append("无必要因果说明时可省略，不填配额。")
+                .append("交易才用 terms：offerer/receiver/consideration/payment，以及实际相关的 verificationBy/deadline/onFailure；")
+                .append("无偿可明确写无偿，不擅自补出承诺。")
+                .append("计划不能把不可读改成数据不完整来授予读取能力；能力转变必须先有合理操作与结果，尚未发生的改变不入历史状态。")
+                .append("outcome 只是拟发生结果；独处、犹疑、等待、静场可成立，不要求每场转折或付出代价。")
+                .append("场景只写交锋内容与落点，不写引号台词原话；纸条/回执这类书面物件上的字除外。");
+        // timeAdvance 语义 由「交付项」降级为「背景设定」）：
+        // 前几轮把"推进3-7天"改成"自决"，又加了"连续同日上限"，本质都还在把
+        // 时间推进当作每章要验收的任务——模型一旦读到任务就会去凑它，
+        // 凑出来的就是"第二天""过了几日"这类无信息过渡。真正要治的是这件事。
+        sb.append("\n\ntimeAdvance 是**选填**的背景说明：本章若都在同一天，留空即可，不必为凑数编日期。")
+                .append("需要跨时间时再写（如“次日清晨”“三日后”），写到哪天就是哪天。")
+                .append("**时间是情节的背景，不是每章的任务**——一个下午能写完的章，就让它停在那天；")
+                .append("不要为了“推进时间”而插入过夜/赶路/季节更替等无信息过渡。")
+                .append("唯一的硬约束：不得与已确立的时间线矛盾（例如主角已上高中，就不能写“小学三年级”）。");
         sb.append("\n\n").append(PLAN_SCHEMA_MARKER).append(":")
                 .append("\n{\"chapters\":[{\"chapterNo\":").append(startNo)
-                .append(",\"title\":\"章节标题\",\"goal\":\"本章目标\",\"characters\":[\"角色A\"],")
-                .append("\"keyEvents\":[\"关键事件1\",\"关键事件2\",\"关键事件3\",\"关键事件4\"],")
-                .append("\"dialogueScenes\":[\"对话承载事件①（逐字取自keyEvents）\",\"对话承载事件②（逐字取自keyEvents）\"],")
+                .append(",\"schemaVersion\":2,\"title\":\"章节标题\",\"goal\":\"本章目标\",")
+                .append("\"scenes\":[{\"id\":\"ch-").append(startNo).append("-scene-1\",\"characters\":[\"角色A\"],")
+                .append("\"intention\":\"人物此刻要做什么\",\"resistance\":\"实际阻力或人物内心的不确定性\",")
+                .append("\"entryStates\":[],\"outcome\":\"场景结束的具体状态\",\"function\":\"该场的叙事作用\",")
+                .append("\"milestoneRefs\":[],\"location\":\"\",\"time\":\"\",")
+                // causality 示例给一个最小可用的“人物已有认知 + 一次行动及回应”，不设交易、配额或每场必填：
+                // 示例留空会让模型永远不填；示例写满交易模板又会变成新八股。
+                .append("\"causality\":{\"actors\":[{\"character\":\"角色A\",\"want\":\"本章要做的事\",")
+                .append("\"pressure\":\"推动或阻碍这件事的压力\",\"knowledgeRefs\":[],\"resources\":[],")
+                .append("\"belief\":\"角色A主观相信但未必为真的内容\"}],")
+                .append("\"steps\":[{\"actor\":\"角色A\",\"action\":\"决定性行动\",")
+                .append("\"because\":\"为什么这样决定\",\"requires\":[]}],")
+                .append("\"constraints\":[]}}],")
                 // 示例留空：timeAdvance 是选填，示例给值模型就会每章都填，又变回任务。
                 .append("\"timeAdvance\":\"\",\"endingHook\":\"结尾悬念\",")
                 .append("\"chapterType\":\"normal\",\"suspenseBeat\":\"档位表原文之一\"");
@@ -428,27 +466,16 @@ public class ChapterPlanPromptService {
                 .append("没有展示任务的章，关键事件落在人际、事件、选择与两难上；")
                 .append("早慧的显形走观察者跨章累积的认知变化（一条暗线多个观察者接力），")
                 .append("而不是每章单发一个展示时刻。");
-        // 对话承载规则：关键事件里若混入"内心梳理/制定计划"型独白事件，
-        // 写手交付的对白句数会明显偏低——独白事件写不出互动。
-        // 由"至少 1 个"提到"至少 2 个"：实测同一段章节、同一份计划重跑一次，
-        // 对白句数从 139 掉到 97（平均从 28/章 掉到 19/章，历史 45 章稳在 31-57），
-        // 而"至少 1 个"这条字面上仍然满足——一章只有一个对话事件时，
-        // 其余三个关键事件都写成静态交代，全章就对白塌方。同时要求写清对谁、分歧是什么，
-        // 否则计划里写"二人交谈"，写手只能产出寒暄。
-        // 再补 dialogueScenes 声明 + 机械校验：散文规则只劝不罚——第 105 章 5 条关键事件
-        // 0 条对话承载（characters 写着"电脑屏幕"）照样放行。阈值常量单点在 ChapterPlanChecks，
-        // 此处引用拼接，防两侧口径漂移（与 hasUsableLadder 同套路）
-        rule.append("\n【对话承载·硬约束】每章关键事件**至少 ").append(ChapterPlanChecks.DIALOGUE_SCENES_MIN)
-                .append(" 个**由人物当面的对话/冲突/协作承载（transition 章至少 ")
-                .append(ChapterPlanChecks.DIALOGUE_SCENES_MIN_TRANSITION).append(" 个），")
-                .append("且每条这样的关键事件必须写明**谁对谁、围绕什么分歧**（人物写全名，代词不算）——只写「二人交谈」等于没写；")
-                .append("把这 ≥").append(ChapterPlanChecks.DIALOGUE_SCENES_MIN)
-                .append(" 条事件**逐字复制**进该章 dialogueScenes 字段——校验器会逐条比对：")
-                .append("对不上 keyEvents、事件里不足两个人物全名、或单人事件超过一半，整段计划会被驳回重规划；")
-                .append("**禁止**整章关键事件全部由\"内心梳理/制定计划/复盘总结/能力自评\"类独白事件构成——")
-                .append("独白事件不产生互动，写手只能交付独白章；")
+        // 对话承载规则：计划若全是"内心梳理/制定计划"型独白场景，写手交付的对白句数会明显偏低。
+        // v2 场景契约下该要求落在场景层：intention/resistance/outcome 必须让场景真的能演，
+        // 而不是靠另写一份事件清单凑数。
+        rule.append("\n【对话承载·硬约束】多数场景应由人物当面的对话/冲突/协作承载")
+                .append("（transition 章可只有一场，静场与独处也成立）；")
+                .append("每个这样承载的场景必须写明**谁对谁、围绕什么分歧**（人物写全名，代词不算）——只写「二人交谈」等于没写；")
+                .append("**禁止**整章场景全部由\"内心梳理/制定计划/复盘总结/能力自评\"类独白构成——")
+                .append("独白场景不产生互动，写手只能交付独白章；")
                 .append("相邻两章不得连续独白主导；主角需要\"想明白一件事\"时，")
-                .append("优先让这件事在对峙/合作/教学的**对话中**发生，内心独白只作决策落点不作事件本体。");
+                .append("优先让这件事在对峙/合作/教学的**对话中**发生，内心独白只作决策落点不作场景本体。");
         // 时间衔接规则：计划排"夜里睡熟"而锚/账本仍停在白天时，
         // 写手照排夜景 → 审计按锚判事实矛盾，补丁无法修复（改时段=重构整章）成质量债。
         // 与年龄判据同源：锚是时间/年龄的唯一依据，计划层排事件必须先衔接时段。
@@ -544,17 +571,16 @@ public class ChapterPlanPromptService {
         if (collapsed.isEmpty()) {
             return;
         }
-        sb.append("\n\n【对白坍缩反馈】以下章节篇幅不短、关键事件也落地了，但**角色不开腔**：")
+        sb.append("\n\n【对白坍缩反馈】以下章节篇幅不短、场景也落地了，但**角色不开腔**：")
                 .append(String.join("、", collapsed))
                 .append("（健康线 ≥ ").append(String.format("%.1f", line)).append(" 次/千字）。")
                 .append("通篇动作分解与内心推演，读者读到的是一份流程说明，不是一场戏。")
                 .append("\n本段计划必须按此修正：")
-                .append("\n1. **对话承载事件提到 ≥2 条**——不是「至少 1 条」占位就够，"
+                .append("\n1. **让多数场景由对话承载**——不是占位一场就够，"
                         + "而是让冲突与分歧在台词里发生；")
-                .append("\n2. 每条对话承载事件必须写清**谁对谁、围绕什么分歧**——"
-                        + "只写「二人交谈」等于没写，写手只能产出寒暄，"
-                        + "并把这几条事件**逐字复制**进该章 dialogueScenes 字段；")
-                .append("\n3. 人物只在动作里出场、不用台词表达意图的事件，改写为一次具体的交锋或谈判。");
+                .append("\n2. 每个对话承载场景必须写清**谁对谁、围绕什么分歧**——"
+                        + "只写「二人交谈」等于没写，写手只能产出寒暄；")
+                .append("\n3. 人物只在动作里出场、不用台词表达意图的场景，改写为一次具体的交锋或谈判。");
     }
 
     static void appendForeshadowSpanFeedback(StringBuilder sb, List<ChapterSummaryEntity> summaries) {

@@ -1430,8 +1430,22 @@ public class ChapterWorker {
                               int globalNo, ChapterContract contract, StoryContextEntity storyContextEntity) {
         return renderFacts(storyContext, memoryPrefix)
                 + renderContract(contract, globalNo)
+                // v2 场景计划：场景是权威来源，派生事件只是摘要视图。
+                // 写手据此按场演出，而不是把派生事件再压成一句话。
+                + renderSceneContract(item)
                 + renderContinuityConstraints(contract)
                 + renderWritingGuidance(globalNo, storyContextEntity);
+    }
+
+    /**
+     * 权威场景契约（仅 v2 计划）：逐场给出意图、阻力、结果与可选因果。
+     * 旧计划（schemaVersion 为 null）返回空串，写作提示词与引入前逐字一致。
+     */
+    private String renderSceneContract(ChapterPlanItemEntity item) {
+        if (item == null || !Integer.valueOf(2).equals(item.getSchemaVersion())) {
+            return "";
+        }
+        return cn.novel.yonren.domain.novel.service.armory.plan.ScenePlanPolicy.render(item.getScenes());
     }
 
     /**

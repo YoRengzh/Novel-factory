@@ -931,6 +931,29 @@ class ChapterPlanChecksTest {
         assertNull(ChapterPlanChecks.validateDialogueCarriage(List.of(chapter), ROSTER));
     }
 
+    /**
+     * v2 场景计划不设对白条数配额：场景的 intention/resistance/outcome 已承载"有没有戏可演"，
+     * dialogueScenes 只是派生视图，按条数要求会逼模型在场景之外另造一份事件清单。
+     */
+    @Test
+    void validateDialogueCarriage_skipsSceneContractPlans() {
+        ChapterPlanItemEntity chapter = ChapterPlanItemEntity.builder()
+                .chapterNo(101)
+                .title("第101章")
+                .goal("目标")
+                .schemaVersion(2)
+                .scenes(List.of(new cn.novel.yonren.domain.novel.model.valobj.plan.ScenePlan(
+                        "ch-101-scene-1", List.of("角色丙"), "确认一件事", "对方不肯说",
+                        List.of(), "角色丙暂时收手", "余韵", List.of(), "", "")))
+                .characters(List.of("角色丙"))
+                .keyEvents(List.of("角色丙当面追问，对方回避"))
+                .dialogueScenes(List.of())
+                .build();
+
+        assertNull(ChapterPlanChecks.validateDialogueCarriage(List.of(chapter), ROSTER),
+                "v2 场景计划不应被对白条数配额驳回");
+    }
+
     /** 第 105 章病灶回归：0 条声明（缺字段/空列表）必须点名章号驳回 */
     @Test
     void validateDialogueCarriage_flagsMissingDeclaration() {

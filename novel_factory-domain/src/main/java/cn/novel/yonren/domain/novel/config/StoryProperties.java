@@ -36,6 +36,8 @@ public class StoryProperties {
     private LedgerAdjudicateProperties ledgerAdjudicate = new LedgerAdjudicateProperties();
     // 无人值守续写计划（自续批；默认关闭，开启后作业会自动连续花 token）
     private RunPlanProperties runPlan = new RunPlanProperties();
+    // 场景因果核验：OFF 不调用、OBSERVE 只记警告、ENFORCE 可驳回计划
+    private CausalityProperties causality = new CausalityProperties();
 
     public StoryVO toStoryVO() {
         StoryVO storyVO = new StoryVO();
@@ -183,6 +185,26 @@ public class StoryProperties {
         private int maxBatches = 0;
         /** 批末体检分级达到该档即停止续批，交人工过问：WATCH / DEGRADED / CRITICAL，默认 CRITICAL */
         private String stopOnHealthLevel = "CRITICAL";
+    }
+
+    /**
+     * 场景因果核验。
+     *
+     * <p>{@code OFF} 完全不调用，零成本，行为与引入前一致；{@code OBSERVE} 照常调用并产出结论，
+     * 但结论只进警告、不阻断计划；{@code ENFORCE} 结论可驳回计划并触发带反馈重规划。
+     *
+     * <p>失败降级同样按模式分流：{@code ENFORCE} 下"核验没跑成"本身算阻断，
+     * {@code OBSERVE} 下只记一条警告——避免基础设施故障被当成内容缺陷，也避免它静默通过。
+     */
+    @Data
+    public static class CausalityProperties {
+        public enum Mode { OFF, OBSERVE, ENFORCE }
+
+        /** 计划期核验模式；默认 OFF，不新增任何调用与费用 */
+        private Mode planMode = Mode.OFF;
+
+        /** 审校期核验模式；默认 OFF */
+        private Mode auditMode = Mode.OFF;
     }
 
 }

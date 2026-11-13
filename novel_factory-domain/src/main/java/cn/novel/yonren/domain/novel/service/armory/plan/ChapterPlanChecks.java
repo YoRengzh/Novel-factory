@@ -250,9 +250,19 @@ public final class ChapterPlanChecks {
         return blueprint != null && SuspenseLadderPolicy.usable(blueprint.getSuspenseLadder());
     }
 
+    /**
+     * 必填字段校验。
+     *
+     * <p>v2 场景计划的结构要求与旧事件清单不同：场景本身承载"做什么、遇到什么阻力、结果如何"，
+     * 因此不再强制 {@code keyEvents}——它是 {@code ScenePlanPolicy.normalize} 从场景派生的视图，
+     * 派生在解析阶段完成，此时为空不代表缺失。旧计划（{@code schemaVersion} 为 null）语义不变。
+     */
     private static String missingFields(ChapterPlanItemEntity item) {
+        boolean sceneContract = Integer.valueOf(2).equals(item.getSchemaVersion());
+        boolean eventsMissing = item.getKeyEvents() == null || item.getKeyEvents().isEmpty();
+        boolean scenesMissing = item.getScenes() == null || item.getScenes().isEmpty();
         if (StringUtils.isBlank(item.getTitle()) || StringUtils.isBlank(item.getGoal())
-                || item.getKeyEvents() == null || item.getKeyEvents().isEmpty()) {
+                || (sceneContract ? scenesMissing : eventsMissing)) {
             List<String> missing = new ArrayList<>();
             if (StringUtils.isBlank(item.getTitle())) {
                 missing.add("title");
@@ -260,8 +270,8 @@ public final class ChapterPlanChecks {
             if (StringUtils.isBlank(item.getGoal())) {
                 missing.add("goal");
             }
-            if (item.getKeyEvents() == null || item.getKeyEvents().isEmpty()) {
-                missing.add("keyEvents");
+            if (sceneContract ? scenesMissing : eventsMissing) {
+                missing.add(sceneContract ? "scenes" : "keyEvents");
             }
             return String.join("/", missing);
         }
@@ -797,6 +807,11 @@ public final class ChapterPlanChecks {
             int no = item.getChapterNo() == null ? i + 1 : item.getChapterNo();
             boolean transition = item.getChapterType() != null && item.getChapterType().isTransition();
             int required = transition ? DIALOGUE_SCENES_MIN_TRANSITION : DIALOGUE_SCENES_MIN;
+            // v2 场景计划不设对白配额：场景的 intention/resistance/outcome 已经承载"有没有戏可演"，
+            // 而 dialogueScenes 只是派生视图。继续按条数要求会逼模型在场景之外另造一份事件清单。
+            if (Integer.valueOf(2).equals(item.getSchemaVersion())) {
+                continue;
+            }
             List<String> events = item.getKeyEvents();
             if (events == null || events.isEmpty()) {
                 // 结构性缺失由 validateSegmentStructure 负责（缺 keyEvents 在那里已判死），不重复报

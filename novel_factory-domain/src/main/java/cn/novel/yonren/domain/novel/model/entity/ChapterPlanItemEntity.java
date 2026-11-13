@@ -73,4 +73,19 @@ public class ChapterPlanItemEntity {
      * （缺章 / 未落地 / 相邻雷同三类违规）。老数据为 null，校验跳过。
      */
     private String mainLineAdvance;
+
+    /**
+     * 计划契约版本：null/1 为旧事件清单形态，2 表示 {@link #scenes} 是权威场景。
+     * 旧计划不回溯转换——把事件清单反推成场景等于凭空补造意图与阻力。
+     */
+    private Integer schemaVersion;
+
+    /**
+     * 权威场景序列（v2）。场景是唯一生成源，{@link #characters}、{@link #keyEvents} 与
+     * {@link #dialogueScenes} 只是它的兼容派生视图，由 {@code ScenePlanPolicy.normalize} 刷新，
+     * 不允许与场景各自独立生成。
+     *
+     * <p>旧计划该字段为 null，读取与执行沿用原事件清单语义。
+     */
+    private List<cn.novel.yonren.domain.novel.model.valobj.plan.ScenePlan> scenes;
 }

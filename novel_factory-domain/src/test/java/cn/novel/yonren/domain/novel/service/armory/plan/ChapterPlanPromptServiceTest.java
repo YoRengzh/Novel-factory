@@ -910,7 +910,7 @@ class ChapterPlanPromptServiceTest {
         assertTrue(text.contains("【对白坍缩反馈】"), text);
         assertTrue(text.contains("第95章"), "必须点名崩掉的章号：" + text);
         assertTrue(text.contains("4.4"), "必须给出实测密度供规划层定位：" + text);
-        assertTrue(text.contains("对话承载事件提到 ≥2 条"), text);
+        assertTrue(text.contains("让多数场景由对话承载"), text);
     }
 
     /** 反向：对白密度健康时不注入（欠采样与健康态都不唠叨，否则模型会当噪声忽略） */
@@ -929,14 +929,14 @@ class ChapterPlanPromptServiceTest {
     }
 
     /**
-     * 计划层必须把"对白承载"与"场面级事件"写成硬要求。
+     * 计划层必须把"对白承载"与"场面级场景"写成硬要求。
      *
-     * 实测：同一段章节、同一份计划重跑一次，对白句数从 139 掉到 97（平均 28→19/章，
-     * 而历史 45 章稳在 31-57）。当时的规定是"每章关键事件至少 **1** 个由对话承载"——* 一章只有一个对话事件时，其余三个关键事件都写成静态交代，全章就对白塌方，而规则字面上仍然满足。
-     * 计划的写法直接决定正文的写法：一句话的事件在正文里只会被展开成一句过渡叙述。
+     * 对白条数一旦写成固定配额，模型就会为凑数另造事件清单；场景契约下改由
+     * intention/resistance/outcome 保证场景真的能演。计划的写法直接决定正文的写法：
+     * 一句话的场景在正文里只会被展开成一句过渡叙述。
      */
     @Test
-    void segmentPrompt_requiresTwoDialogueEventsAndSceneLevelKeyEvents() {
+    void segmentPrompt_requiresDialogueCarriageAndSceneLevelScenes() {
         StageBlueprintEntity blueprint = StageBlueprintEntity.builder()
                 .stageNo(3).startChapter(16).endChapter(20).build();
         DefaultArmoryFactory.DynamicContext ctx = DefaultArmoryFactory.DynamicContext.builder()
@@ -946,13 +946,14 @@ class ChapterPlanPromptServiceTest {
 
         String prompt = service.buildPlanPrompt(ctx, 16, 20, blueprint, false, null, null);
 
-        assertTrue(prompt.contains("至少 2 个**由人物当面的对话/冲突/协作承载"), prompt);
+        assertTrue(prompt.contains("多数场景应由人物当面的对话/冲突/协作承载"), prompt);
         assertTrue(prompt.contains("谁对谁、围绕什么分歧"), prompt);
         assertTrue(prompt.contains("必须写到「场面」级"), prompt);
         assertTrue(prompt.contains("在场人物 + 起因或分歧 + 落点或结果"), prompt);
-        // 对话承载字段必须进入输出示例，与要求文本保持一致。
-        assertTrue(prompt.contains("\"dialogueScenes\":["), "输出示例必须含 dialogueScenes 字段：" + prompt);
-        assertTrue(prompt.contains("逐字复制**进该章 dialogueScenes"), prompt);
-        assertTrue(prompt.contains("transition 章至少 1 个"), prompt);
+        // 输出示例必须以场景为权威来源，并带上 schemaVersion=2。
+        assertTrue(prompt.contains("\"schemaVersion\":2"), "输出示例必须声明 v2 场景契约：" + prompt);
+        assertTrue(prompt.contains("\"scenes\":[{\"id\":\"ch-"), "输出示例必须含 scenes 字段：" + prompt);
+        assertTrue(prompt.contains("scenes 是唯一生成源"), prompt);
+        assertTrue(prompt.contains("禁止双份独立生成"), prompt);
     }
 }
