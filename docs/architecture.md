@@ -103,8 +103,14 @@ docs/workspace/stories/
    ├─ story-bible.json               # 设定集
    ├─ story-meta.json                # 元数据（含 sticky 的完结上限）
    ├─ chapters/                      # 正文
+   ├─ .chapter-commit.json           # 章节提交恢复日志（仅在提交中断时存在）
+   ├─ story-authoring.json           # 作者维护工作副本（未激活）
    ├─ memory/                        # 摘要、三账本、一致性索引、滚动大纲、质量债、
-   │                                 # 伏笔排期/结算、风格统计、审计样本 jsonl
+   │                                 # 伏笔排期/结算、风格统计、审计样本 jsonl、
+   │                                 # authoring-context.json（激活的维护版本）、
+   │                                 # authoring-history/（按 revision 归档）、
+   │                                 # pending-chapter-edit.json、chapter-acceptances.json、
+   │                                 # quality-issues.json（作者处置台账）
    ├─ record/run-XXXX/               # 每次运行：章节计划、体检报告等
    └─ checkpoints/cp-<millis>-<ver>/ # 检查点快照（环形保留最近 8 个）
 ```
@@ -120,6 +126,10 @@ docs/workspace/stories/
 | 追加型文件 | `audit` / `candidate` / `quality-trend` 三个 jsonl 用 `APPEND`，单行 JSON 崩溃最多丢半行 |
 
 续写时的**锁步校验**（`validateResumeLockStep`）：正文最大章号必须等于摘要最大章号，且 1..N 连续无缺口，否则硬失败——防止在损坏目录上错位续写。
+
+**章节提交是一个事务。** 正文、摘要与派生状态先写入 `.chapter-commit.json`，再按日志落盘，最后删除日志；中断后由 `recoverChapterCommit` 补完。日志写入前记录正文哈希、物理章号与依据文件哈希，重放时任一不符即拒绝覆盖——不把"外部改过的稿"当成自己的中间态。依据指纹（`chapterWorkBasis`）覆盖设定、编辑纪元、摘要、蓝图、伏笔账与正式章号，因此换稿或人工编辑之后旧稿不能再提交。
+
+**作者维护与正文分离。** 工作副本 `story-authoring.json` 与执行引用 `authoring-context.json` 是两份文件：保存时先归档历史、再原子替换两份指针，提交前重新核对冻结状态。作者纠正必须仍能对上来源正文（章号 + 哈希 + 连续引文），对不上即拒绝读取——过期纠正混进提示词比停下来更贵。
 
 ## 4. 机制清单
 
@@ -256,6 +266,27 @@ docs/workspace/stories/
 10 字段设定集，`FIELDS` 字段描述表**一处声明同时驱动**四件事：请求/响应键集合、提示词里的中文字段名、"哪些字段已有值"、锁定字段回填。重试纠错区分两种失败——`parseFailed`（JSON 未解析）与 `missing`（解析成功但字段空）——第二次尝试追加的纠错指令不同（"笼统说输出不合法会让模型去改格式而漏掉真缺的内容"）。
 
 `lockNonTargetFields` 在模型输出后机械回填非目标字段，这就是"**只重生成大纲不会顺手改掉世界观**"的机制；`targets` 含未知字段名直接报错，防"点了重生却什么都没变"。
+
+### 4.10 人物状态投影
+
+`memory/CharacterStateProjector`
+三账本只记"当前状态"，回答不了"这个人是否知道某件事、答应过什么、打算做什么"。摘要因此额外携带 `characterEffects`：认知（KNOWLEDGE）、信念（BELIEF）、目标、决定、意图、行动与承诺各自独立。身份、章号与稿件哈希由代码绑定，模型只提供语义字段。
+
+重建按章序重放：证据必须在正文中定位、状态迁移必须合法（终态不自动重开）、同一事项同章不得歧义；未通过的条目转 `pendingCharacterEffects`，不进权威状态。认知与信念分开——**信念可以错误，不自动构成世界事实矛盾**；被要求不等于答应，打算不等于履行。旧摘要没有该字段时不参与重建，行为与引入前一致。
+
+### 4.11 场景契约与因果核验
+
+`plan/ScenePlanPolicy`、`plan/SceneCausalityPolicy`、`plan/PlanCausalityReviewService`
+计划可选 `schemaVersion=2` 的 `scenes`：场景是唯一生成源，章级 `characters`/`keyEvents`/`dialogueScenes` 由系统派生，禁止双份独立生成。旧计划（`schemaVersion` 为 null）继续按原事件清单执行，不做反推转换——把事件清单反推成场景等于凭空补造意图与阻力。
+
+`SceneCausalityPolicy` 只校验已声明因果数据的身份与结构，不调模型、不判语义真假，也不为静场或独处场景补造对白与代价。`PlanCausalityReviewService` 逐场景核验结果所依赖的前提，三态由配置决定：`OFF` 完全不调用；`OBSERVE` 只记日志不回灌写手（观察态诊断一旦变成写作指令，等于用未验证的判断改变剧情）；`ENFORCE` 才驳回。`ISSUE` 必须绑定 `factId`/章号/正文哈希/连续引文；`UNKNOWN` 表示证据不足，既不算通过也不算违规。
+
+### 4.12 书内创作维护与品质处置
+
+`armory/authoring/*`、`quality/QualityIssueService`
+作者维护与生成分开：工作副本 `story-authoring.json` 与执行引用 `authoring-context.json` 是两份文件，保存必须携带预览哈希——候选版本按预览当时的正文依据算出，直接写会让"作者看到的"与"落盘的"分叉。作者纠正必须绑定来源章号、正文哈希与连续引文；对不上即拒绝读取。
+
+品质问题是作者对已生成问题的独立记账，与生成侧质量债分开：处置不改正文、不改质量债、不参与生成依据。**当前版本缺少历史稿与候选稿的保真比对，复核一律返回"未确认"且不调用模型**——无法区分"问题已解决"与"改动了未授权内容"时，认定解决等于用未验证结论覆盖质量债。
 
 ## 5. 跨切面设计原则
 
