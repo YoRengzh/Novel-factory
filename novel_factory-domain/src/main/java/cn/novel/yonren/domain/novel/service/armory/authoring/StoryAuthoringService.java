@@ -78,6 +78,45 @@ public final class StoryAuthoringService {
         });
     }
 
+    /** 将当前章节范围内的已激活作者条目带入生成提示词。 */
+    public static String renderGuidance(StoryContextEntity context, int startChapter, int endChapter) {
+        var active = context == null ? null : context.getStoryAuthoring();
+        if (active == null || endChapter < active.effectiveFromChapter()) {
+            return "";
+        }
+        StringBuilder guidance = new StringBuilder();
+        for (Entry entry : active.entries()) {
+            int fromChapter = Math.max(active.effectiveFromChapter(), entry.effectiveFromChapter());
+            if (fromChapter > endChapter) {
+                continue;
+            }
+            if (guidance.isEmpty()) {
+                guidance.append("\n\n【作者维护】\n")
+                        .append("有据纠错优先于冲突的自动提取。未来意图只约束生效章及后续计划，须由正文演出才成为已发生事实。\n");
+            }
+            guidance.append("- 第 ").append(Math.max(startChapter, fromChapter)).append(" 章起 ")
+                    .append(entry.kind()).append(' ').append(entry.entityName());
+            if (entry.operation() == Operation.EXTRACTION_CORRECTION) {
+                guidance.append(" · 提取纠错（来源第 ").append(entry.sourceChapter()).append(" 章）：");
+            } else {
+                guidance.append(" · 未来意图：");
+            }
+            guidance.append(entry.after()).append('\n');
+        }
+        return guidance.toString();
+    }
+
+    public static String characterDepthMode(StoryContextEntity context) {
+        var active = context == null ? null : context.getStoryAuthoring();
+        return active == null ? null : active.characterDepthMode();
+    }
+
+    public static String renderCharacterDecisions(String trajectory) {
+        return "\n\n【人物决策设计】\n让参与本章的关键人物基于已有认知、目标和承诺做出可观察的选择，"
+                + "并写出该选择的代价或后果。保留人物之间的信息差，不凭空补造既有动机或承诺。\n"
+                + trajectory;
+    }
+
     /** 输入为锁内同一批只读状态；preview 的 revision 可重复计算，PUT 不另选一份候选。 */
     public static StoryAuthoringPreview preview(StoryAuthoringView current, StoryAuthoringPatch patch,
                                                 String bible, Map<Integer, ChapterManuscript> chapters,

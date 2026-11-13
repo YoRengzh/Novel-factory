@@ -63,6 +63,9 @@ class StoryGenerateServiceTest {
     @Mock
     private StoryProperties storyProperties;
 
+    @Mock
+    private cn.novel.yonren.domain.novel.service.armory.edit.ChapterEditService chapterEditService;
+
     @InjectMocks
     private StoryGenerateService storyGenerateService;
 
@@ -102,6 +105,28 @@ class StoryGenerateServiceTest {
         assertEquals(2, ctx.getChapterOffset());
         assertEquals("结尾片段", ctx.getPrevChapterTail());
         assertEquals(List.of("时间线冲突"), ctx.getPendingConflicts());
+    }
+
+    @Test
+    void generate_reflowsPendingEditBeforeLoadingGenerationMemory() throws Exception {
+        String dirName = "20260831-story-0001";
+        Path storyDir = Path.of(dirName);
+        var storyVO = new StoryVO();
+        var command = ArmoryCommandEntity.builder().resumeStoryDir(dirName).storyVO(storyVO).build();
+        var pending = new IStoryRepository.PendingChapterEdit(1, false);
+        var oldHistory = List.of(ChapterSummaryEntity.builder().chapterNo(1).summary("旧").build());
+        var newHistory = List.of(ChapterSummaryEntity.builder().chapterNo(1).summary("新").build());
+        when(storyRepository.resolveStoryDirectory(dirName)).thenReturn(storyDir);
+        when(storyRepository.readChapterNumbers(storyDir)).thenReturn(List.of(1));
+        when(storyRepository.readChapterSummaries(storyDir)).thenReturn(oldHistory, newHistory);
+        when(storyRepository.readPendingChapterEdit(storyDir)).thenReturn(pending);
+        stubStrategyReturn();
+
+        var context = storyGenerateService.newDynamicContext(null);
+        storyGenerateService.generate(command, null, context);
+
+        verify(chapterEditService).reflowPending(storyDir, pending, oldHistory, storyVO, null);
+        assertEquals(newHistory, context.getChapterSummaries());
     }
 
     @Test

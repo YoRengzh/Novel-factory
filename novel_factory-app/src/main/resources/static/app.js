@@ -928,24 +928,15 @@
     const chapterListDiv = document.getElementById('chapter-list');
     const chaptersDiv = document.getElementById('chapters');
     const chapterViewDiv = document.getElementById('chapter-view');
-    const workbenchOverview = document.getElementById('workbench-overview');
     const workbenchMetrics = document.getElementById('workbench-metrics');
     const storyOverviewIntro = document.getElementById('story-overview-intro');
     const workbenchTitle = document.getElementById('workbench-title');
     const chapterViewTitle = document.getElementById('chapter-view-title');
     const chapterListTitle = document.getElementById('chapter-list-title');
 
-    document.getElementById('btn-back-stories').addEventListener('click', function () {
-        chapterListDiv.classList.add('hidden');
-        workbenchOverview.classList.add('hidden');
-        libraryList.classList.remove('hidden');
-        currentStoryDir = null;
-    });
-
     document.getElementById('btn-back-chapters').addEventListener('click', function () {
         chapterViewDiv.classList.add('hidden');
         chapterListDiv.classList.remove('hidden');
-        workbenchOverview.classList.remove('hidden');
         hideChapterNav();
     });
 
@@ -1195,8 +1186,7 @@
             }).join('');
             storiesDiv.querySelectorAll('.story-card').forEach(function (card) {
                 card.addEventListener('click', function () {
-                    currentStoryDir = card.dataset.dir;
-                    loadChapters(currentStoryDir);
+                    loadChapters(card.dataset.dir);
                 });
             });
             // 导出按钮在整卡可点的卡片内部：stopPropagation 防止误触发进章节列表
@@ -1232,10 +1222,7 @@
             showToast('已删除：' + name);
             // 当前浏览的正是被删的故事：退回故事库，避免章节区停留在已删数据上
             if (currentStoryDir === dir) {
-                currentStoryDir = null;
-                chapterListDiv.classList.add('hidden');
-                workbenchOverview.classList.add('hidden');
-                libraryList.classList.remove('hidden');
+                closeBook();
             }
             loadStories();
         })
@@ -1279,21 +1266,20 @@
         });
     }
 
-    function loadChapters(storyDir) {
+    function loadChapters(storyDir, resetWorkspace = false) {
         const token = ++storyViewToken;
         fetchJson('/api/stories/' + encodeURIComponent(storyDir) + '/chapters')
         .then(function (chapters) {
             if (token !== storyViewToken) return;   // 过期响应：用户已切到别的故事
             // 与“当前显示”绑定：保存/相邻章导航都读 currentStoryDir，不能只在 click 时赋值
+            const changedBook = currentStoryDir !== storyDir;
             currentStoryDir = storyDir;
             chapterSequence = chapters.map(function (chapter) { return chapter.chapterNo; });
             libraryList.classList.add('hidden');
+            chapterViewDiv.classList.add('hidden');
             chapterListDiv.classList.remove('hidden');
-            workbenchOverview.classList.remove('hidden');
-            // 书内工作区与章节列表同页：打开书籍即加载作者维护与品质问题
-            if (bookWorkspace) { bookWorkspace.open(storyDir); }
-            // 故事概览与章节列表是同级工作区，概览始终排在章节列表之前。
-            chapterListDiv.parentNode.insertBefore(workbenchOverview, chapterListDiv);
+           hideChapterNav();
+            if (bookWorkspace && (changedBook || resetWorkspace)) bookWorkspace.open(storyDir);
             chapterListTitle.textContent = '章节目录';
             if (chapters.length === 0) {
                 chaptersDiv.innerHTML = '<p class="empty-hint">暂无章节</p>';
@@ -1325,7 +1311,9 @@
         workbenchMetrics.innerHTML = '<p class="empty-hint">概览加载中...</p>';
         fetchJson('/api/stories/' + encodeURIComponent(storyDir) + '/workbench')
         .then(function (data) {
-            workbenchTitle.textContent = data.novelTitle || '故事概述';
+            if (storyDir !== currentStoryDir) return;
+            document.getElementById('book-workspace-title').textContent = data.novelTitle || '书内工作区';
+            workbenchTitle.textContent = '故事概要';
             storyOverviewIntro.textContent = data.storyOverview || '暂无故事简介';
             renderStoryPlan(data);
             var m = data.metrics || {};
@@ -1338,8 +1326,6 @@
                 metric('未解决质量债', m.unresolvedQualityDebtCount || 0),
                 metric('一致性冲突', m.continuityConflictCount || 0)
             ].join('');
-            renderLedger('workbench-characters', data.characters || []);
-            renderLedger('workbench-items', (data.items || []).concat(data.factions || []));
             var risks = (data.foreshadowing || []).map(function (f) { return '第' + f.chapterNo + '章 · ' + f.content; })
                 .concat((data.pendingFacts || []).map(function (f) { return '待确认 · ' + f.name + '：' + f.status; }))
                 .concat((data.qualityDebts || []).filter(function (d) { return !d.resolved; }).map(function (d) { return '质量债 · 第' + d.chapterNo + '章'; }));
@@ -1347,7 +1333,11 @@
             // 工作区的人物/物品/势力/伏笔面板复用同一份工作台数据，避免两套口径
             if (bookWorkspace) { bookWorkspace.updateWorkbench(data); }
         })
-        .catch(function (err) { workbenchMetrics.innerHTML = '<p class="empty-hint">加载失败：' + esc(err.message) + '</p>'; });
+        .catch(function (err) {
+            if (storyDir === currentStoryDir) {
+                workbenchMetrics.innerHTML = '<p class="empty-hint">加载失败：' + esc(err.message) + '</p>';
+            }
+        });
     }
 
     // ===== 检查点与回滚 =====
@@ -1376,6 +1366,7 @@
         checkpointListDiv.innerHTML = '<p class="empty-hint">加载中...</p>';
         fetchJson('/api/stories/' + encodeURIComponent(storyDir) + '/checkpoints')
         .then(function (list) {
+            if (storyDir !== currentStoryDir) return;
             if (!list || list.length === 0) {
                 checkpointListDiv.innerHTML = '<p class="empty-hint">暂无检查点，进程自动打点后或手动快照后出现</p>';
                 return;
@@ -1411,9 +1402,7 @@
         fetchJson('/api/stories/' + encodeURIComponent(storyDir) + '/checkpoints/' + encodeURIComponent(checkpointId) + '/restore', { method: 'POST' })
         .then(function () {
             cpStatus('回滚完成，已刷新概览', 'ok');
-            loadCheckpoints(storyDir);
-            loadWorkbench(storyDir);
-            loadChapters(storyDir);
+            if (storyDir === currentStoryDir) loadChapters(storyDir, true);
         })
         .catch(function (err) {
             cpStatus('回滚失败：' + err.message, 'error');
@@ -1482,13 +1471,6 @@
         return '<div class="metric-card"><strong>' + esc(String(value)) + '</strong><span>' + esc(label)
             + (hint ? ' · ' + esc(String(hint)) : '') + '</span></div>';
     }
-    function renderLedger(id, entries) {
-        var el = document.getElementById(id);
-        el.innerHTML = entries.length ? entries.slice(0, 16).map(function (x) {
-            return '<div class="compact-row"><b>' + esc(x.name || '') + '</b><span>' + esc(x.status || '未记录') + '</span></div>';
-        }).join('') : '<p class="empty-hint">暂无记录</p>';
-    }
-
     function loadChapter(storyDir, chapterNo) {
         const token = ++storyViewToken;
         // 换章即作废上次选中：否则用户在新章里点一次就会沿用旧片段
@@ -1500,7 +1482,6 @@
             currentStoryDir = storyDir;
             chapterViewDiv.classList.remove('editing');
             chapterListDiv.classList.add('hidden');
-            workbenchOverview.classList.add('hidden');
             chapterViewDiv.classList.remove('hidden');
             chapterViewTitle.textContent = '第 ' + ch.chapterNo + ' 章 ' + ch.title;
             contentReadonly.textContent = ch.content;
@@ -3578,15 +3559,28 @@
         // 章节编辑器仍有未保存改动时，工作区的保存不得把上下文切走
         isExtraDirty: function () { return chapterHasUnsavedEdits; }
     }) : null;
-    if (bookWorkspace) {
-        document.getElementById('btn-back-stories').addEventListener('click', function () {
-            if (!bookWorkspace.canLeave()) return;
-            bookWorkspace.open('');
-            libraryList.classList.remove('hidden');
-            chapterListDiv.classList.add('hidden');
-            workbenchOverview.classList.add('hidden');
-        });
+    function closeBook() {
+        ++storyViewToken;
+        currentStoryDir = null;
+        currentChapterNo = null;
+        chapterHasUnsavedEdits = false;
+        hideChapterNav();
+        if (bookWorkspace) bookWorkspace.open('');
+        libraryList.classList.remove('hidden');
     }
+
+    document.getElementById('btn-back-stories').addEventListener('click', function () {
+        if (!bookWorkspace || bookWorkspace.canLeave()) closeBook();
+    });
+    document.getElementById('btn-refresh-chapters').addEventListener('click', function () {
+        if (currentStoryDir) loadChapters(currentStoryDir);
+    });
+    document.getElementById('btn-refresh-runs').addEventListener('click', function () {
+        if (currentStoryDir) {
+            loadWorkbench(currentStoryDir);
+            loadCheckpoints(currentStoryDir);
+        }
+    });
 
     // ===== 版本通知（左下角）=====
     // 逻辑：当前版本由本地后端 /api/app/version 提供；最新版本直接查 GitHub Releases API

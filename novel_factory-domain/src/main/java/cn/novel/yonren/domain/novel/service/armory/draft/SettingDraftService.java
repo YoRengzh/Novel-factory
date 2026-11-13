@@ -171,6 +171,7 @@ public class SettingDraftService {
         String prompt = buildPrompt(request, targets, previous, lockedValues, preferences, full);
         PromptContext ctx = PromptContext.builder()
                 .theme(request.theme())
+                .targetFields(targets)
                 .style(preferences.getOrDefault("style", lockedValues.get("style")))
                 .build();
 

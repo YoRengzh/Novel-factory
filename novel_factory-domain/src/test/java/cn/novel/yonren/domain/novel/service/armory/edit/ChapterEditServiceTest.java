@@ -59,7 +59,8 @@ class ChapterEditServiceTest {
         storyProperties.setConstraints(new StoryVO.Constraints());
         // re-inject since @InjectMocks ran before storyProperties was set
         service = new ChapterEditService(storyRepository, chapterSummaryService,
-                chapterMemoryService, storyMemoryService, storyProperties);
+                chapterMemoryService, storyMemoryService, storyProperties,
+                new cn.novel.yonren.domain.novel.service.armory.memory.ConsistencyIndexService());
     }
 
     @Test

@@ -5,6 +5,7 @@ import cn.novel.yonren.domain.novel.model.entity.ForeshadowScheduleEntity;
 import cn.novel.yonren.domain.novel.model.entity.ForeshadowSettlementEntity;
 import cn.novel.yonren.domain.novel.model.entity.StageBlueprintEntity;
 import cn.novel.yonren.domain.novel.model.entity.StoryContextEntity;
+import cn.novel.yonren.domain.novel.service.armory.authoring.StoryAuthoringService;
 import cn.novel.yonren.domain.novel.model.valobj.StoryVO;
 import cn.novel.yonren.domain.novel.service.armory.factory.DefaultArmoryFactory;
 import cn.novel.yonren.domain.novel.service.armory.memory.ChapterMemoryService;
@@ -149,6 +150,11 @@ public class ChapterPlanPromptService {
         planBlocks.add(new PromptBudgetGuard.Block("故事设定", 5, true, dynamicContext.getStoryContext()));
         planBlocks.addAll(memoryBlocks);
         sb.append(promptBudgetGuard.assemblePlanInput(startNo, planBlocks));
+        sb.append(StoryAuthoringService.renderGuidance(planStoryContext, startNo,
+                endNo == null ? startNo : endNo));
+        if ("APPLY".equals(StoryAuthoringService.characterDepthMode(planStoryContext))) {
+            sb.append(StoryAuthoringService.renderCharacterDecisions(""));
+        }
         sb.append("\n\n请先规划完整章节计划，不要生成正文。")
                 .append("\n要求：")
                 .append("\n0. 【数量锚定·最高优先级，先于一切剧情】本章节数量是硬性契约：")

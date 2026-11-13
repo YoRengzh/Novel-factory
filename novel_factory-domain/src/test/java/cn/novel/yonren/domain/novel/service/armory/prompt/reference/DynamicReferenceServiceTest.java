@@ -15,8 +15,11 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
+import java.util.Map;
+import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
@@ -58,6 +61,38 @@ class DynamicReferenceServiceTest {
 
         when(referenceIndexLoader.getIndex()).thenReturn(List.of());
         when(fileLoader.load(anyString())).thenReturn("资料内容");
+    }
+
+    @Test
+    void blockModeSearchesEligibleSectionsOfAnIneligibleWholeDocument() {
+        properties.setMode("vector");
+        properties.getContentBlocks().setEnabled(true);
+        var policy = new ReferenceUsagePolicy();
+        var blockRetriever = mock(ReferenceBlockRetriever.class);
+        service = new DynamicReferenceService(referenceIndexLoader, selector, retriever, fileLoader,
+                properties, llmRuntimeConfig, null, policy, blockRetriever);
+        var document = entry("character-building");
+        var eligible = new ReferenceAtom(document.getFileName(), "eligible", "人物塑造", "人物深度塑造技巧",
+                0, "角色需要独立动机", "hash", null, List.of(), true);
+        var ineligible = new ReferenceAtom(document.getFileName(), "ineligible", "人物塑造", "人物档案模板",
+                1, "人物档案模板", "hash", null, List.of(), true);
+        var snapshot = new ReferenceBlockSnapshot(null, List.of(eligible, ineligible),
+                Map.of("eligible", eligible, "ineligible", ineligible), "corpus", "signature");
+        var prepared = mock(ReferenceBlockRetriever.Prepared.class);
+        var module = new StoryVO.Module();
+        var context = PromptContext.builder().build();
+        when(referenceIndexLoader.getIndex()).thenReturn(List.of(document));
+        when(blockRetriever.prepare(module)).thenReturn(prepared);
+        when(prepared.snapshot()).thenReturn(snapshot);
+        when(blockRetriever.retrieve(eq(prepared), anyString(), eq(Set.of(document.getFileName())),
+                eq(Set.of("eligible")), eq(12), eq(0.0)))
+                .thenReturn(new ReferenceBlockRetriever.Retrieval(snapshot, List.of()));
+
+        assertFalse(policy.allowsDocument(document.getFileName(), PromptScene.CHAPTER_CONTENT, context));
+        service.selectAsRules(module, PromptScene.CHAPTER_CONTENT, context);
+
+        verify(blockRetriever).retrieve(eq(prepared), anyString(), eq(Set.of(document.getFileName())),
+                eq(Set.of("eligible")), eq(12), eq(0.0));
     }
 
     @Test

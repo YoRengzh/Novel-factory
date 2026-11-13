@@ -127,4 +127,9 @@ test('静态资源加载顺序：工作区脚本必须先于 app.js 接线', () 
     assert.ok(appAt > 0, 'index.html 必须引用 app.js');
     assert.ok(workspaceAt < appAt, '工作区脚本必须在 app.js 之前加载，否则 create 时取不到全局');
     assert.ok(html.includes('book-workspace.css'), 'index.html 必须引用工作区样式');
+    for (const id of ['workbench-overview', 'chapter-list', 'chapter-view', 'btn-back-stories', 'checkpoint-list']) {
+        assert.equal([...html.matchAll(new RegExp('\\bid="' + id + '"', 'g'))].length, 1, id);
+    }
+    const app = fs.readFileSync(path.join(staticRoot, 'app.js'), 'utf8');
+    assert.ok(!app.includes('insertBefore(workbenchOverview'), '概要卡片必须留在概要标签页');
 });

@@ -4,6 +4,7 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 
 import cn.novel.yonren.domain.novel.adapter.repository.IStoryRepository;
+import cn.novel.yonren.domain.novel.model.valobj.work.ChapterCommitState;
 import cn.novel.yonren.domain.novel.model.aggregate.ChapterPlanAggregate;
 import cn.novel.yonren.domain.novel.model.entity.ArmoryCommandEntity;
 import cn.novel.yonren.domain.novel.model.entity.ChapterPlanItemEntity;
@@ -343,7 +344,7 @@ class ChapterWorkerTest {
 
         assertEquals(1, ctx.getChapterContents().size(), "取消信号置位后应完成当前章即停");
         verify(llmInvokeService, times(1)).invoke(any(), any(), any(), anyString(), anyMap());
-        verify(storyRepository, times(1)).commitChapter(eq(STORY_DIR), any(), anyList(), any());
+        verify(storyRepository, times(1)).commitChapter(eq(STORY_DIR), any(), any(ChapterCommitState.class));
         verify(storyRepository, times(1)).writeJobStatus(eq(STORY_DIR), same(job));
         assertEquals(Integer.valueOf(1), job.getCurrentChapter());
     }
@@ -476,7 +477,7 @@ class ChapterWorkerTest {
 
         chapterWorker.generateAll(command(), ctx);
 
-        verify(storyRepository, times(2)).commitChapter(eq(STORY_DIR), any(), anyList(), any());
+        verify(storyRepository, times(2)).commitChapter(eq(STORY_DIR), any(), any(ChapterCommitState.class));
         verify(chapterSummaryService, times(2)).summarize(any(), any(), anyString(), anyInt(), anyString(), anyList(), any());
     }
 
@@ -544,10 +545,9 @@ class ChapterWorkerTest {
 
         chapterWorker.generateAll(command(), ctx);
 
-        ArgumentCaptor<List<cn.novel.yonren.domain.novel.model.entity.QualityDebtEntity>> captor =
-                ArgumentCaptor.forClass(List.class);
-        verify(storyRepository, atLeastOnce()).writeQualityDebts(any(), captor.capture());
-        List<cn.novel.yonren.domain.novel.model.entity.QualityDebtEntity> last = captor.getValue();
+        ArgumentCaptor<ChapterCommitState> captor = ArgumentCaptor.forClass(ChapterCommitState.class);
+        verify(storyRepository, atLeastOnce()).commitChapter(any(), any(), captor.capture());
+        var last = captor.getValue().debts();
         boolean recorded = last.stream().flatMap(d -> d.getIssues().stream())
                 .anyMatch(i -> "aesthetic".equals(i.getDimension())
                         && "MINOR".equals(i.getSeverity()));
@@ -696,7 +696,7 @@ class ChapterWorkerTest {
         org.mockito.ArgumentCaptor<cn.novel.yonren.domain.novel.model.entity.ChapterContentEntity> captor =
                 org.mockito.ArgumentCaptor.forClass(cn.novel.yonren.domain.novel.model.entity.ChapterContentEntity.class);
         verify(storyRepository, org.mockito.Mockito.atLeastOnce())
-                .commitChapter(any(), captor.capture(), anyList(), any());
+                .commitChapter(any(), captor.capture(), any(ChapterCommitState.class));
         assertTrue(captor.getAllValues().stream()
                         .anyMatch(c -> c.getContent() != null && c.getContent().contains("这是真正文内容")),
                 "重复键时必须抢救首个非空 content，而不是落盘空稿");

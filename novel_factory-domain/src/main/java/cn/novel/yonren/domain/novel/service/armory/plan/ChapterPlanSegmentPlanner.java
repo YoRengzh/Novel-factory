@@ -315,7 +315,7 @@ public class ChapterPlanSegmentPlanner {
             if (stillBadJumpSwallow != null) {
                 residual.append(ChapterPlanChecks.jumpSwallowFeedback(stillBadJumpSwallow));
             }
-            return new PlannedSegment(retry.raw(), retry.plan(), residual.toString());
+            retry = new PlannedSegment(retry.raw(), retry.plan(), residual.toString());
         } else {
             log.info("{}推进校验：重规划后通过", label);
         }

@@ -247,6 +247,7 @@
                             <p id="story-overview-intro" class="story-overview-intro">暂无故事简介</p>
                             <div id="story-plan" class="story-plan-panel"></div>
                             <div id="workbench-metrics" class="metric-grid"></div>
+                            <div id="workbench-risks" class="compact-list"></div>
                             <p class="settings-hint">这里只展示全书概况。阅读与修改正文请到「正文与章节」，维护人物和设定请到「创作管理」。</p>
                         </div>
                     </section>
@@ -348,73 +349,6 @@
                         <div class="content-card"><h3>检查点与回滚</h3><p class="settings-hint">手动快照为全书留锚；回滚将恢复章节、蓝图、账本并裁剪之后的章节。最多保留 8 个，超限丢弃最旧。回滚前请保存编辑。</p><div class="cp-actions"><button id="btn-new-checkpoint" class="btn-primary" type="button">打一个快照</button><button id="btn-refresh-checkpoints" class="btn-secondary" type="button">刷新</button></div><div id="checkpoint-status" class="config-status hidden"></div><div id="checkpoint-list" class="compact-list cp-list"></div></div>
                         <div id="book-advanced" class="content-card"><h3>书级高级设置</h3><p class="settings-hint">人物深度模式独立保存在当前书。普通生成请求不携带模式，也不会静默覆盖它。保存只影响未来可用执行依据，已启动任务仍使用冻结版本。</p><p id="book-current-mode" class="character-profile-meta">当前执行模式待读取</p><label for="book-character-depth-mode">人物深度模式</label><select id="book-character-depth-mode" disabled><option value="">继承服务端默认（未单独设置）</option><option value="OFF">OFF · 关闭</option><option value="OBSERVE">OBSERVE · 仅观察</option><option value="APPLY">APPLY · 应用决策设计</option></select><p id="character-mode-hint" class="settings-hint"></p><button id="btn-preview-book-mode" class="btn-secondary" type="button" disabled>预览模式变更</button><div id="book-run-preview-slot"></div></div>
                     </section>
-                </div>
-
-                <div id="chapter-list" class="content-card hidden" data-page-node-id="sQKu8GtUhfMWJyueWmV5hS">
-                    <div class="list-header has-floating-back" data-page-node-id="eDBR2HDW1EAGmgVVqREsBR">
-                        <button id="btn-back-stories" class="btn-back btn-back-floating" data-page-node-id="jLVE7hvmS8IgM55JnDAcZs">
-                            <span data-page-node-id="9H9e2czj2aM0ewOLbbh5kJ">返回</span>
-                        </button>
-                        <h2 id="chapter-list-title" class="section-title" data-page-node-id="JGnJBS0omuXSelmuWsDpD8">章节目录</h2>
-                    </div>
-                    <div id="chapters" class="chapters-list" data-page-node-id="VyG5CsThi8riSGensnnUxD"></div>
-                </div>
-
-                <div id="workbench-overview" class="content-card hidden" data-page-node-id="jPRhqbR47qaS9Cc3CqwkQD">
-                    <div class="section-label" data-page-node-id="66cDQd6CKZOayp4RHCbrli">STORY OVERVIEW</div>
-                    <div class="list-header" data-page-node-id="EeDGSqUfphi3LY9iB4gHB5">
-                        <div data-page-node-id="ppR97f8ddqBwm5wiSR950R">
-                            <h2 id="workbench-title" class="section-title" data-page-node-id="IWi2AZ6SpaOtuMHU3gfSJD">故事概述</h2>
-                        </div>
-                        <button id="btn-refresh-workbench" class="btn-secondary" type="button" data-page-node-id="A0ajHoFzWD45pceRMFAadh">刷新概览</button>
-                    </div>
-                    <div class="workbench-split" data-page-node-id="AdGWcxpDJPqfDkXi3uHGoz">
-                        <div class="wb-col wb-setting" data-page-node-id="VSuKOjmunwEXAk4ntqojFo">
-                            <p id="story-overview-intro" class="story-overview-intro" data-page-node-id="1UT8c4PNDMLa8zGrww864M">暂无故事简介</p>
-                            <div id="story-plan" class="story-plan-panel" data-page-node-id="qScBJMDJjDPZBdzHDbGArY"></div>
-                            <div id="workbench-metrics" class="metric-grid" data-page-node-id="s40DM8nK2ufBeG3oYp51xD"></div>
-                            <div class="workbench-columns" data-page-node-id="k9TTt3Cz3CddjjuijhGYQO">
-                                <div data-page-node-id="dv0oatFtX3nE77INCe1zhh"><h3 data-page-node-id="HVbclKYOCD1LAF6PcnfGGo">角色账本</h3><div id="workbench-characters" class="compact-list" data-page-node-id="72ymtE22dhdROa52Vv4rju"></div></div>
-                                <div data-page-node-id="WhALdSfJcJt8x764l7j0AY"><h3 data-page-node-id="oO1C0GZ9KWUCosGfjcgxLV">物品 / 势力</h3><div id="workbench-items" class="compact-list" data-page-node-id="OV0OMykULDYGfOyZ5lh295"></div></div>
-                                <div data-page-node-id="p4P85bb9AXgyzFXjUCIFOU"><h3 data-page-node-id="mVJaSOnHML8wQ3RWFXCYTm">伏笔与质量债</h3><div id="workbench-risks" class="compact-list" data-page-node-id="RfOYolycaTRV1CXFrv14rj"></div></div>
-                            </div>
-                        </div>
-                        <div class="wb-col wb-checkpoint" data-page-node-id="xS5nFvEAOK8wa9ZInHagR7">
-                            <div class="section-label" data-page-node-id="j13DmxihqQmx0VmBte4ZCs">CHECKPOINTS</div>
-                            <h3 class="wb-col-title" data-page-node-id="mW5rKG7MxKos6RO02JQvcj">检查点与回滚</h3>
-                            <p class="settings-hint" data-page-node-id="bZPNg3WOhIUHAZViLTLYVs">
-                                手动快照用于在开新阶段前留锚；回滚将把章节、蓝图、账本恢复到该点，
-                                并裁剪之后的章节。最多保留 8 个，超限自动丢弃最旧。
-                            </p>
-                            <div class="cp-actions" data-page-node-id="aZaHMr0Vrl6Jqy4MfrUGYj">
-                                <button id="btn-new-checkpoint" class="btn-primary" type="button" data-page-node-id="vkWSNkLCqWJqBq5VaqJJ7o">打一个快照</button>
-                                <button id="btn-refresh-checkpoints" class="btn-secondary" type="button" data-page-node-id="KHUjrgdGr6J7vcvVES3Irh">刷新</button>
-                            </div>
-                            <div id="checkpoint-status" class="config-status hidden" data-page-node-id="FInWEgMwAw31zoa07VqcC9"></div>
-                            <div id="checkpoint-list" class="compact-list cp-list" data-page-node-id="jhoh85VVhuXinh4eo7Rk0D">
-                                <p class="empty-hint" data-page-node-id="PdGElSDZjZJmhFnVlyDbHq">加载中...</p>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-
-                <div id="chapter-view" class="content-card hidden" data-page-node-id="LtIvcZmhySgfuasnQPbwyR">
-                    <div class="list-header has-floating-back" data-page-node-id="utj5ql8etcU5ZdedKKiFwW">
-                        <button id="btn-back-chapters" class="btn-back btn-back-floating" data-page-node-id="PnaYX8aDNtqJzQMuf022sf">
-                            <span data-page-node-id="Pwr4rpHFwF6js8KrfXQkLp">返回</span>
-                        </button>
-                        <h2 id="chapter-view-title" class="section-title" data-page-node-id="zZRBGGpQM0eqhZCf8Y3zW3"></h2>
-                    </div>
-                    <div class="chapter-actions" data-page-node-id="vuBcDgnxoOEhhF5qhBAMy3">
-                        <button id="btn-edit" class="btn-secondary" data-page-node-id="Qsxx0V9cwnlj4IifBGpsGy">编 辑</button>
-                        <button id="btn-save" class="btn-primary hidden" data-page-node-id="0JdELmpfsOJR8c8Pv4LZaU">保 存</button>
-                        <button id="btn-cancel-edit" class="btn-secondary hidden" data-page-node-id="RpGLVi4Rt6dTo6l9e4nUFA">取 消</button>
-                    </div>
-                    <div class="chapter-body" data-page-node-id="KHEWeBEA3GLGqIKi3SlcK8">
-                        <div id="chapter-content-readonly" class="chapter-text" data-page-node-id="9EQV0dFBsKx4XNkU5aZuZP"></div>
-                        <div id="chapter-content-edit" class="chapter-text hidden" contenteditable="true" spellcheck="false" data-page-node-id="xnKTyy7dM0GcvbGTx6B8WJ"></div>
-                        <div id="save-result" class="save-result hidden" data-page-node-id="gKT0dSnqk73yxaNU9uKRsW"></div>
-                    </div>
                 </div>
 
                 <!-- 选中文本的浮动工具条：只在阅读态、选中足够长的片段时出现 -->

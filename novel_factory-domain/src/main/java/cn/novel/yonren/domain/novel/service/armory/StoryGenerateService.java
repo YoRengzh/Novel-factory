@@ -8,6 +8,7 @@ import cn.novel.yonren.domain.novel.model.entity.ArmoryCommandEntity;
 import cn.novel.yonren.domain.novel.model.entity.StoryContextEntity;
 import cn.novel.yonren.domain.novel.config.StoryProperties;
 import cn.novel.yonren.domain.novel.service.armory.factory.DefaultArmoryFactory;
+import cn.novel.yonren.domain.novel.service.armory.edit.ChapterEditService;
 import cn.novel.yonren.domain.novel.service.armory.memory.ChapterMemoryService;
 import cn.novel.yonren.domain.novel.service.job.GenerationJob;
 import cn.novel.yonren.types.enums.ResponseCode;
@@ -42,6 +43,9 @@ public class StoryGenerateService {
 
     @Resource
     private ChapterMemoryService chapterMemoryService;
+
+    @Resource
+    private ChapterEditService chapterEditService;
 
     @Resource
     private StoryProperties storyProperties;
@@ -189,13 +193,18 @@ public class StoryGenerateService {
         StoryBibleParser.Snapshot settings = parsed.snapshot();
         restoreStoryFeatures(command, settings);
         restoreCharacterProfiles(command, settings);
-        restoreAuthoring(command, storyDir);
 
-        // 先补完上次中断的提交再读记忆：日志残留说明正文已换、账本可能还没跟上。
-        // 没有日志时是空操作，不改变既有续写行为。
         storyRepository.recoverChapterCommit(storyDir);
+        restoreAuthoring(command, storyDir);
         List<ChapterSummaryEntity> history = storyRepository.readChapterSummaries(storyDir);
-        dynamicContext.setChapterSummaries(new ArrayList<>(history));
+        validateResumeLockStep(resumeStoryDir, history, storyRepository.readChapterNumbers(storyDir));
+        var pending = storyRepository.readPendingChapterEdit(storyDir);
+        if (pending != null) {
+            String worldId = command.getStoryContextEntity() == null
+                    ? settings.worldId() : command.getStoryContextEntity().getWorldId();
+            chapterEditService.reflowPending(storyDir, pending, history, command.getStoryVO(), worldId);
+            history = storyRepository.readChapterSummaries(storyDir);
+        }
         dynamicContext.setConsistencyIndex(storyRepository.readConsistencyIndex(storyDir));
         dynamicContext.setStyleStat(storyRepository.readStyleStat(storyDir));
         dynamicContext.setQualityDebts(new ArrayList<>(storyRepository.readQualityDebts(storyDir)));
@@ -213,9 +222,7 @@ public class StoryGenerateService {
         dynamicContext.setForeshadowSchedules(
                 new ArrayList<>(storyRepository.readForeshadowSchedule(storyDir)));
 
-        // 锁步校验：正文文件与记忆摘要必须严格对齐（最大编号一致、编号从 1 连续），否则硬失败
-        validateResumeLockStep(resumeStoryDir, history, storyRepository.readChapterNumbers(storyDir));
-
+        dynamicContext.setChapterSummaries(new ArrayList<>(history));
         int chapterOffset = history.stream()
                 .mapToInt(s -> s.getChapterNo() == null ? 0 : s.getChapterNo())
                 .max().orElse(0);

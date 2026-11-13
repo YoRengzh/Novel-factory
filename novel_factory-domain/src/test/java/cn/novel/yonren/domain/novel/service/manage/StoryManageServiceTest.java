@@ -204,7 +204,7 @@ class StoryManageServiceTest {
 
     @Test
     void saveChapter_activeJob_throwsConflict() {
-        when(jobRegistry.isActiveForStory(DIR)).thenReturn(true);
+        when(jobRegistry.tryBeginStoryOperation(DIR)).thenReturn(false);
 
         ChapterSaveRequestDTO request = new ChapterSaveRequestDTO();
         request.setContent("新内容");
@@ -227,7 +227,7 @@ class StoryManageServiceTest {
     @Test
     void saveChapter_success_writesAndReflows() throws Exception {
         when(storyRepository.resolveStoryDirectory(DIR)).thenReturn(STORY_DIR);
-        when(jobRegistry.isActiveForStory(DIR)).thenReturn(false);
+        when(jobRegistry.tryBeginStoryOperation(DIR)).thenReturn(true);
         String content = "正".repeat(1500);
         when(chapterEditService.reflow(STORY_DIR, 1, content))
                 .thenReturn(new ChapterEditService.ReflowResult(true, false, null));
@@ -246,7 +246,7 @@ class StoryManageServiceTest {
     @Test
     void saveChapter_preservesExistingTitle() throws Exception {
         when(storyRepository.resolveStoryDirectory(DIR)).thenReturn(STORY_DIR);
-        when(jobRegistry.isActiveForStory(DIR)).thenReturn(false);
+        when(jobRegistry.tryBeginStoryOperation(DIR)).thenReturn(true);
         ChapterContentEntity existing = new ChapterContentEntity();
         existing.setChapterNo(1);
         existing.setTitle("原有标题");
@@ -269,7 +269,7 @@ class StoryManageServiceTest {
     @Test
     void saveChapter_missingChapter_writesEmptyTitle() throws Exception {
         when(storyRepository.resolveStoryDirectory(DIR)).thenReturn(STORY_DIR);
-        when(jobRegistry.isActiveForStory(DIR)).thenReturn(false);
+        when(jobRegistry.tryBeginStoryOperation(DIR)).thenReturn(true);
         when(storyRepository.readChapter(STORY_DIR, 9)).thenReturn(null);
         String content = "正".repeat(1500);
         when(chapterEditService.reflow(STORY_DIR, 9, content))
@@ -293,7 +293,7 @@ class StoryManageServiceTest {
     @Test
     void saveChapter_shortContent_nowAllowed() throws Exception {
         when(storyRepository.resolveStoryDirectory(DIR)).thenReturn(STORY_DIR);
-        when(jobRegistry.isActiveForStory(DIR)).thenReturn(false);
+        when(jobRegistry.tryBeginStoryOperation(DIR)).thenReturn(true);
         ChapterContentEntity existing = new ChapterContentEntity();
         existing.setChapterNo(1);
         existing.setTitle("原标题");
@@ -315,7 +315,7 @@ class StoryManageServiceTest {
     @Test
     void saveChapter_reflowFalse_skipsReflow() throws Exception {
         when(storyRepository.resolveStoryDirectory(DIR)).thenReturn(STORY_DIR);
-        when(jobRegistry.isActiveForStory(DIR)).thenReturn(false);
+        when(jobRegistry.tryBeginStoryOperation(DIR)).thenReturn(true);
         ChapterContentEntity existing = new ChapterContentEntity();
         existing.setChapterNo(1);
         existing.setTitle("原标题");

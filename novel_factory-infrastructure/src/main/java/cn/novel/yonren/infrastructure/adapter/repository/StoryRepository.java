@@ -490,7 +490,15 @@ public class StoryRepository implements IStoryRepository {
     private ChapterCommit guardCommit(Path storyDir, ChapterCommit commit) throws IOException {
         var disk = readChapter(storyDir, commit.chapter().getChapterNo());
         Map<String, String> sources = new java.util.LinkedHashMap<>();
-        for (Path source : basisSources(storyDir)) {
+        var guardedSources = new ArrayList<>(basisSources(storyDir));
+        if (commit.state() != null) {
+            guardedSources.addAll(List.of(
+                    workFile(storyDir, StorageKeys.CONSISTENCY_INDEX_FILE),
+                    workFile(storyDir, StorageKeys.QUALITY_DEBT_FILE),
+                    workFile(storyDir, StorageKeys.STYLE_STAT_FILE),
+                    workFile(storyDir, StorageKeys.STYLE_FINGERPRINT_FILE)));
+        }
+        for (Path source : guardedSources) {
             sources.put(relativeKey(storyDir, source),
                     Files.notExists(source) ? "-" : ChapterManuscript.digest(Files.readString(source, StandardCharsets.UTF_8)));
         }
@@ -534,6 +542,10 @@ public class StoryRepository implements IStoryRepository {
         putCommitTarget(targets, StorageKeys.ROLLING_OUTLINE_FILE,
                 state == null ? commit.updatedBlueprints() : state.stages(), true);
         if (state != null) {
+            putCommitTarget(targets, StorageKeys.CONSISTENCY_INDEX_FILE, state.consistency());
+            putCommitTarget(targets, StorageKeys.QUALITY_DEBT_FILE, state.debts(), true);
+            putCommitTarget(targets, StorageKeys.STYLE_STAT_FILE, state.style());
+            putCommitTarget(targets, StorageKeys.STYLE_FINGERPRINT_FILE, state.fingerprints(), true);
             putCommitTarget(targets, StorageKeys.VOLUME_FILE, state.volumes(), true);
             putCommitTarget(targets, StorageKeys.FORESHADOW_SCHEDULE_FILE, state.schedules(), true);
             putCommitTarget(targets, StorageKeys.FORESHADOW_SETTLEMENT_FILE, state.settlements(), true);
@@ -554,6 +566,12 @@ public class StoryRepository implements IStoryRepository {
 
     private static void putCommitTarget(Map<String, String> targets, String file, List<?> value, boolean skipEmpty) {
         if (value != null && (!skipEmpty || !value.isEmpty())) {
+            putCommitTarget(targets, file, value);
+        }
+    }
+
+    private static void putCommitTarget(Map<String, String> targets, String file, Object value) {
+        if (value != null) {
             targets.put(StorageKeys.MEMORY_DIR + "/" + file, ChapterManuscript.digest(JSON.toJSONString(value)));
         }
     }

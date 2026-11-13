@@ -47,7 +47,7 @@ public class JobRegistry {
         }
     }
 
-    public void register(GenerationJob job) {
+    public synchronized void register(GenerationJob job) {
         jobs.put(job.getJobId(), job);
         evictTerminalOverflow();
     }
@@ -83,6 +83,15 @@ public class JobRegistry {
 
     private static boolean isTerminal(JobStatus status) {
         return status == JobStatus.COMPLETED || status == JobStatus.FAILED || status == JobStatus.CANCELLED;
+    }
+
+    /** 在同一个锁内检查故事是否空闲并登记续写作业。 */
+    public synchronized boolean tryRegister(GenerationJob job) {
+        if (isActiveForStory(job.getStoryDirName())) {
+            return false;
+        }
+        register(job);
+        return true;
     }
 
     /** 未知 jobId 返回 null */

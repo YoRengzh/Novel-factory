@@ -25,6 +25,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.contains;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
@@ -47,6 +48,9 @@ class ChapterPlanSegmentPlannerTest {
 
     @Mock
     private PlanBranchService planBranchService;
+
+    @Mock
+    private PlanCausalityReviewService causalityReview;
 
     private ChapterPlanSegmentPlanner planner;
 
@@ -208,6 +212,24 @@ class ChapterPlanSegmentPlannerTest {
         assertNotNull(planned);
         assertEquals(3, planned.plan().getChapters().size());
         verify(llmInvokeService, times(2)).invoke(any(), any(), any(), anyString(), any());
+    }
+
+    @Test
+    void planSegment_enforcesCausalityAfterLocalWarningsAreReleased() {
+        when(llmInvokeService.invoke(any(), any(), any(), anyString(), any()))
+                .thenReturn(stagnantPlan(), stagnantPlan());
+        org.springframework.test.util.ReflectionTestUtils.setField(planner, "planCausalityReviewService", causalityReview);
+        when(causalityReview.getMode()).thenReturn(
+                cn.novel.yonren.domain.novel.config.StoryProperties.CausalityProperties.Mode.ENFORCE);
+        when(causalityReview.check(any(), any(), any(), any(), eq(1), eq(3), any(), any(), any()))
+                .thenReturn(new cn.novel.yonren.domain.novel.model.valobj.plan.PlanValidationResult(
+                        List.of("缺少必要前提"), List.of()));
+
+        var failure = assertThrows(cn.novel.yonren.types.exception.AppException.class, () -> planner.planSegment(
+                new StoryVO(), PromptContext.builder().build(), "prompt",
+                1, 3, blueprintWithLadder(), null, usedPromptMap));
+
+        assertTrue(failure.getInfo().contains("缺少必要前提"));
     }
 
     /**

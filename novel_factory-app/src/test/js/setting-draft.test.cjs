@@ -19,7 +19,7 @@ const fieldIds = {
 function draftBlock() {
     const source = fs.readFileSync(path.join(staticRoot, 'app.js'), 'utf8');
     const start = source.indexOf('    // ===== 一键生成设定集');
-    const end = source.indexOf('    // ===== 章节计划裁决', start);
+    const end = source.indexOf('    // ===== 故事库', start);
     assert.ok(start >= 0 && end > start, '草稿 UI 区块边界必须存在');
     return source.slice(start, end);
 }

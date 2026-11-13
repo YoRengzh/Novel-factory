@@ -72,6 +72,19 @@ class StoryAuthoringServiceTest {
     }
 
     @Test
+    void generationGuidanceKeepsFutureIntentOutOfEarlierChapters() {
+        var active = preview(null, null, List.of(intent(8)), 2).candidate();
+        var story = StoryContextEntity.builder().storyAuthoring(active).build();
+
+        assertEquals("", StoryAuthoringService.renderGuidance(story, 4, 7));
+        String plan = StoryAuthoringService.renderGuidance(story, 4, 9);
+        assertTrue(plan.contains("第 8 章起"));
+        assertTrue(plan.contains(active.entries().get(0).after()));
+        assertEquals("", StoryAuthoringService.renderGuidance(story, 7, 7));
+        assertTrue(StoryAuthoringService.renderGuidance(story, 8, 8).contains("未来意图"));
+    }
+
+    @Test
     void fullListMayRetainUnchangedPastIntentButCannotRebaseEditedIntent() {
         var first = preview(null, null, List.of(intent(2)), 2).candidate();
         Entry original = first.entries().get(0);

@@ -1,8 +1,14 @@
 package cn.novel.yonren.domain.novel.service.armory.edit;
 
 import cn.novel.yonren.domain.novel.adapter.repository.IStoryRepository;
-import cn.novel.yonren.domain.novel.model.entity.ChapterPlanItemEntity;import cn.novel.yonren.domain.novel.model.entity.ChapterSummaryEntity;
+import cn.novel.yonren.domain.novel.model.entity.ChapterPlanItemEntity;
+import cn.novel.yonren.domain.novel.model.entity.ChapterSummaryEntity;
 import cn.novel.yonren.domain.novel.model.valobj.StoryVO;
+import cn.novel.yonren.domain.novel.model.valobj.work.ChapterManuscript;
+import cn.novel.yonren.domain.novel.service.armory.memory.CharacterStateProjector;
+import cn.novel.yonren.domain.novel.service.armory.memory.ConsistencyIndexService;
+import cn.novel.yonren.types.enums.ResponseCode;
+import cn.novel.yonren.types.exception.AppException;
 import cn.novel.yonren.domain.novel.config.StoryProperties;
 import cn.novel.yonren.domain.novel.service.armory.memory.ChapterMemoryService;
 import cn.novel.yonren.domain.novel.service.armory.memory.ChapterSummaryService;
@@ -30,6 +36,47 @@ public class ChapterEditService {
     private final ChapterMemoryService chapterMemoryService;
     private final StoryMemoryService storyMemoryService;
     private final StoryProperties storyProperties;
+    private final ConsistencyIndexService consistencyIndexService;
+
+    /** 按章重建受影响区间，全部成功后才清除待回流标记。 */
+    public void reflowPending(Path storyDir, IStoryRepository.PendingChapterEdit pending,
+                              List<ChapterSummaryEntity> summaries, StoryVO storyVO, String worldId) throws Exception {
+        int fromChapter = pending.fromChapter();
+        if (fromChapter < 1 || fromChapter > summaries.size()) {
+            throw new AppException(ResponseCode.UN_ERROR.getCode(), "待回流起始章超出正式历史：" + fromChapter);
+        }
+        List<ChapterSummaryEntity> rebuilt = new ArrayList<>(summaries.subList(0, fromChapter - 1));
+        for (int chapterNo = fromChapter; chapterNo <= summaries.size(); chapterNo++) {
+            var chapter = storyRepository.readChapter(storyDir, chapterNo);
+            if (chapter == null || !ChapterLengthPolicy.meetsEditMinimum(chapter.getContent())) {
+                throw new AppException(ResponseCode.UN_ERROR.getCode(), "待回流正文缺失或为空：第 " + chapterNo + " 章");
+            }
+            var summary = summarizeEdit(storyDir, chapterNo, chapter.getContent(), storyVO, rebuilt);
+            if (summary.isPartial()) {
+                throw new AppException(ResponseCode.UN_ERROR.getCode(), "第 " + chapterNo + " 章回流只生成了残缺摘要，请重试");
+            }
+            var manuscript = ChapterManuscript.of(chapter);
+            summary.setManuscriptHash(manuscript.hash());
+            CharacterStateProjector.bind(summary, manuscript, rebuilt);
+            rebuilt.add(summary);
+        }
+        storyRepository.writeChapterSummaries(storyDir, rebuilt);
+        storyRepository.writeConsistencyIndex(storyDir, consistencyIndexService.rebuild(rebuilt, storyVO));
+        storyMemoryService.rebuildIndex(storyVO.getModule(), storyDir, rebuilt, worldId);
+        storyRepository.writePendingChapterEdit(storyDir, null);
+    }
+
+    private ChapterSummaryEntity summarizeEdit(Path storyDir, int chapterNo, String content, StoryVO storyVO,
+                                               List<ChapterSummaryEntity> history) throws Exception {
+        var plan = storyRepository.readChapterPlanItem(storyDir, chapterNo);
+        if (plan == null) {
+            plan = ChapterPlanItemEntity.builder().chapterNo(chapterNo).title("第" + chapterNo + "章").build();
+        }
+        return chapterSummaryService.summarize(storyVO, plan, content, chapterNo,
+                chapterMemoryService.renderLedgerPrompt(history),
+                chapterMemoryService.buildForeshadowContextListWithIds(history, ChapterMemoryService.FORESHADOW_CONTEXT_LIMIT),
+                history);
+    }
 
     public record ReflowResult(boolean summaryUpdated, boolean partial, String warning) {
     }
@@ -72,16 +119,22 @@ public class ChapterEditService {
             ChapterSummaryEntity newSummary = chapterSummaryService.summarize(
                     storyVO, item, newContent, chapterNo, ledgerPrompt, foreshadowing);
 
+            var chapter = storyRepository.readChapter(storyDir, chapterNo);
+            if (chapter != null) {
+                var manuscript = ChapterManuscript.of(chapter);
+                newSummary.setManuscriptHash(manuscript.hash());
+                CharacterStateProjector.bind(newSummary, manuscript, summaries);
+            }
             summaries.set(chapterNo - 1, newSummary);
             storyRepository.writeChapterSummaries(storyDir, summaries);
             // 摘要已跟上正文：清除待回流标记。若仍有更早章节的待办，保留其起始章。
             IStoryRepository.PendingChapterEdit pending = storyRepository.readPendingChapterEdit(storyDir);
-            if (pending != null && pending.fromChapter() >= chapterNo) {
+            storyRepository.writeConsistencyIndex(storyDir, consistencyIndexService.rebuild(summaries, storyVO));
+            storyMemoryService.indexChapter(storyVO.getModule(), storyDir, summaries, chapterNo, null);
+            if (pending != null && pending.fromChapter() == chapterNo
+                    && chapterNo == summaries.size() && !newSummary.isPartial()) {
                 storyRepository.writePendingChapterEdit(storyDir, null);
             }
-
-            storyMemoryService.indexChapter(
-                    storyVO.getModule(), storyDir, summaries, chapterNo, null);
 
             return new ReflowResult(true, newSummary.isPartial(), null);
         } catch (Exception e) {

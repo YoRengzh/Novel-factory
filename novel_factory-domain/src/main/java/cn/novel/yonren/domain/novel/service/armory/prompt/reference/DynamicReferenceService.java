@@ -68,10 +68,12 @@ public class DynamicReferenceService {
         List<ReferenceIndexEntry> index = referenceIndexLoader.getIndex();
         // 按场景裁剪索引：58 份平铺时选择器要在长表里挑 3 份，选准率随条目数下降；
         // 先筛到该场景实际可用的分组，选择范围更聚焦（向量模式不受影响，它走语义召回）
+        boolean blockMode = blockRetriever != null && isBlockMode(config, scene);
         List<ReferenceIndexEntry> sceneIndex = filterByScene(index, scene);
-        // 用途资格在候选进入选择器之前生效：不适用来源不能被选中后再丢弃。
-        sceneIndex = filterByUsage(sceneIndex, scene, ctx);
-        String cacheKey = buildCacheKey(module, scene, ctx, sceneIndex);
+        if (!blockMode) {
+            sceneIndex = filterByUsage(sceneIndex, scene, ctx);
+        }
+        String cacheKey = buildCacheKey(module, scene, ctx, sceneIndex) + "|" + blockMode;
         if (config.isCacheEnabled()) {
             List<PromptRule> cached = selectionCache.get(cacheKey);
             if (cached != null) {
@@ -80,7 +82,7 @@ public class DynamicReferenceService {
             }
         }
 
-        if (blockRetriever != null && isBlockMode(config, scene)) {
+        if (blockMode) {
             List<PromptRule> blocks = selectBlocks(module, scene, ctx, sceneIndex);
             if (config.isCacheEnabled()) {
                 selectionCache.put(cacheKey, blocks);
@@ -238,7 +240,7 @@ public class DynamicReferenceService {
                 + java.util.Objects.toString(ctx.getChapterBrief(), "") + "|"
                 + String.valueOf(baseUrl) + "|" + String.valueOf(model) + "|"
                 + llmRuntimeConfig.effectiveReferenceMode(selectorProperties.getMode()) + "|"
-                + usagePolicy.version() + "|"
+                + usagePolicy.version() + "|" + ctx.getTargetFields() + "|"
                 + index.hashCode();
     }
 

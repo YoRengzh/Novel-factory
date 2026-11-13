@@ -248,12 +248,21 @@ public class StoryManageService {
         if (request.getContent() == null || request.getContent().isBlank()) {
             throw new AppException(ResponseCode.ILLEGAL_PARAMETER.getCode(), "正文不能为空");
         }
-        if (jobRegistry.isActiveForStory(storyDirName)) {
-            throw new AppException(ResponseCode.ACTIVE_JOB_CONFLICT.getCode(), "该故事有运行中的作业，请等待完成后再编辑");
-        }
         if (!ChapterLengthPolicy.meetsEditMinimum(request.getContent())) {
             throw new AppException(ResponseCode.ILLEGAL_PARAMETER.getCode(), "正文不能为空");
         }
+        if (!jobRegistry.tryBeginStoryOperation(storyDirName)) {
+            throw new AppException(ResponseCode.ACTIVE_JOB_CONFLICT.getCode(), "该故事有运行中的作业或维护操作，请等待完成后再编辑");
+        }
+        try {
+            return saveChapterWhileLocked(storyDirName, chapterNo, request);
+        } finally {
+            jobRegistry.endStoryOperation(storyDirName);
+        }
+    }
+
+    private ChapterSaveResponseDTO saveChapterWhileLocked(String storyDirName, int chapterNo,
+                                                        ChapterSaveRequestDTO request) {
         Path storyDir = resolveStoryDir(storyDirName);
         ChapterContentEntity existing = repo(() -> storyRepository.readChapter(storyDir, chapterNo));
         ChapterContentEntity entity = new ChapterContentEntity();

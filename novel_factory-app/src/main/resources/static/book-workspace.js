@@ -689,7 +689,7 @@
             setCharacters(cards) { state.cards = cards; renderCharacterList(); renderSelectedCharacter(); sync(); },
             draftSettings() { if (state.readState !== 'ready' || !state.authoring) throw new Error('请先读取当前书的创作设定；不会使用生成表单。'); return copy(state.settings); },
             onCharacterSaved() { invalidatePreview(); if (!dirty()) loadAuthoring(false); },
-            canLeave(message) { if (busy()) { notify('保存或处置请求中，请等待结果，不切换上下文。'); return false; } return !dirty() || ask(message || '离开当前书将丢弃未保存的创作管理输入，继续？'); }
+            canLeave(message) { if (busy()) { notify('保存或处置请求中，请等待结果，不切换上下文。'); return false; } return !(dirty() || (options.isExtraDirty && options.isExtraDirty())) || ask(message || '离开当前书将丢弃未保存的创作管理输入，继续？'); }
         };
     }
 

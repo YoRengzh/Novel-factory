@@ -33,11 +33,18 @@ public class StoryGenerateController {
     public StoryGenerateResponseDTO chapterGenerate(@RequestBody StoryGenerateRequestDTO request) throws Exception {
         // 续写的并发守卫：同步端点与异步作业共用同一个故事目录时，
         // 两边各持一份上下文写正文/摘要，后完成者会整表覆盖（与 /api/jobs 同款语义）
-        if (StringUtils.isNotBlank(request.getResumeStoryDir())
-                && jobRegistry.isActiveForStory(request.getResumeStoryDir())) {
-            throw new ResponseStatusException(HttpStatus.CONFLICT,
-                    "该故事已有运行中的作业，请等待完成或取消后重试");
+        String storyDir = request.getResumeStoryDir();
+        if (StringUtils.isBlank(storyDir)) {
+            return storyGenerateService.generateDto(request);
         }
-        return storyGenerateService.generateDto(request);
+        if (!jobRegistry.tryBeginStoryOperation(storyDir)) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT,
+                    "该故事有运行中的作业或维护操作，请等待完成后重试");
+        }
+        try {
+            return storyGenerateService.generateDto(request);
+        } finally {
+            jobRegistry.endStoryOperation(storyDir);
+        }
     }
 }
