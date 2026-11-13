@@ -93,7 +93,7 @@ public class LlmConfigSaveRequestDTO {
     }
 
     /**
-     * 全局兜底模型覆盖（2026-10-23）：所有场景共用这一份，字段级合并。
+     * 全局兜底模型覆盖：所有场景共用这一份，字段级合并。
      * null=本次不动兜底覆盖；resetFallback=true 清空。
      * 字段语义同 SceneOverride：null=保留现状，空串=显式清除该字段。
      * 支持独立 base-url/api-key——兜底的意义就是换供应商，地址密钥必须能跟着变。

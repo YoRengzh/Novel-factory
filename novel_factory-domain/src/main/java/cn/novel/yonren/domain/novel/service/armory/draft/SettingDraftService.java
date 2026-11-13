@@ -72,7 +72,7 @@ public class SettingDraftService {
 
     private final LlmInvokeService llmInvokeService;
 
-    /** 2026-11-05 分层重构注入：yml 模型配置在服务内补齐，trigger 层不再触碰 StoryProperties */
+    /** yml 模型配置在服务内补齐，trigger 层不触碰 StoryProperties */
     private StoryProperties storyProperties;
 
     @jakarta.annotation.Resource
@@ -81,7 +81,7 @@ public class SettingDraftService {
     }
 
     /**
-     * DTO 门面：请求/响应转换与配置补齐都在服务内完成（2026-11-05 分层重构）。
+     * DTO 门面：请求/响应转换与配置补齐都在服务内完成。
      * 异常语义不变——题材为空 / targets 未知字段 → ILLEGAL_PARAMETER（trigger 映射 400）；
      * 两次尝试均无可用 JSON → 其它 AppException（trigger 映射 502）。
      */

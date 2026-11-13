@@ -140,7 +140,7 @@ class ChapterBeatsServiceTest {
 
     // ==================== 移植自旧系统的闸门用例 ====================
 
-    /** 生产实测（第 131/133/135 章）：模型无视 prompt 的 {"beats":…} 包装、直接返回顶层数组 */
+    /** 模型直接返回顶层数组而非 {"beats":…} 包装时，应兼容解析 */
     @Test
     void buildBeats_bareArray_isWrappedAndParsed() {
         when(llmGateway.complete(any(), any(LlmCall.class))).thenReturn(
@@ -222,8 +222,7 @@ class ChapterBeatsServiceTest {
     /**
      * 全章零对白拍 → 在 prompt 侧补一条硬要求（根因在节拍生成侧，这里只兜底告知）。
      *
-     * 实测第 96 章：节拍五要素里没有对白，写手逐拍扩写后全章有效对话仅 9 句、
-     * 轮次密度 4.4/千字（劣化线 6.0），同批其它章 12-27。
+     * 节拍未提供对白时，逐拍扩写可能形成全章动作分解，因此需要显式对白兜底。
      */
     @Test
     void renderBeatsPrompt_allSilentBeats_addsDialogueFallback() {

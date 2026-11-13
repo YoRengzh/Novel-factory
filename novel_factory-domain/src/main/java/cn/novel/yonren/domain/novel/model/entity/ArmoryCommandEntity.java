@@ -21,7 +21,7 @@ public class ArmoryCommandEntity {
     // yml 配置装配进来的 StoryVO
     private StoryVO storyVO;
 
-    // 续写目录名（docs/workspace/stories 下的目录，如 20260829-story-0001）；非空时预载该目录的记忆摘要
+    // 续写目录名（docs/workspace/stories 下的目录）；非空时预载该目录的记忆摘要
     private String resumeStoryDir;
 
     // 全书总章数上限（可选，来自请求）：覆盖 yml 的 constraints.max-chapter-count，达到后视为完结、拒绝续写

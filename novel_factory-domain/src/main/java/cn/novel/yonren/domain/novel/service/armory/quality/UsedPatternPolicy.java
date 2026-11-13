@@ -18,8 +18,7 @@ public final class UsedPatternPolicy {
     public static final int BODY_LOOKBACK = 5;
 
     /**
-     * 规划层回看更长：编排一段 5 章的计划时只看 5 章，容易把上一段的套路原样再来一遍——
-     * 实测"老陆五金铺"在第 8–16 章之间反复出现，5 章窗口根本看不到完整重复史。
+     * 规划层回看更长，避免仅看当前段长度时遗漏跨段重复舞台与套路。
      */
     public static final int PLAN_LOOKBACK = 10;
 
@@ -37,11 +36,11 @@ public final class UsedPatternPolicy {
             "抢", "夺", "报复", "揭穿", "打", "骂", "逼", "威胁", "骗", "偷", "拦", "堵",
             "施压", "催促", "栽赃", "恐吓", "争执", "刁难", "挤兑", "挑衅", "找茬"};
 
-    /** 同一角色在窗口内作为冲突发起方达到该章数即点名（3 次即"反复"，实测小胖为 3 次） */
+    /** 同一角色在窗口内作为冲突发起方达到该章数即点名 */
     private static final int CONFLICT_ROLE_ALERT = 3;
 
     /** 能力展示频次的告警阈值：按窗口长度的约一半起算（5 章窗口 2 次即告警，10 章窗口 5 次），
-     *  且至少为 2——新书 6-10 章实测 5/5 章连续展示，读者第 3 次即可预判套路 */
+     *  且至少为 2，避免一次展示就被当成重复套路。 */
     private static int abilityShowcaseAlertThreshold(int windowSize) {
         return Math.max(2, windowSize / 2);
     }

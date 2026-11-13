@@ -81,10 +81,8 @@ class ConsistencyIndexServiceTest {
 
     @Test
     void mechanismIntervalOne_disablesCheckInsteadOfFlaggingEveryChapter() {
-        // interval=1 时 gap % 1 恒为 0 ⇒ 未使用的章之后**章章命中**，
-        // 写手陷入"必须用金手指"与"金手指没额度"互相矛盾的要求，两轮修订必然耗尽。
-        // 实测 5 章 5 条 BLOCKING 全部出自这里。间隔 1 表达的是"规划层要求每章都用"，
-        // 不该由机械门禁逐字兜底——故直接停用该检查，交给规划层与审校。
+        // 间隔 1 表达规划层要求每章使用，不应由机械门禁逐字兜底，
+        // 否则 gap % 1 恒为 0 会令未使用章后逐章命中，并与使用额度约束冲突。
         StoryVO story = new StoryVO();
         StoryVO.StoryFeatures features = new StoryVO.StoryFeatures();
         features.setHasCheatMechanism(true);
@@ -151,8 +149,7 @@ class ConsistencyIndexServiceTest {
 
     @Test
     void mechanismDescriptionFiresOnlyOnTheChapterThatExceedsQuota() {
-        // 回归：原实现每章用全量 contents 重算累计值，第 3 个描述章出现后**其后每章**都报
-        // （162 章样本实测连报 135 章 = 83.3%）。增量口径只应报"新引入描述且额度已满"的那几章。
+        // 回归：累计额度已满后，只应报告本章新引入的描述，不得连坐后续未描述的章节。
         StoryVO story = mechanismStory("剑意提取系统", 3);
         List<ChapterSummaryEntity> beforeThird = List.of(described(22), described(26));
 
@@ -206,8 +203,7 @@ class ConsistencyIndexServiceTest {
 
     @Test
     void renderTimeAnchor_rendersLatestStoryTimeAndAgeWithSource() {
-        // 时序锚是把"阶段锚"像境界一样锁定进每一路 prompt 的止血点
-        //（首发事故为"十一个月婴儿写数论证明"，重跑又绕道为"涂鸦=答案/观察者附会"）
+        // 时序锚像境界约束一样进入每路 prompt，避免能力与表达媒介提前升级。
         ChapterSummaryEntity ch16 = ChapterSummaryEntity.builder().chapterNo(16).timePoint("正月十六上午")
                 .consistencyFacts(List.of(new ChapterSummaryEntity.ConsistencyFact(
                         "NUMBER", "某角色月龄", "十一个月", "角色丙", "证据")))
@@ -360,8 +356,7 @@ class ConsistencyIndexServiceTest {
 
     /**
      * 时间线按章号窗口：只渲染最近 W 章。时间线是"每章一条"的心跳数据，
-     * 老条目与近章摘要/三账本重复，随连载线性膨胀——125 章时仅此一节约 1.2k 字符，
-     * 是正文前缀预算饱和（章章 99-100%）挤出三账本/伏笔账的主力之一。
+     * 老条目与近章摘要、三账本重复，并随连载线性膨胀；按窗口渲染可控制前缀预算。
      */
     @Test
     void renderPrompt_timelineWindowedByChapterNumber() {

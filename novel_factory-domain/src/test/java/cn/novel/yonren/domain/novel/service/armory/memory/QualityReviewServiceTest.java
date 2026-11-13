@@ -76,7 +76,7 @@ class QualityReviewServiceTest {
 
     // ------------------------------------------------------------------ 抽样
 
-    /** 首尾必取，中间名额给机械最差章——均匀三点会系统性错过"内部坏章"（实测 108/109 逃逸） */
+    /** 首尾必取，中间名额给机械最差章，避免均匀三点抽样错过内部不达标章 */
     @Test
     void sampleChapters_middleSlotGoesToMechanicalWorst() {
         List<Integer> all = new ArrayList<>();
@@ -266,7 +266,7 @@ class QualityReviewServiceTest {
         return list;
     }
 
-    /** 10 章摘要：仅第 4 章有效字数 1369（模拟实测过的"不达标章"），对白比统一 0.5 */
+    /** 10 章摘要夹具：第 4 章有效字数 1369，用于模拟不达标章；对白比统一 0.5 */
     private List<ChapterSummaryEntity> summaries() {
         List<ChapterSummaryEntity> list = new ArrayList<>();
         for (int i = 1; i <= 10; i++) {
@@ -318,8 +318,8 @@ class QualityReviewServiceTest {
     /**
      * 背离必须留痕：机械判对白坍缩、主观却给 8 分以上。
      *
-     * 实测样本：第 96 章机械密度 4.4 次/千字（劣化线 6.0），而本服务给它 dialogue=8、问题 0 条。
-     * 分数本身只是读数，但"两把尺子对同一章给出相反结论"这件事必须落盘——* 它说明该维度上主观尺子没有分辨力，不能拿它去驱动规划层调整。
+     * 同一章的主观评分与机械指标给出相反结论时必须落盘，
+     * 防止把缺乏分辨力的主观读数直接用于规划层调整。
      */
     @Test
     void divergenceBetweenSubjectiveAndMechanical_isRecorded() throws Exception {

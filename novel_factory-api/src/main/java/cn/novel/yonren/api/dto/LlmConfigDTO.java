@@ -45,7 +45,7 @@ public class LlmConfigDTO {
     private List<SceneView> scenes;
 
     /**
-     * 全局兜底模型（2026-10-23）：所有场景共用一份，主模型与场景配置都不可用时启用。
+     * 全局兜底模型：所有场景共用一份，主模型与场景配置都不可用时启用。
      * 自带地址密钥与输出上限——兜底的意义是换供应商，配置必须能跟着变
      */
     private FallbackView fallback;

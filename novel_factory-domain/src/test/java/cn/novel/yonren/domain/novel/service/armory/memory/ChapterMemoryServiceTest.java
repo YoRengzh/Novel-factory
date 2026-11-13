@@ -239,10 +239,8 @@ class ChapterMemoryServiceTest {
     /**
      * 逾期项必须保证在登记清单里。
      *
-     * 此前是纯"最新 N 条"，于是**埋得越早的线越看不见**；而摘要 prompt 要求回收条目
-     * "逐字沿用账中描述"——一条掉出清单的线，模型根本无从登记，于是它永远关不掉账、
-     * 被后续每一段反复要求回收。老书实测埋在第 0 章的那条早就掉出了最新 20 条之外，
-     * 体检同时报出「清账静默兑现」高占比，两者是同一个缺口的两面。
+     * 仅保留最新 N 条会隐藏早埋的线；摘要要求逐字沿用账中描述，
+     * 因此逾期项必须保留在登记清单中，避免漏记回收并被后续段反复要求补收。
      */
     @Test
     void foreshadowContext_reservesSlotsForOverdueEntries() {
@@ -653,9 +651,8 @@ class ChapterMemoryServiceTest {
                 "最近记忆必须比账本更不可牺牲");
         assertTrue(blockByLabel(blocks, "近章摘要").priority() < blockByLabel(blocks, "久远唤醒").priority(),
                 "最近记忆必须比向量唤醒更不可牺牲");
-        // 三账本由 4 上调至 3：实测连续多章被整块截断后，写手看不到事实基准而编造出
-        // 与原文差一个量级的数值，且错值被摘要登记成正典。它与"上章结尾"同属"缺了就写错"
-        // 的档，故断言改为"不劣于"——账本不得比尾部衔接内容更易被牺牲。
+        // 三账本 priority 3 与上章结尾同属事实连续性约束；账本缺失会让正文失去事实基准。
+        // 断言“不劣于”：账本不得比尾部衔接内容更易被牺牲。
         assertTrue(blockByLabel(blocks, "三账本").priority()
                         <= blockByLabel(blocks, "上章结尾").priority(),
                 "账本是事实基准，不得比上章结尾更易被牺牲（同档可接受）");
@@ -670,7 +667,7 @@ class ChapterMemoryServiceTest {
     @Test
     void timeAnchor_isInjectedAtRealmLockPriorityWhenAgeFactPresent() {
         // 年龄必须像境界一样每路锁定——时序锚与境界锁定同级（priority 1）、不可截断。
-        // 背景：26-30 章计划 prompt 里"当前月龄出现 0 次"，导致十一个月大的婴儿写数论证明。
+        // 当前年龄缺失会削弱能力边界约束，因此每路 prompt 都需要时序锚。
         ChapterSummaryEntity ch16 = summary(16, states(state("角色丙", "十一个月")));
         ch16.setTimePoint("正月十六上午");
         ch16.setConsistencyFacts(new ArrayList<>(List.of(new ChapterSummaryEntity.ConsistencyFact(
@@ -702,8 +699,7 @@ class ChapterMemoryServiceTest {
     @Test
     void memoryBlocks_keepDirectionBlocksWhenNoSummaries() {
         // 新书首段（无摘要）不得整块清空——卷方向锚/阶段蓝图不依赖摘要，
-        // 是首段计划与第一章唯一的方向来源（实测事故：首段计划输入仅剩[故事设定]，
-        // 计划层据此编出超龄事件，阶段出口条件达成率仅 2/5）
+        // 是首段计划与第一章的方向来源；无摘要不能让方向约束随记忆块一并消失。
         StageBlueprintEntity blueprint = StageBlueprintEntity.builder()
                 .stageNo(1).startChapter(1).endChapter(5)
                 .stageGoal("周岁宴完成灵童半公开认证")
@@ -984,10 +980,9 @@ class ChapterMemoryServiceTest {
 
     @Test
     void prefix_singleMentionEntryRendersNameOnly() {
-        // 只出现一次的条目降为"仅列名"：实测本书物品账本近一半渲染字数是这类
-        // 一次性布景道具（油纸包点心 / 绿豆汤 / 洛阳轴承厂纸盒…），不会再被引用却持续吃前缀预算。
-        // 判定依据：buildLedger 里 lastChapterNo 每次提及都会刷新，故"首现章 == 最近提及章"
-        // 等价于"全篇只在一章出现过"——这是本规则能成立的前提，须由本用例守住。
+        // 只出现一次的条目降为“仅列名”，避免一次性布景道具的完整状态持续占用前缀预算。
+        // 判定依据：buildLedger 里 lastChapterNo 每次提及都会刷新，故“首现章 == 最近提及章”
+        // 等价于全篇只在一章出现过；本用例守住这一判定前提。
         List<ChapterSummaryEntity> summaries = List.of(
                 summary(1, states(state("角色丙", "重生为四岁幼童"),
                         state("油纸包点心", "从供销社买回，油纸已渗油"))),

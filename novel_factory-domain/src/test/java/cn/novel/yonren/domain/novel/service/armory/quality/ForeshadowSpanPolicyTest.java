@@ -12,10 +12,7 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
- * 伏笔寿命度量测试。
- *
- * 反例直接用实测分布：第 1–15 章回收 13 条伏笔，跨度 1 章 ×8、2 章 ×2、3 ×1、6 ×1、8 ×1，
- * 平均 2.23 章、77% 在 2 章内兑现——"埋了就收"，读者来不及惦记。
+ * 伏笔寿命度量测试：覆盖短跨度集中分布、统计口径与反馈边界。
  */
 class ForeshadowSpanPolicyTest {
 
@@ -254,13 +251,8 @@ class ForeshadowSpanPolicyTest {
     // ==================== 反馈口径：欠采样时退回宽松 回归） ====================
 
     /**
-     * **回归**：老故事的历史埋设全部未标注（`resolvable=null`），严格口径样本为 0，
-     * 于是 `shouldAdvise` 因欠采样返回 false ⇒ **伏笔长度反馈整段不注入、治本通道静默失效**。
-     *
-     * 实测证据：第 16-20 章那批的 `input.json` 里「伏笔长度反馈」出现 **0 次**（上一批是 1 次），
-     * 而按宽松口径本该触发（10 条样本 / 80% 短命 / 均 1.90 章）。
-     *
-     * 结论：**指标宁可失明也不许脏，反馈宁可多唠叨也不许瞎。**
+     * 老数据未标注兑现义务时，严格指标保持干净；反馈另用明确的宽松兼容口径。
+     * 样本不足不能被解释为已达到健康水平。
      */
     @Test
     @DisplayName("feedbackSpans：严格样本不足时退回宽松口径，反馈不静默失效")

@@ -27,8 +27,7 @@ public final class LlmErrorClassifier {
          * 供应商侧内部故障（500 / engine abort / InternalError.Algo）：
          * 重试同一模型大概率再撞一次（长时间思考跑到一半被上游掐断），换模型更有效。
          *
-         * 2026-09-30 新增：此前 500 落到 {@link #UNKNOWN}（modelLevel=false），
-         * 于是"思考模型被上游 abort"永远不触发降级链——而这恰恰是思考模型最常见的失败。
+         * 这类故障需区别于 {@link #UNKNOWN}，保留模型层分类才能进入降级链。
          */
         UPSTREAM_INTERNAL("供应商内部故障（换模型比原样重试更有效）", true, true),
 
@@ -84,7 +83,7 @@ public final class LlmErrorClassifier {
             // 供应商侧内部故障 补）：思考模型跑久了上游会直接 abort，
             // 回报 500 InternalError.Algo / engine abort / 引擎异常 —— 这类错误**换模型有效**
             //（同一份请求换一个供应商端点重跑通常就过了），而原样重试同一模型大概率再撞一次。
-            // 实测：kimi-k3 跑卷蓝图 795s 后报 500 engine abort，若不归此类则落到 UNKNOWN
+            // 长调用被上游中断时，内部故障分类须保留换模型的恢复通道。
             //（modelLevel=false，不换模型）+ 传输层把 500 当服务端错误重试 → 白烧两轮长调用后整批终止。
             new Rule(Kind.UPSTREAM_INTERNAL, "internalerror.algo", "internal_error.algo", "engine abort",
                     "engine_abort", "engineerror", "internal server error", "server_error",

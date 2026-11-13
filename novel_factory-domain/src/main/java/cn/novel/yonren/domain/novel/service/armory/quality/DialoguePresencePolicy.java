@@ -4,28 +4,13 @@ import java.util.ArrayList;
 import java.util.List;
 
 /**
- * 正文级对话承载对账（机械，2026-10-11）：计划声明了 dialogueScenes 的章，声明的台词
- * 是否真的以引号对白落进了正文。实测第 110 章：计划声明两句（角色甲「既然记着，
- * 这个也记上。」＋角色乙「嗯。」），正文只写出前一句，后一句被降级成"点了点头"——
- * 计划层的对话承载闸门只校验声明本身（存在/数量/诚实/双名），管不到正文兑现，
- * 本类补上"声明 → 正文"这半程对账。
+ * 正文级对话承载对账：核对 dialogueScenes 声明的台词是否以引号对白落进正文。
+ * 只识别缺失，不单独决定修复；等价改写可能无法逐字匹配。
+ * 调用方结合轮次密度坍缩判定严重度，将缺失清单作为定向修订目标。
  *
- * 只做缺失识别，不做触发判定（106-110 五章实测校准）：健康章节的写手会大量
- * 等价改写声明台词——第 108 章四条场景两条 LCS 占比 <0.2 而交锋完整落在正文
- * （「好，但你得自己把最后一步补上」→「后半段我写到这儿，剩下的你自己接」），逐字对账
- * 会几乎每章白吃一轮修订。因此本类只回答"哪些声明的台词没落地"；是否触发修复由调用方
- * 结合轮次密度坍缩判定（{@code QualityGate#dialogueDensityCollapse}：声明了对话场景的章
- * 密度坍缩从 MINOR 升级 BLOCKING——计划已承诺对话而正文开不了腔是写手违约，不再只是
- * 规划层没给料；缺失清单作为修订靶点随建议下发）。
- *
- * 匹配口径（三选一即算落地）：①归一化后互相包含（写手扩写/缩写台词）；
- * ②LCS 占声明台词长度 ≥1/2（换词不换意的改写：实测词序对调 0.56 命中、整句重写 0.15 不命中）；
- * ③归一化后 ≤2 字的短台词（「嗯」「好」）只在 ≤4 字的短对白里按包含判定——单字台词包含在
- * 长句里属噪声（「他嗯了一声站起来」不是交付台词）。引号提取复用
- * {@link DialogueRatioPolicy#utterances}（仓库内"什么算一句对白"的唯一定义），LCS 复用
- * {@link PlanAdherencePolicy#longestCommonSubstring}（仓库内唯一实现，避免第三份口径）。
- * 归一化去掉全部标点：台词改写常伴随标点与语气词变化（「就是为了不进保送？」vs
- * 「是不想进保送吧。」），标点不参与匹配。
+ * 匹配口径：归一化包含、LCS 占声明台词至少一半，或短台词在短对白内命中。
+ * 引号提取复用 {@link DialogueRatioPolicy#utterances}，LCS 复用
+ * {@link PlanAdherencePolicy#longestCommonSubstring}；标点不参与匹配。
  */
 public final class DialoguePresencePolicy {
 
@@ -33,7 +18,7 @@ public final class DialoguePresencePolicy {
     private static final int SHORT_SPEECH_MAX = 2;
     /** 短对白阈值：短台词只允许在 ≤ 此长度的正文对白里找（「嗯，知道了」算交付「嗯」） */
     private static final int SHORT_LINE_MAX = 4;
-    /** 改写容忍线：归一化 LCS 长度须达到声明台词长度的此占比（实测 0.56=词序对调命中） */
+    /** 改写容忍线：归一化 LCS 长度须达到声明台词长度的此占比 */
     private static final double REWRITE_RATIO = 0.5;
     /** 压缩匹配下限：正文对白至少要有这么长，才可能算"声明长台词的压缩版" */
     private static final int COMPRESSED_LINE_FLOOR = 4;

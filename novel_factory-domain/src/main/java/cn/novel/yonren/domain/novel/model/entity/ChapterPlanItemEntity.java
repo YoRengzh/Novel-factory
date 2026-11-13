@@ -25,12 +25,11 @@ public class ChapterPlanItemEntity {
     private List<String> keyEvents;
 
     /**
-     * **对话承载事件的声明**（2026-10-10 新增）：把本章 keyEvents 中由 ≥2 个人物**当面对话/冲突/协作**
+     * **对话承载事件的声明**：把本章 keyEvents 中由 ≥2 个人物**当面对话/冲突/协作**
      * 承载的那几条**逐字复制**到这里——normal/climax/finale 章 ≥2 条、transition 章 ≥1 条。
      *
      * 为什么需要独立字段：keyEvents 是自由文本，事件的性质（有戏可演 / 单人独处）
-     * 不在结构里，机械校验数不出来——第 105 章 5 条关键事件 0 条对话承载（characters 里甚至写着
-     * "电脑屏幕"）、第 96 章"2 条对话承载数量合规但最大事件是独白"，都是这么放行的。
+     * 不在结构里，机械校验无法仅从事件数量判断人物互动是否成立。
      * 声明是**可机械核验**的契约：见 {@code ChapterPlanChecks.validateDialogueCarriage}——
      * 逐字命中 keyEvents、匹配事件写到 ≥2 个人物全名、单人事件不得过半；不达标驳回重规划一次。
      *
@@ -47,12 +46,10 @@ public class ChapterPlanItemEntity {
     private ChapterType chapterType;
 
     /**
-     * **本章结束时核心悬念所处的档位**（2026-09-22 新增）：必须**逐字取自**阶段蓝图的
+     * **本章结束时核心悬念所处的档位**：必须**逐字取自**阶段蓝图的
      * {@code suspenseLadder}（由蓝图针对本书生成，见 {@code StageBlueprintEntity.suspenseLadder}）。
      *
-     * 为什么要这个字段：此前的计划约束是"每章至少一处关系/信息/资源的变化"，
-     * 而"内心评价悄然变化"也能满足它——实测出现过整批 6 章主线零推进，每章都是
-     * "发现线索 → 自我否定 → 回到原点"，规划层甚至还把它写成了要"确立"的叙事范式。
+     * 悬念档位用于区分主线推进与仅有内心评价变化，避免抽象变化掩盖原地循环。
      * 档位是**有序枚举**，机械比较负责防缺失与倒退，不能仅凭同粗档断言语义停滞。
      *
      * 校验见 {@code ChapterPlanChecks.validateSuspenseAdvance}：有蓝图逐字对表、去标签后非重复的
@@ -61,7 +58,7 @@ public class ChapterPlanItemEntity {
     private String suspenseBeat;
 
     /**
-     * **本章落地的主线推进**（2026-10-02 新增）：逐字取自阶段蓝图的
+     * **本章落地的主线推进**：逐字取自阶段蓝图的
      * {@code StageBlueprintEntity.mainLineByChapter} 中对应章号那条。
      *
      * 与 {@link #suspenseBeat} 的分工（两个维度，不可互相替代）：

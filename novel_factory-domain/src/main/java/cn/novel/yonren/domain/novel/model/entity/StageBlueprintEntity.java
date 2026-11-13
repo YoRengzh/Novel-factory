@@ -77,12 +77,11 @@ public class StageBlueprintEntity {
     private String stageReport;
 
     /**
-     * **章级主线推进**（2026-10-02 新增）：本阶段**逐章**的主线推进，段计划必须逐字落地。
+     * **章级主线推进**：本阶段**逐章**的主线推进，段计划必须逐字落地。
      *
      * 为什么需要它：{@link #suspenseLadder} 是"粗进度条"——3-6 档要覆盖 5-80 章的阶段
      * （阶段长度被 {@code MIN_STAGE_LENGTH=30 / MAX_STAGE_LENGTH=80} 钳制，批次不足时截断）。
-     * 于是必然出现"多章共用同一档"：实测第 11-15 章五章回填同一档位，
-     * **不是模型偷懒，是档位表本身没有能力区分它们**。
+     * 多章共用同一档位是粗粒度枚举的正常结果，因此需要独立的章级推进记录。
      *
      * 两者是**两个维度**，不可互相替代：
      *
@@ -124,8 +123,8 @@ public class StageBlueprintEntity {
      * 退出条件核验结果：达成须给出可机械校验的证据（章节号 + 该章摘要内的连续原文引用），
      * 证据校验失败按未达成处理（宁严勿松）；核验服务失败时整体为 null（回退模型自评结转）。
      *
-     * 2026-09-16 起核验按原子子句粒度进行（{@code ExitConditionPolicy.splitAtoms}）：
-     * 复合条件（78% 的实测条件含"且/以及/同时"）只有全部分句达成才算整条达成，
+     * 核验按原子子句粒度进行（{@code ExitConditionPolicy.splitAtoms}）：
+     * 含"且/以及/同时"的复合条件只有全部分句达成才算整条达成，
      * {@code metAtoms}/{@code totalAtoms} 让"部分推进"可见，{@code note} 精确指出还差哪个分句。
      */
     @Data

@@ -248,10 +248,8 @@ public class BuildStageBlueprintNode extends AbstractArmorySupport {
         repairStageEndFromOutline(requestParameter, storyContext, dynamicContext.getChapterSummaries(),
                 blueprint, previous);
 
-        // 追进度字段接线（2026-10-26）：这三个 transient 字段此前**没有任何一处赋值**——
-        // 注释写着"由 BuildStageBlueprintNode 计算、ChapterPlanSegmentPlanner 消费"，
-        // 但消费端的 jumpRequired 依赖它们，于是恒为 false，设计好的"跳接段 fail-closed"从未生效。
-        // 这里补上赋值：滞后 = 大纲在本阶段窗口内自身要走的时间 − 正文实际已走的时间。
+        // 追进度字段接线：消费端的 jumpRequired 依赖这些 transient 字段。
+        // 滞后 = 大纲在本阶段窗口内自身要走的时间 − 正文实际已走的时间。
         // 注意"重锚"并不取消滞后——重锚只是把预算平移，若正文连平移后的预算都追不上，滞后依然存在。
         // 滞后 ≥ 硬跳阈值（2 年）才要求强制跳接，小滞后由章后欠账回灌逐章追讨。
         wirePacingFields(storyContext, dynamicContext.getChapterSummaries(), blueprint);
@@ -375,27 +373,13 @@ public class BuildStageBlueprintNode extends AbstractArmorySupport {
     }
 
     /**
-     * stageEnd 机械校验+回填：12.1 要求模型从【进度对齐·大纲路标】声明
-     * stageEndYear/stageEndAge，但实测会胡写（写出早于故事开局的年份）。
-     * 下限 = **重锚预算**：大纲段时间预算按正文实际锚点整体平移后取值，
-     * 而非大纲原预算——学校线里程碑保留顺序、随实际时间滑动，硬追原日历只会让蓝图声明
-     * 永远跑到正文前面（实测第 111-120 段：原机制回填出 2011/14 岁，正文实际 2010/12 岁）。
-     * 校验规则：stageEndYear 必须含 4 位年份且 ≥ 重锚预算、≥ 上一阶段声明（单调递增）；
-     * stageEndAge 同理。任一不合格即按重锚预算回填——无锚点/大纲段无数值标记时保持声明原样，不编造。
+     * stageEnd 机械校验与回填：声明必须满足重锚预算，不能早于正文事实锚。
+     * 大纲时间预算按正文实际锚点平移后取窗口自身增量，见 {@link StoryPacing#pacedBudget}。
+     * 不继承下一段的完整段末预算，避免快进段被提前计入当前阶段。
      *
-     * 跨段预算继承的连续性格挡（2026-10-26）：预算基准取"阶段终点所在段"时，窗口一旦
-     * 跨过大纲段边界，就会把下一段的**整段**预算提前拉进本阶段。大纲里存在"快进段"（如
-     * {@code 231-240章 2013年秋至2016年夏}、{@code 241-250章 2016年秋}）——它们用少数章节覆盖数年，
-     * 于是 5 章的小阶段只要尾章落进下一段，下限就被抬到数年之后。
-     *
-     * 单调下限改为取正文实际锚点（2026-10-26）：声明是计划、不是事实。上一阶段把终点
-     * 声明到某年而正文没走到时，若拿该声明当永久下限，后续每个阶段都会被钳在它以上，
-     * 年份链就此**单向棘轮**，再也回不到正文实际时间。锚点来自摘要 timePoint，是已发生的事实，
-     * 用它做下限既能防倒退（正文真走到了，下限自然是那年），又不会把"没走到的计划"固化成下限。
-     * 无锚点（老数据/摘要缺年份）时才退回上一阶段声明兜底，避免失去倒退保护。
-     *
-     * 预算计价只看窗口自身增量：见 {@link StoryPacing#pacedBudget}——不继承任何一段的
-     * 段末，故快进段的段末不会被提前记进本阶段；预算无上限，正文真走过去就照常放行。
+     * 单调下限优先取摘要 timePoint 的事实锚，而不是未实现的计划终点。
+     * 无事实锚时才回退上一阶段声明；无锚点或大纲数值标记时保持原声明，不编造。
+     * 年份与年龄不合格时按重锚预算回填；正文超过计划预算仍照常放行。
      */
     private void repairStageEndFromOutline(ArmoryCommandEntity requestParameter,
                                            StoryContextEntity storyContext,
@@ -864,8 +848,7 @@ public class BuildStageBlueprintNode extends AbstractArmorySupport {
             String condition = result.getCondition();
             // 章号引用重定基：结转到本阶段后，"第76-80章中至少有一章…"这类条件必须改为
             // 引用**本阶段**的章号，否则校验侧只看本批记忆，结构上永远判定为未达成——
-            // 条件会无限结转、每批都拉低达成率，形成永久坏账（实测第5阶段 11 条里有 3 条如此，
-            // 备注明写"所给记忆仅包含第81-85章，无第76-80章内容，无法判定"）。
+            // 条件会无限结转并形成不可验证的坏账，因此章号引用须与当前核验窗口对齐。
             String rebased = rebaseConditionChapterRefs(condition, blueprint.getStartChapter(), blueprint.getEndChapter());
             if (inheritedBefore.stream().anyMatch(c -> StringUtils.equals(c, condition)
                     || StringUtils.equals(c, rebased))) {
@@ -927,12 +910,8 @@ public class BuildStageBlueprintNode extends AbstractArmorySupport {
      * 结转任务机械兜底：上一版标记为"进行中"的任务，若模型输出的 carriedTasks 里既没有
      * 同名条目、也没有判为完成/放弃的记录，则原样补回（不信任模型的一次服从）。
      *
-     * 治什么：prompt 第 3 条要求"对上一版每条未完成任务逐条结转……严禁静默丢弃"，
-     * 但提示词此前**根本没渲染上一版 carriedTasks**（只渲染了 tasks/exitResults/stageReport），
-     * 模型只能凭近章摘要重猜 ⇒ 注入的约定事件（"面邀必须兑现""附加赛必须完成"）在换版时蒸发。
-     * 实测：第 14 阶段注入的附加赛任务在第 15 阶段 carriedTasks 中消失，而系统侧零告警。
-     * 提示词已同步补齐输入（见 RollingOutlineService 渲染处）；此处再加一道机械闸——
-     * 与 {@link #mergeUnmetExitConditions} 同款：不把可靠性押在一次服从上。
+     * 上一版进行中任务需显式作为输入，并用机械兜底补回遗漏处置的条目。
+     * 与 {@link #mergeUnmetExitConditions} 同款，不把可靠性押在模型一次服从上。
      *
      * 补回条目一律标"进行中"并注明来源，供阶段末复核与人工复盘；
      * 与已有条目按内容双向包含去重，避免与模型自己写的措辞略异版本重复登记。
@@ -983,8 +962,7 @@ public class BuildStageBlueprintNode extends AbstractArmorySupport {
      * 为什么不拦截：冻结线措辞是自由文本，"哪个 task 越了哪条线"的机械判定必然误伤
      * （如"冻结"可能出现在与冻结线无关的技术描述里）；而该情形的后果在正文侧可见
      * （新事实凭空出现 → 与既有定案冲突 → 一致性指标与人工复盘能抓到）。
-     * 实测第 16 阶段：结转清单明写虹镇静默期"严禁新实物/新追查"，
-     * 模型仍在 tasks 安排"角色甲透露虹镇旧事的新信息碎片"，第 140 章据此造出地窖账册。
+     * 冻结期条目不能因蓝图换版被安排新推进；这里保留观测而不替代事实核验。
      */
     private void warnFrozenLineViolations(StageBlueprintEntity previous, StageBlueprintEntity blueprint) {
         if (previous == null || blueprint == null

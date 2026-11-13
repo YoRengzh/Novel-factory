@@ -38,7 +38,7 @@
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
         <!-- 注意：勿将 logback 钉到 1.5.15！logback-spring.xml 使用了 SizeAndTimeBasedFNATP，
              该兼容类 1.5.16 才重新引入，1.5.15 会抛 NoSuchFieldError: dateInCurrentPeriod。
-             （wrench shade jar 及其连带的类冲突已于 2026-09-29 随框架类内联移除） -->
+             （框架类采用内联实现，避免 shade jar 及其连带的类冲突） -->
     </properties>
 
     <licenses>

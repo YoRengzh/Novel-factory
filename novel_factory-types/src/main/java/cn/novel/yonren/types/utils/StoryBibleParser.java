@@ -93,7 +93,7 @@ public final class StoryBibleParser {
      * 按「标签: 值」切分。
      *
      * 只按第一个 ASCII 冒号切分：值本身可能含冒号，用 {@code split(":")} 会把值截断。
-     * 中文全角冒号「：」不参与切分（书名如《道诡：理智尽头是疯狂》正是全角，天然安全）。
+     * 中文全角冒号「：」不参与切分，字段值中的全角标点原样保留。
      */
     private static Map<String, String> parseToMap(String bibleText) {
         Map<String, String> values = new HashMap<>();

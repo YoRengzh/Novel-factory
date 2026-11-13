@@ -48,7 +48,7 @@ class CharacterNameListDeserializerTest {
         assertEquals(List.of("角色丙", "角色戊"), beats.beats.get(0).characters);
     }
 
-    /** 回归：实测第 4 章的失败输入——对象数组，角色名在键上 */
+    /** 对象数组中角色名在键上时，按键解析名称列表。 */
     @Test
     void objectArray_takesKeysAsNames() throws Exception {
         Payload beats = parse("""

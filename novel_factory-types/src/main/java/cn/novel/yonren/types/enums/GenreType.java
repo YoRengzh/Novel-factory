@@ -14,7 +14,7 @@ public enum GenreType {
     /** 玄幻/奇幻/修仙类 */
     FANTASY("fantasy"),
 
-    /** 都市异能/超能力觉醒类（2026-10-04 从 FANTASY 拆出：修仙向与都市异能向的资料分岗） */
+    /** 都市异能/超能力觉醒类：修仙向与都市异能向的资料分岗 */
     ABILITY("ability"),
 
     /** 悬疑/推理/刑侦类 */
@@ -23,16 +23,16 @@ public enum GenreType {
     /** 言情/情感类 */
     ROMANCE("romance"),
 
-    /** 科技流/黑科技/星际类（2026-10-04 新增） */
+    /** 科技流/黑科技/星际类 */
     SCIFI("scifi"),
 
-    /** 末世/废土/天灾生存类（2026-10-04 新增） */
+    /** 末世/废土/天灾生存类 */
     APOCALYPSE("apocalypse"),
 
-    /** 无限流/副本/规则怪谈类（2026-10-04 新增） */
+    /** 无限流/副本/规则怪谈类 */
     INFINITE_FLOW("infinite-flow"),
 
-    /** 都市现实/重生/年代/商战类（2026-10-04 新增：此前都市重生落 DEFAULT，题材资料完全缺席） */
+    /** 都市现实/重生/年代/商战类 */
     URBAN("urban"),
 
     /** 未命中任何题材词表（无对应 genres 资料，仅落 styles/default.md） */
@@ -48,7 +48,7 @@ public enum GenreType {
         return code;
     }
 
-    /** 异能/超能力系（2026-10-04 从 FANTASY 词表拆出：玄幻仍归 FANTASY，都市异能归 ABILITY） */
+    /** 异能/超能力系：玄幻仍归 FANTASY，都市异能归 ABILITY */
     private static final List<String> ABILITY_KEYWORDS = List.of("异能", "超能力", "觉醒", "进化", "基因");
     private static final List<String> FANTASY_KEYWORDS = List.of("玄幻", "奇幻", "修仙", "修真", "仙侠", "魔法", "灵气");
     private static final List<String> SUSPENSE_KEYWORDS = List.of("悬疑", "推理", "惊悚", "刑侦", "侦探", "犯罪", "灵异");

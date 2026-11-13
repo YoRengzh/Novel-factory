@@ -240,7 +240,7 @@ public interface IStoryRepository {
     List<String> readCandidateOutcomes(Path storyDir) throws Exception;
 
     /**
-     * 读候选选优样本的**原始 JSONL 行**（2026-10-03 新增）：与 {@link #readCandidateOutcomes} 同源同序，
+     * 读候选选优样本的**原始 JSONL 行**：与 {@link #readCandidateOutcomes} 同源同序，
      * 但保留 {@code chapterNo}——重跑批次时同一章会追加多行，统计层必须按章去重取**每章最后一行**，
      * 否则旧批次的行会把触发率推到 100% 以上。文件缺失返回空表；单行损坏跳过。
      */

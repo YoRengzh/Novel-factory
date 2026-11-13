@@ -744,9 +744,8 @@ class RollingOutlineServiceTest {
     /**
      * 悬念档位补采 prompt：只问两个字段、结构完整、示例用正确的键名。
      *
-     * 它存在的理由来自实测——同一条要求放进完整蓝图 prompt（十几个要求 + 长 schema）会被模型
-     * 静默省略，而短聚焦 prompt 服从率极高。因此这条 prompt 必须**很短且只问这两项**，
-     * 别把上下文又堆回来（那等于把问题复制一遍）。
+     * 完整蓝图 prompt 容易因上下文和 schema 过长而遗漏字段，补采应保持短而聚焦。
+     * 只请求两个字段，避免重新堆入完整上下文。
      */
     @Test
     void buildSuspenseLadderRepairPrompt_isShortAndAsksOnlyTwoFields() {
@@ -841,8 +840,8 @@ class RollingOutlineServiceTest {
     }
 
     /**
-     * 时序锚注入：新书首段零摘要时，排期补采必须带设定兜底锚——* 否则会产出"4岁主角无意识写出未来年份日期"这类违反时序锚的 intent
-     * （实测：经【必须埋设】强压给计划与写手后，审校按锚判 BLOCKING，修订无法不丢事件地修复，整链死锁）。
+     * 时序锚注入：新书首段零摘要时，排期补采必须带设定兜底锚。
+     * 否则违规 intent 会被当成必须埋设的事件，与后续审校约束冲突并阻塞修订闭环。
      */
     @Test
     void scheduleRepairPrompt_injectsTimeAnchorForFreshBook() {
@@ -963,7 +962,7 @@ class RollingOutlineServiceTest {
 
     /**
      * 主粮配额下限：学习/本金/程序不足 2/5 必须被拦。
-     * 动机：只有悬疑上限时，压出来的空间被关系/家庭吃掉而非回到主粮——* 实测 106-120 十五章主粮 3/15（其中 1 章行政）且本金 0、程序 0。
+     * 仅有悬疑上限不能保证主粮份额，必须同时校验学习、本金与程序的配额下限。
      */
     @Test
     void mainLineDiscipline_flagsHardLineQuotaShortfall() {

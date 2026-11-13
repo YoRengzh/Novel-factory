@@ -34,8 +34,7 @@
             <artifactId>spring-ai-anthropic</artifactId>
             <exclusions>
                 <!-- Spring AI 把 io.rest-assured:json-path 声明为 compile 依赖（测试框架误标），
-                     会连带拖入 groovy / groovy-json 约 7.5M 到运行时包。生产链路完全不用，
-                     排除后包体积实测减少 7.5M（2026-11-05）。若未来需要 rest-assured 做集成测试，
+                     生产链路不使用该测试框架依赖；若需要 rest-assured 做集成测试，
                      请在测试模块显式以 test 作用域引入。 -->
                 <exclusion>
                     <groupId>io.rest-assured</groupId>

@@ -8,13 +8,12 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
- * 正文级对话承载对账测试：夹具全部取自 20261004-story-0001 第 106-110 章实测数据
- * （计划声明 vs 成文正文），把校准结论直接锁进用例——匹配阈值一旦改动破坏真实数据的
- * 行为（该报的不报、该放的不放）会立刻在这里暴露。
+ * 正文级对话承载对账测试：核对声明台词与实际正文，
+ * 锁定缺失识别、等价改写和短台词匹配的边界。
  */
 class DialoguePresencePolicyTest {
 
-    /** 第 110 章实测：声明两句，正文只写出前一句，「嗯」被降级成"点了点头"——必须识别出缺失 */
+    /** 声明两句但只交付一句时，应识别第二句缺失，点头叙述不替代台词。 */
     @Test
     void ch110_deliveredOneOfTwo_reportsSecondMissing() {
         String content = """

@@ -265,10 +265,7 @@ class ChapterPlanSegmentPlannerTest {
     }
 
     /**
-     * 新增能力：**档位描述去重不依赖档位表**——无蓝图模式下同样要拦。
-     *
-     * 旧行为是"无档位表 ⇒ 整个闸门直接 return"，于是模型把同一句 suspenseBeat 复制 5 遍
-     * 也无人过问（实测第 11–15 章正是如此）。去重只做逐字比较、不需要档位表，没有理由跟着跳过。
+     * 档位描述去重不依赖档位表，无蓝图模式下也须拦截逐字重复，不能整道跳过。
      */
     @Test
     void planSegment_duplicateBeatsStillReplannedWithoutLadder() {

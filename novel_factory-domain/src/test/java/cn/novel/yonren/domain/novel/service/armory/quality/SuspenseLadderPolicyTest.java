@@ -103,7 +103,7 @@ class SuspenseLadderPolicyTest {
     @Test
     @DisplayName("段末连续两章过渡不再豁免：那是停摆不是蓄势（第 14/15/16 章实测病症）")
     void consecutiveTransitionTailIsFlagged() {
-        // 实测：第14章(normal) + 第15章(transition) + 第16章(transition) 连续三章同为档位4，
+        // 普通章后连续两章过渡且保持同档，不能借段尾过渡豁免掩盖停滞。
         // 旧规则因"以过渡章收尾"整段豁免，正是"三章讲同一件事"绕过校验的通道。
         // 豁免本意是单章过渡替下一章蓄势；连续两章过渡已经不是蓄势。
         List<SuspenseLadderPolicy.Beat> beats = List.of(

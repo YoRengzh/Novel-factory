@@ -66,7 +66,7 @@ public class ForeshadowPriorityService {
     /**
      * 分级：≥100 未填，≥80 硬，≥60 软，其余背景。
      * 主线核心（5 分）不熔断——未填语义是"剧情走远的闲笔"，整卷级谜题冻结等于让写手
-     * 失去主线悬念上下文（实测第 11 章熔断的正是主线谜题），故封顶在硬级保持强可见，
+     * 失去主线悬念上下文，故封顶在硬级保持强可见，
      * 其出路归卷末/人工处理
      */
     public static Tier tierOf(int score, Integer importance) {

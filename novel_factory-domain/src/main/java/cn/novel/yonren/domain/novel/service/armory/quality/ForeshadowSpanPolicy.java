@@ -94,12 +94,8 @@ public final class ForeshadowSpanPolicy {
     /**
      * 为一条回收登记找最匹配的埋设种子：**ID 全等优先，其次归一化全等，最后最长公共子串**。
      *
-     * ID 优先是关键路径：账本渲染带 {@code [F7-2]} 前缀、模型回抄 ID 销账
-     * （见 {@code ChapterMemoryService.buildForeshadowContextListWithIds}），而回抄的 ID 里
-     * **不含任何语义内容**——只做文本全等/子串匹配时，这类回收在体检口径里
-     * 配不上任何埋设，该线永远停在"在途"。实测第 143-149 章的 ID 回抄回收**全部漏配**，
-     * 在途数被单调虚高。账本侧早已 ID 感知（{@code ChapterMemoryService.isResolved}），
-     * 指标侧漏改是纯粹的口径分裂。
+     * 纯 ID 不含语义内容，文本全等或子串匹配无法识别该类回收，
+     * 必须与账本侧保持同一 ID 核销口径，避免在途数被虚高。
      *
      * ID 形态但无对应埋设时**不回退文本**：一条纯 ID 的回收登记不含语义，
      * 拿 {@code [F142-1]} 去做子串匹配只会撞出噪声（老数据无 ID 的线由文本路径覆盖）。

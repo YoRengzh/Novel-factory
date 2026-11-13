@@ -20,14 +20,13 @@ import java.util.regex.Pattern;
 public class ConsistencyIndexService {
 
     /**
-     * 每节渲染条数上限（2026-10-12 由 20 收紧到 12）：索引随连载线性增长，125 章时整块 2.9k
-     * 字符，是正文前缀预算饱和（章章 99-100%）挤出三账本/伏笔账的主力之一。上限只影响
+     * 每节渲染条数上限：索引随连载增长，需要约束前缀体量。上限只影响
      * {@link #renderPrompt} 渲染视图，不截断底层数据（审计与排期仍看全量 index）。
      */
     private static final int MAX_RENDER_ENTRIES = 12;
 
     /**
-     * 时间线按**章号**窗口：只渲染最近 W 章的条目（2026-10-12）。
+     * 时间线按**章号**窗口：只渲染最近 W 章的条目。
      * 时间线是"每章一条"的心跳数据，老条目与近章摘要（覆盖近 10 章）和三账本重复，
      * 且随连载线性膨胀。按章号而非插入序截取：TIMELINE 事实与每章 timePoint 混排时不依赖插入序。
      */
@@ -124,11 +123,8 @@ public class ConsistencyIndexService {
     /**
      * 金手指超期未使用检测：每个完整间隔只报一次；没有明确金手指设定时始终返回空。
      *
-     * interval <= 1 直接放行（2026-10-01 补）：间隔为 1 意味着"每章都必须用"，
-     * 此时 {@code gap % interval} 恒为 0 ⇒ 只要某章没用，其后的**每一章**都会命中。
-     * 实测该配置下 5 章 5 条 BLOCKING、章章修订两轮耗尽仍不收敛——因为写手根本无法
-     * 在"必须用金手指"与"金手指没额度"之间同时满足，这是一种自我不可能的要求。
-     * 间隔 1 本身是把"每章都得用"写成了配置，但那条要求应当由规划层表达，机械门禁只做兜底。
+     * interval <= 1 直接放行：间隔为 1 会让模运算每章命中。
+     * 每章使用的要求应由规划层表达，机械门禁只做兜底，避免互相矛盾的使用配额。
      *
      * @param currentContent 本章正文，可为 null。非空且本章已提及机制时直接放行——本检查在质量门内
      *                       于摘要落盘前执行，只有回读正文才能避免"本章用了但摘要还没生成"的误判
@@ -165,15 +161,9 @@ public class ConsistencyIndexService {
     /**
      * 金手指/核心能力运作机制跨章重复描述检测（**增量口径**）。
      *
-     * 2026-09-16 重写，修掉两处缺陷：
-     *
-     *   · 计数器不归零：原实现每章都用全量 contents 重算累计值，一旦第 3 个描述章出现，
-     *       其后每一章累计值都 > 2 因而章章报 BLOCKING——162 章样本实测会连报
-     *       135 章（83.3%）；若直接当 BLOCKING 进修订闭环，等于从第 28 章起每章都要修订。
-     *       现改为：只有"本章新引入描述 且 此前额度已用满"的那一章才报（同一样本只报 3 章）
-     *   · 跨批丢历史：原实现依赖 {@code chapterContents}，而它每个批次都从空列表开始 ⇒
-     *       "全篇至多 2 次"的上限每批都会重置，多批续写下形同虚设。现改为从摘要取历史
-     *       （{@code mechanismDescribed} 由 ChapterWorker 机械写入，摘要跨批预载）
+     * 只在本章新引入描述且此前额度已满时报告，不让历史累计值使后续每章重复命中。
+     * 历史取自摘要的 {@code mechanismDescribed}，不能依赖每批重置的 chapterContents。
+     * 该字段由 ChapterWorker 机械写入，并随摘要跨批预载。
      *
      *
      * @param currentDescribed 本章正文是否引入机制描述（{@link #describesMechanism}）
@@ -294,17 +284,14 @@ public class ConsistencyIndexService {
     }
 
     /**
-     * 时序锚（2026-10-03）：把「当前故事时间 + 主角当前年龄」渲染成一段自包含的硬锚文本。
+     * 时序锚：把「当前故事时间 + 主角当前年龄」渲染成一段自包含的硬锚文本。
      *
-     * 为什么需要它：26-30 章批次出现"十一个月大的婴儿写数论证明、列乘法竖式"的能力失控。
-     * 根因不在写手——计划 prompt 里当前月龄出现 0 次，只有圣经 band"21-30 章步入小学／
-     * 自学高阶数学"，模型无从知道人物仍是婴儿，于是把"这一带应该读小学"直接落到了襁褓婴儿身上。
-     * 年龄必须像修为境界一样，在每一路 prompt 里被显式锁定。
+     * 每一路 prompt 都需显式提供当前年龄，避免把未来学段目标误当成当前能力。
      *
      * 为什么不编造：只从摘要里已记录、且经证据校验入账的年龄类关键数字取材；
      * 无年龄事实时返回空串，由装配器过滤该块，绝不猜一个年龄塞进去。
      *
-     * 推算语义：年龄值记于其来源章号（如第16章"十一个月"）；调用方（计划/正文/蓝图）
+     * 推算语义：年龄值记于其来源章号；调用方（计划/正文/蓝图）
      * 应当按当前故事时间往前推算，因此文本显式提示"按故事时间推算至本章"，而非把旧值当成本章值。
      *
      * @return 无年龄事实时返回空串
@@ -359,9 +346,8 @@ public class ConsistencyIndexService {
     }
 
     /**
-     * 设定兜底年龄锚（2026-10-03）：新书首段还没有任何摘要 → 摘要驱动的 {@link #renderTimeAnchor} 为空，
-     * 第一章与首段计划会在"零年龄约束"下生成（实测：4 岁主角在首段做出超龄行为，
-     * 且审校年龄判据因 guard 无锚而不触发）。此处从故事设定保守提取年龄。
+     * 设定兜底年龄锚：无摘要时 {@link #renderTimeAnchor} 为空，
+     * 此处从明确的故事设定保守提取起始年龄。
      *
      * 命中从严：只在年龄明确绑定幼龄阶段词（"以4岁幼童的身份""4岁的孩童"）或"年仅/年方N岁"
      * 时才命中——"前世38岁""他38岁时"这类成人年龄一律不锚，宁可无锚也不误锚。
@@ -464,7 +450,7 @@ public class ConsistencyIndexService {
     private void append(StringBuilder sb, String title, List<?> values) {
         if (values == null || values.isEmpty()) return;
         // 只渲染最近的 MAX_RENDER_ENTRIES 条：list 按章节序累积，此前 limit 取头部会
-        // 永远停在开篇旧事实上 实测 22 条 timeline 只渲染了第 1-20 条）
+        // 永远停在开篇旧事实上；渲染视图必须取近期条目。
         List<?> recent = values.size() > MAX_RENDER_ENTRIES
                 ? values.subList(values.size() - MAX_RENDER_ENTRIES, values.size()) : values;
         sb.append(title).append("：");
@@ -473,9 +459,8 @@ public class ConsistencyIndexService {
     }
 
     /**
-     * 紧凑渲染（2026-10-01）：此前直接拼接 lombok toString，全字段名（event=/chapterNo=/evidence=…）
-     * 塞满 prompt——timeline 单条实测 313 字符、整块近 7000 字符，是前缀预算饱和（97-100%）
-     * 挤出审校反馈/风格警示块的头号元凶。紧凑后单条约 40-70 字符，同一信息量省 60% 以上。
+     * 紧凑渲染：只输出业务所需字段，避免完整 toString 字段名占满 prompt，
+     * 给审校反馈和风格警示留出预算。
      */
     private static String compact(Object value) {
         if (value instanceof ConsistencyIndexEntity.TimelineEntry t) {

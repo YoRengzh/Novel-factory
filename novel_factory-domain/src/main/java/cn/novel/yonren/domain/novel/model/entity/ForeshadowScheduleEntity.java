@@ -9,7 +9,7 @@ import java.util.List;
 import java.util.Objects;
 
 /**
- * 伏笔兑现排期表（2026-10-02 新增，P2b）：阶段蓝图为伏笔**预先排定埋设章与回收章**的前瞻台账。
+ * 伏笔兑现排期表：阶段蓝图为伏笔**预先排定埋设章与回收章**的前瞻台账。
  *
  * 为什么必须是"蓝图级的前瞻表"：兑不兑现、什么时候兑现，是**长视野决策**——
  * 而段计划一次只看 5 章，它只能"本段内埋本段内收"。但 seed 是**写正文时**才由摘要模型产生的，
@@ -76,7 +76,7 @@ public class ForeshadowScheduleEntity {
         /**
          * 长线在养标记：在哪一阶段末被裁决判为 {@code PARKED}（有意慢慢养的线）。null = 未在养。
          *
-         * 为什么用标记而不是新 status（2026-10-10）：{@link #active()} 只认 PLANNED/PLANTED，
+         * 为什么用标记而不是新 status：{@link #active()} 只认 PLANNED/PLANTED，
          * 新状态会被 {@code carriableItems} 静默丢掉——那等于把"在养"变成"停止追踪"，
          * 而它恰恰要继续被追踪（观察者仍可能提到它、真兑现时要能自动关账）。
          *

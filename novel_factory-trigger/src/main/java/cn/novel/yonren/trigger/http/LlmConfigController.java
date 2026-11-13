@@ -24,7 +24,7 @@ import java.util.List;
  * GET 返回全局覆盖（apiKey 只回掩码）+ 场景模型矩阵（yml 静态生效值 + 运行时覆盖 + 合成生效值）；
  * PUT 保存/合并（全局 apiKey 空则保留现值；scenes 全量替换场景覆盖，resetScenes 仅清场景，reset=true 清空全部）。
  * 覆盖仅作用于聊天 LLM 调用链路，生效即时、持久化到 data/llm-config-override.json，重启后仍保留。
- * 2026-11-05 分层重构：properties 参数已下沉 LlmRuntimeConfig.viewFull()。
+ * properties 参数由 LlmRuntimeConfig.viewFull() 内部装配。
  */
 @Slf4j
 @RestController

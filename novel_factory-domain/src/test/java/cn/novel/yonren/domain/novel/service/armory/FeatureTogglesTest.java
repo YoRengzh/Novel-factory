@@ -109,7 +109,7 @@ class FeatureTogglesTest {
 
     @Test
     void costHintsCoverDurationHeavyScenes() {
-        // 候选选优是单章 20+ 分钟的主因，提示里必须点明耗时量级
+        // 候选选优属于高耗时场景，成本提示必须包含耗时量级
         String candidateHint = FeatureToggles.Def.CANDIDATE.getCostHint();
         assertTrue(candidateHint.contains("20"), "候选选优的提示必须写明耗时量级：" + candidateHint);
     }

@@ -88,11 +88,9 @@ public class ChapterSummaryService {
     }
 
     /**
-     * 带时间锚的重载（2026-10-13）：timePoint 要求写出年份后，模型必须知道**当前故事年份**。
+     * 带时间锚的重载：timePoint 要求写出年份后，模型必须知道**当前故事年份**。
      *
-     * 为什么必须给锚：实测第 136 章正文只写"三月十七号"（年份在前章），
-     * 摘要模型据此猜成"2010年3月17日"，而正典是 2011 年——该摘要一旦入库即成为下一章的
-     * 时序锚，年份错位会自我固化（并且污染"进度对齐"体检的口径）。
+     * 正文可能只写月日，缺少历史锚时模型容易猜错年份并使错误沿摘要链固化。
      * 锚由调用方用历史摘要渲染（{@code ConsistencyIndexService.renderTimeAnchor}），
      * 与规划/正文/审校用的是同一根锚，三处同源。
      *
@@ -340,9 +338,8 @@ public class ChapterSummaryService {
                 .append("实测第 131-140 章摘要全部只写月份，时序锚取不到年份，规划层据此臆造出 2013 年")
                 .append("（而正文实际是 2010 年），年份链整段错位。")
                 .append("若本章未推进日期，写\"YYYY年X月X日（承接上章同日）\"；")
-                // 与计划侧 timeAdvance 口径对齐：允许同日后，实测出现
-                // "2013年10月（具体日期未明）""10月某日傍晚"——这类写法既丢了日、又让后续章节
-                // 无从沿链推算。同日也必须落到具体月日，不许用「某日」「具体日期未明」回避。
+                // 与计划侧 timeAdvance 口径对齐：同日仍须明确月日，
+                // 含糊日期会让后续章节无法沿链推算，不能以「某日」「具体日期未明」回避。
                 .append("**禁止「某日」「某月」「具体日期未明」这类含糊写法**：即便同日也要写出具体月日，")
                 .append("本章日期应与上一章或本章计划的 timeAdvance 一致，不得凭空模糊化；")
                 .append("境界纪年等非现实题材不受此限，沿用原口径。")
@@ -381,9 +378,8 @@ public class ChapterSummaryService {
                 .append("\n目标：").append(nullToBlank(item.getGoal()))
                 .append("\n关键事件：").append(item.getKeyEvents() == null ? "" : String.join("、", item.getKeyEvents()))
                 .append("\n结尾悬念：").append(nullToBlank(item.getEndingHook()));
-        // 时间锚（2026-10-13）：timePoint 强制带年份后，模型必须知道**当前故事年份**才能写对。
-        // 不给锚时它会从正文里的零散线索猜——实测第 136 章正文只写"三月十七号"，摘要便填成
-        // "2010年3月17日"（正典是 2011 年）；该值入库即成为下一章的时序锚，错位会自我固化。
+        // 时间锚：timePoint 带年份时须使用当前故事年份，
+        // 避免仅凭正文零散月日猜测并将错误固化到下一章的时序锚。
         if (historyForAnchor != null && !historyForAnchor.isEmpty()) {
             String anchor = ConsistencyIndexService.renderTimeAnchor(historyForAnchor);
             if (StringUtils.isNotBlank(anchor)) {
@@ -437,7 +433,7 @@ public class ChapterSummaryService {
     }
 
     /**
-     * 为本章伏笔种子分配**稳定 ID**（2026-10-13）：格式 {@code F{埋设章号}-{序号}}。
+     * 为本章伏笔种子分配**稳定 ID**：格式 {@code F{埋设章号}-{序号}}。
      *
      * 为什么在机械层分配：ID 是记账凭据，模型的职责是语义判断（这是不是伏笔、
      * 算不算已兑现），记账归机械层——与 excerpt 子串校验、账本核销同一分工。
@@ -507,7 +503,7 @@ public class ChapterSummaryService {
             if (matched == 0) {
                 log.warn("本章回收清单 {} 条在待收账本里一条都没匹配上（措辞漂移？）——账本按文本核销，"
                         + "对不上就不会关账，该线会被反复要求回收：{}", cleaned.size(), cleaned);
-                // 结构化留痕（2026-10-13）：这是"账本按文本核销"这条设计的漏损计量点，
+                // 结构化留痕：这是账本核销失配的计量点，
                 // 只写日志无法聚合统计——伏笔结构化 ID 改造的效果验证依赖这个数字
                 lastLedgerMismatch = new LedgerMismatch(cleaned.size(),
                         pendingForeshadowing.size(), List.copyOf(cleaned));
@@ -543,7 +539,7 @@ public class ChapterSummaryService {
     /**
      * 与账本核销同口径：**ID 命中优先，文本互相包含回退**。
      *
-     * 2026-10-13 起账本清单带 {@code [F7-2] } 前缀（见
+     * 账本清单可带 {@code [F7-2] } 前缀（见
      * {@code ChapterMemoryService.buildForeshadowContextListWithIds}），故：
      *
      *   · 登记值是 ID 形态（{@code [F7-2]} / {@code F7-2}）时——与账本条目的 ID 前缀精确比对；
@@ -591,7 +587,7 @@ public class ChapterSummaryService {
         }
         List<String> kept = new ArrayList<>();
         List<String> dropped = new ArrayList<>();
-        // 账本行可能带 [F7-2] ID 前缀（2026-10-13）：比对前剥离，否则包含匹配恒不成立，
+        // 账本行可能带 [F7-2] ID 前缀：比对前剥离，否则包含匹配恒不成立，
         // 重述过滤会静默失效（换句重述的伏笔将反复入账、未填池虚胖）
         List<String> pendingTrimmed = pendingForeshadowing.stream()
                 .filter(StringUtils::isNotBlank)
@@ -631,7 +627,7 @@ public class ChapterSummaryService {
     }
 
     /**
-     * **种子 → 新埋清单的无条件补齐**（2026-10-14）：把种子里声明了兑现义务
+     * **种子 → 新埋清单的无条件补齐**：把种子里声明了兑现义务
      * （{@code resolvable=TRUE}）而 {@code foreshadowingNew} 里缺失的条目补进 new。
      * 补齐前先过重述闸：与待回收账（剥离 ID 前缀后）实质重复的种子不补——
      * 那是模型换句重述的账本旧线，{@code filterRestatedForeshadows} 只挡 new 侧，
@@ -639,9 +635,8 @@ public class ChapterSummaryService {
      *
      * 为什么必须补：下游账本（{@code ChapterMemoryService.buildPendingForeshadowDetailed}）
      * **只读 {@code foreshadowingNew}**，种子读得再多也只服务于原文引用/重要度/ID。
-     * 实测第 1-140 章有 133 条种子在 new 里找不到对应条目——其中大部分是 VOID 出账的正常残留，
-     * 但仍有真伏笔因此**对账本完全不可见**：不待回收、不注入规划、拿不到 ID、永远不会被安排回收。
-     * 模型偶尔只填 seeds 忘填 new（两个字段分别输出），此前无任何校验兜住。
+     * 模型可能只填 seeds 而漏填 new，使真实伏笔对待回收账不可见。
+     * 本方法补齐登记遗漏，但不根据数量差臆造新的埋设证据。
      *
      * 为什么不反向做（把 new 里缺失的条目补进 seeds）：seed 携带 excerpt/importance/
      * resolvable 等**埋设现场事实**，机械层凭空造不出来；补出的种子只有 content，
@@ -741,9 +736,9 @@ public class ChapterSummaryService {
      * 判定走 EvidenceMatch 统一分档（逐字 → 归一化 → 省略号分段 → 短语覆盖），
      * 用于吸收模型惯用的「...」压缩引用与引号/空白差异；完全定位不到的仍移出三账本状态、
      * 转入 pendingFacts（待裁决，不入账本前缀，随 summaries 落盘）。
-     * 未填 evidence（降级路径/模型未遵从）→ 同样转入 pendingFacts 待裁决（2026-09-16 修正：
-     * 原实现直接入账，等于"不写引文就绕过整道门"，且物品/势力条目因缺 sourceAccount 会在
-     * 裁决回写时被错写到角色账本）。本方法只作用于本章新生成的摘要，不回溯历史数据，
+     * 未填 evidence（降级路径/模型未遵从）→ 同样转入 pendingFacts 待裁决，
+     * 不能用缺引文绕过校验；sourceAccount 保留原账本归属，避免裁决回写时错账。
+     * 本方法只作用于本章新生成的摘要，不回溯历史数据，
      * 故不存在"旧摘要被二次过滤"的兼容问题
      * 宁可少记一条存疑事实，不可让编造事实污染账本
      */
@@ -861,10 +856,8 @@ public class ChapterSummaryService {
      * **数值型事实的机械兜底**：正文里出现了带经济/计量单位的数字，而本章一致性事实里
      * 没有任何 NUMBER 条目覆盖它时，按正文原句回填一条。
      *
-     * 治什么：摘要模型偶尔整章不输出 {@code consistencyFacts}（实测某章正文明确写了
-     * 「七块二跌到三块出头」并据此做了持币决策，但该章 facts 为空）——于是这条最关键的数值锚
-     * 在账本里不存在，后续章节的写手看不到它，只能自己编一个量级（实测后文把同一资产
-     * 写成「十七块跌到九块」，与原文的「三块出头」差了一个量级，且此后这个错值反而成了正典）。
+     * 模型漏填 consistencyFacts 时，缺失数值锚会使后续章节无法对照既有数量或价格。
+     * 回填只依据正文原句，不凭空补出数值。
      *
      * 为什么只兜底"经济/计量"类数字：普通叙述里的数字（年份、年龄、楼层、页码）
      * 本就大量出现，全量回填会把账本灌满噪声。限定在带单位且单位属于价格/数量/金额这一族，
@@ -901,7 +894,7 @@ public class ChapterSummaryService {
                 continue;
             }
             // 经济语境允许出现在**本句或相邻句**：真实对话里价格常与"这是什么"分开说
-            //（实测事故原句：「七块二跌到三块出头。」角色甲把电子词典推过来——本句无经济词）。
+            // 语义主体和具体数值可能在相邻对白中分别交代。
             // 窗口取 ±1 句，既能覆盖"上一句交代行情、下一句报数字"的常见写法，又不至于把整章都算进来。
             if (!hasEconomicContextNear(sentences, i)) {
                 continue;
@@ -941,8 +934,7 @@ public class ChapterSummaryService {
      * 带单位的数字：价格/数量/金额。刻意只认这些单位——年份、年龄、楼层等日常数字不进账本。
      *
      * 覆盖两种口语形态：① {@code 17块 / 3.5元 / 两百枚}；② {@code 七块二 / 三块出头}
-     * （中文价格常用"块"后接角位或模糊后缀）。第二类必须单独认，否则「七块二跌到三块出头」
-     * 这种最典型的价格叙述会被整句漏掉——实测事故原文正是这个形态。
+     * （中文价格常用"块"后接角位或模糊后缀），两类写法均需覆盖。
      */
     private static final java.util.regex.Pattern NUMERIC_WITH_UNIT = java.util.regex.Pattern.compile(
             "(?:[0-9]+(?:\\.[0-9]+)?|[一二三四五六七八九十百千两几]+(?:十|百|千)?)\\s*(?:块|元|美元|枚|股|万|亿)"

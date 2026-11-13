@@ -12,7 +12,7 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * 角色名字列表的容错反序列化器（2026-10-01 实测后新增）。
+ * 角色名字列表的容错反序列化器。
  *
  * 为什么需要：`ChapterBeatsEntity.Beat.characters` 声明为 {@code List<String>}，
  * 但模型经常输出对象数组，把"角色名:角色身份"塞进去：
@@ -21,7 +21,7 @@ import java.util.Map;
  *
  * 期望 {@code ["主角甲","角色甲","角色乙"]}，实际收到对象 ⇒ Jackson 反序列化抛异常
  * ⇒ {@code BeanOutputConverter.convert} 失败 ⇒ 整章节拍丢失、降级为无节拍直写（SCAFFOLDED）。
- * 实测第 1–10 章批次第 4 章即因此降级（连抛 5 次解析错误）。
+ * 容错解析避免合法角色名因对象包装而丢失。
  *
  * 容错策略（只取能确定的部分，绝不猜）：
  *

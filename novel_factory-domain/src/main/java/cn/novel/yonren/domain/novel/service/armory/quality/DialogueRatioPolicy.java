@@ -108,7 +108,7 @@ public final class DialogueRatioPolicy {
     }
 
     /** 判坍缩的最小篇幅：更短的正文样本太小，宁可漏报不误伤。
-     *  自 2026-10-09 起同时对轮次密度检测（{@code QualityGate#dialogueDensityCollapse}）开放：
+     *  同时用于轮次密度检测（{@code QualityGate#dialogueDensityCollapse}）：
      * 同一份"样本太小就不断言"的口径必须只有一处，否则两条检测会对同一章给出相反结论。 */
     public static final int FORMAT_COLLAPSE_MIN_CHARS = 800;
 
@@ -198,11 +198,8 @@ public final class DialogueRatioPolicy {
      * 引号风格漂移检测（机械，MINOR）：本章台词几乎全用弯引号 {@code “”}
      * 而本书主流是直角引号 {@code 「」}。
      *
-     * 为什么单独判：两种引号在中文小说里都合法，{@link #checkFormatCollapse}
-     * 与 {@link #utteranceCount} 也都认（正则同时覆盖），所以**任何现有检测都不会报**——
-     * 但同一本书里混用是读者一眼可见的排版不一致。实测某书一章整章重写稿：台词引号
-     * 几乎全用弯引号，而其余各章全部用直角引号（全书仅此一章例外）——换模型重写时写手带回了
-     * 自己的排版习惯，而那一章的前缀预算 99% 打满、文风指纹块被裁掉（风格锚不在场）。
+     * 两种引号均为合法中文排版，格式检测不会拒绝任一写法。
+     * 同书风格漂移独立观测，避免换模型后引号习惯失去统一参照。
      *
      * 口径从严（宁漏勿滥）：非 transition 章、篇幅 ≥ {@value #QUOTE_STYLE_MIN_CHARS}、
      * 台词数 ≥ {@value #QUOTE_STYLE_MIN_UTTERANCES}，且弯引号占比 ≥ 80% 才判——

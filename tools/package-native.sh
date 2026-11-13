@@ -36,7 +36,7 @@ for entry in data config; do
 done
 
 # ---- 解包 fat jar（tools extract → 瘦 jar + lib/）
-# 实测收益：fat jar 启动 5.6–6.1s → 解包布局 3.8–4.3s，省 1.3s 以上。
+# 解包布局用于减少 fat jar 条目解压与索引的启动开销。
 # 原因：jar 内条目需解压 + 中央目录索引，按文件展开后类加载器直接读文件系统；
 # jpackage 的 --input 目录天然就是这个形态，不额外增加体积
 "$JDK_BIN/java.exe" -Djarmode=tools -jar "$JAR" extract --destination dist/cds/app
@@ -44,16 +44,12 @@ done
 # ---- jpackage：解包目录整体进包
 #
 # JVM 参数：**故意不加** -XX:TieredStopAtLevel=1。
-# 它能把启动再压到 2.2s（相对 4.3s 省 2.1s），但那是全进程生效的：只用 C1 编译、
-# 永不启用 C2，挂机跑批期间本地处理永久降速——实测 20 万次正则匹配 0.75s → 7.0s、
-# JSON 解析 51ms → 104ms，而项目有 35 处 Pattern 分布在质检/摘要/蓝图解析等每章必走
-# 的路径上。启动感知已由闪屏兜住（点图标立刻有反馈），为「闪屏少停 2 秒」赔上
-# 数小时的本地处理性能不划算。
+# 该参数对全进程生效：只用 C1 编译，永不启用 C2，可能降低长期跑批时的
+# 正则匹配与 JSON 解析性能。这些处理贯穿质检、摘要和蓝图解析等章节路径，
+# 因此不以牺牲运行期性能换取启动速度。
 #
-# 未采用 CDS（-XX:SharedArchiveFile）：实测档能正常生成并映射（日志
-# "Opened archive ... app.jsa"），但启动耗时无改善（4.35s → 5.05s，反而略慢），
-# 且 JDK 17 静态档不含模块图（日志 "archive was created without full module graph"），
-# 覆盖不到 Spring 启动的主要开销。多 39MB 体积换零收益，故不用。
+# 未采用 CDS（-XX:SharedArchiveFile）：JDK 17 静态档不含完整模块图，
+# 覆盖不到 Spring 启动的主要开销，且会增加分发体积。
 "$JDK_BIN/jpackage.exe" \
   --type app-image \
   --input dist/cds/app \

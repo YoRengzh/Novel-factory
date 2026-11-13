@@ -101,7 +101,7 @@
                     <excludes>
                         <!-- Lombok 是编译期注解处理器，运行时零作用。spring-boot repackage 默认会把
                              provided 作用域的依赖也纳入 BOOT-INF/lib（与常规 Maven 行为不同），
-                             因此需在此显式排除，否则白白多 2M（2026-11-05 实测）。 -->
+                             因此需在此显式排除，避免把编译期依赖带入运行包。 -->
                         <exclude>
                             <groupId>org.projectlombok</groupId>
                             <artifactId>lombok</artifactId>

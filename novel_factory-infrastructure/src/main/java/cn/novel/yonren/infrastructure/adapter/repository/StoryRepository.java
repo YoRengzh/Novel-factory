@@ -268,8 +268,7 @@ public class StoryRepository implements IStoryRepository {
      * 写章节计划到 runDir/chapter-plan.yml（供人工审阅/裁决）。
      *
      * ⚠️ 这里是**逐字段手写**的 YAML，不是对象序列化——**新增计划字段时必须同步加进来**，
-     * 否则该字段在留档里静默消失（实测踩过：`suspenseBeat` 有值、闸门也校验了，
-     * 但留档文件里查不到，一度被误判成"模型没回填"）。
+     * 否则该字段在留档里静默消失，留档与实际计划将无法对照。
      */
     @Override
     public void writeChapterPlan(Path runDir, ChapterPlanAggregate chapterPlan) throws IOException {

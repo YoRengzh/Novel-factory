@@ -102,7 +102,7 @@ class ChapterSummaryServiceTest {
 
     @Test
     void summarize_repairsDanglingCommaWithoutRetry() {
-        // 第 5 章实测故障：对象内悬空逗号 ",}"
+        // 对象内悬空逗号 ",}" 应在文本修复后直接解析
         String bad = "{\"summary\":\"小陈夜探废矿。\",\"characterStates\":[{\"name\":\"小陈\",\"status\":\"重伤，藏身石缝\",\"evidence\":\"正文\",}],\"timePoint\":\"当夜废矿\"}";
         stubModel(bad);
 
@@ -118,7 +118,7 @@ class ChapterSummaryServiceTest {
 
     @Test
     void summarize_salvagesSummaryFromMalformedOutput() {
-        // 第 9 章实测故障：数组未闭合，timePoint/continuityConflicts 以 {name,status} 对象错位塞进数组
+        // 数组未闭合、timePoint/continuityConflicts 以 {name,status} 对象错位塞进数组时应降级抢救
         String bad = "{\"summary\":\"小陈深入废矿，遭遇巡山弟子搜捕。\","
                 + "\"characterStates\":[{\"name\":\"小陈\",\"status\":\"重伤\"}],"
                 + "\"foreshadowingNew\":[\"矿洞深处雷鸣\"],"
@@ -283,9 +283,8 @@ class ChapterSummaryServiceTest {
     /**
      * 回收登记是一项**义务**，不是可选项（强化）。
      *
-     * 原prompt只写了约束（"只能从账中选取""逐字沿用"），没有正面义务、没有例子，
-     * 也没有解析后的机械校验。结果是漏记——而漏记的后果不是"少记一笔"：该线永远关不掉账，
-     * 会在后续每一段被反复要求回收。体检实测「清账静默兑现 80 条（占弃置 66%）」即为此。
+     * prompt 必须给出正面义务、登记示例与机械校验，不能只有选取和逐字沿用约束。
+     * 漏记会让已回收的线无法关账，并被后续段反复要求补收。
      */
     @Test
     void summarize_promptStatesResolutionDutyWithExamples() {

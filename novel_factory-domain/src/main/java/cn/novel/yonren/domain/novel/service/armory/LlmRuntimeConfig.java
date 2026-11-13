@@ -83,7 +83,7 @@ public class LlmRuntimeConfig {
         private Map<String, Boolean> toggles;
 
         /**
-         * 全局兜底模型覆盖（2026-10-23）：所有场景共用这一个兜底，字段级合并
+         * 全局兜底模型覆盖：所有场景共用这一个兜底，字段级合并
          * （null=沿用 yml 静态值）。支持独立 base-url / api-key / max-tokens——
          * 兜底的意义就在于"换一个供应商"，地址密钥必须能跟着变。
          */
@@ -189,7 +189,7 @@ public class LlmRuntimeConfig {
      */
     private FeatureToggles featureToggles;
 
-    /** 2026-11-05 分层重构注入：viewFull 的静态侧来源（trigger 层不再传 properties） */
+    /** viewFull 的静态侧来源（trigger 层不传 properties） */
     private volatile StoryProperties storyProperties;
 
     /** 资料选择器静态模式（viewFull 全量视图用；未注入时资料选择器生效值退化为纯覆盖判断） */
@@ -694,8 +694,7 @@ public class LlmRuntimeConfig {
             String providerId = StringUtils.trimToNull(in.getProviderId());
             so.setProviderId(providerId);
             // baseUrl 与 apiKey 同款"null=保留"语义：旧版前端只提交 model 时，
-            // 若按空值覆盖会把已配的地址静默清掉（实测：只改模型 → baseUrl 变 null，
-            // 留下一个"密钥还在、地址丢了"的半残覆盖，下次调用必失败）。
+            // 若按空值覆盖会清掉已配置的地址，形成密钥仍在但地址缺失的不完整覆盖。
             // 显式清除仍可用空串表达（trimToNull 后为 null 的分支由 in.getBaseUrl()==null 区分）
             so.setBaseUrl(in.getBaseUrl() == null
                     ? currentBaseUrlOf(current, entry.getKey())
@@ -851,12 +850,9 @@ public class LlmRuntimeConfig {
     /**
      * model/maxTokens 覆盖到已解析的场景模型（unified 或 scene）；无覆盖原样返回。
      *
-     * maxTokens 是兜底而非覆盖（2026-10-23）：selected 已带值（场景 yml 的
+     * maxTokens 是兜底而非覆盖：selected 已带值（场景 yml 的
      * max-tokens，或回落的 chat-model.max-tokens）时一律尊重它，全局值只在 selected
-     * 没有上限时补位。此前是全局无条件覆盖，代价实测可见：全局填 16384 会把
-     * chapter-plan 的 32768 腰斩，强制思考模型必然烧穿（completionTokens=16384/16384、
-     * 正文为空 → 判烧穿 → 拉黑 → 降级）；同时把 chapter-judge 的 1024 抬高 16 倍。
-     * 各场景上限是按其输出形态调过的（短判定 vs 长计划），一个数字统一压掉本就是错的。
+     * 没有上限时补位。长计划与短判定所需预算不同，不能用全局值无条件覆盖场景上限。
      */
     public StoryVO.Module.ChatModel applyModel(StoryVO.Module.ChatModel selected) {
         Overlay o = overlay;
@@ -897,8 +893,7 @@ public class LlmRuntimeConfig {
         String overrideModel = StringUtils.isNotBlank(fb.getModel()) ? fb.getModel() : null;
         // 兜底与全局主模型同名 = 无效兜底（ModelFallbackChain 见同名直接返回单元素链，
         // 烧穿保护进不了降级分支，空正文被记成 success，故障最终伪装成"解析失败"）。
-        // 2026-10-25 实测：设置页把兜底填成与主模型相同的 glm-5.3-flash，chapter-plan
-        // 连烧两次空正文，报错却指向章数校验。这里整条覆盖作废、回落 yml 静态兜底（异族模型）。
+        // 无效的同名同端点覆盖回落静态兜底，避免降级链仍指向同一个失败目标。
         // 注意只兜住"与全局覆盖主模型同名"这一种形态：无全局覆盖时各场景主模型不同，
         // 静态兜底恰好与某场景同名属正常配置（ModelFallbackChain 本就按场景判同名）。
         String resolvedModel = overrideModel;
@@ -984,7 +979,7 @@ public class LlmRuntimeConfig {
             }
             // 场景级地址密钥手动字段（仅在开关打开时生效；关闭时下面的统一抹除接管）。
             // 顺序必须在站点之后：站是主路径，手动字段只是它没配某字段时的补位——
-            // 反过来写会让残留的旧手动地址反压站配置（实测：选站后仍请求 OLD 地址）
+            // 反过来写会让残留的旧手动地址压过中转站配置。
             if (sceneApiOn() && StringUtils.isNotBlank(so.getBaseUrl())
                     && (sceneProvider == null || StringUtils.isBlank(sceneProvider.getBaseUrl()))) {
                 result.setBaseUrl(so.getBaseUrl());
@@ -1093,7 +1088,7 @@ public class LlmRuntimeConfig {
     }
 
     /**
-     * DTO 门面（2026-11-05 分层重构）：trigger 层不再传 properties——
+     * DTO 门面：trigger 层不传 properties——
      * 静态侧由本类注入的 yml 绑定补齐（FeatureToggles 同款模式），资料选择器模式同理。
      */
     public LlmConfigDTO viewFull() {
@@ -1199,7 +1194,7 @@ public class LlmRuntimeConfig {
      * 同名会让 ModelFallbackChain 直接返回单元素链，烧穿保护失去降级目标；同时静态兜底
      * 存在且是异族模型时才有回落价值，否则不如保持原样（避免把兜底清空）。
      *
-     * 同名但不同供应商不算无效（2026-10-27 实测）：兜底选了另一个中转站时，
+     * 同名但不同供应商不算无效：兜底选了另一个中转站时，
      * 即使模型名相同，实际也是另一路端点/账号——拦掉它会把模型名换成静态兜底，
      * 却仍保留用户选的中转站地址密钥协议，拼出"静态模型 + 异站供应商"的错配请求。
      * 因此只有"同名且同端点"才判无效。

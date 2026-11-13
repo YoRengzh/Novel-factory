@@ -13,12 +13,8 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
- * 年份解析统一口径测试。
- *
- * 背景（实测缺陷）：模型写 timePoint 时阿拉伯与中文数字混用——同一本书里第 1 章是
- * "傍晚"、第 81 章是"二〇〇八年六月十二傍晚"。旧实现只认阿拉伯数字，
- * 于是解析器一路回溯到第 1 章，把"已跳到 2008 年"误判成"仍停留在 2002 年"：
- * 体检侧报"进度滞后 6 段"，规划侧会据此反复注入跳年任务。
+ * 年份解析统一口径测试：阿拉伯与中文数字混用时仍取最新有效锚，
+ * 避免回溯到旧时点后误报进度滞后。
  */
 class StoryPacingTest {
 
@@ -233,7 +229,7 @@ class StoryPacingTest {
 
     @Test
     void calendarShiftYears_measuresOutlineAheadOfProse() {
-        // 大纲 121-130 预算 2012 年起，正文实际 2010 → 大纲跑在正文前面 2 年
+        // 大纲预算领先正文时，平移量取二者差值。
         assertEquals(2, StoryPacing.calendarShiftYears(
                 segment(121, 130, "2012-2013年（14-15岁）", 2012, 2013, 14, 15), 2010));
         // 正文追平/超前大纲 → 平移量 ≤0（预算不动或前移）
@@ -259,7 +255,7 @@ class StoryPacingTest {
 
     @Test
     void slideSegment_slidesYearAndAgeIndependently() {
-        // 实测场景：正文 2010 年/12 岁，大纲段 121-130 预算 2012-2013 年/14-15 岁
+        // 年份与年龄使用各自的事实锚独立平移。
         OutlineSegmentParser.OutlineSegment seg =
                 segment(121, 130, "2012-2013年（14-15岁）", 2012, 2013, 14, 15);
         StoryPacing.SlidBudget slid = StoryPacing.slideSegment(seg, 2, 2);
@@ -293,9 +289,7 @@ class StoryPacingTest {
     // ===== 阶段窗口预算 pacedBudget（治年份单向棘轮）=====
 
     /**
-     * 夹具大纲：231-240 章是**快进段**（10 章覆盖 2013→2016 三年），241-250 章从 2016 起。
-     * 旧实现取"终点章所在段的段末"，5 章的小阶段只要尾章落进快进段就被抬到 2016，
-     * 而正文实际只有 2012 年；该值又成为下一阶段的单调下限，年份链再也回不到正文实际时间。
+     * 快进段夹具：窗口预算只计自身时间增量，不提前继承终点段的全部预算。
      */
     private static final String FAST_FORWARD_GOAL =
             "【卷一·测试】(1-240章)：221-230章 2012年冬至2013年（14岁） 初三；"

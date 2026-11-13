@@ -13,16 +13,9 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
- * 审校 BLOCKING 证据校验的**离线重放**。
- *
- * 样本来自真实产出：故事 {@code 20260917-story-0001} 第 6-17 章有 8 条 BLOCKING 因
- * 「证据校验未通过」被整条降级为 MINOR（不进修订、不落债）。引文原样取自
- * {@code data/log/log_info.log}（当时日志按 50 字截断，故只取未被截断的 4 条做重放）。
- *
- * 目的：确认新口径「分段多数命中」（{@link EvidenceMatch#segmentsContained}）
- * 只放行**正文里真实存在、只是引法不是连续串**的那些引文，
- * 而**纯账本摘录 / 转述式引文 / 编造引文**仍被拒。
- * 这条边界不能凭直觉定——所以用真实样本锁住。
+ * 审校 BLOCKING 证据校验的离线重放。
+ * 分段多数命中（{@link EvidenceMatch#segmentsContained}）允许正文中真实存在的非连续引用，
+ * 但纯账本摘录、转述与编造引文仍须被拒绝。
  */
 class AuditEvidenceReplayTest {
 

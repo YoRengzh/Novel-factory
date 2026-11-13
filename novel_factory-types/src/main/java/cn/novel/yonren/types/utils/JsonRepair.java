@@ -180,7 +180,7 @@ public final class JsonRepair {
      * 抠出的值已做转义还原（换行 / 制表 / 回车 / 引号 / 反斜杠 / 斜杠 / unicode 四位转义）。
      * 实现为 indexOf 键定位 + 状态机逐字符扫值（非正则）：字符串值可达数千字，
      * 交替量词正则 ((?:[^"\\]|\\.)*) 按字符递归匹配，正文级长度会耗尽线程栈——
-     * 实测第 62 章 content ~8 千字触发 StackOverflowError 致整批作业暴毙
+     * 避免长字符串被递归正则匹配时耗尽线程栈。
      */
     public static String extractStringField(String raw, String fieldName) {
         return extractStringField(raw, fieldName, false);

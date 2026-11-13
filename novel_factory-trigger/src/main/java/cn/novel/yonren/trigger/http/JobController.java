@@ -20,7 +20,7 @@ import org.springframework.web.server.ResponseStatusException;
 /**
  * 异步作业端点（D9 个人用范围：只做触发/进度/取消，无列表/详情/导出）。
  * 请求体与同步端点相同；作业在内存注册表中运行，job-status.json 仅供崩溃后人工查看。
- * 2026-11-05 分层重构：装配与状态 DTO 化已下沉 StoryJobService 的 DTO 门面。
+ * 装配与状态 DTO 化由 StoryJobService 的 DTO 门面负责。
  */
 @Slf4j
 @RestController

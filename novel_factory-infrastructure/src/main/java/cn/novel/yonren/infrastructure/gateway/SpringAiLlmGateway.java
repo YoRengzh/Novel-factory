@@ -202,9 +202,8 @@ public class SpringAiLlmGateway implements LlmGateway {
             recordUsage(effective, null, call, null, 0L, null, missing);
             throw missing;
         }
-        // 作业内烧穿黑名单：思考烧穿是确定性故障（与采样无关），同一模型在同一场景重试只会再烧
-        // 一次 10-30 分钟。链中已烧穿的站直接滤掉；全部烧穿则快速失败——黑名单内的模型必然复发，
-        // 再调一次只是把同样的钱再烧一遍（实测连烧 3 次 96k token、44 分钟零产出的事故即此形态）
+        // 作业内烧穿黑名单：链中已烧穿的模型直接滤掉，全部烧穿则快速失败，
+        // 避免同一场景在无可用预算下重复付费。
         String sceneKey = call.getScene() == null ? null : call.getScene().getConfigKey();
         String jobId = jobId();
         GenerationJob job = jobId == null ? null : jobRegistry.get(jobId);
@@ -232,9 +231,7 @@ public class SpringAiLlmGateway implements LlmGateway {
                 // 中扣除，思考失控时会把预算全烧在思维链上，content 只剩空串或不可解析的残片，却以
                 // HTTP 200 记账成功——调用方拿残片按"解析失败"静默降级，备选链因"无异常"从未触发。
                 // 判据以 usage 为主、不依赖 finish_reason（预算烧穿时它可能仍报正常结束），四判据见下。
-                // 实测案例：glm-5.3 烧穿 32000/16384 全空（判定①）；deepseek 备选 16383/16384 撞上限
-                // 只吐 672 字符残 JSON——旧判据"正文 < 500 字符"放过了它，在解析层翻车后整链又烧一轮。
-                // 反例保护：撞上限但 JSON 完整（26524 token/4296 字符的合法计划）判成功放行。
+                // 撞上限且 JSON 残缺须判失败；撞上限但 JSON 完整仍可成功，不能只按字符数判断。
                 //
                 // ⚠️ 失败账须带真实 usage：烧掉的 token 是真实消耗，必须进预算熔断的账，
                 // 否则反复烧穿对熔断不可见。此处记失败账后直接换下一站，不走 catch 的 null usage 路径。
@@ -250,7 +247,7 @@ public class SpringAiLlmGateway implements LlmGateway {
                 // ① completionTokens ≥ 90% 上限 且 正文为空——思考 token 把预算全吃光，正文一个字没吐；
                 // ② completionTokens ≥ 90% 上限 且 JSON 判残缺——撞上限本身只是截断（正常长输出也会），
                 //    但思考挤占下输出常死在 JSON 结构中途（responseFormat 并非所有供应商都守约），
-                //    must 真解析判定（see looksTruncatedJson：事故输出死在中文引号中间，尾字符启发式判不出）；
+                //    须用 looksTruncatedJson 真解析判定，尾字符启发式无法识别字符串中途截断；
                 // ③ 正文为空——无论用量如何，空串对调用方没有意义，能换站就换（用量缺失的供应商
                 //    思考场景只是其子集，不再单列判据）；
                 // ④ 思考 token 占预算 ≥ 80%——不必等正文变空：思考已吃掉大部分预算，剩下那点余量
@@ -286,7 +283,7 @@ public class SpringAiLlmGateway implements LlmGateway {
                 }
                 if (burnLike && failOnBudgetBurn) {
                     // fail 模式：烧穿即快速失败终止本批，不再把空串交给调用方静默降级——
-                    // 那会触发上游又一层重试循环，把同样的 10-30 分钟再挂一遍。
+                    // 避免上游额外重试循环重复消耗同一失败请求的预算。
                     // BudgetBurnException 在下方 catch 中原样穿透（否则被自家 catch 当普通失败
                     // 再记一次账、再沿链降级，fail 语义失效）
                     if (burnedBudget && job != null) {
@@ -304,8 +301,7 @@ public class SpringAiLlmGateway implements LlmGateway {
                     //
                     // 但记账必须记失败：空正文/烧穿对调用方毫无价值，记 success=true 会让
                     // 预算熔断看不见真实空烧，也让排障者以为模型"成功返回了空"。
-                    // 2026-10-26 实测：chapter-content 两次 responseChars=0、completionTokens=16384
-                    // 全被记成 success=true，单作业烧掉 32.7 万 token 而账面无一条失败。
+                    // 用量必须保留，失败分类不能让实际消耗从预算与排障记录中消失。
                     // 返回值不变（仍是 content 空串），只修记账口径——success 字段无消费方。
                     recordUsage(effective, selected, call, content, System.currentTimeMillis() - start,
                             response.getMetadata().getUsage(),
@@ -804,12 +800,11 @@ public class SpringAiLlmGateway implements LlmGateway {
     }
 
     /**
-     * Anthropic /messages 响应的思考剥离与提取（真机联调实证的必要性，2026-10-26）：
+     * Anthropic /messages 响应的思考剥离与提取：
      * Spring AI 1.0.0 的 {@code AnthropicChatModel.toChatResponse} 会把 content[] 里的
      * thinking 块也包装成一个 Generation（AssistantMessage 的正文取 thinking 字段），
      * 且思考块排在首位——网关 {@code response.getResult()} 取第一个结果，拿到的将是
-     * 思考文本而非正文（实测 deepseek-v4.1-flash 经 anthropic 中转：正文=思考自言自语，
-     * responseChars 与 reasoningChars 完全相等）。因此在拦截器里重写 content：
+     * 思考文本而非正文，因此在拦截器里重写 content：
      *
      *   · 丢弃 thinking / redacted_thinking 块（思考字符数先记入 ReasoningCapture 供观测与记账）；
      *   · 多个 text 块合并为单块（Spring AI 每块一个 Generation，网关只取首个，多块会静默丢正文）；

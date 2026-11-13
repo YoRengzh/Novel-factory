@@ -324,7 +324,7 @@ public class ChapterWorker {
                     currentStageBlueprint(dynamicContext.getStageBlueprints(), globalNo),
                     rollingOutlineService.volumeAt(dynamicContext.getVolumes(), globalNo), recallHits,
                     item.getTimeAdvance()));
-            // 新书首段（无摘要）：追加设定兜底年龄锚——否则第一章在零年龄约束下生成 实测）
+            // 新书首段（无摘要）：追加设定兜底年龄锚，避免开篇缺少年龄约束
             chapterMemoryService.prependSettingsAnchorIfNoSummaries(memoryBlocks, summaries,
                     storyContext.getWorldSetting(), storyContext.getProtagonist(), storyContext.getOutline());
             // 实体档案（E1）：本章涉及的休眠实体（老角色/旧物品/势力）的档案注入——
@@ -344,14 +344,14 @@ public class ChapterWorker {
             String secrecyGuardPrompt = chapterMemoryService.buildSecrecyGuard(summaries, item).promptBlock();
             // 文风指纹库：本书已建立的风格基准（正向激励，补"只堵不疏"）
             String fingerprintPrompt = styleStatService.renderFingerprints(styleFingerprints);
-            // 已用情节模式黑名单：防止LLM重复使用相同情节套路（如"演武场演示→长老震惊→获授权"被用了两次）
+            // 已用情节模式黑名单：防止 LLM 复用同一抽象情节结构
             String usedPatternBlacklist = buildUsedPatternBlacklist(summaries, globalNo);
             // 前缀总预算守门：各块独立封顶之和仍可能击穿模型输入窗口，统一按优先级装配——
             // 渲染顺序：末态红线 → 记忆各节（buildMemoryBlocks） → 门禁类块 → 三账本/伏笔账；
             // 第 4 档内按入参顺序贪心填装，三账本/伏笔账（常合计 5k+ 字，第 4 档主要消耗方）抽到末尾——
             // 预算吃紧时由它们承担截断，保住情节模式黑名单/审校反馈两个小纠正通道
-            //（实测第 111/112/115 章：截断[一致性索引]清零预算后两通道整批出局。伏笔账按动态权重
-            //  分级渲染、尾部为最低分背景条目，是最抗截的块，见 ChapterMemoryService.renderForeshadowing）
+            // 伏笔账按动态权重分级渲染，尾部为最低分背景条目，适合作为预算不足时的截断对象，
+            // 见 ChapterMemoryService.renderForeshadowing。
             List<PromptBudgetGuard.Block> ledgerBlocks = detachLedgerBlocks(memoryBlocks);
             List<PromptBudgetGuard.Block> prefixBlocks = new ArrayList<>();
             prefixBlocks.add(PrefixBlock.EDGE_STATE.toBlock(edgeState));
@@ -385,9 +385,8 @@ public class ChapterWorker {
 
             String userPrompt = buildChapterPrompt(dynamicContext.getStoryContext(), item, fullPrefix, globalNo,
                     contract, storyContext);
-            // 段计划遗留违规（2026-10-13）：计划层二次重规划仍未通过的推进问题，在此转成对写手的硬约束。
-            // 实测第 136 章：计划闸门报了"136/137 事件重合、档位倒退"仍放行，写手拿到的是一份残缺契约，
-            // 首稿 87 字（把重叠事件写完就无料可写）——把违规原文交给写手，至少能止损到"本章写别的"。
+            // 段计划遗留违规：计划层二次重规划仍未通过的推进问题，在此转成对写手的硬约束。
+            // 事件重合或档位倒退会削弱本章契约；携带违规说明，帮助写手区分本章与相邻章的推进。
             if (StringUtils.isNotBlank(dynamicContext.getPlanResidualViolations())) {
                 userPrompt += "\n\n【本段计划的遗留问题（规划校验两次未通过仍放行，写作时必须规避）】"
                         + dynamicContext.getPlanResidualViolations()
@@ -399,9 +398,8 @@ public class ChapterWorker {
             // 场景节拍层：计划 → 正文之间插入逐拍供给（防注水的治本改动）；
             // 节拍不可用时用通用骨架兜底——保住因果链，而不是放任模型自由发挥。
             // FREE（enforcesBeats=false）时节拍降为"建议顺序"，把场景划分与对白比例的自由还给模型。
-            // ⚠️ 这句话必须由**节拍块自己**说：此前它由 FREE_BEATS_NOTE 单独追加在节拍块**之前**，
-            // 紧随其后的节拍块又写着"请逐拍扩写，不要跳过或合并"——后者更靠后、更具体，实际生效，
-            // 于是 enforcesBeats() 写好了、有单测、生产代码却从未调用，FREE 名不副实。
+            // 节拍块自身说明执行强度：自由模式不能被后续更具体的逐拍硬约束覆盖，
+            // 因此将 enforcesBeats() 直接传给节拍渲染器，保证模式与供给说明一致。
             String beatsPrompt = beats == null ? ""
                     : chapterBeatsService.renderBeatsPrompt(beats, mode.enforcesBeats());
             userPrompt += StringUtils.isNotBlank(beatsPrompt) ? beatsPrompt : FALLBACK_SKELETON;
@@ -490,13 +488,13 @@ public class ChapterWorker {
             // 抢救成功返回 partial 标记的残缺记忆（仅剧情摘要，账本状态缺失）
             String ledgerPrompt = chapterMemoryService.renderLedgerPrompt(summaries);
             // 摘要携带待回收伏笔账（新→旧封顶），回收登记才能逐字沿用原文、账本核销匹配才可靠。
-            // 带 ID 前缀版（2026-10-13）：模型可回抄 [F章号-序号] 精确销账，不再依赖措辞吻合
+            // 带 ID 前缀版：模型可回抄 [F章号-序号] 精确销账，不再依赖措辞吻合
             List<String> pendingForeshadowing = chapterMemoryService.buildForeshadowContextListWithIds(
                     summaries, ChapterMemoryService.FORESHADOW_CONTEXT_LIMIT);
             ChapterSummaryEntity summary = chapterSummaryService.summarize(
                     requestParameter.getStoryVO(), item, chapterContent.getContent(), globalNo,
                     ledgerPrompt, pendingForeshadowing, summaries);
-            // 账本失配留痕（2026-10-13）：本章回收清单与待收账本一条都没匹配上时，
+            // 账本失配留痕：本章回收清单与待收账本一条都没匹配上时，
             // 把失配事实结构化落盘——这是"账本按文本核销"这条设计的漏损计量点，
             // 只写 WARN 日志无法聚合（伏笔结构化 ID 改造的效果验证依赖这个数字）。fail-soft
             ChapterSummaryService.LedgerMismatch ledgerMismatch = chapterSummaryService.consumeLedgerMismatch();
@@ -505,7 +503,7 @@ public class ChapterWorker {
                         ledgerMismatch.resolvedCount(), ledgerMismatch.pendingCount(),
                         ledgerMismatch.resolved());
             }
-            // 种子补 new 留痕（2026-10-14）：模型偶尔只填 foreshadowSeeds 漏填 foreshadowingNew，
+            // 种子补 new 留痕：模型偶尔只填 foreshadowSeeds 漏填 foreshadowingNew，
             // 机械层已无条件补齐（ChapterSummaryService.syncSeedsIntoNew）——补齐事实落结构化流水，
             // 用于回答"漏填率多高、补进来的条目后来有没有被回收"。fail-soft 同上一块
             ChapterSummaryService.SeedNewSync seedNewSync = chapterSummaryService.consumeSeedNewSync();
@@ -574,13 +572,11 @@ public class ChapterWorker {
             // 此处不再单独记债——否则同一问题会既被修订又被记债，重复计数
             pendingConflicts = summary.getContinuityConflicts();
 
-            // 时间欠账回灌（2026-10-26）：把"计划要推进多少天 vs 正文实际走到哪天"的缺口
+            // 时间欠账回灌：把计划声明与正文实际时点的缺口
             // 注入下一章的【偏差警示】块。复用 pendingConflicts 这条现成通道——
             // 它本来就是"上一章的问题，下一章必须修正"的传递载体（语义与账本冲突一致）。
             //
-            // 为什么必须**章后立刻**回灌，而不是等批末体检：体检只能报警，来不及修正；
-            // 而时间欠账是会**累积**的（实测某段 5 章：计划 59 天、正文 16 天，四章连续欠 87 天），
-            // 越晚发现越难追回。逐章回灌让写手在下一章就补，欠账不会滚成雪球。
+            // 时间欠账可能累积，逐章回灌让下一章及时处理，而不是只留批末告警。
             String timeArrears = timeAdvanceArrears(item, summaries, globalNo);
             if (StringUtils.isNotBlank(timeArrears)) {
                 // 前缀区分来源：偏差警示块的导语是"以账本为准修正"，那对时间欠账不适用——
@@ -634,7 +630,7 @@ public class ChapterWorker {
                     storyRepository.writeStyleStat(storyDir, styleStat);
                     storyRepository.writeStyleFingerprints(storyDir, styleFingerprints);
                     storyRepository.writeConsistencyIndex(storyDir, consistencyIndex);
-                    // 蓝图/卷**只在变化时写**（2026-10-13）：两者一个批次内至多变一次
+                    // 蓝图/卷**只在变化时写**，避免每章重复全量写入。
                     //（阶段边界/卷边界），而此前每章全量重写——写放大随书线性增长。
                     // 蓝图有两个变化源：链式 append（大小变）+ 阶段末章的就地回写（大小不变，
                     // 故须靠 blueprintDirty 显式置脏）；卷在章循环内只读，比大小即可。
@@ -1377,13 +1373,13 @@ public class ChapterWorker {
             把已有内容写完整，优先于向外扩张。""";
 
     /**
-     * 节拍生成用的**前情上下文**：最近 2 章的剧情摘要（2026-09-22）。
+     * 节拍生成用的**前情上下文**：最近 2 章的剧情摘要。
      *
      * 为什么必须给：节拍 prompt 的要求 3 早就写着"第一拍必须无缝承接上一章结尾"，
      * 但此前它只拿到本章计划——**指令承诺了它做不到的事**，模型只能凭空想象上一章。
      *
      * ⚠️ **只取最近 2 章、只取摘要**：节拍需要的是"上一章结尾在哪、当前状态如何"，
-     * 不是全量设定。把整段记忆前缀（实测可达 9000+ 字）塞进去会让每章的节拍调用成本翻几倍。
+     * 不是全量设定，避免整段记忆前缀扩大高频节拍调用的成本。
      *
      * @return 上下文文本；无历史章时返回 null（prompt 会跳过该块）
      */
@@ -1407,7 +1403,7 @@ public class ChapterWorker {
     }
 
     /**
-     * 组装正文 prompt —— **四层结构**（2026-09-22 拆分重构，输出与拆分前逐字节一致）：
+     * 组装正文 prompt —— **四层结构**：
      *
      *   · {@link #renderFacts} 事实层：全局设定 + 记忆前缀（含账本末态红线）——先知道世界与前情；
      *   · {@link #renderContract} 任务层：本章计划条目，即本章唯一的核心戏剧任务；
@@ -1462,16 +1458,11 @@ public class ChapterWorker {
                 .append("\n  结尾悬念：").append(contract.endingImage())
                 .append("\n【本章完成条件】以下条件全部自然完成后，本章立即结束、不再扩写：")
                 .append("\n  1) 关键事件全部落地并写出结果（见上）；")
-                // 2) 是"形态"要求而非字数要求——2026-10-10 实测：同一段章节、同一份计划，
-                // 两次生成的字数差 21%、对白差 30%、情感词差 75%，而计划供给逐字相同。
-                // 根因是本条缺失：写手被要求"完成即收笔"，却没人要求"每个事件得演出来"，
-                // 于是把 4 个关键事件各用一段话交代过去，章就成了 977 字的流程说明。
+                // 2) 是形态要求而非字数要求，防止关键事件被压成提纲式交代。
                 .append("\n  2) **每个关键事件都必须演成一场戏**：有在场的对手或同伴、有一来一回的对话或具体动作、"
                         + "有可看见的结果。**禁止**把关键事件压成一句过渡叙述（如「他把材料交了上去」"
                         + "「两人谈完了」）——那是摘要，不是本章要交付的东西；")
-                // 3) 情感要正面要求，且明确它不算注水：本项目的反注水机制（挤水判据把"重复情绪"
-                // 列为首要目标、契约禁止"心理总结"）叠在一起，把**具体的情感呈现**也一起砍了——
-                // 实测一章情感词从 5 处掉到 1 处。而这本书的格调本来就是"温情细腻…有血有肉的生活细节"。
+                // 3) 具体情感呈现属于人物内容，与抽象重复情绪的注水不同。
                 .append("\n  3) 至少一处**具体的情感时刻**：用动作、停顿、沉默、器物或对白把人物的情绪与关系变化"
                         + "呈现出来（比如话说到一半把碗放下、伸手又收回去、把糖纸压平了才开口），"
                         + "而不是用「他很担心」这类抽象心理总结；")

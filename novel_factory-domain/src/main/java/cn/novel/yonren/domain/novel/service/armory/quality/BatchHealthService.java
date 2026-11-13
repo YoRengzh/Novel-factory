@@ -76,17 +76,15 @@ public class BatchHealthService {
     private static final double SUSPENSE_HOLD_DEGRADED = 3;
 
     /**
-     * 伏笔平均保密跨度（章）——2026-10-01 新增。
-     * 实测第 1–15 章平均 2.23 章、77% 在 2 章内兑现，是"读起来浅"的结构性指标。
-     * ⚠️ 无历史基线，取值按实测分布定，须经更多批次校准（项目约定：不要凭直觉取整）。
+     * 伏笔平均保密跨度（章）：观测是否过早兑现。
+     * 阈值需与目标节奏及更多样本共同校准，不等同于文学质量结论。
      */
     private static final double FORESHADOW_SPAN_OK = 4.0;
     private static final double FORESHADOW_SPAN_DEGRADED = 3.0;
 
     /**
-     * 在途伏笔滞留中位数（章）——2026-10-02 新增，`foreshadowSpan` 的互补指标。
-     * 实测：41 条埋设中 31 条在途、其中 18 条滞留 ≥5 章、最长 14 章。
-     * ⚠️ 无法与历史比较（该口径首次引入），取值先按实测分布设定，须经更多批次校准。
+     * 在途伏笔滞留中位数（章），与 foreshadowSpan 互补。
+     * 反映未兑现事项的等待长度，阈值需经多批样本校准。
      */
     private static final double FORESHADOW_PENDING_OK = 6.0;
     private static final double FORESHADOW_PENDING_DEGRADED = 9.0;
@@ -96,7 +94,7 @@ public class BatchHealthService {
     /** 伏笔未标注占比的可容忍上沿：超过即认为寿命/在途两项指标的样本已被掏空 */
     private static final double FORESHADOW_UNLABELED_OK_TOLERANCE = 0.20;
 
-    /** 漏收伏笔数分级（2026-10-02 新增，P2a）：无历史基线，先按"每阶段允许欠 1 条"设定，须校准 */
+    /** 漏收伏笔数分级：按每阶段可容忍的欠账量设定，须校准 */
     private static final double FORESHADOW_MISSED_OK = 1.0;
     private static final double FORESHADOW_MISSED_DEGRADED = 3.0;
     // ---------- 每章新地点率（改造前基线 0.83，10 章窗口内中位 10 个不同地点） ----------
@@ -1265,8 +1263,7 @@ public class BatchHealthService {
         }
         // 实际时间标记：最新摘要的年龄事实 + 最新 timePoint 的年份（与时序锚渲染同源）
         // 两个维度都走 StoryPacing 统一口径——观测层自写正则会被模型的写法变化击穿：
-        // 实测两轮误报，①年份写成"二〇〇八年"读不到（回溯到第 1 章的 2002，报滞后 6 段）；
-        // ②年龄把「人物四岁+年份数字」这类叙述串当成当前年龄（contains("岁") 过宽，读成 4 岁）
+        // 年份支持中文数字，年龄只接受当前状态词，不能把历史叙述误当作事实锚。
         Integer actualAge = StoryPacing.latestAnchorAge(chapters);
         Integer actualYear = StoryPacing.latestAnchorYear(chapters);
 

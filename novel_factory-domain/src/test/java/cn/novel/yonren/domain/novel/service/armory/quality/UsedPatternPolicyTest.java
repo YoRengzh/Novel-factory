@@ -13,10 +13,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
  * 已用情节模式判据测试：窗口过滤、舞台复用聚合、重复点名。
- *
- * 背景：原黑名单只在正文层、且是"内容复述"，规划层完全没有对应块，
- * 而重复的源头在规划层（实测"老陆五金铺"在第 8–16 章反复出现、"校长测试"连占三章）。
- * 本类补的是一层（舞台 × 章型）指纹统计，并把同一实现同时供规划层与正文层使用。
+ * 舞台与章型指纹同时用于规划层和正文层，不依赖内容复述识别重复结构。
  */
 class UsedPatternPolicyTest {
 
@@ -100,9 +97,7 @@ class UsedPatternPolicyTest {
     @Test
     @DisplayName("角色冲突发起频次：同一角色反复当麻烦制造者要点名（小胖模式的机械指纹）")
     void repeatedConflictRoleIsCalledOut() {
-        // 实测：小胖在第 3/13/19 章反复"抢夺 → 被物证揭穿 → 长辈介入 → 逃离"。
-        // ⚠️ 该套路用**文本相似度抓不到**——三次节拍文本两两 3-gram Jaccard ≤0.09（第3章 vs 第19章仅 0.02），
-        // 因为重复的是抽象结构而非措辞。故本指标走"角色 + 冲突动词"的结构化标签，本用例守住这条路线。
+        // 重复冲突结构可能措辞不同，按角色与冲突动词的结构标签识别。
         List<ChapterSummaryEntity> summaries = List.of(
                 withBeats(chapter(1, "巷口", "normal", "一"), beat("小胖", "抢到角色庚兜里的点心吃")),
                 withBeats(chapter(2, "水井旁", "normal", "二"), beat("王阿婆", "倒煤灰，查证谁偷了她晒的梅干菜")),
@@ -140,7 +135,7 @@ class UsedPatternPolicyTest {
     @Test
     @DisplayName("能力展示频次：窗口内 ≥2 章标注展示即告警，并点名已用形态")
     void repeatedAbilityShowcaseIsCalledOut() {
-        // 实测：5 章全部是「微动作展示 → 旁人评价不像孩子」，读者第 3 次即可预判
+        // 多章同型能力展示达到阈值时应点名已用形态。
         List<ChapterSummaryEntity> summaries = List.of(
                 showcase(6, "手指蘸水画圈引人注意"),
                 showcase(7, "旁人评价不像四岁"),

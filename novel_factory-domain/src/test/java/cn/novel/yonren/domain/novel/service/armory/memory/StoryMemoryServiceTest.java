@@ -313,9 +313,8 @@ class StoryMemoryServiceTest { /*MARKER-CHECK-1*/
 
     @Test
     void retrieve_truncatesOversizedFirstHitToBudget() {
-        // 回归：旧实现"至少保留首条"让单条大命中（chapter/bible 记忆点实测 2000~3000 字）
-        // 原样灌进前缀，600 的预算形同虚设——生产日志里「唤醒」块在 129~3166 字之间剧烈波动。
-        // 现在首条也按预算截断，前缀长度才可预期、预算数值才谈得上可调。
+        // 回归：首条命中也必须按 600 字预算截断，不能因“至少保留首条”而绕过预算。
+        // 前缀长度受预算控制后，召回大小才可预测、可配置。
         String oversized = "记".repeat(3000);
         when(vectorStore.search(anyString(), any(), anyInt())).thenReturn(List.of(
                 ScoredVectorPoint.builder().score(0.9)
@@ -877,11 +876,8 @@ class StoryMemoryServiceTest { /*MARKER-CHECK-1*/
     /**
      * 核对口径必须只数**受管的点**。
      *
-     * 背景：实测 145 章回滚时日志报「应有受管点 453，实际 454」——差值恒为 1 个卷方向点。
-     * 成因是对账用**集合总数**与"应有受管点"比对，而删除时刻意跳过卷点（那是卷生成路径维护的），
-     * 两个口径必然差一个卷点数。必现的误报会训练人忽略这条 WARN。
-     *
-     * 本用例守住关键行为：**集合里有卷点不触发任何额外写删**——* 修正后对账不再因卷点存在而误判（旧实现在此场景会报点数不符）。
+     * 卷方向点由卷生成路径维护，删除与对账都必须排除这些非受管点。
+     * 不得用集合总数与受管期望数比较；卷点存在时不应触发额外写删或点数告警。
      */
     @Test
     void rebuildIndex_countIgnoresUnmanagedVolumePoints(@TempDir Path storyDir) throws Exception {

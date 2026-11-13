@@ -17,7 +17,7 @@ import static org.mockito.Mockito.when;
 
 /**
  * 候选链路统计测试：重点钉住**按章去重**口径——* 重跑批次时同一章会追加多行，统计必须取每章最后一行，
- * 否则旧批次行会把触发率推到 100% 以上（老书重跑实测 105%/133%）。
+ * 否则重复行会被计入分子，把触发率推到 100% 以上。
  */
 @ExtendWith(MockitoExtension.class)
 class CandidateSampleServiceTest {

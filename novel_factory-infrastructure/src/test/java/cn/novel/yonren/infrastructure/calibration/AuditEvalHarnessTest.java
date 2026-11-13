@@ -52,7 +52,7 @@ import java.util.stream.Stream;
  * 运行方式（项目根目录）：
  *
  * mvn test -pl novel_factory-infrastructure -Dtest=AuditEvalHarnessTest -Daudit.eval=true \
- *   -Deval.mode=noise -Deval.story=20260905-story-0002 -Deval.k=3 -Deval.limit=5
+ *   -Deval.mode=noise -Deval.story=<story-dir> -Deval.k=3 -Deval.limit=5
  *
  */
 @EnabledIfSystemProperty(named = "audit.eval", matches = "true")

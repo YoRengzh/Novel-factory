@@ -18,12 +18,8 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
- * 证据命中判定测试。
- *
- * 单元用例的素材取自 20260913-story-0001 的真实挂起数据（模型的省略号压缩引用、
- * 引号形态差异、语序重组等），不是臆造样本。末尾的干跑回归用同一份数据重放
- * 全部历史隔离条目，断言账本完整度回到 94% 以上（门分层 + SPREAD/ANCHORED 留痕档），
- * 且「全库无据」条目一条都不被放行——放行与守门这两件事同时是本改造的验收判据。
+ * 证据命中判定测试：覆盖省略号压缩、引号差异和语序重组的容错，
+ * 同时验证无据条目仍被隔离，放宽表述不等于放宽事实存在性。
  */
 class EvidenceMatchTest {
 

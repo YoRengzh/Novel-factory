@@ -60,58 +60,33 @@ class StoryPropertiesBindingTest {
         assertEquals(17, sceneModels.size(),
                 "应有 17 个场景配置（16 个既有 + 新增 setting-draft 设定集草稿）");
 
-        // 结构校验：每个场景模型名必须落在"本账号实弹验证可调用"集合内——// 拼错调用名（如把 deepseek-v4-flash 写成 deepseek-flash）会在运行期 404，这里提前拦截。
+        // 结构校验：每个场景模型名必须落在可调用模型集合内，提前拦截拼错调用名导致的运行期 404。
         // 具体用哪个模型允许随时手调，不在断言范围内。
-        // 带日期后缀的快照档（qwen3.7-max-/ qwen3.7-plus-）已确认可用且在
-        // 免费额度内，故一并收录；它们的无后缀名与快照名都有效，但 yml 用的是快照档。
-        // qwen3.7-max-为 chapter-plan 的现行快照档：三章实测中 chapter-plan
-        // 三次调用全部成功，属"实弹验证可调用"（此前白名单停留在 05-20 档，属过期而非拼错）
+        // 带日期后缀的快照档与无后缀别名都有效，一并收录以兼容固定版本配置。
         var callable = java.util.Set.of("deepseek-v4-pro", "deepseek-v4-flash", "deepseek-v4.1-flash",
                 "qwen3.7-plus", "qwen3.7-plus-2026-05-26", "qwen3.7-max-2026-05-20",
                 "qwen3.7-max-2026-06-08",
-                // chapter-plan 换用 05-17 快照档，job-44746101051367424
-                // 第 16-20 章批次实测 4 次 chapter-plan 调用全部成功（0 失败），属实弹验证可调用。
-                // 同日 glm-5.3 因 reasoning_effort 默认 max 吃满输出预算、正文只剩 1-2 字而弃用。
+                // 兼容 chapter-plan 的快照模型名。
                 "qwen3.7-max-2026-05-17",
-                // audit / audit-verify 现行用档（preview 档），job-45441319799103488 +
-                // job-45456511509471232 两批 audit+audit-verify 共 32 次调用全部成功（0 失败），
-                // 且实际抓出 ch9 禁泄泄露——属实弹验证可调用。
-                // 注意：同批 chapter-plan / chapter-rewrite 虽调用成功，但产出系统性偏薄（计划 3 事件/章、
-                // 挑战者稿全线比原稿短），属**质量淘汰**，已回退 05-17 档——白名单只拦"调不通用"，不拦"用不好"。
+                // preview 档同样允许用于 audit / audit-verify；白名单只校验可调用性，不评价产出质量。
                 "qwen3.7-max-preview",
-                // 模型名切换为当前供应商的大写规范名，36-40 章批次
-                //（job-45753881946234880）全场景实弹调用成功——stage-blueprint/summary/
-                // paragraph-audit/ledger-adjudicate 全部 0 失败；qwen-3.7-plus 在 31-35 批
-                //（job-45730329780035584）rewrite/audit/patch 共 13 次调用成功（但其 rewrite
-                // 输出 3 次解析失败属质量问题，chapter-rewrite 已改配 qwen3.8-max）。
-                // 大小写两种写法都保留：yml 现已统一小写，但运行时覆盖/历史配置里仍可能出现
-                // 供应商规范大写名（同一模型，供应商侧不区分大小写）
+                // 大小写两种写法都保留，兼容运行时覆盖及供应商规范名；供应商侧不区分大小写。
                 "DeepSeek-V4-Pro", "DeepSeek-V4-Flash",
                 "qwen-3.7-plus",
                 "qwen3.8-flash", "qwen3.8-max", "kimi-k3", "glm-5.2",
-                // chapter-plan / chapter-rewrite 现行用档，已实测可调用
-                //（此前白名单未同步 → 测试长期红，进而把 infrastructure 的测试整段 SKIPPED 掉）
+                // 兼容 chapter-plan / chapter-rewrite 的模型配置。
                 "qwen3.8-27b",
-                // 再补：chapter-plan 换成它，已实测可调用（无后缀名与快照档都有效）
+                // 无后缀名与快照档都有效。
                 "qwen3.7-max",
-                // stage-blueprint 换用 0902 快照档，DashScope 实测 0.7s 正常返回
-                //（快照档与无后缀别名都可用；用快照是为了固定版本，避免上游静默换权重）
+                // stage-blueprint 快照档用于固定版本，避免上游静默换权重；无后缀别名也可用。
                 "qwen3.8-max-0902",
-                // Command Code Provider 实弹验证通过的模型。**当前配置已回退到
-                // DashScope 免费档，不再使用这些付费档模型**，此处保留白名单以免日后切回时又要重新实测：
-                //   deepseek/deepseek-v4.1-flash  11.7k 字提示词 18.6s / 1915 字 / 推理仅 16%
-                //   Qwen/Qwen3.8-Max              同提示词 37.7s 返回合法 JSON（推理 82%）
-                //   google/gemini-3.8-flash        同提示词 10.9s（最快）
-                //   zai-org/GLM-5.3                大输出场景 12.9 分钟后 524，**不可用于规划类**
-                //   z-ai/glm-5.3-flash 输出 0 字；z-ai/glm-5.3-flashx 与 Qwen/Qwen3.8-Flash 为 422
+                // 兼容不同供应商的命名空间模型名，白名单不限制当前供应商选择。
                 "deepseek/deepseek-v4.1-flash", "zai-org/GLM-5.3", "google/gemini-3.8-flash",
                 "Qwen/Qwen3.8-Max",
-        // glm-5.3（DashScope 无后缀名）实弹验证 200——最小请求秒回、content 干净、
-       // 思考在独立 reasoning_content 字段。与 zai-org/GLM-5.3（OpenRouter 通道，大输出 524）区分；
-       // 强制思考模型，enable_thinking 注入被 4xx 拒时网关已自愈去除（SpringAiLlmGateway 拦截器）
-        // （kimi-k3 场景实弹）：强制思考 + 温度钉死 1.0——任何非 1.0 的
-        // temperature 都会被 400 拒绝（InternalError.Algo.InvalidParameter），
-        // kimi-k3 场景必须显式配 temperature: 1.0
+        // glm-5.3 的思考在独立 reasoning_content 字段；不同供应商的同名模型需分别配置。
+       // 强制思考模型的 enable_thinking 被 4xx 拒绝时，网关拦截器会自愈去除。
+        // kimi-k3 强制思考且温度必须为 1.0；其他 temperature 会被 400 拒绝，
+        // 场景配置必须显式配 temperature: 1.0。
         "glm-5.3");
         for (Map.Entry<String, StoryVO.Module.ChatModel> entry : sceneModels.entrySet()) {
             StoryVO.Module.ChatModel model = entry.getValue();
@@ -122,9 +97,8 @@ class StoryPropertiesBindingTest {
                             + "然后把名字加进本测试的 callable 集合；若是拼错了就改 yml。");
         }
 
-        // 抽查：节拍上限必须高于思考量。原为 2048（"小输出任务"），但 实测：上限低于
-        // 约 8192 时代理会给固定 10000 预算，思考吃光后正文为 0（completionTokens=7188/2048），
-        // 每次都靠降级救回。上限只是天花板、不改变实际输出量，故抬到 16384。
+        // 抽查：节拍输出上限必须高于思考预算。低于约 8192 时，代理可能分配固定 10000
+        // 思考预算并耗尽正文容量；上限 16384 只提供余量，不改变实际输出量。
         StoryVO.Module.ChatModel beats = sceneModels.get("chapter-beats");
         assertEquals(16384L, beats.getMaxTokens().longValue(), "节拍上限需高于思考量，避免烧穿后降级");
 
@@ -135,11 +109,11 @@ class StoryPropertiesBindingTest {
         assertEquals(0.2, sceneModels.get("summary").getTemperature(), 0.001, "摘要温度应为 0.2");
 
         // 配置回归守卫：embedding-api 必须挂在 story.module 之下。
-        // 此前插入 run-plan 块时把缩进搞错，embedding-api 被 YAML 吞进 run-plan，
-        // module.embeddingApi 变成 null，故事记忆向量检索在生成期才爆（"未配置 embedding-api"）——// 这类缩进错误不报错、只在运行期以最难排查的方式现形，所以必须在绑定层拦住
+        // YAML 缩进错误可能把 embedding-api 归到 run-plan 等兄弟块，绑定层必须拦住。
+        // 否则 module.embeddingApi 会为 null，生成期才会暴露未配置嵌入服务的问题。
         assertNotNull(module.getEmbeddingApi(), "story.module.embedding-api 未绑定成功"
                 + "（检查 yml 缩进：它必须位于 story.module 之下，而不是 run-plan 或其他块）");
-        // 模型名允许随时手调（本断言曾写死 embedding-3，换 qwen3.7-text-embedding-flash 即红）——// 守卫的目标是"绑定成功"，不是"绑定到哪个具体模型"
+        // 模型名允许随时手调；守卫目标是绑定成功，而非绑定到某个具体模型。
         assertTrue(module.getEmbeddingApi().getModel() != null && !module.getEmbeddingApi().getModel().isBlank(),
                 "embedding 模型名不应为空");
         assertNotNull(module.getEmbeddingApi().getBaseUrl(), "embedding base-url 不应为空");

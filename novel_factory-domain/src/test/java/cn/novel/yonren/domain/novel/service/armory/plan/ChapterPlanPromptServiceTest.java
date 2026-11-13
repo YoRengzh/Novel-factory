@@ -740,10 +740,7 @@ class ChapterPlanPromptServiceTest {
     }
 
     /**
-     * 同一条线在多个阶段块里各存一份时必须去重，且**保留最后一条**。
-     *
-     * 实测（第 96-100 章那批）：8 个逾期注入名额里 5 条逐字是同一条、2 条是同一条石子，
-     * 整份清单只覆盖 3 件事——规划层被反复命令去收同三样东西，这就是"重复拖沓"的来源。
+     * 同一条线跨阶段重复保存时，注入前按身份去重并保留最后一条，避免重复占用名额。
      */
     @Test
     void scheduleBlock_dedupesSameIntentAcrossBlocks() {
@@ -818,10 +815,7 @@ class ChapterPlanPromptServiceTest {
     }
 
     /**
-     * 逾期挂起：逾期 ≥ 30 章的线**停止自动补收**，改入「逾期挂起·待人工裁定」块。
-     *
-     * 标定依据（第 96-100 章实测逾期分布，正好两簇）：仍在推进的条目逾期 11-22 章，
-     * 卡死的三条逾期 48-74 章。继续每段下令的实测后果是规划层每段都把它安排一遍——* 同一件事被反复重写（"藏物/记号纸"重复拖沓的机制）。
+     * 逾期 ≥ 30 章时停止自动补收，进入待裁定块，避免每段重复安排同一事项。
      */
     @Test
     void scheduleBlock_suspendsChronicallyOverdueInsteadOfReordering() {
@@ -854,7 +848,7 @@ class ChapterPlanPromptServiceTest {
     }
 
     /**
-     * 长线在养：阶段出口判 PARKED 的线不再被要求回收，但必须**明说这是有意为之**——* 否则规划层会把它当"被忘了的线"自发安排回收（实测 那条年份线索就是这样被反复重写的）。
+     * 长线在养仍明确点名，但不下达回收指令，避免被误当成遗忘事项。
      */
     @Test
     void scheduleBlock_showsParkedLongLinesWithoutOrderingRecovery() {
@@ -895,11 +889,7 @@ class ChapterPlanPromptServiceTest {
     // ==================== 对白坍缩反馈块 ====================
 
     /**
-     * 最近 5 章里有轮次密度低于劣化线的章 → 注入【对白坍缩反馈】，责令本段把冲突写进台词。
-     *
-     * 实测第 96 章 4.4 次/千字（劣化线 6.0，同批其它章 12-27）：计划的 4 条关键事件里
-     * 有 2 条是对话承载，**数量合规**，但篇幅最大的那条是纯独白推导——规则只管条数、
-     * 不管篇幅占比，写手于是交付了动作分解。责任在规划层。
+     * 最近章轮次密度低于劣化线时，反馈给规划层调整对话承载，而不仅是正文格式。
      */
     @Test
     void dialogueCollapseFeedback_injectedWhenRecentChapterCollapsed() {
@@ -960,7 +950,7 @@ class ChapterPlanPromptServiceTest {
         assertTrue(prompt.contains("谁对谁、围绕什么分歧"), prompt);
         assertTrue(prompt.contains("必须写到「场面」级"), prompt);
         assertTrue(prompt.contains("在场人物 + 起因或分歧 + 落点或结果"), prompt);
-        // 对话承载的执法通道：字段必须进输出示例——"字段不进示例就等于不存在"（mainLineAdvance 事故同款）
+        // 对话承载字段必须进入输出示例，与要求文本保持一致。
         assertTrue(prompt.contains("\"dialogueScenes\":["), "输出示例必须含 dialogueScenes 字段：" + prompt);
         assertTrue(prompt.contains("逐字复制**进该章 dialogueScenes"), prompt);
         assertTrue(prompt.contains("transition 章至少 1 个"), prompt);

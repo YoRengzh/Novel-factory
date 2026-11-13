@@ -41,7 +41,7 @@ import java.util.List;
 /**
  * 故事库端点：列表 / 章节浏览 / 章节编辑（编辑触发摘要回流）。无鉴权（localhost 个人使用）。
  *
- * 2026-11-05 分层重构后本类只做两件事：HTTP 语义（路由/参数/响应头）与
+ * 本类只做两件事：HTTP 语义（路由/参数/响应头）与
  * {@link AppException} → HTTP 状态的映射；业务逻辑与实体触碰全部在
  * {@link StoryManageService}（domain）。
  *
@@ -159,7 +159,7 @@ public class StoryManageController {
     /**
      * 回滚到指定检查点：章节/摘要/蓝图/账本原子还原 + 向量索引重建。
      * 返回还原后的检查点（current）——**必须带 JSON 体**：前端 fetchJson 统一按 Content-Type 判别响应，
-     * void + 空体会被误报为「服务暂不可用（200）」（2026-10-04 实测：回滚成功但前端报失败）。
+     * void + 空体会被误报为「服务暂不可用（200）」。
      */
     @PostMapping("/{storyDirName}/checkpoints/{checkpointId}/restore")
     public CheckpointDTO restoreCheckpoint(@PathVariable("storyDirName") String storyDirName,

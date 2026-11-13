@@ -47,8 +47,7 @@ import java.util.ArrayList;
 import java.util.List;
 
 /**
- * 故事库应用服务：从 trigger 的 StoryManageController 下沉而来的读写编排
- * （2026-11-05 分层重构——controller 只留 HTTP 语义，实体触碰全部归本服务）。
+ * 故事库应用服务：负责读写编排；controller 只留 HTTP 语义，实体操作归本服务。
  *
  * 沿用仓内既有模式：domain 服务直接吞吐 api DTO（SegmentEditService / UserAssetStore 同款），
  * 配置经构造期注入（CheckpointService / ChapterEditService 内部 toStoryVO 同款）。
@@ -234,8 +233,7 @@ public class StoryManageService {
     /**
      * 人工保存正文：保留既有标题，正文写盘后按需触发记忆回流（重跑摘要 + 重建向量索引）。
      *
-     * 人工保存只要求非空：1500 字是生成路径的质量门禁，不该驳回用户的手改
-     * （实测段落级润色后保存被这条 400 挡掉，整章不足 1500 字就改不了）。
+     * 人工保存只要求非空：生成路径的质量门禁不应阻止用户保存已提交短章的手改。
      */
     public ChapterSaveResponseDTO saveChapter(String storyDirName, int chapterNo, ChapterSaveRequestDTO request) {
         if (request.getContent() == null || request.getContent().isBlank()) {
@@ -255,7 +253,7 @@ public class StoryManageService {
         entity.setContent(request.getContent());
         repo(() -> storyRepository.writeChapters(storyDir, List.of(entity)));
 
-        // 记忆回流是整章级的 LLM 调用，实测要几分钟。段落级润色/扩写不改情节事实，
+        // 记忆回流是整章级的 LLM 调用。段落级润色/扩写不改情节事实，
         // 重算摘要是纯浪费——前端传 reflow=false 跳过；续写引入了新内容，必须回流，否则账本与正文脱节。
         ChapterSaveResponseDTO dto = new ChapterSaveResponseDTO();
         dto.setSaved(true);
@@ -468,7 +466,7 @@ public class StoryManageService {
     /**
      * 回滚到指定检查点：章节/摘要/蓝图/账本原子还原 + 向量索引重建。
      * 返回还原后的检查点（current）——**必须带 JSON 体**：前端 fetchJson 统一按 Content-Type 判别响应，
-     * void + 空体会被误报为「服务暂不可用（200）」（2026-10-04 实测：回滚成功但前端报失败）。
+     * void + 空体会被误报为「服务暂不可用（200）」。
      */
     public CheckpointDTO restoreCheckpoint(String storyDirName, String checkpointId) {
         if (jobRegistry.isActiveForStory(storyDirName)) {

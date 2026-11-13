@@ -140,7 +140,7 @@ public class SegmentEditService {
                         : "（润色与扩写都不得改变情节事实）；\n")
                 .append("3. 不要使用 Markdown 标记，不要加引号包裹。\n")
                 // 网关对 OpenAI 协议强制 JSON_OBJECT（治正文/摘要的截断不闭合），
-                // 不显式给 schema 时模型会自创键名（实测返回 {"text": "..."} 但各模型键名不一）。
+                // 不显式给 schema 时模型可能自创键名，无法稳定解包。
                 // 明确 schema 能让解包稳定命中，也避免模型把解释塞进别的键。
                 .append(ACTION_CONTINUE.equals(action)
                         ? "4. 按以下 JSON 格式输出，新续写的内容放在 text 字段：{\"text\":\"紧接上文的新内容\"}\n"
@@ -225,8 +225,8 @@ public class SegmentEditService {
      * 从 JSON 对象里取出正文：按常见键名优先级找第一个非空字符串值。
      * 不是合法 JSON、或找不到字符串字段时原样返回（交给后续清洗继续处理）。
      *
-     * 键名不限于 text——不同模型对 JSON Mode 的 schema 理解各异，实测出现过
-     * content / result / edited / output 等写法，统一按候选列表依次尝试。
+     * 键名不限于 text——不同模型可能使用 content / result / edited / output 等写法，
+     * 统一按候选列表依次尝试。
      */
     static String unwrapJsonText(String text) {
         if (text == null) {

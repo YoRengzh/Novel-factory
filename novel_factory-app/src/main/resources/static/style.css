@@ -715,9 +715,7 @@ textarea { resize: vertical; line-height: 1.7; }
 /* 返回按钮固定到左上角：章节列表/正文可能很长，滚到底部时也要能一键退出。
    用 fixed 而非 sticky——sticky 只在父容器内粘，滚出 content-card 就失效了。
 
-   位置（实测）：.app-header 高 54px + border-bottom 1px → 分界线在 55px。
-   按钮顶部紧贴分界线（top 55px），水平放在引星图标（left 48px）的左下方（left 24px）。
-   宽 45px → 右边界 69px，正文左边界 127px，留 58px 间隙，完全不遮挡。
+   按钮紧贴页头分界线，正文为其留出左侧间距。
    改 left/padding 时必须同步 .content-card.with-floating-back 的 padding-left。 */
 .btn-back-floating {
     position: fixed;

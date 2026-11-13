@@ -5,7 +5,7 @@ import java.util.List;
 /**
  * 批末体检报告 DTO：镜像领域记录 BatchHealthReport 的组件（字段名逐一对齐，JSON 形状不变）。
  *
- * 2026-11-05 从"直接返回领域 record"改为 DTO——trigger 层不再触碰 domain 模型类型；
+ * 使用 DTO 隔离领域 record——trigger 层不触碰 domain 模型类型；
  * 嵌套的 Metric/Level/Direction 同步镜像，key 为稳定标识（前端与自动化脚本按 key 取值）。
  */
 public record BatchHealthDTO(int chapterCount,

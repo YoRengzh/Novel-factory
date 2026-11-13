@@ -30,7 +30,7 @@ import java.util.Optional;
  *
  * 运行方式（项目根目录）：
  * mvn test -pl novel_factory-infrastructure -Dtest=ChapterAuditRuntimeSampleTest -Daudit.calibration=true
- * 可加 -Daudit.calibration.story=20260905-story-0004 指定样本所在故事
+ * 可加 -Daudit.calibration.story=<story-dir> 指定样本所在故事
  */
 @EnabledIfSystemProperty(named = "audit.calibration", matches = "true")
 class ChapterAuditRuntimeSampleTest {

@@ -72,7 +72,7 @@ public class PlanApprovalGateNode extends AbstractArmorySupport {
     /**
      * 是否挂起等待人工裁决。
      *
-     * 请求级开关优先（2026-09-26）：{@code autoApprovePlan=true} 时本批直接透传、不挂起。
+     * 请求级开关优先：{@code autoApprovePlan=true} 时本批直接透传、不挂起。
      * 语义为"**只能放宽不能收紧**"——它无法让 yml 关闭的门重新生效，避免请求参数
      * 悄悄改掉配置侧"要审"的意图。跳过会打日志，观测层据此区分"人主动跳过"与"配置就没开"
      */

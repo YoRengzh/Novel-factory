@@ -146,17 +146,14 @@ public class ChapterPlanSegmentPlanner {
                 parsed.plan().getChapters(), blueprint, summariesForPressure);
         String mainLineIssue = ChapterPlanChecks.validateMainLineAdvance(parsed.plan().getChapters(), mainLine);
         String timeAdvanceIssue = ChapterPlanChecks.validateTimeAdvance(parsed.plan().getChapters());
-        // 时间推进单调性（2026-10-26）：这条规则此前只写在提示词里（"全段 timeAdvance 必须单调递增"），
-        // 没有任何执行通道——与"跳月吞线""伏笔净增"两闸门引入前的状态相同：写在 prompt 里的规则
-        // 不校验就等于没有。实测某段 5 章计划合计推进 59 天、正文只走 16 天，即靠这条缺口放行。
+        // 时间推进单调性须通过机械校验，不能只依赖 prompt 要求。
         String timeOrderIssue = TimeAdvanceChecks.validateMonotonic(parsed.plan().getChapters());
         if (timeOrderIssue != null) {
             timeAdvanceIssue = timeAdvanceIssue == null
                     ? timeOrderIssue : timeAdvanceIssue + "；" + timeOrderIssue;
         }
         // 跨章场景重演：与前两项正交——那两项管"推进说得对不对"，本项管"同一件事是不是被说了两遍"。
-        // 实测逃逸：相隔两章的同一场景（第96/99章）、以及在共用原文后追加一句子项（第98/99章，
-        // 而"档位原文之后附本章独有子项"恰是本项目 prompt 自己建议的写法）
+        // 共用粗档原文不代表细推进重复，仍须检测相隔章节中的同一场景和动作。
         String sceneReplayIssue = ChapterPlanChecks.validateSceneReplay(parsed.plan().getChapters(), suspenseLadder);
         // 追进度跳接校验：蓝图挂 pacing 即本段需要时间跳跃——只写在散文里规划层永远不执行，
         // 末章 timeAdvance 必须显式推进到预算年份才算跳了
@@ -167,14 +164,14 @@ public class ChapterPlanSegmentPlanner {
                 ? ChapterPlanChecks.validateTimeAdvancePacing(parsed.plan().getChapters(), pacingBudgetYear)
                 : null;
         // 对话承载闸门：把「有没有戏可演」从散文规则变成结构契约（dialogueScenes 声明 + 逐字比对 + 人名计数）。
-        // 第 105 章 5 条关键事件 0 条对话承载照样放行，就是这条规则没有执法通道的直接后果
+        // 明确的声明与核验才能区分实际人物互动和自由文本事件数量。
         log.info("{}对话承载闸门启用：校验 {} 章（non-transition ≥{} / transition ≥{}；账本名册 {} 名）",
                 label, expected, ChapterPlanChecks.DIALOGUE_SCENES_MIN,
                 ChapterPlanChecks.DIALOGUE_SCENES_MIN_TRANSITION,
                 rosterNames == null ? 0 : rosterNames.size());
         String dialogueIssue = ChapterPlanChecks.validateDialogueCarriage(parsed.plan().getChapters(), rosterNames);
         // 伏笔净增闸门（高压期）：压力块在规划 prompt 里给了"净增上限 0"的**警告**，
-        // 但警告不是执法——实测同一份计划里压力块写明收线优先，计划仍在"埋设第N章长线"。
+        // 自然语言警告可能未被遵从，需要结构校验核对净增约束。
         // 本项把那条要求变成可驳回的结构校验（与其它规划闸门同款：带反馈重规划一次，二次放行）。
         // 低压期本项恒为 null（只治"账已满还在铺新线"）。
         String netGrowthIssue = ForeshadowLedgerPressurePolicy.validatePlanNetGrowth(
@@ -183,9 +180,8 @@ public class ChapterPlanSegmentPlanner {
         if (netGrowthIssue != null) {
             log.warn("{}伏笔净增闸门未通过（高压期）：{}", label, netGrowthIssue);
         }
-        // 跳月不得吞线（2026-10-19）：一次跨 ≥1 个月的章节必须交代已铺开的待收线索。
-        // 实测事故：188/190 章两次跳月把"苏家观察员""Vossner 座谈"两条铺了九章的线整段吞掉，
-        // 读者视角是"刚铺就断"。待收线索取上一段遗留、尚未回收的伏笔内容。
+        // 跳月不得吞线：一次跨 ≥1 个月的章节必须交代已铺开的待收线索。
+        // 待收线索取上一段遗留、尚未回收的伏笔内容，避免时间跳跃使已铺线索静默消失。
         List<String> openThreads = openThreadsOf(summariesForPressure, startChapter);
         String jumpSwallowIssue = ChapterPlanChecks.validateJumpDoesNotSwallowThreads(
                 parsed.plan().getChapters(), openThreads);
@@ -284,10 +280,8 @@ public class ChapterPlanSegmentPlanner {
                     stillBadSceneReplay == null ? "-" : stillBadSceneReplay,
                     stillBadDialogue == null ? "-" : stillBadDialogue,
                     stillBadNetGrowth == null ? "-" : stillBadNetGrowth);
-            // 遗留违规随规划结果下行（2026-10-13）：放行不等于问题消失——同一件事被排给两章、
-            // 档位倒退这类违规若不告诉写手，正文侧只会在残缺契约上自由发挥（实测第 136 章：
-            // 计划闸门报了"136/137 事件重合"仍放行，写手把重叠事件写完就没料，首稿 87 字）。
-            // 正文 prompt 注入后，写手至少知道"哪些推进必须本章独有、哪些不得再写"。
+            // 遗留违规随规划结果下行，放行不等于问题消失。
+            // 正文仍需知道哪些推进必须本章独有、哪些动作不得重演。
             StringBuilder residual = new StringBuilder();
             if (stillBadLadder != null) {
                 residual.append(ChapterPlanChecks.suspenseFeedback(stillBadLadder));

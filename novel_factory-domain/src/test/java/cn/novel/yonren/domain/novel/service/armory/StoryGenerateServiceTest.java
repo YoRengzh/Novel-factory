@@ -247,9 +247,8 @@ class StoryGenerateServiceTest {
 
     /**
      * 回归：续写请求**不带** maxChapterCount 时，不得回落到 yml 的全局默认上限。
-     * 实测场景：本书固化上限 320，而 yml constraints.max-chapter-count = 188。
-     * 旧实现把 yml 兜底值塞进 requestedMax，188 < 320 于是按 188 执行——一本书会在 188 章
-     * 被静默判完结，且"固化值不可下调"的语义形同虚设。
+     * 夹具中固化上限高于 yml 默认上限；默认兜底值不得被当成显式请求上限，
+     * 否则会提前判完结并破坏固化值不可下调的语义。
      */
     @Test
     void generate_resumeWithoutRequestCap_ignoresYmlDefault() throws Exception {
@@ -363,9 +362,8 @@ class StoryGenerateServiceTest {
     /**
      * 续写时人物档案必须由 bible **强制回填**。
      *
-     * 实测：正文把某女性角色写成「他」连写三章，而账本里没有任何可对照的锚——* 性别、志愿这类"跨章不变的设定"只能由作者在 bible 里声明一次。
-     * 之所以在后端回填而不是依赖前端把字段带回来：漏带不会报错，只会表现为"锚悄悄消失"，
-     * 而那正是这三章能一路写错的原因。
+     * 性别、志愿这类跨章不变的设定由作者在 bible 中声明。
+     * 后端必须回填这些事实锚，不能依赖前端携带字段，否则漏传会静默丢失约束。
      */
     @Test
     void generate_resumeRestoresCharacterProfilesFromBible() throws Exception {

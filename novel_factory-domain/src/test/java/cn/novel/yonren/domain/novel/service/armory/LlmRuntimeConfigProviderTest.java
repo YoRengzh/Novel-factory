@@ -386,11 +386,10 @@ class LlmRuntimeConfigProviderTest {
         assertNull(sceneModel.getApiKey());
     }
 
-    // ===== 回归：评审中实测到的三个缺陷=====
+    // ===== 场景覆盖保存与中转站优先级回归 =====
 
     /**
-     * 回归 ①：旧版手动配置"只改模型"保存时，baseUrl 曾被静默清空
-     * （apiKey 有 currentApiKeyOf 保护、baseUrl 没有），留下"密钥在、地址丢"的半残覆盖。
+     * 回归 ①：手动配置只改模型时，保存必须保留已配置的 baseUrl 与 apiKey。
      */
     @Test
     void legacySceneOverride_keepBaseUrlWhenOnlyModelChanges() {
@@ -417,8 +416,8 @@ class LlmRuntimeConfigProviderTest {
     }
 
     /**
-     * 回归 ②：选中转站后，残留的旧手动字段曾在生效链路里反压站配置
-     * （applyModel 赋值顺序错误），实测请求打到了 OLD 地址。
+     * 回归 ②：选中转站后，站点配置必须优先于残留的旧手动字段。
+     * applyModel 的赋值顺序不得让旧地址或密钥覆盖所选站点。
      */
     @Test
     void sceneProvider_winsOverLeftoverManualFields() {
@@ -488,7 +487,7 @@ class LlmRuntimeConfigProviderTest {
         assertEquals("https://anth.example.com", module.getFallbackModel().getBaseUrl());
     }
 
-    // ===== 第二轮评审新增的两个缺陷=====
+    // ===== 兜底模型与端点一致性回归 =====
 
     /**
      * 回归 ④：兜底与主模型同名但指向另一中转站时，旧守卫按"同名=无效"整条作废，

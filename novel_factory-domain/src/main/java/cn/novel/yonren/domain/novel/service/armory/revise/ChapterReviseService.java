@@ -58,8 +58,8 @@ public class ChapterReviseService {
     private static final double MIN_LENGTH_RATIO = 0.8;
 
     /**
-     * 修订轮允许丢失的关键事件条数上限（2026-10-04）：BLOCKING 违规现场常与关键事件场景重叠
-     * （时序锚类违规尤其如此——"幼年写下未来年份"本身就是排期项），修复必然改写该场景。
+     * 修订轮允许丢失的关键事件条数上限：BLOCKING 违规可能与关键事件场景重叠，
+     * 修复事实或时序矛盾时可能需要改写该场景。
      * 允许丢 1 条换取硬伤修复；丢 ≥2 条说明修订在跑偏，仍然拒绝。
      */
     private static final int REVISE_ALLOWED_EVENT_LOSS = 1;

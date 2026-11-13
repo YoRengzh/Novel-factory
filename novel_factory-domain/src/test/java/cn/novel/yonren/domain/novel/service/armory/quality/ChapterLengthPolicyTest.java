@@ -40,7 +40,7 @@ class ChapterLengthPolicyTest {
     @Test
     void exceedsReference_boundaryIsInclusiveBelowAndExclusiveAbove() {
         // 上沿 补）：与下沿对偶，用来让"注水"有检测面。
-        // 实测第 20 章 4170 有效字，远超 2600；而邻章 1607~2205 都在区间内。
+        // 超出参考上沿的长稿应被观测，区间内稿件不报超标。
         assertFalse(ChapterLengthPolicy.exceedsReference("字".repeat(2600)), "等于上沿不算超标");
         assertTrue(ChapterLengthPolicy.exceedsReference("字".repeat(2601)), "略超上沿即算超标");
         assertTrue(ChapterLengthPolicy.exceedsReference("字".repeat(4170)), "实测第 20 章的量级必须能识别");

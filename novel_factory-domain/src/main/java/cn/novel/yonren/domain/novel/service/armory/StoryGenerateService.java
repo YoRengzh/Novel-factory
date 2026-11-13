@@ -54,7 +54,7 @@ public class StoryGenerateService {
     }
 
     /**
-     * DTO 门面（2026-11-05 分层重构）：同步调试端点的入口——装配在服务内完成
+     * DTO 门面：同步调试端点的入口——装配在服务内完成
      * （未显式传 storyVO 时用 yml 默认补齐），trigger 层只拿 DTO。
      */
     public cn.novel.yonren.api.dto.StoryGenerateResponseDTO generateDto(

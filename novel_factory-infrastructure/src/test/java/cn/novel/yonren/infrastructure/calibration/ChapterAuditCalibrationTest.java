@@ -37,7 +37,7 @@ import java.util.stream.Stream;
  * 校准方向"宁漏勿滥"：乱报会驱动 revise 无差别重写，severity 判据预计迭代 2~3 轮。
  *
  * 运行方式（项目根目录）：
- * mvn test -pl novel_factory-infrastructure -Dtest=ChapterAuditCalibrationTest -Daudit.calibration=true -Daudit.calibration.story=20260830-story-0001
+ * mvn test -pl novel_factory-infrastructure -Dtest=ChapterAuditCalibrationTest -Daudit.calibration=true -Daudit.calibration.story=<story-dir>
  */
 @EnabledIfSystemProperty(named = "audit.calibration", matches = "true")
 class ChapterAuditCalibrationTest {

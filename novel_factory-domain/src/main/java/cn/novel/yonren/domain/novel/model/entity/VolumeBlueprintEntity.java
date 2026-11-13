@@ -60,7 +60,7 @@ public class VolumeBlueprintEntity {
         private Integer arcNo;
         private String oneLineGoal;
         /**
-         * 弧预计章数（2026-09-16 #5 补齐）：让"本弧还剩几章"可以被机械回答，
+         * 弧预计章数：让"本弧还剩几章"可以被机械回答，
          * 阶段窗口与弧预算才能对齐。各弧之和应约等于卷章数（生成期仅告警，不做硬约束）
          */
         private Integer estimatedChapters;

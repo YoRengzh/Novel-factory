@@ -1,6 +1,6 @@
 name: CI
 
-# 测试全量跑在 CI，本地不必每次全量执行（1598 个用例，约 2 分钟）。
+# 测试全量跑在 CI，本地不必每次全量执行。
 # 分层边界由 ArchBoundaryTest 三条 ArchUnit 规则守护，破坏即构建失败。
 on:
   push:

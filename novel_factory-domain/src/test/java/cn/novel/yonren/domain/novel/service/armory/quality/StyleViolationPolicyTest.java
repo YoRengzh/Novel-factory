@@ -178,7 +178,7 @@ class StyleViolationPolicyTest {
 
     @Test
     void chapterReferenceInsideDialogue_isExempt() {
-        // 回归：第 39 章实测——「第一章」在角色台词里，指《模块化功法导论》的章节，非作者元信息
+        // 对白中的书籍章节指代不是作者层面的章节元信息。
         String content = "“这就是《模块化功法导论》的第一章。”他说完，合上玉简。";
         assertFalse(hasDesc(StyleViolationPolicy.check(content), "章节编号元信息泄露"),
                 "对白内的章节指代不算作者层面元信息");

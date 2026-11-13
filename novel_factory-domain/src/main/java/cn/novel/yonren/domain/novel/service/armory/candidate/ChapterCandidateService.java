@@ -129,8 +129,7 @@ public class ChapterCandidateService {
                 return incumbentGate;
             }
             // 机械排序：零违规者优先、有效字数次之；带违规的挑战者直接出局（原稿已过机械门禁 = 零违规）。
-            // 字数下限实测）：5 次采纳的挑战者全部比原稿短（ch15 砍半、ch19 -42%）——
-            // 盲评明令不评长短 ⇒ 短稿结构性占优，必须在进盲评前拦下（详见 analysis/fix-plan-candidate-length-floor.md）。
+            // 字数下限在盲评前拦截严重缩水，避免不评长短的排序偏好损害成篇完整性。
             ChapterContentEntity best = mechanicalBest(challengers,
                     ChapterLengthPolicy.effectiveCharacterCount(chapterContent.getContent()));
             if (best == null) {
@@ -191,28 +190,9 @@ public class ChapterCandidateService {
     /**
      * 候选选优的触发判定。
      *
-     * 2026-10-01 修 DEBT 漏触发：此前只认 {@code MINOR_RESIDUE} 与 {@code REVISED_PASS}
-     * 两种"低置信通过"，{@code DEBT}（修订耗尽仍有未修复 BLOCKING）落到 {@code default -> false}
-     * 被直接跳过。而这恰恰是**最需要换一个写法**的章节——原稿已经在同一方向上改了两轮仍不收敛，
-     * 说明问题不在措辞而在写法本身。
-     *
-     * 实测代价：2026-10-01 批次 5 章**全部** DEBT，候选一次都没启动，
-     * 每章白跑 2 轮 revise + 2 轮 audit-verify（10 次 patch 共 53k token）后仍是同样的稿。
-     *
-     * 仍受 {@code candidate.enabled} 总开关约束（见 {@link #challenge}），
-     * 未配置第二模型族时不会空转。{@code DEBT} 无独立开关——它没有"要不要触发"的合理默认，
-     * 只有一个正确答案：触发。
-     *
-     * 2026-10-02：MINOR_RESIDUE 与 DEBT 双双关闭（见 {@code CandidateProperties} 各自字段的注释）。
-     * 本批实测的采纳率分布是唯一依据：
-     *
-     *   REVISED_PASS   66.7%   ← 唯一有效的信号
-     *   MINOR_RESIDUE  42.9%
-     *   DEBT            0%     ← 纯烧钱
-     *
-     * MINOR 关闭的理由是"条数门槛无判别力"（两批中位数均为 6，调门槛只是挪切点）；
-     * DEBT 关闭的理由是"代价确定、收益 0/3"（挑战者与守卫者撞同一堵墙）。
-     * 两个开关都保留，可在积累更多样本后重新打开。
+     * 受 {@code candidate.enabled} 总开关与各等级的独立开关约束，见 {@link #challenge}。
+     * MINOR 条数不能单独证明整章重写有收益；DEBT 的结构性问题也可能在同计划下再次出现。
+     * 因此保留分等级配置，让用户在评估采纳收益与模型费用后显式开启。
      */
     private boolean triggered(GateResult gate, StoryProperties.CandidateProperties props) {
         return switch (gate.grade()) {
@@ -318,10 +298,8 @@ public class ChapterCandidateService {
      * 候选盲评用的事实基线：最近若干章的剧情摘要 + 三账本状态串（与
      * {@code StageExitReviewService} 的可核验文本同源）。
      *
-     * 为什么必须补：盲评原先只拿到【章节计划 + 两稿正文】，既没有记忆也没有账本，
-     * 因此结构上不可能发现"身份映射被改写""认知状态提前升级""已确认事实被否定"
-     * 这类错误，只能比较文风——实测第 9、10 章的挑战者正是这样胜出的。
-     * 补上基线后，评审才具备事实核对的依据。
+     * 两稿与计划不足以核对历史身份、认知与已确认事实；
+     * 补上摘要和账本后，评审才具备事实核对依据。
      *
      * @return 基线文本；无历史章节（开篇）时返回 null，由 prompt 渲染成"无既知事实约束"
      */
@@ -386,9 +364,8 @@ public class ChapterCandidateService {
     /**
      * 机械排序：先滤掉机械门禁命中的稿，再取有效字数最高者；全部命中返回 null。
      *
-     * 字数下限（2026-10-04）：挑战者有效字 < 原稿 × {@link #CHALLENGER_MIN_LENGTH_RATIO}
-     * 或（原稿未达参考线时）< 原稿自身长度即出局——盲评明令"不评长短"，
-     * 短稿在盲评里结构性占优（11-20 章实测 5 次缩水采纳：ch15 -50%、ch19 -42%、ch20 -34%）。
+     * 字数下限：挑战者有效字 < 原稿 × {@link #CHALLENGER_MIN_LENGTH_RATIO}
+     * 或（原稿未达参考线时）< 原稿自身长度即出局，避免盲评采纳严重缩水的稿件。
      */
     private ChapterContentEntity mechanicalBest(List<ChapterContentEntity> challengers, int incumbentChars) {
         // 下限以原稿为基准而非绝对 1500：原稿本就短时，拒绝更长的挑战者只会更糟——本闸防"缩水采纳"，
@@ -429,9 +406,8 @@ public class ChapterCandidateService {
 
     /**
      * 异模型盲评：两稿裸正文随机定为 A/B（剥离来源信息防自偏好），只评文风与计划事件覆盖，
-     * 明令不评长短详略。空响应/解析失败自动重试一次（deepseek 等思考型模型偶发
-     * "HTTP 200 但正文为空、token 全在思维链"的响应，实测 ch32 踩中）；两次均失败时
-     * 返回 verdict=null 并携带最后一次原始输出（截断）供样本留痕复盘
+     * 明令不评长短详略。空响应/解析失败自动重试一次；两次均失败时
+     * 返回 verdict=null，并携带最后一次原始输出的截断副本供留痕。
      */
     private JudgeAttempt judge(StoryVO storyVO, ChapterPlanItemEntity item,
                                String incumbent, String challenger, int globalNo,

@@ -39,7 +39,7 @@ public class StoryVO {
         // 分场景模型：key 为 ModelScene.configKey（如 "chapter-plan"），value 为独立模型/思考模式配置
         private Map<String, ChatModel> sceneModels;
         /**
-         * 全局兜底模型（2026-10-23，替代此前的按场景 {@code model-fallbacks} 表）。
+         * 全局兜底模型，替代按场景 {@code model-fallbacks} 表。
          *
          * 所有场景共用这一个兜底：主模型与场景配置都不可用时才启用。之所以做成
          * "单个 + 自带完整配置"而不是"每场景一条链"：
@@ -78,16 +78,14 @@ public class StoryVO {
             private String embeddingsPath;
             private String model;
             /**
-             * 单次请求的**输入条数**上限（2026-09-22 新增）：不同供应商限制不同，
-             * 实测 {@code text-embedding-v3} 上限为 10，一次多发直接 400
-             * （{@code batch size is invalid, it should not be larger than 10}）并终止作业。
+             * 单次请求的**输入条数**上限：不同供应商限制不同，
+             * 超出模型限制会导致请求被拒绝。
              * 留空走 {@code SpringAiEmbeddingGateway.DEFAULT_EMBED_BATCH_SIZE}。
              */
             private Integer batchSize;
             /**
-             * 输出向量维度（2026-09-25 新增）：显式钉死，不依赖供应商默认值——
-             * DashScope text-embedding-v4 实测默认 1024 维且支持该参数（2048/768 亦可），
-             * 但默认值若被供应商调整，Qdrant 集合维度会静默不匹配。留空则不传（走供应商默认）。
+             * 输出向量维度：显式钉死，不依赖供应商默认值。
+             * 默认值漂移会导致向量集合维度不匹配；留空则不传（走供应商默认）。
              * 注意：**维度相同不代表向量空间兼容**，换模型仍需重嵌。
              */
             private Integer dimensions;

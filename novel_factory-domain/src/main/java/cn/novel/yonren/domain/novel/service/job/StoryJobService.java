@@ -462,7 +462,7 @@ public class StoryJobService {
                 return;
             }
             int chaptersDone = countChapters(storyDirName);
-            // 体检口径取**本批窗口**（2026-10-13）：判停答的是"这一批写得健不健康"，
+            // 体检口径取**本批窗口**：判停答的是"这一批写得健不健康"，
             // 此前吃全书历史——早期几批的坏账会把 overall 永久压在 CRITICAL（续批永久停机），
             // 而旧债后来全清也无法恢复；反过来"这批突然劣化"会被历史好数据稀释而漏判。
             // 窗口 = 本批区间 [batchStart, batchEnd]（含已完成章）；全书口径仍保留给 /health 观测端点。
@@ -606,7 +606,7 @@ public class StoryJobService {
     // ------------------------------------------------DTO 门面（trigger 层专用入口）
 
     /**
-     * DTO 门面（2026-11-05 分层重构）：trigger 层不再触碰实体/聚合，
+     * DTO 门面：trigger 层不触碰实体/聚合，
      * 装配（StoryCommandAssembler）与状态 DTO 化都在本服务内完成。
      * 既有实体签名方法保留——自动续批等 domain 内部路径仍走实体。
      */

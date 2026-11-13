@@ -129,8 +129,8 @@ class ChapterCandidateServiceTest {
 
     @Test
     void challengerBelowLengthFloor_keepsIncumbent() {
-        // 字数下限：挑战者有效字 < 原稿 60% 直接机械出局，不进盲评——// 实测：5 次采纳的挑战者全部比原稿短（ch15 砍半、ch19 -42%），盲评明令不评长短，
-        // 短稿结构性占优，必须在盲评前拦下。原稿约 1600 有效字，挑战者约 270 有效字。
+        // 字数下限：挑战者有效字 < 原稿 60% 直接机械出局，不进盲评。
+        // 盲评不评价长短，篇幅保护必须在盲评前完成；夹具中原稿约 1600 字、挑战者约 270 字。
         String longIncumbent = "原稿正文，情节推进，细节扎实，对白自然。".repeat(100);
         chapterContent.setContent(longIncumbent);
         String shortChallenger = "{\"chapterNo\":1,\"title\":\"挑战稿\",\"content\":\""
@@ -317,7 +317,7 @@ class ChapterCandidateServiceTest {
                 "开篇没有基线时 prompt 要显式说明「无既知事实约束」，而不是留空让模型自行假设");
     }
 
-    /** ：MINOR 条数不足门槛时不得触发——正是本批触发率爆到 100% 的根因 */
+    /** MINOR 条数不足门槛时不得触发候选 */
     @Test
     void minorResidueBelowThreshold_doesNotTrigger() {
         GateResult fewMinors = GateResult.of(List.of(), 5, 0); // 门槛默认 6
@@ -365,9 +365,8 @@ class ChapterCandidateServiceTest {
     /**
      * 默认配置下**只有 REVISED_PASS 触发候选**。
      *
-     * 依据：两批实测的采纳率分布为 REVISED_PASS 66.7% > MINOR_RESIDUE 42.9% > DEBT 0%，
-     * 且 MINOR 条数无判别力（两批中位数均 6）、DEBT 三次触发零采纳。
-     * 三条通道里只有 REVISED_PASS 是有效信号，所以其余两条默认关闭。
+     * 默认仅启用 REVISED_PASS 通道；MINOR_RESIDUE 与 DEBT 的触发开关默认关闭，
+     * 避免把较弱或未闭环的质量信号直接转成候选调用。
      */
     @Test
     void defaultConfig_onlyRevisedPassTriggers() {

@@ -1919,7 +1919,7 @@
 
         // 关键：采用后**留在阅读态**，不进入 contenteditable 编辑态。
         // 之前强制进编辑态，而编辑态会禁用浮动工具条（maybeShowSegmentToolbar 首道判断），
-        // 于是用户改完一处必须先保存才能改下一处——实测"润色完不能再润色/续写"即此因。
+        // 留在阅读态可继续选中其他段落，无需先保存才再次使用工具条。
         // 现在正文已就地更新，可以继续选中别的段落连续操作；需要手改时再点「编 辑」。
         markChapterDirty();
 
@@ -2263,7 +2263,7 @@
         if (inputProvider.value === id) body.providerId = '';
         // 定点解除该站在全局/场景/兜底的引用，后端保留其它所有覆盖字段。
         // 不能在这里重提 body.scenes：后端对非空 scenes 是全量替换，只提交受影响行
-        // 会连带清空其它场景的模型/Tokens/温度覆盖（实测此形态）
+        // 会连带清空其它场景的模型/Tokens/温度覆盖。
         if (affectedScenes.length || affectedFallback) body.detachProviderId = id;
         fetchJson('/api/config/llm', {
             method: 'PUT',
@@ -2656,7 +2656,7 @@
 
     // ===== 功能开关（质量/速度档：运行时覆盖 yml 的 enabled 开关）=====
     // 思考模型建议：这些场景每批/每章必调、对延迟敏感，强制思考模型（glm-5.3/kimi-k3 一类无法关思考）
-    // 会因思考失控烧穿输出预算（实测 glm-5.3 在 chapter-plan 连烧 32k token 零产出）
+    // 会因思考失控占满输出预算而无法产出正文。
     const THINKING_SENSITIVE_SCENES = {
         'chapter-plan': '⚑ 建议非思考模型（思考失控会烧穿 32k 预算）',
         'chapter-beats': '⚑ 高频小输出，建议非思考模型',

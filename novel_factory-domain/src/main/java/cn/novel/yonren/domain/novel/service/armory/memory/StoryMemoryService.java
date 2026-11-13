@@ -45,7 +45,7 @@ import java.util.stream.Collectors;
  * 五期扩展：worldId 合法时 bible 点另写 novel-world-{worldId}（仅 bible 共享，chapter/ledger 故事私有）。
  * 写新章 / 规划批次前按相关性检索唤醒久远记忆，由 ChapterMemoryService 渲染进记忆前缀。
  * 相关性门控（minScore）+ 字符预算（maxRecallChars）贯彻反注水原则；
- * 检索链路失败语义（2026-09-28 细化）：**瞬时失败先做有界重试**（限流/5xx/网络 IO/向量库调用异常，
+ * 检索链路失败语义：**瞬时失败先做有界重试**（限流/5xx/网络 IO/向量库调用异常，
  * 上限见 retrieve-max-attempts），重试耗尽或确定性失败（欠费/鉴权/参数/未配置）仍终止作业——
  * llm 降级与静默跳过的质量不可接受（静默跳过会让整批在无记忆前缀下跑完，产出上看不出来）；
  * 仅索引写入路径保持 fail-soft 告警（失败点可由下次幂等写入补齐）
@@ -89,10 +89,8 @@ public class StoryMemoryService {
     private static final int PLAN_QUERY_TASKS_CHARS = 400;
 
     /**
-     * 单个记忆点的目标字符数（2026-09-27 切块）：此前"一章一个点、整份 bible 一个点"，
-     * 单点可达 2000~3000 字，导致唤醒预算实际绑不住（首条整条放进前缀），
-     * 且检索粒度太粗——命中一整章会把无关内容也一起拉进来。
-     * 现按句边界切成 ~600 字的点，预算才真正可绑定、召回也更精准。
+     * 单个记忆点的目标字符数：按句边界切块，
+     * 避免整章或整份设定占满召回预算，并减少无关内容一同进入前缀。
      */
     private static final int MEM_CHUNK_CHARS = 600;
 
@@ -443,17 +441,8 @@ public class StoryMemoryService {
             }
             embedAndUpsert(module, toWrite, storyCollection);
             writeIndexMeta(module, storyDir);
-            // 核对口径必须与"应有"对齐：**只数本链路管理的点**（chapter/ledger/bible）。
-            // 此前用集合总数（vectorStore.count）与 desiredIds.size() 比对，而同一集合里
-            // 还有卷方向点（kind=volume，由卷生成路径维护、回滚刻意保留）——
-            // 两个口径撞在一起必然差一个卷点数，每次回滚都报一条"可能残留多余点"的误报
-            // （实测 145 章回滚：应 453 实际 454，差值 1 正是一个卷方向点）。
-            // 必现的误报会训练人忽略这条 WARN，以后真出问题也会被当成噪声。
-            //
-            // 第二个口径坑（2026-10-19 修正）：toWrite 里**多数是已存在点的改写**（id 相同、文本变了），
-            // 它们不增加点数。旧式 `managedStored - toDelete + toWrite` 把改写也当成新增，
-            // 于是每次回滚都多算「改写条数」个点（实测 165 章回滚：应 518 实际报 524，差值 6 正是改写数），
-            // 而集合实际受管点恰好 518。这里只加"原本不存在、这次才写入"的点。
+            // 对账只统计本链路管理的点；卷方向点不参与此处的应有数量比较。
+            // 已有点的改写不增加点数，只把原本不存在的写入计为新增。
             long managedStored = stored.stream()
                     .filter(p -> MANAGED_KINDS.contains(p.getKind()))
                     .count();

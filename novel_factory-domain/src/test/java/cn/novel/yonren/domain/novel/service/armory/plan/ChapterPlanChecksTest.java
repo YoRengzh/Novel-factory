@@ -1066,8 +1066,7 @@ class ChapterPlanChecksTest {
     }
 
     /**
-     * 回归：跳月章未交代已铺开的线索 → 驳回。
-     * 实测事故：188/190 两次跳月把「苏家观察员」「Vossner 座谈」两条铺了九章的线整段吞掉。
+     * 回归：跳月章未交代已铺开的线索时，必须报告缺失而不能静默吞线。
      */
     @Test
     void validateJumpDoesNotSwallowThreads_flagsSwallowedThreads() {

@@ -218,10 +218,7 @@ class QualityGateTest {
     }
 
     /**
-     * 跨章对白逐字重复必须是 BLOCKING 并真的驱动一次修订。
-     *
-     * 实测第 100 章与第 102 章一字不差问了同一句「那句话还会不会兑现？」，两句都留在了成稿里——* 因为这类重复原先只进「风格警示」（下一章的软提示）与 MINOR 记账，没有任何一条能驱动修订。
-     * 对白重复是读者最容易察觉的硬伤（人物像在复读），修法又机械（改这一句），所以升级为 BLOCKING。
+     * 跨章完整台词重复必须产生 BLOCKING 并进入定向修订，不能仅留后续软警示。
      */
     @Test
     void crossChapterDialogueRepeat_isBlocking_andDrivesRevision() {
@@ -585,12 +582,7 @@ class QualityGateTest {
     }
 
     /**
-     * 对白轮次坍缩必须**落一条 MINOR 债**，而不是只打一条 WARN。
-     *
-     * 实测第 96 章：4.4 次/千字（劣化线 6.0，同批其它章 12-27）。当时
-     * {@code ContentDensityPolicy} 的预警（有效对话 <25 句）确实进了审校 prompt，但审校规则里
-     * BLOCKING 仅限四类硬伤、MINOR 明写"只记录，不触发修订"——那条预警在设计上不会产生任何动作，
-     * 原稿照样放行。落成质量债才会随记忆回灌到规划层与下一章 prompt，信号才不会被丢掉。
+     * 未声明对话场景时，轮次坍缩记入 MINOR 债并回灌规划，不能只输出 WARN。
      */
     @Test
     void dialogueDensityCollapse_isRecordedAsMinorDebt() {
@@ -635,7 +627,7 @@ class QualityGateTest {
     /**
      * 正文级对话承载对账：计划声明了 dialogueScenes 的章，密度坍缩从 MINOR
      * 升级 BLOCKING——规划层已承诺对话承载，正文开不了腔是写手违约，必须进修订闭环；
-     * 缺失的场景台词作为修订靶点随建议下发。实测第 110 章形态：声明两句、成文一句。
+     * 缺失的场景台词作为修订靶点随建议下发。
      */
     @Test
     void declaredDialogueScenes_densityCollapse_escalatesToBlocking() {
@@ -791,9 +783,7 @@ class QualityGateTest {
     }
 
     /**
-     * 篇幅坍缩硬底线：有效字低于 800 的提纲式废稿记 BLOCKING 并进修订闭环。
-     *
-     * 实测第 136 章整章重写后终稿仅 674 有效字，却因"原 BLOCKING 已修复"而放行出厂——* 首审的字数告警发生在重写之前、重写后没有任何环节复测终稿。本用例钉住"坍缩即 BLOCKING"。
+     * 篇幅坍缩硬底线：有效字低于 800 时记 BLOCKING 并进入修订，不能只看旧问题已修复。
      */
     @Test
     void collapsedChapter_isBlocking_andDrivesRevision() {
@@ -819,8 +809,7 @@ class QualityGateTest {
     }
 
     /**
-     * 修订稿必须重新过篇幅底线（136 章事故的直接补丁）：
-     * 首审因其它 BLOCKING 触发重写，重写稿虽修好了那些问题却只有 674 字——* 旧实现在此闭环放行，本用例钉住"修订稿仍坍缩 ⇒ 不闭环"。
+     * 修订后仍坍缩的稿件不能因旧 BLOCKING 已修复而闭环放行。
      */
     @Test
     void collapsedRevision_isNotAcceptedAsClosed() {

@@ -76,7 +76,7 @@ public class ChapterBeatsService {
                 log.warn("第 {} 章有 {}/{} 拍未声明信息增量（无状态变化），已在正文 prompt 中标注"
                                 + "「并入相邻拍、严禁原地扩写」", globalNo, stagnant, beats.getBeats().size());
             }
-            // 对白供给机械检查（2026-10-09）：与 infoGain 同款但**判据必须不同**——
+            // 对白供给机械检查：与 infoGain 同款但**判据必须不同**——
             // infoGain 是必填字段，模型总会填点什么，那条检查实测全程从未触发（等于空转）；
             // dialogue 是允许留空的字段，留空才携带信息：全章留空＝这一章只有流程、没有戏。
             long silent = beats.getBeats().stream().filter(b -> !hasDialogue(b)).count();
@@ -128,11 +128,8 @@ public class ChapterBeatsService {
     /**
      * 渲染节拍块，{@code enforceOrder} 决定节拍是"必须逐拍照做"还是"仅建议顺序"。
      *
-     * 为什么要这个开关（2026-10-09）：{@code GenerationMode.enforcesBeats()} 早就写好了
-     * 也写了单测，但**生产代码从未调用**——FREE（契约完整 + 节拍可用）本意是"节拍只作建议顺序，
-     * 把场景划分与对白比例的自由还给模型"，实际拼出来的却是"以下节拍为建议顺序"紧跟
-     * "请逐拍扩写，不要跳过或合并"（后者更靠后、更具体，实际生效）。于是"自由写作"名不副实，
-     * 写手被锁死在逐拍扩写上——第 96 章那种把每个事件展开成动作分解的写法正源于此。
+     * {@code GenerationMode.enforcesBeats()} 决定是否强制执行顺序。
+     * FREE 模式下允许重组场景与对白比例，不能同时渲染与建议顺序矛盾的逐拍强制指令。
      */
     public String renderBeatsPrompt(ChapterBeatsEntity beats, boolean enforceOrder) {
         if (beats == null || beats.getBeats() == null || beats.getBeats().isEmpty()) {

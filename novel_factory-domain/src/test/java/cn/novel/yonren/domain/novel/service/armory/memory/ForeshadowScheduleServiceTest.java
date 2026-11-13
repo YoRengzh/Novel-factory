@@ -74,8 +74,7 @@ class ForeshadowScheduleServiceTest {
     }
 
     /**
-     * **窗口容错**：模型实测会偏移排期 1-2 章（它连 mainLineAdvance 都要靠 JSON 示例才肯回填）。
-     * 按"章号精确相等"匹配会让整表腐烂成 MISSED。
+     * **窗口容错**：排期允许 ±2 章偏移，不能仅按章号精确相等匹配，避免误判 MISSED。
      */
     @Test
     @DisplayName("stamp：排期章 ±2 窗口内都能命中")
@@ -91,9 +90,8 @@ class ForeshadowScheduleServiceTest {
     }
 
     /**
-     * **短锚点回归**（老书两批实测）：排期 intent 与摘要 seed 是两个模型的措辞，
-     * 同一件事实测被改写掉 1-2 个字——「老银镯子」(LCS=4) 在旧 6 字门槛下被误判 MISSED，
-     * 而它**分毫不差埋在排期章上**。阈值降到 4 后此类必须命中。
+     * **短锚点回归**：排期 intent 与摘要 seed 可能改写措辞，按公共子串匹配应接受 LCS=4。
+     * 阈值 4 用于避免短锚在旧 6 字门槛下被误判 MISSED。
      */
     @Test
     @DisplayName("stamp：4 字锚点（老银镯子）在窗口内必须命中")
@@ -180,9 +178,8 @@ class ForeshadowScheduleServiceTest {
     /**
      * 阶段出口裁决判 DONE 的线必须回写 PAID——闭环的最后一段。
      *
-     * 只把 DONE 写进结算文件而不回写排期表，它下一段仍会以「逾期补收」再被下一次令：
-     * 实测某条老线（第 5 章埋、原计划第 45 章收）在后续几十章仍被逐段下令补收，
-     * 而它其实已在在中段兑现，只是 {@code matchPayoff} 认不出来。
+     * DONE 必须同时写入结算文件与排期表；仅写结算文件会留下逾期状态，
+     * 即使实际已兑现，后续段仍可能反复要求补收。
      */
     @Test
     @DisplayName("applySettlementOutcomes：判 DONE 的线回写 PAID，未判的不得被误关")

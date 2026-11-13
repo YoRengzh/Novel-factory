@@ -90,8 +90,7 @@ class SpringAiLlmGatewayTest {
 
     @Test
     void looksTruncatedJson_rejectsRealAccidentShapes() {
-        // 真实事故形态（llm-usage.jsonl ）：deepseek 备选 16383/16384 撞上限，
-        // 残 JSON 死在中文引号中间——尾字符判不出来，必须真解析
+        // JSON 在字符串内部截断，尾字符启发式不足以判断，必须真解析。
         assertTrue(SpringAiLlmGateway.looksTruncatedJson(
                 "{\"chapters\":[{\"chapterNo\":1,\"goal\":\"…李默辩解：「我"));
         // 围栏包裹的截断（responseFormat 不守约的常见形态）
@@ -106,7 +105,7 @@ class SpringAiLlmGatewayTest {
 
     @Test
     void filterBurned_removesBurnedStations_allBurnedFailsFastOrFailSoft() {
-        // 事故核心路径：glm-5.3 烧穿后，黑名单必须把它从后续调用的降级链里滤掉；
+        // 已烧穿模型必须从本作业内后续调用的降级链中滤掉。
         // 全链烧穿时 fail 模式快速失败（不重烧）、skip 模式回退原链走既有 fail-soft 出口
         JobRegistry registry = new JobRegistry();
         SpringAiLlmGateway skipGateway = new SpringAiLlmGateway(1, 20, 600, false,

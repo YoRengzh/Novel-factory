@@ -14,7 +14,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 /**
  * LLM 失败分类测试。
  *
- * 用例的真实报文均取自本项目实测日志（归因）：
+ * 覆盖代表性供应商错误报文及归因：
  * 403 {@code AllocationQuota.FreeTierOnly}（额度用尽且账号仅允许免费额度）、
  * 403 {@code content_policy_violation}（内容审计命中）、
  * 400 {@code invalid_request_error}（参数被拒）、404 {@code model_not_found}（模型不存在）。
@@ -101,7 +101,7 @@ class LlmErrorClassifierTest {
     @Test
     @DisplayName("供应商内部故障：500 / engine abort —— 换模型比原样重试更有效")
     void upstreamInternal() {
-        // 实测报文：kimi-k3 思考 795s 后被上游掐断
+        // engine abort 属于供应商内部故障，应允许更换模型
         Kind engineAbort = LlmErrorClassifier.classify(withMessage(
                 "500 InternalError.Algo: engine abort, request=... model=kimi-k3"));
         assertEquals(Kind.UPSTREAM_INTERNAL, engineAbort);

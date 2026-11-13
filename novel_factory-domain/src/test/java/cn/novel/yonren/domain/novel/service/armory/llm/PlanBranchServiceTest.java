@@ -158,12 +158,9 @@ class PlanBranchServiceTest {
     }
 
     /**
-     * **回归**：P1 上线后分支推演连续两个作业"进取线解析失败"。
-     *
-     * 根因：`stripPlanSchema` 原先只从 schema 标记截尾，而「8.2 章级主线推进要求」与
-     * 「【章级主线推进】块」都在 schema **之前**，于是残留。那块是"第16章：… / 第17章：…"的
-     * 逐章清单——比 schema 更具体——模型于是交回**章节计划数组**而不是分支推演要的方向对象
-     * （日志里 4 条 {@code BeanOutputConverter} 解析失败的原始输出正是带 mainLineAdvance 的章节计划）。
+     * **回归**：分支推演必须剥离章节级 schema、要求与逐章清单，保留方向推演仍需的约束。
+     * 「8.2 章级主线推进要求」与「【章级主线推进】块」位于 schema 之前，
+     * 只从 schema 标记截尾会留下更具体的逐章清单，使模型返回章节计划数组而非方向对象。
      */
     @Test
     void stripPlanSchema_removesMainlineBlocksButKeepsUsefulSections() {

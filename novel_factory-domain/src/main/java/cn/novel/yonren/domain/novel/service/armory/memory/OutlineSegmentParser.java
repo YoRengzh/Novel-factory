@@ -12,23 +12,20 @@ import java.util.regex.Pattern;
 
 public final class OutlineSegmentParser {
 
-    /** 卷头： 【卷一·巷子烟火与早慧神童】(1-90章)： */
+    /** 卷头：卷号、卷名与括号中的章区间 */
     private static final Pattern VOLUME_PATTERN = Pattern.compile(
             "【卷([一二三四五六七八九十]{1,3})[·・]?([^】]*)】\\s*[(（]\\s*(\\d+)\\s*[-–—~]\\s*(\\d+)\\s*章\\s*[)）]");
     /** 段头： 41-50章 …（也匹配"41-50 章"宽容空格） */
     private static final Pattern SEGMENT_HEAD = Pattern.compile(
             "(\\d+)\\s*[-–—~]\\s*(\\d+)\\s*章");
-    /** 年份： 2002年 / 2005-2006年 / 2011-2013年 */
+    /** 年份：四位年份，或以连字符连接的年份区间 */
     private static final Pattern YEAR_PATTERN = Pattern.compile(
             "(\\d{4})\\s*(?:[-–—~]\\s*(\\d{4}))?\\s*年");
     /**
-     * 散文式年份区间： 2013年秋至2016年夏 / 2012年冬至2013年 / 2011年秋冬至2012年初。
+     * 散文式年份区间：起止年份之间允许季节或月份说明。
      *
-     * 为什么必须单独认：作者写大纲时大量使用"X年某季至Y年某季"的写法，
-     * 而 {@link #YEAR_PATTERN} 只认连字符（2012-2013年）。只认连字符时，区间段的结束年被静默吞掉，
-     * 段被当成"单一年份"——实测 {@code 231-240章 2013年秋至2016年夏（14-17岁）} 读成 2013-2013 年，
-     * 于是"快进段横跨三年"这个事实在时间账里完全不存在：按章号比例分摊时间时跨度为 0，
-     * 阶段预算被算成"本阶段不该推进"，与大纲原意相反。
+     * {@link #YEAR_PATTERN} 只认连字符，需单独支持"X年某季至Y年某季"，
+     * 避免区间结束年被吞掉后按单一年份计算阶段预算。
      *
      * 桥接只允许 ≤8 个非数字字符（季节/月份/顿号），避免跨段把后文的年份错当区间结束年。
      */
@@ -52,7 +49,7 @@ public final class OutlineSegmentParser {
 
     /**
      * 章段：章区间 + 时间标记（全部可缺省）+ 里程碑描述。
-     * timeLabel 保留原文（如"2007年（9岁）""2010年秋""2017年上半年"），渲染时逐字引用不转译。
+     * timeLabel 保留原始时间标记，渲染时逐字引用不转译。
      */
     public record OutlineSegment(int startChapter, int endChapter, int volumeNo, String timeLabel,
                                  Integer yearStart, Integer yearEnd, Integer ageStart, Integer ageEnd,
@@ -145,8 +142,8 @@ public final class OutlineSegmentParser {
         Integer yearStart = null;
         Integer yearEnd = null;
         String yearLabel = null;
-        // 先试散文式区间（"2013年秋至2016年夏"），命中则起始/结束年都拿到；
-        // 不命中再退回连字符写法（"2012-2013年"）。顺序不能反：连字符模式会把
+        // 先试散文式区间，命中则起始/结束年都拿到；
+        // 不命中再退回连字符写法。顺序不能反：连字符模式会把
         // 散文式区间的起始年单独匹配掉，结束年从此丢失。
         Matcher range = YEAR_PROSE_RANGE.matcher(work);
         if (range.find()) {

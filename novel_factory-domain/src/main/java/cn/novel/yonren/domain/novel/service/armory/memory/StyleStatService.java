@@ -30,10 +30,8 @@ public class StyleStatService {
     /**
      * 已见句集滚动上限（挤出最老句子，防无界增长）。
      *
-     * 2026-10-10 由 80 上调至 300：80 句约等于**一章**的量，于是"隔两章的重复"根本进不了视野
-     * ——实测第 100 章与第 102 章一字不差重复了同一句，查重两侧都查不到。该列表不参与 prompt 渲染
-     * （渲染的只有 {@link #MAX_REPEATED_SENTENCES} 条重复句），所以放宽窗口只增加一点内存与比对，
-     * 不增加 prompt 体积。
+     * 该列表不参与 prompt 渲染，只有 {@link #MAX_REPEATED_SENTENCES} 条重复句进入警示。
+     * 增大窗口可追踪较远章节的重复，只增加内存与比对开销，不增加 prompt 体积。
      */
     public static final int MAX_USED_SENTENCES = 300;
     /** 跨章重复句保留上限（警示渲染用） */
@@ -58,9 +56,7 @@ public class StyleStatService {
     /**
      * 对白句入库下限：**含引号**长度。
      *
-     * 取 8 是两头的取舍（实测标定 2026-10-10）：要抓的真重复是 10 字的
-     * 「三班还等得到吗？」，而套话短答（「我知道了。」6 字、「明天再说。」6 字、「我先走了。」6 字）
-     * 在正常文里本来就会自然复现——那条判据要进 BLOCKING 驱动改稿，把套话扫进来等于白改一稿。
+     * 取 8：短套话在正常对白中会自然复现，较长的完整发言才纳入跨章重复检测。
      */
     public static final int MIN_DIALOGUE_LINE_LENGTH = 8;
     /**
@@ -72,15 +68,9 @@ public class StyleStatService {
     /**
      * 近重复判定的相似度下限：字符 3-gram 的 Jaccard 相似度。
      *
-     * 为什么需要它：查重原先用精确 {@code equals}，而模型最爱的重复方式是"改一两个字"——
-     * 实测第 9/10 章结尾仅差一个"他"字：
-     * 「枕头底下，那根烟硌着他的后脑勺，像一根小小的骨头」，
-     * 精确匹配下跨章重复句统计结果为 0 条，等于完全失明。
-     *
-     * 取 0.70 依据实测：上述一对句子的 3-gram Jaccard ≈ 0.77（会被捕获）；
-     * 而"同结构但不同内容"的句子（如"他低头看自己的手"vs"他低头看自己的脚"）虽相似，
-     * 其 Jaccard 低于该线。该判据只影响风格警示与 MINOR 记账，不进 BLOCKING 闸门，
-     * 故取偏保守的阈值：宁可漏报也不要把正常文体误标成重复。
+     * 精确 equals 会漏掉少量改字的近重复，采用 3-gram Jaccard 进行保守检测。
+     * 该判据只影响风格警示与 MINOR 记账，不进 BLOCKING 闸门；
+     * 阈值兼顾同义改写识别与正常相似结构的误报风险。
      */
     private static final double NEAR_DUPLICATE_JACCARD = 0.70;
 
@@ -318,8 +308,8 @@ public class StyleStatService {
     /**
      * 渲染修订侧疲劳词禁新增名单（注入修订 prompt）：全文词表 + 已累计逼近/达到阈值的词点名。
      *
-     * 2026-10-03 措辞同步：风格账闸已降级为"只告知不拒稿"（修订优先修 BLOCKING），
-     * 故不再声称"即拒稿"——但新增仍会推高全书累计、由后续每一章的风格警示承担代价，措辞如实说明。
+     * 风格账闸只告知不拒稿，修订优先修 BLOCKING；新增疲劳词仍会推高全书累计，
+     * 并由后续章节的风格警示持续提示。
      */
     public String renderReviseFatigueBlacklist(StyleStatEntity stat) {
         StringBuilder sb = new StringBuilder("【疲劳词禁新增名单】修订稿严禁新增或推高以下词的全书累计次数（跨章累计达到")
