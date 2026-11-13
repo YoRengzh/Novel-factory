@@ -5,6 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" data-page-node-id="8sLYgkHO9NSfcylfa8tyUO">
     <title>StartDrafts</title>
     <link rel="stylesheet" href="style.css" data-page-node-id="njce1GWWRJakUhAUukzdHE">
+    <link rel="stylesheet" href="book-workspace.css">
 </head>
 <body data-page-node-id="HR1gysp1ogdC9U0cmacZqK">
     <!-- ==================== 主应用 ==================== -->
@@ -225,6 +226,128 @@
                     <div class="section-label" data-page-node-id="BhmS1HONZveyNieNCEnmHZ">LIBRARY</div>
                     <h2 class="section-title" data-page-node-id="Eue6HHXx9VgGEeNfVx0KzN">故事列表</h2>
                     <div id="stories" class="stories-grid" data-page-node-id="FELQGHUwOmGnCVmlekPK1F"></div>
+                </div>
+
+                <div id="book-workspace" class="book-workspace hidden">
+                    <header class="book-workspace-header">
+                        <div class="book-breadcrumb"><button id="btn-back-stories" class="btn-back" type="button">← 小说库</button><span>书内工作区</span></div>
+                        <div class="list-header"><h2 id="book-workspace-title" class="section-title">正在读取书籍…</h2><span id="book-unsaved" class="book-unsaved hidden" role="status">有未保存修改</span></div>
+                        <nav class="book-tabs" aria-label="书内工作区" role="tablist">
+                            <button id="book-tab-overview" type="button" role="tab" data-book-tab="overview" aria-controls="book-panel-overview" aria-selected="false">概要</button>
+                            <button id="book-tab-chapters" type="button" role="tab" data-book-tab="chapters" aria-controls="book-panel-chapters" aria-selected="true" class="active">正文与章节</button>
+                            <button id="book-tab-authoring" type="button" role="tab" data-book-tab="authoring" aria-controls="book-panel-authoring" aria-selected="false">创作管理</button>
+                            <button id="book-tab-runs" type="button" role="tab" data-book-tab="runs" aria-controls="book-panel-runs" aria-selected="false">运行记录</button>
+                        </nav>
+                    </header>
+
+                    <section id="book-panel-overview" class="book-panel hidden" role="tabpanel" aria-labelledby="book-tab-overview">
+                        <div id="workbench-overview" class="content-card">
+                            <div class="section-label">STORY OVERVIEW</div>
+                            <div class="list-header"><h3 id="workbench-title" class="section-title">概要</h3><button id="btn-refresh-workbench" class="btn-secondary" type="button">刷新数据</button></div>
+                            <p id="story-overview-intro" class="story-overview-intro">暂无故事简介</p>
+                            <div id="story-plan" class="story-plan-panel"></div>
+                            <div id="workbench-metrics" class="metric-grid"></div>
+                            <p class="settings-hint">这里只展示全书概况。阅读与修改正文请到「正文与章节」，维护人物和设定请到「创作管理」。</p>
+                        </div>
+                    </section>
+
+                    <section id="book-panel-chapters" class="book-panel" role="tabpanel" aria-labelledby="book-tab-chapters">
+                        <div id="chapter-list" class="content-card">
+                            <div class="list-header"><h3 id="chapter-list-title" class="section-title">正文与章节</h3><button id="btn-refresh-chapters" class="btn-secondary" type="button">刷新目录</button></div>
+                            <div id="chapters" class="chapters-list"></div>
+                        </div>
+                        <div id="chapter-view" class="content-card hidden">
+                            <div class="list-header"><button id="btn-back-chapters" class="btn-back" type="button">← 章节目录</button><h3 id="chapter-view-title" class="section-title"></h3></div>
+                            <div id="chapter-issue-context" class="book-issue-context hidden" role="status"></div>
+                            <div class="chapter-actions">
+                                <button id="btn-edit" class="btn-secondary" type="button">编 辑</button>
+                                <button id="btn-save" class="btn-primary hidden" type="button">保 存</button>
+                                <button id="btn-cancel-edit" class="btn-secondary hidden" type="button">取 消</button>
+                            </div>
+                            <div class="chapter-body">
+                                <div id="chapter-content-readonly" class="chapter-text"></div>
+                                <div id="chapter-content-edit" class="chapter-text hidden" contenteditable="true" spellcheck="false"></div>
+                                <div id="save-result" class="save-result hidden"></div>
+                            </div>
+                        </div>
+                    </section>
+
+                    <section id="book-panel-authoring" class="book-panel hidden" role="tabpanel" aria-labelledby="book-tab-authoring">
+                        <div class="book-authoring-layout">
+                            <nav class="book-subnav" aria-label="创作管理" role="tablist">
+                                <button type="button" role="tab" data-authoring-tab="settings" aria-controls="book-authoring-settings" aria-selected="true" class="active">故事设定</button>
+                                <button type="button" role="tab" data-authoring-tab="characters" aria-controls="book-authoring-characters" aria-selected="false">人物档案</button>
+                                <button type="button" role="tab" data-authoring-tab="items" aria-controls="book-authoring-items" aria-selected="false">物品</button>
+                                <button type="button" role="tab" data-authoring-tab="factions" aria-controls="book-authoring-factions" aria-selected="false">势力</button>
+                                <button type="button" role="tab" data-authoring-tab="foreshadow" aria-controls="book-authoring-foreshadow" aria-selected="false">伏笔</button>
+                                <button type="button" role="tab" data-authoring-tab="issues" aria-controls="book-authoring-issues" aria-selected="false">待处理问题</button>
+                                <button type="button" role="tab" data-authoring-tab="depth" aria-controls="book-authoring-depth" aria-selected="false">深度建议</button>
+                            </nav>
+                            <div class="book-authoring-content">
+                                <div class="book-authoring-toolbar"><p id="book-authoring-meta" class="character-profile-meta">正在读取书级设定…</p><button id="btn-reload-authoring" class="btn-secondary" type="button">重新读取设定</button></div>
+                                <div id="book-authoring-status" class="config-status hidden" role="status" aria-live="polite"></div>
+                                <section id="book-authoring-settings" class="content-card book-authoring-panel" role="tabpanel">
+                                    <div class="list-header"><h3>故事设定</h3><button id="btn-edit-book-settings" class="btn-secondary" type="button">编辑设定</button></div>
+                                    <p class="settings-hint">当前书的创作依据，不与生成表单共享。保存前先预览差异，不会自动生成正文或改写已发生事实。</p>
+                                    <div id="book-settings-fields" class="form-grid"></div>
+                                    <div id="book-settings-actions" class="form-actions hidden"><button id="btn-preview-book-settings" class="btn-primary" type="button">预览并保存设定</button><button id="btn-cancel-book-settings" class="btn-secondary" type="button">取消编辑</button></div>
+                                </section>
+                                <section id="book-authoring-characters" class="content-card book-authoring-panel hidden" role="tabpanel">
+                                    <h3>人物档案</h3>
+                                    <p id="character-profile-meta" class="character-profile-meta" aria-live="polite">档案待读取</p>
+                                    <div class="book-character-layout">
+                                        <nav id="book-character-list" class="book-character-list" aria-label="人物列表"></nav>
+                                        <div class="book-character-detail">
+                                            <nav class="book-character-tabs" aria-label="人物档案分区" role="tablist">
+                                                <button type="button" role="tab" data-character-tab="basic" aria-controls="book-character-basic" aria-selected="true" class="active">基础设定</button>
+                                                <button type="button" role="tab" data-character-tab="motivation" aria-controls="book-character-motivation" aria-selected="false">性格动机</button>
+                                                <button type="button" role="tab" data-character-tab="state" aria-controls="book-character-state" aria-selected="false">当前状态</button>
+                                                <button type="button" role="tab" data-character-tab="history" aria-controls="book-character-history" aria-selected="false">变化历史</button>
+                                            </nav>
+                                            <section id="book-character-basic" class="book-character-panel" role="tabpanel">
+                                                <div class="list-header"><h4>基础硬事实 · 全书原文</h4><button id="btn-edit-book-facts" class="btn-secondary" type="button">编辑原文</button></div>
+                                                <p class="settings-hint">身份、关系和既定事实目前按全书原文保存，不将这段文本伪拆成人物字段。性格动机不等于已发生事实。</p>
+                                                <p id="book-character-facts-read" class="book-long-text">正在读取…</p>
+                                                <label for="book-character-facts" class="sr-only">全书人物硬事实原文</label>
+                                                <textarea id="book-character-facts" rows="9" class="hidden"></textarea>
+                                                <div id="book-facts-actions" class="form-actions hidden"><button id="btn-preview-book-facts" class="btn-primary" type="button">预览并保存硬事实</button><button id="btn-cancel-book-facts" class="btn-secondary" type="button">取消编辑</button></div>
+                                            </section>
+                                            <section id="book-character-motivation" class="book-character-panel hidden" role="tabpanel">
+                                                <h4>性格与动机 · 决策设计</h4>
+                                                <p class="settings-hint">先阅读，按人物点「编辑」修改。来源、版本和生效章仅展示，服务器绑定；锁定卡不会被草稿覆盖。</p>
+                                                <div id="character-decision-cards" class="character-decision-cards"></div>
+                                                <div id="character-decision-deletions" class="character-decision-deletions hidden" aria-live="polite"></div>
+                                                <div class="form-actions character-card-actions">
+                                                    <button type="button" id="btn-add-character-card" class="btn-secondary">添加人物</button>
+                                                    <button type="button" id="btn-draft-character-cards" class="btn-secondary">生成人物草稿（调用模型）</button>
+                                                    <button type="button" id="btn-save-character-cards" class="btn-primary">保存人物档案</button>
+                                                    <button type="button" id="btn-reload-character-cards" class="btn-secondary">重新读取档案</button>
+                                                </div>
+                                                <p id="character-save-hint" class="settings-hint">独立保存不调用模型，不改硬事实、不切换高级模式。</p>
+                                            </section>
+                                            <section id="book-character-state" class="book-character-panel hidden" role="tabpanel"><h4>当前状态 · 已发生事实</h4><div id="workbench-characters" class="compact-list"></div><div id="book-character-state-records"></div></section>
+                                            <section id="book-character-history" class="book-character-panel hidden" role="tabpanel"><h4>变化历史与维护记录</h4><div id="book-character-history-list"></div></section>
+                                        </div>
+                                    </div>
+                                    <div id="character-decision-status" class="config-status hidden" role="status" aria-live="polite"></div>
+                                    <div id="book-character-entry"></div>
+                                </section>
+                                <section id="book-authoring-items" class="content-card book-authoring-panel hidden" role="tabpanel"><h3>物品</h3><p class="settings-hint">账本事实与作者维护记录分开展示；未来意图不会回写既有正文。</p><div id="workbench-items" class="compact-list"></div><div id="book-item-records"></div><div id="book-item-entry"></div></section>
+                                <section id="book-authoring-factions" class="content-card book-authoring-panel hidden" role="tabpanel"><h3>势力</h3><p class="settings-hint">本页仅展示势力，不与物品混排。</p><div id="workbench-factions" class="compact-list"></div><div id="book-faction-records"></div><div id="book-faction-entry"></div></section>
+                                <section id="book-authoring-foreshadow" class="content-card book-authoring-panel hidden" role="tabpanel"><h3>伏笔</h3><p class="settings-hint">已有伏笔、回收状态与未来安排；质量问题请到「待处理问题」。</p><div id="workbench-foreshadow" class="compact-list"></div><div id="book-foreshadow-records"></div><div id="book-foreshadow-entry"></div></section>
+                                <section id="book-authoring-issues" class="content-card book-authoring-panel hidden" role="tabpanel"><div class="list-header"><h3>待处理问题</h3><button id="btn-refresh-quality-issues" class="btn-secondary" type="button">刷新问题</button></div><p class="settings-hint">备注、暂缓、误报只记录作者处置，不代表系统解决。修改正文后须明确复检；仅复检会调用模型。</p><div id="book-quality-issues"></div><details><summary>未入账事实 · 待核对证据</summary><div id="book-pending-facts"></div></details></section>
+                                <section id="book-authoring-depth" class="content-card book-authoring-panel hidden" role="tabpanel"><h3>深度建议</h3><p class="settings-hint">只读观察和条件建议，不是已发生事实，不自动改写人物或解决质量问题。</p><div id="workbench-character-observation"></div></section>
+                                <section id="book-authoring-preview" class="book-preview content-card hidden" role="region" aria-label="保存预览" aria-live="polite"><h3>确认保存差异</h3><div id="book-authoring-preview-content"></div><div class="form-actions"><button id="btn-confirm-book-authoring" class="btn-primary" type="button">确认保存</button><button id="btn-cancel-book-preview" class="btn-secondary" type="button">返回修改</button></div></section>
+                            </div>
+                        </div>
+                    </section>
+
+                    <section id="book-panel-runs" class="book-panel hidden" role="tabpanel" aria-labelledby="book-tab-runs">
+                        <div id="book-run-status" class="config-status hidden" role="status" aria-live="polite"></div>
+                        <div class="content-card"><div class="list-header"><h3>执行详情</h3><button id="btn-refresh-runs" class="btn-secondary" type="button">刷新记录</button></div><div id="workbench-memory-status" aria-live="polite"></div><section id="workbench-plan-work" data-read-only="true"></section><div id="workbench-chapter-work" role="region" aria-live="polite" aria-label="章节执行详情（只读）" data-read-only="true"></div></div>
+                        <div class="content-card"><h3>检查点与回滚</h3><p class="settings-hint">手动快照为全书留锚；回滚将恢复章节、蓝图、账本并裁剪之后的章节。最多保留 8 个，超限丢弃最旧。回滚前请保存编辑。</p><div class="cp-actions"><button id="btn-new-checkpoint" class="btn-primary" type="button">打一个快照</button><button id="btn-refresh-checkpoints" class="btn-secondary" type="button">刷新</button></div><div id="checkpoint-status" class="config-status hidden"></div><div id="checkpoint-list" class="compact-list cp-list"></div></div>
+                        <div id="book-advanced" class="content-card"><h3>书级高级设置</h3><p class="settings-hint">人物深度模式独立保存在当前书。普通生成请求不携带模式，也不会静默覆盖它。保存只影响未来可用执行依据，已启动任务仍使用冻结版本。</p><p id="book-current-mode" class="character-profile-meta">当前执行模式待读取</p><label for="book-character-depth-mode">人物深度模式</label><select id="book-character-depth-mode" disabled><option value="">继承服务端默认（未单独设置）</option><option value="OFF">OFF · 关闭</option><option value="OBSERVE">OBSERVE · 仅观察</option><option value="APPLY">APPLY · 应用决策设计</option></select><p id="character-mode-hint" class="settings-hint"></p><button id="btn-preview-book-mode" class="btn-secondary" type="button" disabled>预览模式变更</button><div id="book-run-preview-slot"></div></div>
+                    </section>
                 </div>
 
                 <div id="chapter-list" class="content-card hidden" data-page-node-id="sQKu8GtUhfMWJyueWmV5hS">
@@ -744,6 +867,8 @@
          模型输入框聚焦时下拉被祖先 display:none 隐藏——场景矩阵跨场景下拉曾因此完全不可见。
          JS 按 getBoundingClientRect 写入 fixed 坐标，位置与 DOM 归属无关 -->
     <div id="chatgpt-model-options" class="model-dropdown"></div>
+
+    <script src="book-workspace.js"></script>
 
     <script src="app.js"></script>
 </body>

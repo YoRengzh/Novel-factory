@@ -1290,6 +1290,8 @@
             libraryList.classList.add('hidden');
             chapterListDiv.classList.remove('hidden');
             workbenchOverview.classList.remove('hidden');
+            // 书内工作区与章节列表同页：打开书籍即加载作者维护与品质问题
+            if (bookWorkspace) { bookWorkspace.open(storyDir); }
             // 故事概览与章节列表是同级工作区，概览始终排在章节列表之前。
             chapterListDiv.parentNode.insertBefore(workbenchOverview, chapterListDiv);
             chapterListTitle.textContent = '章节目录';
@@ -1342,6 +1344,8 @@
                 .concat((data.pendingFacts || []).map(function (f) { return '待确认 · ' + f.name + '：' + f.status; }))
                 .concat((data.qualityDebts || []).filter(function (d) { return !d.resolved; }).map(function (d) { return '质量债 · 第' + d.chapterNo + '章'; }));
             document.getElementById('workbench-risks').innerHTML = risks.length ? risks.slice(0, 12).map(function (x) { return '<div class="compact-row">' + esc(x) + '</div>'; }).join('') : '<p class="empty-hint">暂无待处理项</p>';
+            // 工作区的人物/物品/势力/伏笔面板复用同一份工作台数据，避免两套口径
+            if (bookWorkspace) { bookWorkspace.updateWorkbench(data); }
         })
         .catch(function (err) { workbenchMetrics.innerHTML = '<p class="empty-hint">加载失败：' + esc(err.message) + '</p>'; });
     }
@@ -3561,6 +3565,26 @@
                 }
                 return body;
             });
+        });
+    }
+
+    // ===== 书内工作区（作者维护与品质问题）=====
+    // 独立组件：只做渲染与请求，状态与互斥由自身持有；app.js 只负责打开/关闭与注入工作台数据。
+    const bookWorkspace = window.BookWorkspace ? window.BookWorkspace.create({
+        document: document,
+        fetchJson: function (url, options) { return fetchJson(url, options); },
+        confirm: function (message) { return window.confirm(message); },
+        notify: function (message) { showToast(message); },
+        // 章节编辑器仍有未保存改动时，工作区的保存不得把上下文切走
+        isExtraDirty: function () { return chapterHasUnsavedEdits; }
+    }) : null;
+    if (bookWorkspace) {
+        document.getElementById('btn-back-stories').addEventListener('click', function () {
+            if (!bookWorkspace.canLeave()) return;
+            bookWorkspace.open('');
+            libraryList.classList.remove('hidden');
+            chapterListDiv.classList.add('hidden');
+            workbenchOverview.classList.add('hidden');
         });
     }
 

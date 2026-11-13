@@ -238,6 +238,14 @@ public interface IStoryRepository {
     Path resolveStoryDirectory(String storyDirName) throws Exception;
 
     /**
+     * 只读解析：与 {@link #resolveStoryDirectory} 同一套格式与越界校验，但不创建 memory 目录。
+     * 维护类只读入口不应因为"看一眼"而在用户目录里留下空目录。
+     */
+    default Path resolveStoryDirectoryReadOnly(String storyDirName) throws Exception {
+        return resolveStoryDirectory(storyDirName);
+    }
+
+    /**
      * 读取指定故事目录下编号最大的章节正文全文（供续写衔接取上一章结尾）；无章节文件返回 null。
      * storyDir 为 resolveStoryDirectory 校验后的路径对象
      */
@@ -354,6 +362,63 @@ public interface IStoryRepository {
      * storyDir 为 resolveStoryDirectory 校验后的路径对象
      */
     StoryMeta readStoryMeta(Path storyDir) throws Exception;
+
+    /**
+     * 读取当前激活的书级维护版本（作者纠正与后续意图）；文件不存在返回 null。
+     *
+     * <p>存在但损坏、或作者纠正所引用的来源正文已变化时抛异常：此时继续使用会把
+     * 与正文不再匹配的纠正当成事实注入提示词，比停下来更贵。
+     */
+    cn.novel.yonren.domain.novel.model.valobj.authoring.StoryAuthoringSnapshot readActiveStoryAuthoring(Path storyDir)
+            throws Exception;
+
+    /** 作者维护工作副本（未激活）；缺文件返回 null，坏文件硬失败。 */
+    default cn.novel.yonren.domain.novel.model.valobj.authoring.StoryAuthoringSnapshot readStoryAuthoring(Path storyDir)
+            throws Exception {
+        return null;
+    }
+
+    /** 只读维护视图：设定、工作副本、执行引用与来源在同一锁内快照，无恢复副作用。 */
+    default cn.novel.yonren.domain.novel.model.valobj.authoring.StoryAuthoringView readStoryAuthoringView(Path storyDir)
+            throws Exception {
+        throw new UnsupportedOperationException("仓储未实现作者维护视图");
+    }
+
+    /** 按 revision 读取历史版本；不存在返回 null。 */
+    default cn.novel.yonren.domain.novel.model.valobj.authoring.StoryAuthoringSnapshot readStoryAuthoringHistory(
+            Path storyDir, String revision) throws Exception {
+        throw new UnsupportedOperationException("仓储未实现作者维护历史读取");
+    }
+
+    /**
+     * 无模型、无写入的预览：绑定当前 revision/basis 与来源正文，返回候选版本与预览哈希。
+     * 预览不消费任何待办，也不恢复未完成提交。
+     */
+    default cn.novel.yonren.domain.novel.model.valobj.authoring.StoryAuthoringPreview previewStoryAuthoring(
+            Path storyDir, cn.novel.yonren.domain.novel.model.valobj.authoring.StoryAuthoringPatch patch)
+            throws Exception {
+        throw new UnsupportedOperationException("仓储未实现作者维护预览");
+    }
+
+    /**
+     * 单次故事锁事务：重算预览、校验 previewHash、归档历史后原子替换工作副本与执行引用。
+     * 任何失败都不得报告保存成功。
+     */
+    default cn.novel.yonren.domain.novel.model.valobj.authoring.StoryAuthoringView safeApplyStoryAuthoringPreview(
+            Path storyDir, cn.novel.yonren.domain.novel.model.valobj.authoring.StoryAuthoringPatch patch,
+            String expectedPreviewHash) throws Exception {
+        throw new UnsupportedOperationException("仓储未实现作者维护保存");
+    }
+
+    /** 维护写边界：只检查未完成提交与待回流标记，不恢复、不消费待办。 */
+    default void assertStoryMaintenanceWriteBoundary(Path storyDir) throws Exception {
+        throw new UnsupportedOperationException("仓储未实现维护边界检查");
+    }
+
+    /** 只读维护依据指纹，供维护侧车绑定预览。 */
+    default String readStoryMaintenanceBasis(Path storyDir) throws Exception {
+        throw new UnsupportedOperationException("仓储未实现维护依据读取");
+    }
 
     /** 故事库列表条目 */
     record StorySummary(String storyDirName, String novelTitle, int chapterCount, long lastModifiedMs) {

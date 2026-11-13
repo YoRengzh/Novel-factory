@@ -75,7 +75,7 @@ public class StoryRepository implements IStoryRepository {
     private static final int RUN_RETENTION = 20;
 
     /** 每故事写锁：并发批次写同一故事目录时串行化落盘，配合原子替换保证文件永远是完整快照 */
-    private final ConcurrentHashMap<String, ReentrantLock> storyLocks = new ConcurrentHashMap<>();
+    private final ConcurrentHashMap<String, ReentrantLock> storyLocks = STORY_LOCKS;
 
     /** 检查点环形保留上限：仅保留最近 N 个，更旧的自动回收 */
     private static final int CHECKPOINT_RETENTION = 8;
@@ -1030,6 +1030,278 @@ public class StoryRepository implements IStoryRepository {
     }
 
     @Override
+    public cn.novel.yonren.domain.novel.model.valobj.authoring.StoryAuthoringSnapshot readActiveStoryAuthoring(Path storyDir)
+            throws IOException {
+        final cn.novel.yonren.domain.novel.model.valobj.authoring.StoryAuthoringSnapshot[] result =
+                new cn.novel.yonren.domain.novel.model.valobj.authoring.StoryAuthoringSnapshot[1];
+        withStoryLock(storyDir, () -> {
+            Path file = workFile(storyDir, StorageKeys.AUTHORING_CONTEXT_FILE);
+            if (Files.notExists(file)) {
+                return;
+            }
+            cn.novel.yonren.domain.novel.model.valobj.authoring.StoryAuthoringSnapshot snapshot;
+            try {
+                snapshot = JSON.parseObject(Files.readString(file, StandardCharsets.UTF_8),
+                        cn.novel.yonren.domain.novel.model.valobj.authoring.StoryAuthoringSnapshot.class);
+                cn.novel.yonren.domain.novel.service.armory.authoring.StoryAuthoringService.validatePersisted(snapshot);
+            } catch (RuntimeException e) {
+                throw corruptMemory(file, "作者维护快照", e);
+            }
+            validateAuthoringSources(storyDir, snapshot);
+            result[0] = snapshot;
+        });
+        return result[0];
+    }
+
+    /**
+     * 作者纠正必须仍能对上来源正文：正文被改过或引文不在其中时拒绝使用，
+     * 否则会把与当前正文不符的纠正当作事实注入后续章节。
+     */
+    private void validateAuthoringSources(Path storyDir,
+            cn.novel.yonren.domain.novel.model.valobj.authoring.StoryAuthoringSnapshot snapshot) throws IOException {
+        if (snapshot == null || snapshot.entries() == null) {
+            return;
+        }
+        for (var entry : snapshot.entries()) {
+            if (entry == null
+                    || entry.operation() != cn.novel.yonren.domain.novel.model.valobj.authoring.StoryAuthoringSnapshot.Operation.EXTRACTION_CORRECTION) {
+                continue;
+            }
+            if (entry.sourceChapter() == null) {
+                throw new IllegalStateException("激活的作者纠正缺少来源章号");
+            }
+            var manuscript = readChapter(storyDir, entry.sourceChapter());
+            if (manuscript == null) {
+                throw new IllegalStateException("激活的作者纠正来源正文缺失");
+            }
+            var current = ChapterManuscript.of(manuscript);
+            if (!Objects.equals(entry.sourceHash(), current.hash())
+                    || entry.evidence() == null || !current.content().contains(entry.evidence())) {
+                throw new IllegalStateException("激活的作者纠正来源正文已变化，请重新核对维护版本");
+            }
+        }
+    }
+
+    /** 作者维护工作副本文件名（故事根目录，与 bible 同级）。 */
+    private static final String AUTHORING_ROOT_FILE = "story-authoring.json";
+
+    /** 作者维护历史目录（memory/ 下，按 revision 归档）。 */
+    private static final String AUTHORING_HISTORY_DIR = "authoring-history";
+
+    @Override
+    public cn.novel.yonren.domain.novel.model.valobj.authoring.StoryAuthoringView readStoryAuthoringView(Path storyDir)
+            throws IOException {
+        final cn.novel.yonren.domain.novel.model.valobj.authoring.StoryAuthoringView[] result =
+                new cn.novel.yonren.domain.novel.model.valobj.authoring.StoryAuthoringView[1];
+        withStoryLock(storyDir, () -> {
+            var state = readAuthoringStateLocked(storyDir);
+            result[0] = state.view();
+        });
+        return result[0];
+    }
+
+    @Override
+    public cn.novel.yonren.domain.novel.model.valobj.authoring.StoryAuthoringSnapshot readStoryAuthoring(Path storyDir)
+            throws IOException {
+        final cn.novel.yonren.domain.novel.model.valobj.authoring.StoryAuthoringSnapshot[] result =
+                new cn.novel.yonren.domain.novel.model.valobj.authoring.StoryAuthoringSnapshot[1];
+        withStoryLock(storyDir, () -> {
+            Path file = storyDir.resolve(AUTHORING_ROOT_FILE);
+            result[0] = readAuthoringFile(storyDir, file);
+        });
+        return result[0];
+    }
+
+    @Override
+    public cn.novel.yonren.domain.novel.model.valobj.authoring.StoryAuthoringSnapshot readStoryAuthoringHistory(
+            Path storyDir, String revision) throws IOException {
+        if (revision == null || !revision.matches("[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}")) {
+            throw new IllegalArgumentException("维护历史 revision 非法");
+        }
+        final cn.novel.yonren.domain.novel.model.valobj.authoring.StoryAuthoringSnapshot[] result =
+                new cn.novel.yonren.domain.novel.model.valobj.authoring.StoryAuthoringSnapshot[1];
+        withStoryLock(storyDir, () -> {
+            Path file = workFile(storyDir, AUTHORING_HISTORY_DIR).resolve(revision + ".json");
+            if (Files.notExists(file)) {
+                return;
+            }
+            result[0] = readAuthoringFile(storyDir, file);
+            if (result[0] != null && !revision.equals(result[0].revision())) {
+                throw corruptMemory(file, "作者维护历史", null);
+            }
+        });
+        return result[0];
+    }
+
+    @Override
+    public cn.novel.yonren.domain.novel.model.valobj.authoring.StoryAuthoringPreview previewStoryAuthoring(
+            Path storyDir, cn.novel.yonren.domain.novel.model.valobj.authoring.StoryAuthoringPatch patch) throws IOException {
+        final cn.novel.yonren.domain.novel.model.valobj.authoring.StoryAuthoringPreview[] result =
+                new cn.novel.yonren.domain.novel.model.valobj.authoring.StoryAuthoringPreview[1];
+        withStoryLock(storyDir, () -> {
+            var state = readAuthoringStateLocked(storyDir);
+            result[0] = cn.novel.yonren.domain.novel.service.armory.authoring.StoryAuthoringService
+                    .preview(state.view(), patch, state.bible(), state.chapters(), state.freezeHash());
+        });
+        return result[0];
+    }
+
+    @Override
+    public cn.novel.yonren.domain.novel.model.valobj.authoring.StoryAuthoringView safeApplyStoryAuthoringPreview(
+            Path storyDir, cn.novel.yonren.domain.novel.model.valobj.authoring.StoryAuthoringPatch patch,
+            String expectedPreviewHash) throws IOException {
+        if (expectedPreviewHash == null || !expectedPreviewHash.matches("[0-9a-f]{64}")) {
+            throw new IllegalArgumentException("保存必须提供有效 previewHash");
+        }
+        final cn.novel.yonren.domain.novel.model.valobj.authoring.StoryAuthoringView[] result =
+                new cn.novel.yonren.domain.novel.model.valobj.authoring.StoryAuthoringView[1];
+        withStoryLock(storyDir, () -> {
+            AuthoringReadState state = readAuthoringStateLocked(storyDir);
+            var preview = cn.novel.yonren.domain.novel.service.armory.authoring.StoryAuthoringService
+                    .preview(state.view(), patch, state.bible(), state.chapters(), state.freezeHash());
+            if (!expectedPreviewHash.equals(preview.previewHash())) {
+                throw new IllegalStateException("预览已过期或变更内容不同，请重新预览后保存");
+            }
+            cn.novel.yonren.domain.novel.model.valobj.authoring.StoryAuthoringSnapshot next = preview.candidate();
+            Path root = storyDir.resolve(AUTHORING_ROOT_FILE);
+            Path active = workFile(storyDir, StorageKeys.AUTHORING_CONTEXT_FILE);
+            // 历史先于工作副本/执行引用落盘；没有被引用的历史是安全残留。
+            if (state.view().snapshot() != null) {
+                archiveAuthoring(storyDir, state.view().snapshot());
+            }
+            if (state.view().activeSnapshot() != null) {
+                archiveAuthoring(storyDir, state.view().activeSnapshot());
+            }
+            archiveAuthoring(storyDir, next);
+            // 提交指针前再次核对冻结状态：桌面手改不持 Java 锁，绝不悄悄重基。
+            AuthoringReadState beforeCommit = readAuthoringStateLocked(storyDir);
+            if (!state.freezeHash().equals(beforeCommit.freezeHash())
+                    || !state.view().basis().equals(beforeCommit.view().basis())) {
+                throw new IllegalStateException("保存期间工作副本或正文依据变化，请重新读取和预览");
+            }
+            String encoded = JSON.toJSONString(next);
+            writeStringAtomic(root, encoded);
+            writeStringAtomic(active, encoded);
+            result[0] = new cn.novel.yonren.domain.novel.model.valobj.authoring.StoryAuthoringView(
+                    cn.novel.yonren.domain.novel.service.armory.authoring.StoryAuthoringService
+                            .mergedSettings(state.bible(), next),
+                    next.revision(), state.view().basis(), next, next,
+                    state.view().sources(), state.view().effectiveFromChapter());
+        });
+        return result[0];
+    }
+
+    /** 作者维护只读状态：工作副本、执行引用、设定、正文与冻结哈希在同一锁内快照。 */
+    private record AuthoringReadState(
+            cn.novel.yonren.domain.novel.model.valobj.authoring.StoryAuthoringView view,
+            String bible, Map<Integer, ChapterManuscript> chapters, String freezeHash) {
+
+        static AuthoringReadState of(cn.novel.yonren.domain.novel.model.valobj.authoring.StoryAuthoringView view,
+                                     String bible, Map<Integer, ChapterManuscript> chapters, String freezeHash) {
+            return new AuthoringReadState(view, bible, chapters, freezeHash);
+        }
+    }
+
+    private AuthoringReadState readAuthoringStateLocked(Path storyDir) throws IOException {
+        cn.novel.yonren.domain.novel.model.valobj.authoring.StoryAuthoringSnapshot root =
+                readAuthoringFile(storyDir, storyDir.resolve(AUTHORING_ROOT_FILE));
+        cn.novel.yonren.domain.novel.model.valobj.authoring.StoryAuthoringSnapshot active =
+                readAuthoringFile(storyDir, workFile(storyDir, StorageKeys.AUTHORING_CONTEXT_FILE));
+        String rootText = root == null ? null
+                : Files.readString(storyDir.resolve(AUTHORING_ROOT_FILE), StandardCharsets.UTF_8);
+        String activeText = active == null ? null
+                : Files.readString(workFile(storyDir, StorageKeys.AUTHORING_CONTEXT_FILE), StandardCharsets.UTF_8);
+        String bible = readStoryBible(storyDir);
+        List<Integer> formal = readChapterNumbers(storyDir);
+        Map<Integer, ChapterManuscript> chapters = new java.util.TreeMap<>();
+        StringBuilder frozen = new StringBuilder("authoring-freeze-v1\n")
+                .append(rootText == null ? "-" : ChapterManuscript.digest(rootText)).append('\n')
+                .append(activeText == null ? "-" : ChapterManuscript.digest(activeText)).append('\n');
+        for (int i = 0; i < formal.size(); i++) {
+            int chapterNo = formal.get(i);
+            if (chapterNo != i + 1) {
+                throw new IllegalStateException("正式章节必须连续，作者维护不能绕过缺章状态");
+            }
+            Path path = storyDir.resolve(StorageKeys.CHAPTER_DIR).resolve(String.format("%s%04d%s",
+                    StorageKeys.CHAPTER_FILE_PREFIX, chapterNo, StorageKeys.CHAPTER_FILE_SUFFIX));
+            if (!Files.isRegularFile(path)) {
+                throw new IllegalStateException("作者维护来源正文缺失");
+            }
+            frozen.append(chapterNo).append(':')
+                    .append(ChapterManuscript.digest(Files.readString(path, StandardCharsets.UTF_8))).append('\n');
+            chapters.put(chapterNo, ChapterManuscript.of(readChapter(storyDir, chapterNo)));
+        }
+        List<ChapterSummaryEntity> summaries = readChapterSummaries(storyDir);
+        List<cn.novel.yonren.domain.novel.model.valobj.authoring.StoryAuthoringSource> sources =
+                cn.novel.yonren.domain.novel.service.armory.authoring.StoryAuthoringService.sources(summaries, chapters);
+        cn.novel.yonren.domain.novel.model.valobj.authoring.StoryAuthoringView view =
+                new cn.novel.yonren.domain.novel.model.valobj.authoring.StoryAuthoringView(
+                        cn.novel.yonren.domain.novel.service.armory.authoring.StoryAuthoringService
+                                .mergedSettings(bible, root),
+                        root == null ? null : root.revision(),
+                        chapterWorkBasis(storyDir),
+                        root, active, sources, formal.size() + 1);
+        return AuthoringReadState.of(view, bible, Map.copyOf(chapters),
+                ChapterManuscript.digest(frozen.toString()));
+    }
+
+    private void archiveAuthoring(Path storyDir,
+                                  cn.novel.yonren.domain.novel.model.valobj.authoring.StoryAuthoringSnapshot snapshot)
+            throws IOException {
+        if (snapshot == null || snapshot.revision() == null) {
+            return;
+        }
+        if (!snapshot.revision().matches("[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}")) {
+            throw new IllegalArgumentException("作者维护历史 revision 非法");
+        }
+        Path file = workFile(storyDir, AUTHORING_HISTORY_DIR).resolve(snapshot.revision() + ".json");
+        cn.novel.yonren.domain.novel.model.valobj.authoring.StoryAuthoringSnapshot existing =
+                readAuthoringFile(storyDir, file);
+        if (existing != null) {
+            if (!existing.equals(snapshot)) {
+                throw new IllegalStateException("作者维护历史 revision 不可覆盖");
+            }
+            return;
+        }
+        writeStringAtomic(file, JSON.toJSONString(snapshot));
+    }
+
+    private cn.novel.yonren.domain.novel.model.valobj.authoring.StoryAuthoringSnapshot readAuthoringFile(
+            Path storyDir, Path file) throws IOException {
+        if (!Files.isRegularFile(file)) {
+            return null;
+        }
+        cn.novel.yonren.domain.novel.model.valobj.authoring.StoryAuthoringSnapshot snapshot;
+        try {
+            snapshot = JSON.parseObject(Files.readString(file, StandardCharsets.UTF_8),
+                    cn.novel.yonren.domain.novel.model.valobj.authoring.StoryAuthoringSnapshot.class);
+            cn.novel.yonren.domain.novel.service.armory.authoring.StoryAuthoringService.validatePersisted(snapshot);
+        } catch (RuntimeException e) {
+            throw corruptMemory(file, "作者维护快照", e);
+        }
+        return snapshot;
+    }
+
+    @Override
+    public void assertStoryMaintenanceWriteBoundary(Path storyDir) throws IOException {
+        // 维护写入只检查未完成提交与待回流标记；不恢复、不消费任何待办。
+        // 调用方另持 JobRegistry 维护许可，仓储层看不到作业状态。
+        withStoryLock(storyDir, () -> {
+            if (Files.exists(storyDir.resolve(StorageKeys.CHAPTER_COMMIT_FILE))
+                    || readPendingChapterEditLocked(storyDir) != null) {
+                throw new IllegalStateException("存在未完成提交或待回流编辑，作者维护不可进行");
+            }
+        });
+    }
+
+    @Override
+    public String readStoryMaintenanceBasis(Path storyDir) throws IOException {
+        final String[] result = new String[1];
+        withStoryLock(storyDir, () -> result[0] = chapterWorkBasis(storyDir));
+        return result[0];
+    }
+
+    @Override
     public void writeJobStatus(Path storyDir, GenerationJob job) throws IOException {
         if (job == null) {
             return;
@@ -1092,6 +1364,34 @@ public class StoryRepository implements IStoryRepository {
                     "续写失败：故事目录真实路径越出 workspace 边界（疑似符号链接）：" + storyDirName);
         }
         Files.createDirectories(storyDir.resolve(StorageKeys.MEMORY_DIR));
+        return storyDir;
+    }
+
+    /**
+     * 只读解析：与 {@link #resolveStoryDirectory} 同一套格式与越界校验，但不创建 memory 目录。
+     * 维护类只读入口不应因为"看一眼"而在用户目录里留下空目录。
+     */
+    @Override
+    public Path resolveStoryDirectoryReadOnly(String storyDirName) throws IOException {
+        if (storyDirName == null || storyDirName.isBlank()) {
+            throw new AppException(ResponseCode.UN_ERROR.getCode(), "故事目录名为空");
+        }
+        if (!STORY_DIR_PATTERN.matcher(storyDirName).matches()) {
+            throw new AppException(ResponseCode.UN_ERROR.getCode(),
+                    "故事目录名格式非法（应为 yyyyMMdd-story-XXXX）：" + storyDirName);
+        }
+        Path workspace = Paths.get(StorageKeys.WORKSPACE_DIR);
+        Path storyDir = workspace.resolve(storyDirName).normalize();
+        if (!Files.isDirectory(storyDir)) {
+            throw new AppException(ResponseCode.UN_ERROR.getCode(),
+                    "故事目录不存在 " + storyDir.toAbsolutePath());
+        }
+        Path workspaceRoot = workspace.toRealPath();
+        Path realStoryDir = storyDir.toRealPath();
+        if (!realStoryDir.startsWith(workspaceRoot) || !realStoryDir.getParent().equals(workspaceRoot)) {
+            throw new AppException(ResponseCode.UN_ERROR.getCode(),
+                    "故事目录真实路径越出 workspace 边界（疑似符号链接）：" + storyDirName);
+        }
         return storyDir;
     }
 
@@ -1391,6 +1691,31 @@ public class StoryRepository implements IStoryRepository {
     @FunctionalInterface
     private interface IoCheckedRunnable {
         void run() throws IOException;
+    }
+
+    /**
+     * 共享故事锁：供同包的侧车仓储（品质问题、作者维护）复用同一把锁。
+     *
+     * <p>侧车与正文写入必须串行：两边各自持有一份陈旧依据写回同一目录时，
+     * 后写者会静默覆盖前者的状态。锁按故事目录归一化路径登记，跨仓储实例一致。
+     */
+    static <T> T withSharedStoryLock(Path storyDir, CheckedSupplier<T> action) throws Exception {
+        ReentrantLock lock = STORY_LOCKS.computeIfAbsent(
+                storyDir.toAbsolutePath().normalize().toString(), key -> new ReentrantLock());
+        lock.lock();
+        try {
+            return action.get();
+        } finally {
+            lock.unlock();
+        }
+    }
+
+    /** 共享锁的静态表：实例方法 {@link #withStoryLock} 与本方法必须命中同一把锁。 */
+    private static final ConcurrentHashMap<String, ReentrantLock> STORY_LOCKS = new ConcurrentHashMap<>();
+
+    @FunctionalInterface
+    interface CheckedSupplier<T> {
+        T get() throws Exception;
     }
 
     private String quote(String value) {

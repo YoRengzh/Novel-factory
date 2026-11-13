@@ -189,6 +189,7 @@ public class StoryGenerateService {
         StoryBibleParser.Snapshot settings = parsed.snapshot();
         restoreStoryFeatures(command, settings);
         restoreCharacterProfiles(command, settings);
+        restoreAuthoring(command, storyDir);
 
         // 先补完上次中断的提交再读记忆：日志残留说明正文已换、账本可能还没跟上。
         // 没有日志时是空操作，不改变既有续写行为。
@@ -264,6 +265,26 @@ public class StoryGenerateService {
         // 未写/无法解析时沿用原默认间隔 3
         features.setCheatUsageInterval(settings.cheatUsageInterval() != null ? settings.cheatUsageInterval() : 3);
         command.getStoryVO().setFeatures(features);
+    }
+
+    /**
+     * 续写时恢复书级维护版本（作者纠正与后续意图）。
+     *
+     * <p>维护版本是写作依据的一部分：作者已确认的纠正必须进入后续章节的提示词，
+     * 否则模型会继续沿用错误提取。文件不存在时保持为 null，与引入前一致。
+     * 来源正文已变化时仓储层会拒绝读取，不让过期纠正混进提示词。
+     */
+    private void restoreAuthoring(ArmoryCommandEntity command, java.nio.file.Path storyDir) throws Exception {
+        if (command == null || command.getStoryContextEntity() == null || storyDir == null) {
+            return;
+        }
+        var active = storyRepository.readActiveStoryAuthoring(storyDir);
+        if (active == null) {
+            return;
+        }
+        command.getStoryContextEntity().setStoryAuthoring(active);
+        cn.novel.yonren.domain.novel.service.armory.authoring.StoryAuthoringService
+                .applySettings(command.getStoryContextEntity(), active);
     }
 
     /**

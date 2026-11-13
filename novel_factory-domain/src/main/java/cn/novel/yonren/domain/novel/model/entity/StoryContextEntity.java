@@ -45,4 +45,11 @@ public class StoryContextEntity {
      */
     private String characterProfiles;
 
+    /**
+     * 本次执行冻结的书级维护版本（作者纠正与后续意图）。旧故事没有该字段时不新增 JSON 键，
+     * 与引入前逐字节一致；有值时只作提示词输入，不替代正文、摘要或原始设定。
+     */
+    @com.fasterxml.jackson.annotation.JsonInclude(com.fasterxml.jackson.annotation.JsonInclude.Include.NON_NULL)
+    private cn.novel.yonren.domain.novel.model.valobj.authoring.StoryAuthoringSnapshot storyAuthoring;
+
 }

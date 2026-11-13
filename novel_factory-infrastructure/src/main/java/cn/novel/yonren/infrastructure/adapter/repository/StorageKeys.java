@@ -33,6 +33,11 @@ class StorageKeys {
     static final String CHAPTER_ACCEPTANCES_FILE = "chapter-acceptances.json";
     /** 编辑纪元：人工改动正式章节时推进，参与依据指纹，使旧稿不能跨编辑提交。 */
     static final String CHAPTER_WORK_EPOCH_FILE = "chapter-work-epoch";
+    /**
+     * 当前激活的书级维护版本（作者纠正与后续意图）。
+     * 放在 memory/ 下与摘要同级：它是"这一稿写作依据"的一部分，须随检查点一起还原。
+     */
+    static final String AUTHORING_CONTEXT_FILE = "authoring-context.json";
     static final String CONSISTENCY_INDEX_FILE = "consistency-index.json";
     static final String QUALITY_DEBT_FILE = "quality-debts.json";
     static final String FORESHADOW_SETTLEMENT_FILE = "foreshadow-settlements.json";

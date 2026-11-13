@@ -26,6 +26,27 @@ public class JobRegistry {
 
     private final ConcurrentHashMap<String, GenerationJob> jobs = new ConcurrentHashMap<>();
 
+    /**
+     * 正在进行的维护操作（作者维护保存、品质问题处置等）。
+     * 与作业共用同一互斥口径：维护期间不得启动同书作业，作业期间也不得开始维护，
+     * 否则两侧会各自持有一份陈旧依据写回同一目录。
+     */
+    private final java.util.Set<String> storyOperations = ConcurrentHashMap.newKeySet();
+
+    /** 检查与登记必须原子执行，避免两个并发维护请求同时取得同一本书。 */
+    public synchronized boolean tryBeginStoryOperation(String storyDirName) {
+        if (storyDirName == null || storyDirName.isBlank()) {
+            return false;
+        }
+        return !isActiveForStory(storyDirName) && storyOperations.add(storyDirName);
+    }
+
+    public void endStoryOperation(String storyDirName) {
+        if (storyDirName != null) {
+            storyOperations.remove(storyDirName);
+        }
+    }
+
     public void register(GenerationJob job) {
         jobs.put(job.getJobId(), job);
         evictTerminalOverflow();
@@ -76,6 +97,9 @@ public class JobRegistry {
     public boolean isActiveForStory(String storyDirName) {
         if (storyDirName == null) {
             return false;
+        }
+        if (storyOperations.contains(storyDirName)) {
+            return true;
         }
         for (GenerationJob job : jobs.values()) {
             JobStatus s = job.getStatus();
