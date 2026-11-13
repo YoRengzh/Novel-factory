@@ -256,6 +256,13 @@ story:
       min-score: 0.35        # 向量检索最低相似分（Cosine 越大越相近）；过滤无关命中
       max-recall-chars: 12000 # 动态资料全文注入字符预算，超出按段落截
       content-scene-recall-chars: 6000
+      # 块级注入（默认关闭）：命中完整资料块而不是整份文件；依赖项随带，装不下的整块放弃。
+      content-blocks:
+        enabled: false
+        candidate-top-k: 12
+        max-blocks: 6
+        max-chars: 2000
+        per-doc-max-chars: 1500
 
     # 故事记忆层（二期跨章剧情记忆 + 三期人物/世界观记忆）：每章检查点把本章摘要/账本/设定
     story-memory:

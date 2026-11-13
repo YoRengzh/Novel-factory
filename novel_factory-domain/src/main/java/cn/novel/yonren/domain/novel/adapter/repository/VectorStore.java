@@ -4,6 +4,7 @@ import cn.novel.yonren.domain.novel.model.valobj.ScoredVectorPoint;
 import cn.novel.yonren.domain.novel.model.valobj.StoredPoint;
 import cn.novel.yonren.domain.novel.model.valobj.VectorPoint;
 
+import java.util.Collection;
 import java.util.List;
 
 /**
@@ -20,6 +21,23 @@ public interface VectorStore {
 
     /** 相似检索：返回按分数降序的前 limit 个点 */
     List<ScoredVectorPoint> search(String collection, float[] queryVector, int limit);
+
+    /**
+     * 带服务端过滤的相似检索：只在该 payload 字段取值属于 {@code fieldValues} 的点内检索。
+     *
+     * 先在应用层删掉不允许的点，等于让不允许的候选先占满 topK，合法但分数稍低的候选
+     * 根本不会返回。null 白名单表示不限制，空集合表示不允许任何点。
+     */
+    default List<ScoredVectorPoint> search(String collection, float[] queryVector, int limit,
+                                           String field, Collection<String> fieldValues) {
+        if (fieldValues == null) {
+            return search(collection, queryVector, limit);
+        }
+        if (fieldValues.isEmpty()) {
+            return List.of();
+        }
+        throw new UnsupportedOperationException("该向量适配器未实现服务端过滤");
+    }
 
     /** 清空整集合（删除全部点）；本集合后续由下次 ensureCollection+upsert 自动重建 */
     void clear(String collection);

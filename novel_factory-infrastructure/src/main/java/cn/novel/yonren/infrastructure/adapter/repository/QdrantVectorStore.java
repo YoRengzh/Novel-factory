@@ -12,10 +12,15 @@ import io.qdrant.client.grpc.Collections.Distance;
 import io.qdrant.client.grpc.Collections.VectorParams;
 import io.qdrant.client.grpc.Collections.VectorsConfig;
 import io.qdrant.client.grpc.JsonWithInt;
+import io.qdrant.client.grpc.Points.Condition;
 import io.qdrant.client.grpc.Points.DeletePoints;
+import io.qdrant.client.grpc.Points.FieldCondition;
+import io.qdrant.client.grpc.Points.Filter;
+import io.qdrant.client.grpc.Points.Match;
 import io.qdrant.client.grpc.Points.PointId;
 import io.qdrant.client.grpc.Points.PointsIdsList;
 import io.qdrant.client.grpc.Points.PointsSelector;
+import io.qdrant.client.grpc.Points.RepeatedStrings;
 import io.qdrant.client.grpc.Points.RetrievedPoint;
 import io.qdrant.client.grpc.Points.ScrollPoints;
 import io.qdrant.client.grpc.Points.ScrollResponse;
@@ -217,14 +222,36 @@ public class QdrantVectorStore implements VectorStore {
 
     @Override
     public List<ScoredVectorPoint> search(String collection, float[] queryVector, int limit) {
+        return search(collection, queryVector, limit, null, null);
+    }
+
+    @Override
+    public List<ScoredVectorPoint> search(String collection, float[] queryVector, int limit,
+                                          String field, java.util.Collection<String> fieldValues) {
+        if (fieldValues != null && fieldValues.isEmpty()) {
+            return List.of();
+        }
+        if (fieldValues != null && (field == null || field.isBlank())) {
+            throw new IllegalArgumentException("白名单检索必须指定 payload 字段");
+        }
         QdrantClient qdrant = requireClient();
         try {
-            List<ScoredPoint> results = qdrant.searchAsync(SearchPoints.newBuilder()
+            SearchPoints.Builder request = SearchPoints.newBuilder()
                     .setCollectionName(collection)
                     .setLimit(limit)
                     .addAllVector(toFloatList(queryVector))
-                    .setWithPayload(WithPayloadSelector.newBuilder().setEnable(true).build())
-                    .build()).get(TIMEOUT_SECONDS, TimeUnit.SECONDS);
+                    .setWithPayload(WithPayloadSelector.newBuilder().setEnable(true).build());
+            if (fieldValues != null) {
+                // 服务端白名单过滤：应用层事后删点会让非法候选先占满 topK。
+                request.setFilter(Filter.newBuilder().addMust(Condition.newBuilder()
+                        .setField(FieldCondition.newBuilder()
+                                .setKey(field)
+                                .setMatch(Match.newBuilder().setKeywords(
+                                        RepeatedStrings.newBuilder().addAllStrings(fieldValues).build()))
+                                .build())
+                        .build()));
+            }
+            List<ScoredPoint> results = qdrant.searchAsync(request.build()).get(TIMEOUT_SECONDS, TimeUnit.SECONDS);
             List<ScoredVectorPoint> points = new ArrayList<>(results.size());
             for (ScoredPoint sp : results) {
                 points.add(ScoredVectorPoint.builder()

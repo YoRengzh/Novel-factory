@@ -54,7 +54,7 @@ class DynamicReferenceServiceTest {
                 .thenAnswer(inv -> inv.getArgument(0));   // 默认透传 yml 模式（无覆盖）
         // 第 7 个参数是 FeatureToggles：传 null 表示不启用分组开关（按全开处理，等价旧行为）
         service = new DynamicReferenceService(referenceIndexLoader, selector, retriever, fileLoader,
-                properties, llmRuntimeConfig, null);
+                properties, llmRuntimeConfig, null, new ReferenceUsagePolicy(), null);
 
         when(referenceIndexLoader.getIndex()).thenReturn(List.of());
         when(fileLoader.load(anyString())).thenReturn("资料内容");
@@ -65,7 +65,10 @@ class DynamicReferenceServiceTest {
         // 运行时覆盖 = llm：即使 yml 是 vector，也走 LLM 选择器（不触发向量检索）
         properties.setMode("vector");
         when(llmRuntimeConfig.effectiveReferenceMode("vector")).thenReturn("llm");
-        when(selector.select(any(), any(), any(), anyList())).thenReturn(List.of("a"));
+        when(selector.select(any(), any(), any(), anyList()))
+                .thenReturn(List.of("chapter-guide"));
+        when(referenceIndexLoader.getIndex()).thenReturn(List.of(
+                entry("chapter-guide"), entry("opening-design")));
 
         List<PromptRule> rules = service.selectAsRules(null, PromptScene.CHAPTER_PLAN, planCtx());
 
@@ -82,6 +85,56 @@ class DynamicReferenceServiceTest {
 
         assertTrue(rules.isEmpty());
         verify(selector, never()).select(any(), any(), any(), anyList());
+    }
+
+    @Test
+    void unregisteredOrIneligibleSourcesNeverReachTheSelector() {
+        when(referenceIndexLoader.getIndex()).thenReturn(List.of(
+                entry("worldbuilding"), entry("unregistered-new-doc"), entry("exemplar-dialogue")));
+        when(selector.select(any(), any(), any(), anyList())).thenReturn(List.of());
+
+        service.selectAsRules(null, PromptScene.SETTING_DRAFT,
+                PromptContext.builder().theme("玄幻").build());
+
+        @SuppressWarnings("unchecked")
+        org.mockito.ArgumentCaptor<List<ReferenceIndexEntry>> captor =
+                org.mockito.ArgumentCaptor.forClass(List.class);
+        verify(selector).select(any(), any(), any(), captor.capture());
+        assertEquals(List.of("worldbuilding"), captor.getValue().stream()
+                .map(ReferenceIndexEntry::getFileName).toList(),
+                "未登记来源和正文范例不能进入设定草稿候选");
+    }
+
+    @Test
+    void selectedIneligibleSourceIsDroppedBeforePromptRuleCreation() {
+        when(referenceIndexLoader.getIndex()).thenReturn(List.of(entry("worldbuilding")));
+        when(selector.select(any(), any(), any(), anyList())).thenReturn(List.of("exemplar-battle"));
+
+        List<PromptRule> rules = service.selectAsRules(null, PromptScene.SETTING_DRAFT,
+                PromptContext.builder().theme("玄幻").build());
+
+        assertTrue(rules.isEmpty(), "选择器越界返回的正文范例不得进入提示词");
+        verify(fileLoader, never()).load("references/exemplar-battle.md");
+    }
+
+    @Test
+    void targetFieldsNarrowCandidatesForSettingDraft() {
+        when(referenceIndexLoader.getIndex()).thenReturn(List.of(
+                entry("worldbuilding"), entry("villain-design")));
+        when(selector.select(any(), any(), any(), anyList())).thenReturn(List.of());
+
+        service.selectAsRules(null, PromptScene.SETTING_DRAFT,
+                PromptContext.builder().theme("玄幻").targetFields(List.of("tone")).build());
+
+        @SuppressWarnings("unchecked")
+        org.mockito.ArgumentCaptor<List<ReferenceIndexEntry>> captor =
+                org.mockito.ArgumentCaptor.forClass(List.class);
+        verify(selector).select(any(), any(), any(), captor.capture());
+        assertTrue(captor.getValue().isEmpty(), "只重生基调时世界/反派资料不应进入候选");
+    }
+
+    private static ReferenceIndexEntry entry(String fileName) {
+        return new ReferenceIndexEntry(fileName, fileName, "", "references/" + fileName + ".md");
     }
 
     @Test
@@ -147,10 +200,10 @@ class DynamicReferenceServiceTest {
     @Test
     void indexChangeInvalidatesCache() {
         when(selector.select(any(), any(), any(), anyList()))
-                .thenReturn(List.of("dialogue-writing"));
+                .thenReturn(List.of("chapter-guide"));
         when(referenceIndexLoader.getIndex())
-                .thenReturn(List.of(new ReferenceIndexEntry("a", "标题A", null, "references/a.md")))
-                .thenReturn(List.of(new ReferenceIndexEntry("b", "标题B", null, "references/b.md")));
+                .thenReturn(List.of(entry("chapter-guide")))
+                .thenReturn(List.of(entry("chapter-guide"), entry("opening-design")));
 
         service.selectAsRules(null, PromptScene.CHAPTER_PLAN, planCtx());
         service.selectAsRules(null, PromptScene.CHAPTER_PLAN, planCtx());
@@ -189,20 +242,23 @@ class DynamicReferenceServiceTest {
     void maxSelectedTruncatesRules() {
         properties.setMaxSelected(2);
         when(selector.select(any(), any(), any(), anyList()))
-                .thenReturn(List.of("a", "b", "c"));
+                .thenReturn(List.of("chapter-guide", "opening-design", "pacing-control"));
+        when(referenceIndexLoader.getIndex()).thenReturn(List.of(
+                entry("chapter-guide"), entry("opening-design"), entry("pacing-control")));
 
         List<PromptRule> rules = service.selectAsRules(null, PromptScene.CHAPTER_PLAN, planCtx());
 
         assertEquals(2, rules.size());
-        verify(fileLoader, never()).load(eq("references/c.md"));
+        verify(fileLoader, never()).load(eq("references/pacing-control.md"));
     }
 
     @Test
     void maxRecallCharsBoundsInjectedContent() {
         properties.setMaxRecallChars(12);
         when(selector.select(any(), any(), any(), anyList()))
-                .thenReturn(List.of("dialogue-writing"));
-        when(fileLoader.load("references/dialogue-writing.md"))
+                .thenReturn(List.of("chapter-guide"));
+        when(referenceIndexLoader.getIndex()).thenReturn(List.of(entry("chapter-guide")));
+        when(fileLoader.load("references/chapter-guide.md"))
                 .thenReturn("一二三四五六七八九十十一十二十三十四");
 
         List<PromptRule> rules = service.selectAsRules(null, PromptScene.CHAPTER_PLAN, planCtx());
@@ -214,13 +270,15 @@ class DynamicReferenceServiceTest {
     @Test
     void missingFileSkippedWithoutBreaking() {
         when(selector.select(any(), any(), any(), anyList()))
-                .thenReturn(List.of("dialogue-writing", "content-expansion"));
-        when(fileLoader.load("references/dialogue-writing.md")).thenReturn(null);
+                .thenReturn(List.of("chapter-guide", "opening-design"));
+        when(referenceIndexLoader.getIndex()).thenReturn(List.of(
+                entry("chapter-guide"), entry("opening-design")));
+        when(fileLoader.load("references/chapter-guide.md")).thenReturn(null);
 
         List<PromptRule> rules = service.selectAsRules(null, PromptScene.CHAPTER_PLAN, planCtx());
 
         assertEquals(1, rules.size());
-        assertEquals("ref-content-expansion", rules.get(0).getName());
+        assertEquals("ref-opening-design", rules.get(0).getName());
     }
 
     @Test

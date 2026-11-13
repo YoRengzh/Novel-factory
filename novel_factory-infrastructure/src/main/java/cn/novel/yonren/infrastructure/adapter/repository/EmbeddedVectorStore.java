@@ -158,6 +158,22 @@ public class EmbeddedVectorStore implements VectorStore {
 
     @Override
     public List<ScoredVectorPoint> search(String collection, float[] queryVector, int limit) {
+        return search(collection, queryVector, limit, null, null);
+    }
+
+    /**
+     * 带白名单的相似检索：在计算分数与截断 topK 之前先按 payload 字段过滤。
+     * 事后删点会让不允许的候选占满名额，合法但分数稍低的点永远拿不到。
+     */
+    @Override
+    public List<ScoredVectorPoint> search(String collection, float[] queryVector, int limit,
+                                          String field, java.util.Collection<String> fieldValues) {
+        if (fieldValues != null && fieldValues.isEmpty()) {
+            return List.of();
+        }
+        if (fieldValues != null && (field == null || field.isBlank())) {
+            throw new IllegalArgumentException("白名单检索必须指定 payload 字段");
+        }
         CollectionState state = load(collection);
         if (state.points.isEmpty() || queryVector == null || queryVector.length == 0) {
             return List.of();
@@ -171,12 +187,16 @@ public class EmbeddedVectorStore implements VectorStore {
         // 暴力精确检索：全部点逐一点积，取分数降序前 limit。规模百点级，毫秒内完成
         List<ScoredVectorPoint> scored = new ArrayList<>(state.points.size());
         for (Map.Entry<String, Stored> e : state.points.entrySet()) {
+            Map<String, String> payload = e.getValue().payload();
+            // 服务端过滤语义：不合格的点不参与打分与名额竞争。
+            if (fieldValues != null && (payload == null || !fieldValues.contains(payload.get(field)))) {
+                continue;
+            }
             float dot = 0f;
             float[] v = e.getValue().vector();
             for (int i = 0; i < unit.length; i++) {
                 dot += unit[i] * v[i];
             }
-            Map<String, String> payload = e.getValue().payload();
             scored.add(ScoredVectorPoint.builder()
                     .id(e.getKey())
                     .score(dot)

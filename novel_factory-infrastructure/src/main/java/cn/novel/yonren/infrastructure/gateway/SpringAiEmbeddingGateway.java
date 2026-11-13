@@ -173,4 +173,80 @@ public class SpringAiEmbeddingGateway implements EmbeddingGateway {
         });
     }
 
+    /**
+     * 冻结当前生效的 embedding 配置：运行时覆盖只在此刻解析一次。
+     * 索引构建与查询向量共用同一会话，避免中途切换供应商或维度导致两套向量空间混用。
+     */
+    @Override
+    public EmbeddingSession session(StoryVO.Module module) {
+        if (module == null || module.getEmbeddingApi() == null) {
+            throw new IllegalStateException("未配置 embedding-api（yml story.module.embedding-api），无法创建会话");
+        }
+        StoryVO.Module effective = llmRuntimeConfig == null ? module : llmRuntimeConfig.applyEmbedding(module);
+        StoryVO.Module.EmbeddingApi api = effective.getEmbeddingApi();
+        String signature = embeddingSignature(api);
+        Integer dimensions = api.getDimensions();
+        OpenAiEmbeddingModel model = embeddingModel(effective);
+        int batchSize = resolveBatchSize(effective);
+        return new EmbeddingSession() {
+            @Override
+            public List<float[]> embed(List<String> texts) {
+                return embedBatch(effective, model, texts, batchSize);
+            }
+
+            @Override
+            public String signature() {
+                return signature;
+            }
+
+            @Override
+            public Integer dimensions() {
+                return dimensions;
+            }
+        };
+    }
+
+    /** 向量空间签名：地址、路径、模型与显式维度；不包含密钥。 */
+    static String embeddingSignature(StoryVO.Module.EmbeddingApi api) {
+        if (api == null) {
+            throw new IllegalStateException("embedding 配置为空，无法计算空间签名");
+        }
+        String raw = String.valueOf(api.getBaseUrl()) + "|" + String.valueOf(api.getEmbeddingsPath())
+                + "|" + String.valueOf(api.getModel()) + "|" + String.valueOf(api.getDimensions());
+        try {
+            byte[] digest = java.security.MessageDigest.getInstance("SHA-256")
+                    .digest(raw.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+            return java.util.HexFormat.of().formatHex(digest, 0, 8);
+        } catch (java.security.NoSuchAlgorithmException e) {
+            throw new IllegalStateException("SHA-256 不可用", e);
+        }
+    }
+
+    private List<float[]> embedBatch(StoryVO.Module module, OpenAiEmbeddingModel model,
+                                     List<String> texts, int batchSize) {
+        List<String> capped = capInputLength(texts);
+        List<float[]> vectors = new ArrayList<>(capped.size());
+        for (int start = 0; start < capped.size(); start += batchSize) {
+            int end = Math.min(capped.size(), start + batchSize);
+            List<String> batch = capped.subList(start, end);
+            EmbeddingResponse response = callWithRetry(model, module, batch);
+            List<Embedding> results = response == null ? null : response.getResults();
+            if (results == null || results.size() != batch.size()) {
+                throw new IllegalStateException("embedding 返回条数与请求不一致：请求 " + batch.size()
+                        + " 条，返回 " + (results == null ? 0 : results.size())
+                        + " 条（批量起点 " + start + "，模型 " + module.getEmbeddingApi().getModel()
+                        + "）。为防止向量错位，已终止本次向量化");
+            }
+            for (Embedding embedding : results) {
+                float[] vector = embedding == null ? null : embedding.getOutput();
+                if (vector == null || vector.length == 0) {
+                    throw new IllegalStateException("embedding 返回空向量（批量起点 " + start
+                            + "，模型 " + module.getEmbeddingApi().getModel() + "）");
+                }
+                vectors.add(vector);
+            }
+        }
+        return vectors;
+    }
+
 }

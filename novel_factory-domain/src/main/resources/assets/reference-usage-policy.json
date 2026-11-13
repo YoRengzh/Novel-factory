@@ -1,0 +1,1774 @@
+{
+  "schemaVersion": "1",
+  "_comment": "独立用途资格 registry：不改变 reference-block-policy 拆块或 embedding。所有根 catalog 文档显式登记；unknown deny。allowsDocument 是 whole-safe；块与依赖按 headingPath 独立判断。scenes、purposes、types 均必填；sections 覆盖后三者并继承可选上下文条件。",
+  "documents": {
+    "action-scenes": {
+      "group": "technique",
+      "scenes": [
+        "CHAPTER_CONTENT",
+        "CHAPTER_REVISE",
+        "CHAPTER_AUDIT"
+      ],
+      "purposes": [
+        "PROSE_EXPRESSION",
+        "QUALITY_REVIEW"
+      ],
+      "types": [
+        "METHOD"
+      ]
+    },
+    "chapter-guide": {
+      "group": "structure",
+      "scenes": [
+        "CHAPTER_PLAN",
+        "CHAPTER_CONTENT",
+        "CHAPTER_REVISE",
+        "CHAPTER_AUDIT"
+      ],
+      "purposes": [
+        "STORY_PLANNING",
+        "PROSE_EXPRESSION",
+        "QUALITY_REVIEW"
+      ],
+      "types": [
+        "METHOD"
+      ]
+    },
+    "chapter-template": {
+      "group": "structure",
+      "scenes": [
+        "CHAPTER_PLAN",
+        "CHAPTER_CONTENT"
+      ],
+      "purposes": [
+        "ASSET_MAINTENANCE"
+      ],
+      "types": [
+        "MODEL_SCHEMA"
+      ],
+      "_why": "完整交付格式不得覆盖运行时 schema。"
+    },
+    "character-building": {
+      "group": "genre",
+      "scenes": [
+        "SETTING_DRAFT",
+        "CHAPTER_PLAN",
+        "STAGE_BLUEPRINT",
+        "VOLUME_BLUEPRINT",
+        "CHAPTER_CONTENT",
+        "CHAPTER_REVISE",
+        "CHAPTER_AUDIT"
+      ],
+      "purposes": [
+        "SETTING_DESIGN",
+        "STORY_PLANNING",
+        "PROSE_EXPRESSION",
+        "QUALITY_REVIEW"
+      ],
+      "types": [
+        "PRINCIPLE",
+        "METHOD"
+      ],
+      "sections": [
+        {
+          "headingContains": [
+            "人物档案模板"
+          ],
+          "scenes": [
+            "CHAPTER_PLAN",
+            "STAGE_BLUEPRINT",
+            "VOLUME_BLUEPRINT"
+          ],
+          "purposes": [
+            "STORY_PLANNING"
+          ],
+          "types": [
+            "TEMPLATE"
+          ]
+        }
+      ],
+      "targetFields": [
+        "protagonist",
+        "outline"
+      ]
+    },
+    "character-template": {
+      "group": "genre",
+      "scenes": [
+        "CHAPTER_PLAN",
+        "STAGE_BLUEPRINT",
+        "VOLUME_BLUEPRINT"
+      ],
+      "purposes": [
+        "STORY_PLANNING"
+      ],
+      "types": [
+        "TEMPLATE"
+      ],
+      "targetFields": [
+        "protagonist"
+      ]
+    },
+    "consistency": {
+      "group": "technique",
+      "scenes": [
+        "CHAPTER_PLAN",
+        "STAGE_BLUEPRINT",
+        "VOLUME_BLUEPRINT",
+        "CHAPTER_CONTENT",
+        "CHAPTER_REVISE",
+        "CHAPTER_AUDIT"
+      ],
+      "purposes": [
+        "STORY_PLANNING",
+        "PROSE_EXPRESSION",
+        "QUALITY_REVIEW"
+      ],
+      "types": [
+        "PRINCIPLE",
+        "METHOD"
+      ]
+    },
+    "content-expansion": {
+      "group": "technique",
+      "scenes": [
+        "CHAPTER_CONTENT",
+        "CHAPTER_REVISE",
+        "CHAPTER_AUDIT"
+      ],
+      "purposes": [
+        "PROSE_EXPRESSION",
+        "QUALITY_REVIEW"
+      ],
+      "types": [
+        "METHOD"
+      ]
+    },
+    "corpus-distillation": {
+      "group": "technique",
+      "scenes": [
+        "CHAPTER_CONTENT"
+      ],
+      "purposes": [
+        "ASSET_MAINTENANCE"
+      ],
+      "types": [
+        "OPERATIONS"
+      ],
+      "_why": "资料生产流程不是写作任务指令。"
+    },
+    "cross-chapter-tables": {
+      "group": "technique",
+      "scenes": [
+        "CHAPTER_PLAN",
+        "CHAPTER_CONTENT",
+        "CHAPTER_REVISE",
+        "CHAPTER_AUDIT"
+      ],
+      "purposes": [
+        "STORY_PLANNING",
+        "PROSE_EXPRESSION",
+        "QUALITY_REVIEW"
+      ],
+      "types": [
+        "METHOD"
+      ],
+      "sections": [
+        {
+          "headingContains": [
+            "一、道具链表",
+            "二、时间锚表",
+            "三、术语一致性表",
+            "四、关键数字表"
+          ],
+          "scenes": [
+            "CHAPTER_PLAN"
+          ],
+          "purposes": [
+            "STORY_PLANNING"
+          ],
+          "types": [
+            "TEMPLATE"
+          ]
+        }
+      ]
+    },
+    "de-ai-principles": {
+      "group": "technique",
+      "scenes": [
+        "CHAPTER_CONTENT",
+        "CHAPTER_REVISE",
+        "CHAPTER_AUDIT"
+      ],
+      "purposes": [
+        "PROSE_EXPRESSION",
+        "QUALITY_REVIEW"
+      ],
+      "types": [
+        "PRINCIPLE",
+        "METHOD"
+      ]
+    },
+    "dialogue-writing": {
+      "group": "technique",
+      "scenes": [
+        "CHAPTER_CONTENT",
+        "CHAPTER_REVISE",
+        "CHAPTER_AUDIT"
+      ],
+      "purposes": [
+        "PROSE_EXPRESSION",
+        "QUALITY_REVIEW"
+      ],
+      "types": [
+        "PRINCIPLE",
+        "METHOD"
+      ]
+    },
+    "differentiation": {
+      "group": "genre",
+      "scenes": [
+        "SETTING_DRAFT",
+        "CHAPTER_PLAN",
+        "STAGE_BLUEPRINT",
+        "VOLUME_BLUEPRINT"
+      ],
+      "purposes": [
+        "SETTING_DESIGN",
+        "STORY_PLANNING"
+      ],
+      "types": [
+        "PRINCIPLE",
+        "METHOD"
+      ]
+    },
+    "emotion-curve": {
+      "group": "structure",
+      "scenes": [
+        "CHAPTER_PLAN",
+        "STAGE_BLUEPRINT",
+        "VOLUME_BLUEPRINT",
+        "CHAPTER_CONTENT",
+        "CHAPTER_REVISE",
+        "CHAPTER_AUDIT"
+      ],
+      "purposes": [
+        "STORY_PLANNING",
+        "PROSE_EXPRESSION",
+        "QUALITY_REVIEW"
+      ],
+      "types": [
+        "PRINCIPLE",
+        "METHOD"
+      ]
+    },
+    "emotion-display-dialogue": {
+      "group": "technique",
+      "scenes": [
+        "CHAPTER_CONTENT",
+        "CHAPTER_REVISE",
+        "CHAPTER_AUDIT"
+      ],
+      "purposes": [
+        "PROSE_EXPRESSION",
+        "QUALITY_REVIEW"
+      ],
+      "types": [
+        "PRINCIPLE",
+        "METHOD"
+      ]
+    },
+    "exemplar-battle": {
+      "group": "technique",
+      "scenes": [
+        "CHAPTER_CONTENT",
+        "CHAPTER_REVISE",
+        "CHAPTER_AUDIT"
+      ],
+      "purposes": [
+        "PROSE_EXPRESSION",
+        "QUALITY_REVIEW"
+      ],
+      "types": [
+        "EXEMPLAR"
+      ]
+    },
+    "exemplar-breakthrough": {
+      "group": "technique",
+      "scenes": [
+        "CHAPTER_CONTENT",
+        "CHAPTER_REVISE",
+        "CHAPTER_AUDIT"
+      ],
+      "purposes": [
+        "PROSE_EXPRESSION",
+        "QUALITY_REVIEW"
+      ],
+      "types": [
+        "EXEMPLAR"
+      ]
+    },
+    "exemplar-dialogue": {
+      "group": "technique",
+      "scenes": [
+        "CHAPTER_CONTENT",
+        "CHAPTER_REVISE",
+        "CHAPTER_AUDIT"
+      ],
+      "purposes": [
+        "PROSE_EXPRESSION",
+        "QUALITY_REVIEW"
+      ],
+      "types": [
+        "EXEMPLAR"
+      ]
+    },
+    "exemplar-emotion": {
+      "group": "technique",
+      "scenes": [
+        "CHAPTER_CONTENT",
+        "CHAPTER_REVISE",
+        "CHAPTER_AUDIT"
+      ],
+      "purposes": [
+        "PROSE_EXPRESSION",
+        "QUALITY_REVIEW"
+      ],
+      "types": [
+        "EXEMPLAR"
+      ]
+    },
+    "foreshadowing": {
+      "group": "technique",
+      "scenes": [
+        "CHAPTER_PLAN",
+        "STAGE_BLUEPRINT",
+        "VOLUME_BLUEPRINT",
+        "CHAPTER_CONTENT",
+        "CHAPTER_REVISE",
+        "CHAPTER_AUDIT"
+      ],
+      "purposes": [
+        "STORY_PLANNING",
+        "PROSE_EXPRESSION",
+        "QUALITY_REVIEW"
+      ],
+      "types": [
+        "PRINCIPLE",
+        "METHOD"
+      ]
+    },
+    "genre-flow-tactics": {
+      "group": "genre",
+      "scenes": [
+        "SETTING_DRAFT",
+        "CHAPTER_PLAN",
+        "STAGE_BLUEPRINT",
+        "VOLUME_BLUEPRINT"
+      ],
+      "purposes": [
+        "SETTING_DESIGN",
+        "STORY_PLANNING"
+      ],
+      "types": [
+        "METHOD"
+      ],
+      "targetFields": [
+        "style",
+        "worldSetting",
+        "protagonist",
+        "outline",
+        "chapterGoal"
+      ]
+    },
+    "human-texture-rhythm": {
+      "group": "technique",
+      "scenes": [
+        "CHAPTER_CONTENT",
+        "CHAPTER_REVISE",
+        "CHAPTER_AUDIT"
+      ],
+      "purposes": [
+        "PROSE_EXPRESSION",
+        "QUALITY_REVIEW"
+      ],
+      "types": [
+        "PRINCIPLE",
+        "METHOD"
+      ]
+    },
+    "longform-planning": {
+      "group": "structure",
+      "scenes": [
+        "SETTING_DRAFT",
+        "CHAPTER_PLAN",
+        "STAGE_BLUEPRINT",
+        "VOLUME_BLUEPRINT"
+      ],
+      "purposes": [
+        "SETTING_DESIGN",
+        "STORY_PLANNING"
+      ],
+      "types": [
+        "PRINCIPLE",
+        "METHOD"
+      ],
+      "sections": [
+        {
+          "headingContains": [
+            "长篇专项管理（100章以上必建）"
+          ],
+          "scenes": [
+            "CHAPTER_PLAN",
+            "STAGE_BLUEPRINT",
+            "VOLUME_BLUEPRINT"
+          ],
+          "purposes": [
+            "STORY_PLANNING"
+          ],
+          "types": [
+            "METHOD"
+          ]
+        }
+      ],
+      "targetFields": [
+        "outline",
+        "totalChapters",
+        "chapterGoal"
+      ]
+    },
+    "multi-thread": {
+      "group": "structure",
+      "scenes": [
+        "CHAPTER_PLAN",
+        "STAGE_BLUEPRINT",
+        "VOLUME_BLUEPRINT",
+        "CHAPTER_CONTENT",
+        "CHAPTER_REVISE",
+        "CHAPTER_AUDIT"
+      ],
+      "purposes": [
+        "STORY_PLANNING",
+        "PROSE_EXPRESSION",
+        "QUALITY_REVIEW"
+      ],
+      "types": [
+        "METHOD"
+      ]
+    },
+    "opening-design": {
+      "group": "structure",
+      "scenes": [
+        "CHAPTER_PLAN",
+        "CHAPTER_CONTENT",
+        "CHAPTER_REVISE",
+        "CHAPTER_AUDIT"
+      ],
+      "purposes": [
+        "STORY_PLANNING",
+        "PROSE_EXPRESSION",
+        "QUALITY_REVIEW"
+      ],
+      "types": [
+        "METHOD"
+      ]
+    },
+    "opening-hooks-goldfinger": {
+      "group": "structure",
+      "scenes": [
+        "CHAPTER_PLAN",
+        "CHAPTER_CONTENT",
+        "CHAPTER_REVISE",
+        "CHAPTER_AUDIT"
+      ],
+      "purposes": [
+        "STORY_PLANNING",
+        "PROSE_EXPRESSION",
+        "QUALITY_REVIEW"
+      ],
+      "types": [
+        "METHOD"
+      ]
+    },
+    "outline-template": {
+      "group": "structure",
+      "scenes": [
+        "SETTING_DRAFT",
+        "CHAPTER_PLAN",
+        "STAGE_BLUEPRINT",
+        "VOLUME_BLUEPRINT"
+      ],
+      "purposes": [
+        "SETTING_DESIGN",
+        "STORY_PLANNING"
+      ],
+      "types": [
+        "PRINCIPLE",
+        "METHOD"
+      ],
+      "sections": [
+        {
+          "headingContains": [
+            "大纲的分层与字段口径"
+          ],
+          "scenes": [
+            "CHAPTER_PLAN",
+            "STAGE_BLUEPRINT",
+            "VOLUME_BLUEPRINT"
+          ],
+          "purposes": [
+            "STORY_PLANNING"
+          ],
+          "types": [
+            "MODEL_SCHEMA"
+          ]
+        }
+      ],
+      "targetFields": [
+        "outline",
+        "totalChapters",
+        "chapterGoal"
+      ]
+    },
+    "pacing-control": {
+      "group": "structure",
+      "scenes": [
+        "CHAPTER_PLAN",
+        "CHAPTER_CONTENT",
+        "CHAPTER_REVISE",
+        "CHAPTER_AUDIT"
+      ],
+      "purposes": [
+        "STORY_PLANNING",
+        "PROSE_EXPRESSION",
+        "QUALITY_REVIEW"
+      ],
+      "types": [
+        "METHOD"
+      ]
+    },
+    "plot-structure-circular": {
+      "group": "structure",
+      "scenes": [
+        "CHAPTER_PLAN",
+        "STAGE_BLUEPRINT",
+        "VOLUME_BLUEPRINT"
+      ],
+      "purposes": [
+        "STORY_PLANNING"
+      ],
+      "types": [
+        "TEMPLATE"
+      ]
+    },
+    "plot-structure-five-act": {
+      "group": "structure",
+      "scenes": [
+        "CHAPTER_PLAN",
+        "STAGE_BLUEPRINT",
+        "VOLUME_BLUEPRINT"
+      ],
+      "purposes": [
+        "STORY_PLANNING"
+      ],
+      "types": [
+        "TEMPLATE"
+      ]
+    },
+    "plot-structure-fragmented": {
+      "group": "structure",
+      "scenes": [
+        "CHAPTER_PLAN",
+        "STAGE_BLUEPRINT",
+        "VOLUME_BLUEPRINT"
+      ],
+      "purposes": [
+        "STORY_PLANNING"
+      ],
+      "types": [
+        "TEMPLATE"
+      ]
+    },
+    "plot-structure-frame": {
+      "group": "structure",
+      "scenes": [
+        "CHAPTER_PLAN",
+        "STAGE_BLUEPRINT",
+        "VOLUME_BLUEPRINT"
+      ],
+      "purposes": [
+        "STORY_PLANNING"
+      ],
+      "types": [
+        "TEMPLATE"
+      ]
+    },
+    "plot-structure-heros-journey": {
+      "group": "structure",
+      "scenes": [
+        "CHAPTER_PLAN",
+        "STAGE_BLUEPRINT",
+        "VOLUME_BLUEPRINT"
+      ],
+      "purposes": [
+        "STORY_PLANNING"
+      ],
+      "types": [
+        "TEMPLATE"
+      ]
+    },
+    "plot-structure-kishotenketsu": {
+      "group": "structure",
+      "scenes": [
+        "CHAPTER_PLAN",
+        "STAGE_BLUEPRINT",
+        "VOLUME_BLUEPRINT"
+      ],
+      "purposes": [
+        "STORY_PLANNING"
+      ],
+      "types": [
+        "TEMPLATE"
+      ]
+    },
+    "plot-structure-multiline": {
+      "group": "structure",
+      "scenes": [
+        "CHAPTER_PLAN",
+        "STAGE_BLUEPRINT",
+        "VOLUME_BLUEPRINT"
+      ],
+      "purposes": [
+        "STORY_PLANNING"
+      ],
+      "types": [
+        "TEMPLATE"
+      ]
+    },
+    "plot-structure-mystery": {
+      "group": "structure",
+      "scenes": [
+        "CHAPTER_PLAN",
+        "STAGE_BLUEPRINT",
+        "VOLUME_BLUEPRINT"
+      ],
+      "purposes": [
+        "STORY_PLANNING"
+      ],
+      "types": [
+        "TEMPLATE"
+      ]
+    },
+    "plot-structure-network": {
+      "group": "structure",
+      "scenes": [
+        "CHAPTER_PLAN",
+        "STAGE_BLUEPRINT",
+        "VOLUME_BLUEPRINT"
+      ],
+      "purposes": [
+        "STORY_PLANNING"
+      ],
+      "types": [
+        "TEMPLATE"
+      ]
+    },
+    "plot-structure-romance": {
+      "group": "structure",
+      "scenes": [
+        "CHAPTER_PLAN",
+        "STAGE_BLUEPRINT",
+        "VOLUME_BLUEPRINT"
+      ],
+      "purposes": [
+        "STORY_PLANNING"
+      ],
+      "types": [
+        "TEMPLATE"
+      ]
+    },
+    "plot-structure-save-the-cat": {
+      "group": "structure",
+      "scenes": [
+        "CHAPTER_PLAN",
+        "STAGE_BLUEPRINT",
+        "VOLUME_BLUEPRINT"
+      ],
+      "purposes": [
+        "STORY_PLANNING"
+      ],
+      "types": [
+        "TEMPLATE"
+      ]
+    },
+    "plot-structure-seven-point": {
+      "group": "structure",
+      "scenes": [
+        "CHAPTER_PLAN",
+        "STAGE_BLUEPRINT",
+        "VOLUME_BLUEPRINT"
+      ],
+      "purposes": [
+        "STORY_PLANNING"
+      ],
+      "types": [
+        "TEMPLATE"
+      ]
+    },
+    "plot-structure-short": {
+      "group": "structure",
+      "scenes": [
+        "CHAPTER_PLAN",
+        "STAGE_BLUEPRINT",
+        "VOLUME_BLUEPRINT"
+      ],
+      "purposes": [
+        "STORY_PLANNING"
+      ],
+      "types": [
+        "TEMPLATE"
+      ]
+    },
+    "plot-structure-story-circle": {
+      "group": "structure",
+      "scenes": [
+        "CHAPTER_PLAN",
+        "STAGE_BLUEPRINT",
+        "VOLUME_BLUEPRINT"
+      ],
+      "purposes": [
+        "STORY_PLANNING"
+      ],
+      "types": [
+        "TEMPLATE"
+      ]
+    },
+    "plot-structure-three-act": {
+      "group": "structure",
+      "scenes": [
+        "CHAPTER_PLAN",
+        "STAGE_BLUEPRINT",
+        "VOLUME_BLUEPRINT"
+      ],
+      "purposes": [
+        "STORY_PLANNING"
+      ],
+      "types": [
+        "TEMPLATE"
+      ]
+    },
+    "plot-structure-thriller": {
+      "group": "structure",
+      "scenes": [
+        "CHAPTER_PLAN",
+        "STAGE_BLUEPRINT",
+        "VOLUME_BLUEPRINT"
+      ],
+      "purposes": [
+        "STORY_PLANNING"
+      ],
+      "types": [
+        "TEMPLATE"
+      ]
+    },
+    "plot-structure-twist": {
+      "group": "structure",
+      "scenes": [
+        "CHAPTER_PLAN",
+        "STAGE_BLUEPRINT",
+        "VOLUME_BLUEPRINT"
+      ],
+      "purposes": [
+        "STORY_PLANNING"
+      ],
+      "types": [
+        "TEMPLATE"
+      ]
+    },
+    "quality-checklist": {
+      "group": "technique",
+      "scenes": [
+        "CHAPTER_CONTENT",
+        "CHAPTER_REVISE",
+        "CHAPTER_AUDIT"
+      ],
+      "purposes": [
+        "PROSE_EXPRESSION",
+        "QUALITY_REVIEW"
+      ],
+      "types": [
+        "METHOD"
+      ]
+    },
+    "register-discipline": {
+      "group": "technique",
+      "scenes": [
+        "CHAPTER_CONTENT",
+        "CHAPTER_REVISE",
+        "CHAPTER_AUDIT"
+      ],
+      "purposes": [
+        "PROSE_EXPRESSION",
+        "QUALITY_REVIEW"
+      ],
+      "types": [
+        "PRINCIPLE",
+        "METHOD"
+      ]
+    },
+    "restrained-emotion": {
+      "group": "technique",
+      "scenes": [
+        "CHAPTER_CONTENT",
+        "CHAPTER_REVISE",
+        "CHAPTER_AUDIT"
+      ],
+      "purposes": [
+        "PROSE_EXPRESSION",
+        "QUALITY_REVIEW"
+      ],
+      "types": [
+        "PRINCIPLE",
+        "METHOD"
+      ]
+    },
+    "scene-writing": {
+      "group": "technique",
+      "scenes": [
+        "CHAPTER_CONTENT",
+        "CHAPTER_REVISE",
+        "CHAPTER_AUDIT"
+      ],
+      "purposes": [
+        "PROSE_EXPRESSION",
+        "QUALITY_REVIEW"
+      ],
+      "types": [
+        "PRINCIPLE",
+        "METHOD"
+      ]
+    },
+    "seed-architecture": {
+      "group": "genre",
+      "scenes": [
+        "SETTING_DRAFT",
+        "CHAPTER_PLAN",
+        "STAGE_BLUEPRINT",
+        "VOLUME_BLUEPRINT"
+      ],
+      "purposes": [
+        "SETTING_DESIGN",
+        "STORY_PLANNING"
+      ],
+      "types": [
+        "PRINCIPLE",
+        "METHOD"
+      ],
+      "sections": [
+        {
+          "headingContains": [
+            "衍生子设定结构 schema"
+          ],
+          "scenes": [
+            "CHAPTER_PLAN",
+            "STAGE_BLUEPRINT",
+            "VOLUME_BLUEPRINT"
+          ],
+          "purposes": [
+            "STORY_PLANNING"
+          ],
+          "types": [
+            "MODEL_SCHEMA"
+          ]
+        },
+        {
+          "headingContains": [
+            "专有名词检索标签规范"
+          ],
+          "scenes": [
+            "CHAPTER_PLAN"
+          ],
+          "purposes": [
+            "ASSET_MAINTENANCE"
+          ],
+          "types": [
+            "OPERATIONS"
+          ]
+        },
+        {
+          "headingContains": [
+            "黄金示例"
+          ],
+          "scenes": [
+            "CHAPTER_PLAN",
+            "STAGE_BLUEPRINT",
+            "VOLUME_BLUEPRINT"
+          ],
+          "purposes": [
+            "STORY_PLANNING"
+          ],
+          "types": [
+            "TEMPLATE"
+          ]
+        }
+      ],
+      "targetFields": [
+        "worldSetting",
+        "protagonist",
+        "outline"
+      ]
+    },
+    "seed-atoms-fantasy": {
+      "group": "genre",
+      "scenes": [
+        "SETTING_DRAFT",
+        "CHAPTER_PLAN",
+        "STAGE_BLUEPRINT",
+        "VOLUME_BLUEPRINT"
+      ],
+      "purposes": [
+        "SETTING_DESIGN",
+        "STORY_PLANNING"
+      ],
+      "types": [
+        "METHOD"
+      ],
+      "genres": [
+        "fantasy"
+      ],
+      "targetFields": [
+        "worldSetting",
+        "protagonist",
+        "outline"
+      ]
+    },
+    "seed-atoms-romance": {
+      "group": "genre",
+      "scenes": [
+        "SETTING_DRAFT",
+        "CHAPTER_PLAN",
+        "STAGE_BLUEPRINT",
+        "VOLUME_BLUEPRINT"
+      ],
+      "purposes": [
+        "SETTING_DESIGN",
+        "STORY_PLANNING"
+      ],
+      "types": [
+        "METHOD"
+      ],
+      "genres": [
+        "romance",
+        "urban"
+      ],
+      "targetFields": [
+        "worldSetting",
+        "protagonist",
+        "outline"
+      ]
+    },
+    "style-distillation": {
+      "group": "technique",
+      "scenes": [
+        "CHAPTER_CONTENT"
+      ],
+      "purposes": [
+        "ASSET_MAINTENANCE"
+      ],
+      "types": [
+        "OPERATIONS"
+      ]
+    },
+    "subject-and-ops": {
+      "group": "genre",
+      "scenes": [
+        "SETTING_DRAFT",
+        "CHAPTER_PLAN",
+        "STAGE_BLUEPRINT",
+        "VOLUME_BLUEPRINT"
+      ],
+      "purposes": [
+        "SETTING_DESIGN",
+        "STORY_PLANNING"
+      ],
+      "types": [
+        "METHOD"
+      ],
+      "sections": [
+        {
+          "headingContains": [
+            "数据指标与诊断",
+            "连载更新节拍"
+          ],
+          "scenes": [
+            "CHAPTER_PLAN"
+          ],
+          "purposes": [
+            "ASSET_MAINTENANCE"
+          ],
+          "types": [
+            "OPERATIONS"
+          ]
+        }
+      ],
+      "targetFields": [
+        "novelTitle",
+        "targetAudience",
+        "outline",
+        "chapterGoal",
+        "totalChapters"
+      ]
+    },
+    "transitions": {
+      "group": "structure",
+      "scenes": [
+        "CHAPTER_PLAN",
+        "CHAPTER_CONTENT",
+        "CHAPTER_REVISE",
+        "CHAPTER_AUDIT"
+      ],
+      "purposes": [
+        "STORY_PLANNING",
+        "PROSE_EXPRESSION",
+        "QUALITY_REVIEW"
+      ],
+      "types": [
+        "METHOD"
+      ]
+    },
+    "transmigration-transition": {
+      "group": "genre",
+      "scenes": [
+        "SETTING_DRAFT",
+        "CHAPTER_PLAN",
+        "CHAPTER_CONTENT",
+        "CHAPTER_REVISE",
+        "CHAPTER_AUDIT"
+      ],
+      "purposes": [
+        "SETTING_DESIGN",
+        "STORY_PLANNING",
+        "PROSE_EXPRESSION",
+        "QUALITY_REVIEW"
+      ],
+      "types": [
+        "METHOD"
+      ],
+      "themeKeywords": [
+        "穿越",
+        "重生",
+        "转生",
+        "快穿",
+        "异世界"
+      ],
+      "targetFields": [
+        "worldSetting",
+        "protagonist",
+        "outline"
+      ]
+    },
+    "trope-usage": {
+      "group": "genre",
+      "scenes": [
+        "SETTING_DRAFT",
+        "CHAPTER_PLAN",
+        "STAGE_BLUEPRINT",
+        "VOLUME_BLUEPRINT"
+      ],
+      "purposes": [
+        "SETTING_DESIGN",
+        "STORY_PLANNING"
+      ],
+      "types": [
+        "PRINCIPLE",
+        "METHOD"
+      ],
+      "targetFields": [
+        "worldSetting",
+        "protagonist",
+        "outline"
+      ]
+    },
+    "villain-design": {
+      "group": "genre",
+      "scenes": [
+        "SETTING_DRAFT",
+        "CHAPTER_PLAN",
+        "STAGE_BLUEPRINT",
+        "VOLUME_BLUEPRINT"
+      ],
+      "purposes": [
+        "SETTING_DESIGN",
+        "STORY_PLANNING"
+      ],
+      "types": [
+        "PRINCIPLE",
+        "METHOD"
+      ],
+      "targetFields": [
+        "protagonist",
+        "outline"
+      ]
+    },
+    "worldbuilding": {
+      "group": "genre",
+      "scenes": [
+        "SETTING_DRAFT",
+        "CHAPTER_PLAN",
+        "STAGE_BLUEPRINT",
+        "VOLUME_BLUEPRINT"
+      ],
+      "purposes": [
+        "SETTING_DESIGN",
+        "STORY_PLANNING"
+      ],
+      "types": [
+        "PRINCIPLE",
+        "METHOD"
+      ],
+      "targetFields": [
+        "worldSetting",
+        "outline"
+      ]
+    }
+  },
+  "fixed": {
+    "styles/default.md": {
+      "group": "style",
+      "scenes": [
+        "SETTING_DRAFT",
+        "CHAPTER_PLAN",
+        "STAGE_BLUEPRINT",
+        "VOLUME_BLUEPRINT",
+        "CHAPTER_CONTENT",
+        "CHAPTER_REVISE",
+        "CHAPTER_AUDIT"
+      ],
+      "purposes": [
+        "STYLE_GUIDANCE"
+      ],
+      "types": [
+        "STYLE",
+        "PRINCIPLE"
+      ],
+      "targetFields": [
+        "style",
+        "tone",
+        "perspective",
+        "targetAudience",
+        "outline",
+        "chapterGoal"
+      ]
+    },
+    "styles/fantasy.md": {
+      "group": "style",
+      "scenes": [
+        "SETTING_DRAFT",
+        "CHAPTER_PLAN",
+        "STAGE_BLUEPRINT",
+        "VOLUME_BLUEPRINT",
+        "CHAPTER_CONTENT",
+        "CHAPTER_REVISE",
+        "CHAPTER_AUDIT"
+      ],
+      "purposes": [
+        "STYLE_GUIDANCE"
+      ],
+      "types": [
+        "STYLE",
+        "PRINCIPLE"
+      ],
+      "genres": [
+        "fantasy"
+      ],
+      "targetFields": [
+        "style",
+        "tone",
+        "perspective",
+        "targetAudience",
+        "outline",
+        "chapterGoal"
+      ]
+    },
+    "styles/romance.md": {
+      "group": "style",
+      "scenes": [
+        "SETTING_DRAFT",
+        "CHAPTER_PLAN",
+        "STAGE_BLUEPRINT",
+        "VOLUME_BLUEPRINT",
+        "CHAPTER_CONTENT",
+        "CHAPTER_REVISE",
+        "CHAPTER_AUDIT"
+      ],
+      "purposes": [
+        "STYLE_GUIDANCE"
+      ],
+      "types": [
+        "STYLE",
+        "PRINCIPLE"
+      ],
+      "genres": [
+        "romance"
+      ],
+      "targetFields": [
+        "style",
+        "tone",
+        "perspective",
+        "targetAudience",
+        "outline",
+        "chapterGoal"
+      ]
+    },
+    "styles/suspense.md": {
+      "group": "style",
+      "scenes": [
+        "SETTING_DRAFT",
+        "CHAPTER_PLAN",
+        "STAGE_BLUEPRINT",
+        "VOLUME_BLUEPRINT",
+        "CHAPTER_CONTENT",
+        "CHAPTER_REVISE",
+        "CHAPTER_AUDIT"
+      ],
+      "purposes": [
+        "STYLE_GUIDANCE"
+      ],
+      "types": [
+        "STYLE",
+        "PRINCIPLE"
+      ],
+      "genres": [
+        "suspense"
+      ],
+      "targetFields": [
+        "style",
+        "tone",
+        "perspective",
+        "targetAudience",
+        "outline",
+        "chapterGoal"
+      ]
+    },
+    "references/genres/ability/style-references.md": {
+      "group": "genre",
+      "scenes": [
+        "SETTING_DRAFT",
+        "CHAPTER_PLAN",
+        "STAGE_BLUEPRINT",
+        "VOLUME_BLUEPRINT",
+        "CHAPTER_CONTENT",
+        "CHAPTER_REVISE",
+        "CHAPTER_AUDIT"
+      ],
+      "purposes": [
+        "STYLE_GUIDANCE"
+      ],
+      "types": [
+        "STYLE",
+        "PRINCIPLE"
+      ],
+      "genres": [
+        "ability"
+      ],
+      "targetFields": [
+        "style",
+        "tone",
+        "perspective",
+        "targetAudience",
+        "outline",
+        "chapterGoal"
+      ]
+    },
+    "references/genres/ability/arc-templates.md": {
+      "group": "genre",
+      "scenes": [
+        "CHAPTER_PLAN",
+        "STAGE_BLUEPRINT",
+        "VOLUME_BLUEPRINT"
+      ],
+      "purposes": [
+        "STORY_PLANNING"
+      ],
+      "types": [
+        "TEMPLATE"
+      ],
+      "genres": [
+        "ability"
+      ]
+    },
+    "references/genres/ability/exemplars.md": {
+      "group": "genre",
+      "scenes": [
+        "CHAPTER_CONTENT",
+        "CHAPTER_REVISE",
+        "CHAPTER_AUDIT"
+      ],
+      "purposes": [
+        "PROSE_EXPRESSION",
+        "QUALITY_REVIEW"
+      ],
+      "types": [
+        "EXEMPLAR"
+      ],
+      "genres": [
+        "ability"
+      ]
+    },
+    "references/genres/apocalypse/style-references.md": {
+      "group": "genre",
+      "scenes": [
+        "SETTING_DRAFT",
+        "CHAPTER_PLAN",
+        "STAGE_BLUEPRINT",
+        "VOLUME_BLUEPRINT",
+        "CHAPTER_CONTENT",
+        "CHAPTER_REVISE",
+        "CHAPTER_AUDIT"
+      ],
+      "purposes": [
+        "STYLE_GUIDANCE"
+      ],
+      "types": [
+        "STYLE",
+        "PRINCIPLE"
+      ],
+      "genres": [
+        "apocalypse"
+      ],
+      "targetFields": [
+        "style",
+        "tone",
+        "perspective",
+        "targetAudience",
+        "outline",
+        "chapterGoal"
+      ]
+    },
+    "references/genres/apocalypse/arc-templates.md": {
+      "group": "genre",
+      "scenes": [
+        "CHAPTER_PLAN",
+        "STAGE_BLUEPRINT",
+        "VOLUME_BLUEPRINT"
+      ],
+      "purposes": [
+        "STORY_PLANNING"
+      ],
+      "types": [
+        "TEMPLATE"
+      ],
+      "genres": [
+        "apocalypse"
+      ]
+    },
+    "references/genres/apocalypse/exemplars.md": {
+      "group": "genre",
+      "scenes": [
+        "CHAPTER_CONTENT",
+        "CHAPTER_REVISE",
+        "CHAPTER_AUDIT"
+      ],
+      "purposes": [
+        "PROSE_EXPRESSION",
+        "QUALITY_REVIEW"
+      ],
+      "types": [
+        "EXEMPLAR"
+      ],
+      "genres": [
+        "apocalypse"
+      ]
+    },
+    "references/genres/fantasy/style-references.md": {
+      "group": "genre",
+      "scenes": [
+        "SETTING_DRAFT",
+        "CHAPTER_PLAN",
+        "STAGE_BLUEPRINT",
+        "VOLUME_BLUEPRINT",
+        "CHAPTER_CONTENT",
+        "CHAPTER_REVISE",
+        "CHAPTER_AUDIT"
+      ],
+      "purposes": [
+        "STYLE_GUIDANCE"
+      ],
+      "types": [
+        "STYLE",
+        "PRINCIPLE"
+      ],
+      "genres": [
+        "fantasy"
+      ],
+      "targetFields": [
+        "style",
+        "tone",
+        "perspective",
+        "targetAudience",
+        "outline",
+        "chapterGoal"
+      ]
+    },
+    "references/genres/fantasy/arc-templates.md": {
+      "group": "genre",
+      "scenes": [
+        "CHAPTER_PLAN",
+        "STAGE_BLUEPRINT",
+        "VOLUME_BLUEPRINT"
+      ],
+      "purposes": [
+        "STORY_PLANNING"
+      ],
+      "types": [
+        "TEMPLATE"
+      ],
+      "genres": [
+        "fantasy"
+      ]
+    },
+    "references/genres/fantasy/exemplars.md": {
+      "group": "genre",
+      "scenes": [
+        "CHAPTER_CONTENT",
+        "CHAPTER_REVISE",
+        "CHAPTER_AUDIT"
+      ],
+      "purposes": [
+        "PROSE_EXPRESSION",
+        "QUALITY_REVIEW"
+      ],
+      "types": [
+        "EXEMPLAR"
+      ],
+      "genres": [
+        "fantasy"
+      ]
+    },
+    "references/genres/infinite-flow/style-references.md": {
+      "group": "genre",
+      "scenes": [
+        "SETTING_DRAFT",
+        "CHAPTER_PLAN",
+        "STAGE_BLUEPRINT",
+        "VOLUME_BLUEPRINT",
+        "CHAPTER_CONTENT",
+        "CHAPTER_REVISE",
+        "CHAPTER_AUDIT"
+      ],
+      "purposes": [
+        "STYLE_GUIDANCE"
+      ],
+      "types": [
+        "STYLE",
+        "PRINCIPLE"
+      ],
+      "genres": [
+        "infinite-flow"
+      ],
+      "targetFields": [
+        "style",
+        "tone",
+        "perspective",
+        "targetAudience",
+        "outline",
+        "chapterGoal"
+      ]
+    },
+    "references/genres/infinite-flow/arc-templates.md": {
+      "group": "genre",
+      "scenes": [
+        "CHAPTER_PLAN",
+        "STAGE_BLUEPRINT",
+        "VOLUME_BLUEPRINT"
+      ],
+      "purposes": [
+        "STORY_PLANNING"
+      ],
+      "types": [
+        "TEMPLATE"
+      ],
+      "genres": [
+        "infinite-flow"
+      ]
+    },
+    "references/genres/infinite-flow/exemplars.md": {
+      "group": "genre",
+      "scenes": [
+        "CHAPTER_CONTENT",
+        "CHAPTER_REVISE",
+        "CHAPTER_AUDIT"
+      ],
+      "purposes": [
+        "PROSE_EXPRESSION",
+        "QUALITY_REVIEW"
+      ],
+      "types": [
+        "EXEMPLAR"
+      ],
+      "genres": [
+        "infinite-flow"
+      ]
+    },
+    "references/genres/romance/style-references.md": {
+      "group": "genre",
+      "scenes": [
+        "SETTING_DRAFT",
+        "CHAPTER_PLAN",
+        "STAGE_BLUEPRINT",
+        "VOLUME_BLUEPRINT",
+        "CHAPTER_CONTENT",
+        "CHAPTER_REVISE",
+        "CHAPTER_AUDIT"
+      ],
+      "purposes": [
+        "STYLE_GUIDANCE"
+      ],
+      "types": [
+        "STYLE",
+        "PRINCIPLE"
+      ],
+      "genres": [
+        "romance"
+      ],
+      "targetFields": [
+        "style",
+        "tone",
+        "perspective",
+        "targetAudience",
+        "outline",
+        "chapterGoal"
+      ]
+    },
+    "references/genres/romance/arc-templates.md": {
+      "group": "genre",
+      "scenes": [
+        "CHAPTER_PLAN",
+        "STAGE_BLUEPRINT",
+        "VOLUME_BLUEPRINT"
+      ],
+      "purposes": [
+        "STORY_PLANNING"
+      ],
+      "types": [
+        "TEMPLATE"
+      ],
+      "genres": [
+        "romance"
+      ]
+    },
+    "references/genres/romance/exemplars.md": {
+      "group": "genre",
+      "scenes": [
+        "CHAPTER_CONTENT",
+        "CHAPTER_REVISE",
+        "CHAPTER_AUDIT"
+      ],
+      "purposes": [
+        "PROSE_EXPRESSION",
+        "QUALITY_REVIEW"
+      ],
+      "types": [
+        "EXEMPLAR"
+      ],
+      "genres": [
+        "romance"
+      ]
+    },
+    "references/genres/scifi/style-references.md": {
+      "group": "genre",
+      "scenes": [
+        "SETTING_DRAFT",
+        "CHAPTER_PLAN",
+        "STAGE_BLUEPRINT",
+        "VOLUME_BLUEPRINT",
+        "CHAPTER_CONTENT",
+        "CHAPTER_REVISE",
+        "CHAPTER_AUDIT"
+      ],
+      "purposes": [
+        "STYLE_GUIDANCE"
+      ],
+      "types": [
+        "STYLE",
+        "PRINCIPLE"
+      ],
+      "genres": [
+        "scifi"
+      ],
+      "targetFields": [
+        "style",
+        "tone",
+        "perspective",
+        "targetAudience",
+        "outline",
+        "chapterGoal"
+      ]
+    },
+    "references/genres/scifi/arc-templates.md": {
+      "group": "genre",
+      "scenes": [
+        "CHAPTER_PLAN",
+        "STAGE_BLUEPRINT",
+        "VOLUME_BLUEPRINT"
+      ],
+      "purposes": [
+        "STORY_PLANNING"
+      ],
+      "types": [
+        "TEMPLATE"
+      ],
+      "genres": [
+        "scifi"
+      ]
+    },
+    "references/genres/scifi/exemplars.md": {
+      "group": "genre",
+      "scenes": [
+        "CHAPTER_CONTENT",
+        "CHAPTER_REVISE",
+        "CHAPTER_AUDIT"
+      ],
+      "purposes": [
+        "PROSE_EXPRESSION",
+        "QUALITY_REVIEW"
+      ],
+      "types": [
+        "EXEMPLAR"
+      ],
+      "genres": [
+        "scifi"
+      ]
+    },
+    "references/genres/suspense/style-references.md": {
+      "group": "genre",
+      "scenes": [
+        "SETTING_DRAFT",
+        "CHAPTER_PLAN",
+        "STAGE_BLUEPRINT",
+        "VOLUME_BLUEPRINT",
+        "CHAPTER_CONTENT",
+        "CHAPTER_REVISE",
+        "CHAPTER_AUDIT"
+      ],
+      "purposes": [
+        "STYLE_GUIDANCE"
+      ],
+      "types": [
+        "STYLE",
+        "PRINCIPLE"
+      ],
+      "genres": [
+        "suspense"
+      ],
+      "targetFields": [
+        "style",
+        "tone",
+        "perspective",
+        "targetAudience",
+        "outline",
+        "chapterGoal"
+      ]
+    },
+    "references/genres/suspense/arc-templates.md": {
+      "group": "genre",
+      "scenes": [
+        "CHAPTER_PLAN",
+        "STAGE_BLUEPRINT",
+        "VOLUME_BLUEPRINT"
+      ],
+      "purposes": [
+        "STORY_PLANNING"
+      ],
+      "types": [
+        "TEMPLATE"
+      ],
+      "genres": [
+        "suspense"
+      ]
+    },
+    "references/genres/suspense/exemplars.md": {
+      "group": "genre",
+      "scenes": [
+        "CHAPTER_CONTENT",
+        "CHAPTER_REVISE",
+        "CHAPTER_AUDIT"
+      ],
+      "purposes": [
+        "PROSE_EXPRESSION",
+        "QUALITY_REVIEW"
+      ],
+      "types": [
+        "EXEMPLAR"
+      ],
+      "genres": [
+        "suspense"
+      ]
+    },
+    "references/genres/urban/style-references.md": {
+      "group": "genre",
+      "scenes": [
+        "SETTING_DRAFT",
+        "CHAPTER_PLAN",
+        "STAGE_BLUEPRINT",
+        "VOLUME_BLUEPRINT",
+        "CHAPTER_CONTENT",
+        "CHAPTER_REVISE",
+        "CHAPTER_AUDIT"
+      ],
+      "purposes": [
+        "STYLE_GUIDANCE"
+      ],
+      "types": [
+        "STYLE",
+        "PRINCIPLE"
+      ],
+      "genres": [
+        "urban"
+      ],
+      "targetFields": [
+        "style",
+        "tone",
+        "perspective",
+        "targetAudience",
+        "outline",
+        "chapterGoal"
+      ]
+    },
+    "references/genres/urban/arc-templates.md": {
+      "group": "genre",
+      "scenes": [
+        "CHAPTER_PLAN",
+        "STAGE_BLUEPRINT",
+        "VOLUME_BLUEPRINT"
+      ],
+      "purposes": [
+        "STORY_PLANNING"
+      ],
+      "types": [
+        "TEMPLATE"
+      ],
+      "genres": [
+        "urban"
+      ]
+    },
+    "references/genres/urban/exemplars.md": {
+      "group": "genre",
+      "scenes": [
+        "CHAPTER_CONTENT",
+        "CHAPTER_REVISE",
+        "CHAPTER_AUDIT"
+      ],
+      "purposes": [
+        "PROSE_EXPRESSION",
+        "QUALITY_REVIEW"
+      ],
+      "types": [
+        "EXEMPLAR"
+      ],
+      "genres": [
+        "urban"
+      ]
+    }
+  }
+}

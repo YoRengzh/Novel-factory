@@ -33,6 +33,17 @@ public class GenreMaterialStrategy implements PromptRuleStrategy {
 
     private final PromptRuleFileLoader fileLoader;
 
+    /**
+     * 用途资格：固定题材/风格资源与动态资料共用同一张表。
+     * 为 null 时保持既有行为（单测直接构造），生产由 Spring 注入。
+     */
+    private cn.novel.yonren.domain.novel.service.armory.prompt.reference.ReferenceUsagePolicy usagePolicy;
+
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    void setUsagePolicy(cn.novel.yonren.domain.novel.service.armory.prompt.reference.ReferenceUsagePolicy usagePolicy) {
+        this.usagePolicy = usagePolicy;
+    }
+
     @Override
     public boolean supports(PromptScene scene, PromptContext ctx) {
         // 题材资料服务的是"写作与评判"：大纲定方向、正文/修订写出来、审校按题材规范评价。
@@ -64,8 +75,13 @@ public class GenreMaterialStrategy implements PromptRuleStrategy {
             if (content == null || content.isBlank()) {
                 continue;
             }
+            String ruleName = String.format(entry.namePattern(), genre.getCode());
+            // 固定资源同样受用途资格约束；未登记或与场景不匹配时不注入。
+            if (usagePolicy != null && !usagePolicy.allowsRule(ruleName, scene, ctx)) {
+                continue;
+            }
             rules.add(new PromptRule(
-                    String.format(entry.namePattern(), genre.getCode()),
+                    ruleName,
                     content,
                     PromptRule.InjectPosition.USER_TAIL));
         }

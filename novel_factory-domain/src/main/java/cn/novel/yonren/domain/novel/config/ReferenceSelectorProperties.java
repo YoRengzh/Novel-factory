@@ -4,6 +4,8 @@ import lombok.Data;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 import org.springframework.stereotype.Component;
 
+import cn.novel.yonren.types.enums.PromptScene;
+
 /**
  * 动态资料选择器（skill 式按需注入）的行为开关：领域策略参数，归 domain 所有。
  * 与模型接入配置（同在 domain config 的 StoryProperties）分离——一个管"领域行为开不开"，一个管"用哪个供应商"
@@ -45,5 +47,43 @@ public class ReferenceSelectorProperties {
 
     /** 向量检索最低相似分（Cosine 越大越相近）；0 表示不设门槛 */
     private double minScore = 0.0;
+
+    /**
+     * 块级注入：命中完整资料块而不是整份文件。默认关闭，关闭时保持文件级行为。
+     * 打开后按原子块检索，依赖项随带，装不下的整块放弃，绝不截断原文。
+     */
+    private ContentBlocks contentBlocks = new ContentBlocks();
+
+    public ContentBlocks blocksFor(PromptScene scene) {
+        if (scene == null) {
+            return null;
+        }
+        return contentBlocks;
+    }
+
+    @Data
+    public static class ContentBlocks {
+
+        /** 总开关；关闭后回退文件级选择，其余配置保留 */
+        private boolean enabled = false;
+
+        /** 独立候选池大小，不为凑满预算注入无关块 */
+        private int candidateTopK = 12;
+
+        /** 场景文档数上限；null 继承 max-selected */
+        private Integer maxDocs;
+
+        /** 场景相似度阈值；null 继承 min-score */
+        private Double minScore;
+
+        /** 最多注入的完整块数（含随带依赖） */
+        private int maxBlocks = 6;
+
+        /** 块级总字符预算（含来源标注与分隔符） */
+        private int maxChars = 2000;
+
+        /** 每份来源文档的字符上限；≤0 表示不限 */
+        private int perDocMaxChars = 1500;
+    }
 
 }

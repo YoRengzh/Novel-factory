@@ -1,0 +1,66 @@
+{
+  "version": "2",
+  "_comment": "已核对 references 根目录的运行时资料。默认完整 H2，不因长度自动拆分；splitTitles 仅列人工审核过的安全 H3 边界。requires 使用完整精确标题路径，缺失或歧义必须阻止构建。所有卷首及拆分父前文自动作为依赖保留。",
+  "docs": {
+    "chapter-template": {
+      "whole": true
+    },
+    "plot-structure-circular": { "whole": true },
+    "plot-structure-five-act": { "whole": true },
+    "plot-structure-fragmented": { "whole": true },
+    "plot-structure-frame": { "whole": true },
+    "plot-structure-heros-journey": { "whole": true },
+    "plot-structure-kishotenketsu": { "whole": true },
+    "plot-structure-multiline": { "whole": true },
+    "plot-structure-mystery": { "whole": true },
+    "plot-structure-network": { "whole": true },
+    "plot-structure-romance": { "whole": true },
+    "plot-structure-save-the-cat": { "whole": true },
+    "plot-structure-seven-point": { "whole": true },
+    "plot-structure-short": { "whole": true },
+    "plot-structure-story-circle": { "whole": true },
+    "plot-structure-three-act": { "whole": true },
+    "plot-structure-thriller": { "whole": true },
+    "plot-structure-twist": { "whole": true },
+    "outline-template": {
+      "noSplitTitles": ["大纲的分层与字段口径"]
+    },
+    "longform-planning": {
+      "noSplitTitles": ["避免长篇同质化"]
+    },
+    "character-building": {
+      "noSplitTitles": ["人物深度塑造技巧"]
+    },
+    "cross-chapter-tables": {
+      "noSplitTitles": ["一、道具链表", "二、时间锚表", "三、术语一致性表", "四、关键数字表"]
+    },
+    "transmigration-transition": {
+      "noSplitTitles": ["穿越过渡的三个支点（推荐套路，不限于穿越文）"],
+      "requires": {
+        "穿越过渡的三个支点（推荐套路，不限于穿越文）": ["过渡的节奏要求"]
+      }
+    },
+    "chapter-guide": {
+      "noSplitTitles": ["开场承诺与读者预期", "十种强力开头技巧"],
+      "requires": {
+        "开场承诺与读者预期": ["十种强力开头技巧"]
+      }
+    },
+    "consistency": {
+      "splitTitles": ["金手指/系统存在感一致性"]
+    },
+    "restrained-emotion": {
+      "requires": {
+        "身体反应的语境核查": ["视线与判断的边界"]
+      }
+    },
+    "dialogue-writing": {
+      "splitTitles": ["潜台词（Subtext）"],
+      "requires": {
+        "潜台词（Subtext） › 直接 vs 潜台词": ["潜台词（Subtext） › 潜台词使用边界"],
+        "潜台词（Subtext） › 潜台词技巧": ["潜台词（Subtext） › 潜台词使用边界"],
+        "潜台词（Subtext） › 潜台词信息差的实战工序": ["潜台词（Subtext） › 潜台词使用边界"]
+      }
+    }
+  }
+}

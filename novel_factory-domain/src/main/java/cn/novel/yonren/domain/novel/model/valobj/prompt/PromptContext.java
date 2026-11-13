@@ -4,6 +4,8 @@ import cn.novel.yonren.types.enums.ChapterType;
 import lombok.Builder;
 import lombok.Data;
 
+import java.util.List;
+
 /**
  * 提示词装配上下文：携带判定规则命中所需的全部信息
  */
@@ -28,5 +30,11 @@ public class PromptContext {
 
     /** 本章要点（goal+keyEvents 摘要，正文场景用于资料检索与选择的语义细分；可为 null） */
     private String chapterBrief;
+
+    /**
+     * 本次实际重生成的目标字段（设定草稿场景使用）。
+     * 为空表示整份生成；非空时资料资格只保留与这些字段相关的条目。
+     */
+    private List<String> targetFields = List.of();
 
 }
