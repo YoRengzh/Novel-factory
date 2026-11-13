@@ -94,7 +94,8 @@ public class SettingDraftService {
                 request.getPerspective(),
                 request.getExtraHints(),
                 request.getTargets(),
-                request.getPrevious());
+                request.getPrevious(),
+                request.getLockedFields());
         Result result = draft(storyProperties.toStoryVO(), domainRequest);
         return toResponseDTO(request.getTheme(), result);
     }
@@ -130,15 +131,47 @@ public class SettingDraftService {
             throw new AppException(ResponseCode.ILLEGAL_PARAMETER.getCode(),
                     "一键生成设定集至少需要题材（theme）");
         }
-        List<String> targets = normalizeTargets(request.targets());
+        List<String> requestedTargets = normalizeFields(request.targets(), "targets", true);
+        List<String> explicitLocks = normalizeFields(request.lockedFields(), "lockedFields", false);
+        boolean full = request.targets() == null || request.targets().stream().allMatch(StringUtils::isBlank);
+        List<String> conflicts = full ? List.of()
+                : requestedTargets.stream().filter(explicitLocks::contains).toList();
+        if (!conflicts.isEmpty()) {
+            throw new AppException(ResponseCode.ILLEGAL_PARAMETER.getCode(),
+                    "这些字段同时要求重生成和保留：" + String.join("、", conflicts)
+                            + "；请先取消「保留此项」或移出 targets");
+        }
+        List<String> targets = requestedTargets.stream().filter(key -> !explicitLocks.contains(key)).toList();
         Map<String, String> previous = blankSafeMap(request.previous());
-        // 无任何旧值时，"只重生成某字段"等价于全量生成：没有可锁定的东西，prompt 也不该提"保持既有设定"
-        boolean hasPrevious = previous.values().stream().anyMatch(StringUtils::isNotBlank);
+        Map<String, String> preferences = effectivePreferences(request, previous, targets, explicitLocks);
+        Map<String, String> lockedValues = new LinkedHashMap<>();
+        for (String key : explicitLocks) {
+            String value = previous.containsKey(key) ? previous.get(key) : preferenceValue(request, key);
+            if (value == null) {
+                throw new AppException(ResponseCode.ILLEGAL_PARAMETER.getCode(),
+                        "保留字段缺少当前值：" + key + "；请提供 previous 或先取消「保留此项」");
+            }
+            lockedValues.put(key, value);
+        }
+        // 整份重生成时非目标旧值不是"用户明确保留"，只有单字段重生成才按 previous 锁其余字段。
+        if (!full) {
+            previous.forEach((key, value) -> {
+                if (!targets.contains(key) && StringUtils.isNotBlank(value)) {
+                    lockedValues.putIfAbsent(key, value);
+                }
+            });
+        }
+        // 全锁：没有可重生成字段，直接回填当前值，不调用模型。
+        if (targets.isEmpty()) {
+            DraftOutput kept = new DraftOutput();
+            lockNonTargetFields(kept, lockedValues, List.of());
+            return new Result(kept, List.of());
+        }
 
-        String prompt = buildPrompt(request, targets, previous, hasPrevious);
+        String prompt = buildPrompt(request, targets, previous, lockedValues, preferences, full);
         PromptContext ctx = PromptContext.builder()
                 .theme(request.theme())
-                .style(request.style())
+                .style(preferences.getOrDefault("style", lockedValues.get("style")))
                 .build();
 
         // 重试纠错要把"上轮到底怎么了"分清：JSON 根本没解析出来 vs 解析出来了但某些字段空着，
@@ -153,9 +186,9 @@ public class SettingDraftService {
             parseFailed = parsed == null;
             missing = parseFailed ? List.of() : missingFields(parsed, targets);
             if (!parseFailed && missing.isEmpty()) {
-                lockNonTargetFields(parsed, previous, targets);
+                lockNonTargetFields(parsed, lockedValues, targets);
                 log.info("设定集草稿生成成功，题材: {}，重生成字段: {}，锁定字段: {}",
-                        request.theme(), targets, previous.isEmpty() ? 0 : FIELDS.size() - targets.size());
+                        request.theme(), targets, lockedValues.size());
                 return new Result(parsed, targets);
             }
             log.warn("设定集草稿第 {}/{} 次输出不可用（{}）{}", attempt, MAX_ATTEMPTS,
@@ -169,48 +202,39 @@ public class SettingDraftService {
 
     // ==================== prompt 组装 ====================
 
-    private String buildPrompt(DraftRequest request, List<String> targets,
-                               Map<String, String> previous, boolean hasPrevious) {
-        boolean full = targets.size() == FIELDS.size();
-
+    private String buildPrompt(DraftRequest request, List<String> targets, Map<String, String> previous,
+                               Map<String, String> lockedValues, Map<String, String> preferences, boolean full) {
         StringBuilder sb = new StringBuilder();
         sb.append("你是资深网文编辑兼策划。请根据下面的输入，产出一份可以直接开工的小说设定集。\n\n");
         sb.append("【题材】").append(request.theme().trim()).append('\n');
-        appendLine(sb, "用户已定的风格倾向", request.style());
-        appendLine(sb, "用户已定的目标人群", request.targetAudience());
-        appendLine(sb, "用户已定的基调", request.tone());
-        appendLine(sb, "用户已定的叙述视角", request.perspective());
+        appendLine(sb, "用户已定的风格倾向", preferences.get("style"));
+        appendLine(sb, "用户已定的目标人群", preferences.get("targetAudience"));
+        appendLine(sb, "用户已定的基调", preferences.get("tone"));
+        appendLine(sb, "用户已定的叙述视角", preferences.get("perspective"));
         appendLine(sb, "额外要求（必须遵守）", request.extraHints());
+        sb.append("用户明确选择优先于题材常见写法；不得把资料示例或上一版机器选择当成必须沿用的模板。\n");
 
-        if (hasPrevious && !full) {
+        if (!lockedValues.isEmpty() && lockedValues.values().stream().anyMatch(StringUtils::isNotBlank)) {
             sb.append("\n【必须保持不变的既有设定（严禁改写）】\n");
             for (Field field : FIELDS) {
-                if (targets.contains(field.key())) {
-                    continue;
-                }
-                String value = previous.get(field.key());
+                String value = lockedValues.get(field.key());
                 if (StringUtils.isNotBlank(value)) {
                     sb.append("- ").append(field.label()).append("：").append(value).append('\n');
                 }
             }
-            sb.append("\n【本次需要重写的字段】")
-                    .append(targets.stream().map(this::labelOf).collect(Collectors.joining("、")))
-                    .append("。重写的内容必须与上面列出的既有设定完全自洽——不得引入与它们冲突的新设定。\n");
         }
+        sb.append("\n【本次需要重写的字段】")
+                .append(targets.stream().map(this::labelOf).collect(Collectors.joining("、")))
+                .append("。只为这些字段构思新内容，与保留内容及用户要求自洽；保留字段由系统原样回填。\n");
 
-        if (hasPrevious) {
-            List<String> rewritten = targets.stream()
-                    .filter(t -> StringUtils.isNotBlank(previous.get(t)))
-                    .toList();
-            if (!rewritten.isEmpty()) {
-                sb.append("\n【与上一版的区别（重要）】上一版内容如下，本次必须换一个明显不同的构思方向");
-                if (!full) {
-                    sb.append("（在既有设定不变的前提下，换核心冲突的组织方式、换对手、换切入场景）");
-                }
-                sb.append("，不得只做同义改写或调换措辞：\n");
-                for (String key : rewritten) {
-                    sb.append("- ").append(labelOf(key)).append("（上一版）：").append(previous.get(key)).append('\n');
-                }
+        List<String> rewritten = targets.stream().filter(t -> StringUtils.isNotBlank(previous.get(t))).toList();
+        if (!rewritten.isEmpty()) {
+            sb.append("\n【与上一版的区别（重要）】以下仅是需要替换的旧版本，不是风格或基调约束。")
+                    .append("本次按当前题材重新选择明显不同的构思，不得只做同义改写");
+            if (!full) sb.append("；在保留设定的前提下，调整切入点、人物关系或事件推进方式");
+            sb.append("：\n");
+            for (String key : rewritten) {
+                sb.append("- ").append(labelOf(key)).append("（上一版）：").append(previous.get(key)).append('\n');
             }
         }
 
@@ -265,9 +289,9 @@ public class SettingDraftService {
      * targets 归一：null/空 = 全部字段；含未知字段名直接报错（本项目前端是唯一调用方，
      * 悄悄忽略拼错的字段名只会让"点了重生却什么都没变"变成难查的问题）
      */
-    private static List<String> normalizeTargets(List<String> raw) {
+    private static List<String> normalizeFields(List<String> raw, String parameter, boolean allWhenEmpty) {
         if (raw == null || raw.isEmpty()) {
-            return FIELDS.stream().map(Field::key).toList();
+            return allWhenEmpty ? FIELDS.stream().map(Field::key).toList() : List.of();
         }
         LinkedHashMap<String, Boolean> normalized = new LinkedHashMap<>();
         List<String> unknown = new ArrayList<>();
@@ -278,16 +302,47 @@ public class SettingDraftService {
             String trimmed = key.trim();
             if (FIELDS.stream().noneMatch(f -> f.key().equals(trimmed))) {
                 unknown.add(trimmed);
-                continue;
+            } else {
+                normalized.put(trimmed, Boolean.TRUE);
             }
-            normalized.put(trimmed, Boolean.TRUE);
         }
         if (!unknown.isEmpty()) {
             throw new AppException(ResponseCode.ILLEGAL_PARAMETER.getCode(),
-                    "targets 含未知字段：" + String.join("、", unknown)
+                    parameter + " 含未知字段：" + String.join("、", unknown)
                             + "；可选值为 " + FIELDS.stream().map(Field::key).collect(Collectors.joining("、")));
         }
-        return normalized.isEmpty() ? FIELDS.stream().map(Field::key).toList() : List.copyOf(normalized.keySet());
+        return normalized.isEmpty() && allWhenEmpty ? FIELDS.stream().map(Field::key).toList()
+                : List.copyOf(normalized.keySet());
+    }
+
+    private static String preferenceValue(DraftRequest request, String key) {
+        return switch (key) {
+            case "style" -> request.style();
+            case "tone" -> request.tone();
+            case "perspective" -> request.perspective();
+            case "targetAudience" -> request.targetAudience();
+            default -> null;
+        };
+    }
+
+    private static Map<String, String> effectivePreferences(DraftRequest request, Map<String, String> previous,
+                                                             List<String> targets, List<String> explicitLocks) {
+        Map<String, String> result = new LinkedHashMap<>();
+        boolean hasPrevious = previous.values().stream().anyMatch(StringUtils::isNotBlank);
+        boolean partial = request.targets() != null && request.targets().stream().anyMatch(StringUtils::isNotBlank);
+        for (String key : List.of("style", "targetAudience", "tone", "perspective")) {
+            String value = explicitLocks.contains(key) && previous.containsKey(key)
+                    ? previous.get(key) : preferenceValue(request, key);
+            if (StringUtils.isBlank(value)) continue;
+            // 旧 DTO 会重复上报机器已回填的偏好；除显式锁外，上一版不得冒充用户的硬偏好。
+            if (!explicitLocks.contains(key)
+                    && (StringUtils.isNotBlank(previous.get(key))
+                    || (partial && hasPrevious && targets.contains(key)))) {
+                continue;
+            }
+            result.put(key, value.trim());
+        }
+        return result;
     }
 
     private static List<String> missingFields(DraftOutput parsed, List<String> targets) {
@@ -310,17 +365,16 @@ public class SettingDraftService {
      * 锁定字段机械回填：模型仍按完整 schema 输出，但非目标字段一律以调用方给的值为准。
      * 这就是"只改大纲"不会顺手改掉世界观的原因
      */
-    private static void lockNonTargetFields(DraftOutput output, Map<String, String> previous, List<String> targets) {
-        if (previous.isEmpty()) {
+    private static void lockNonTargetFields(DraftOutput output, Map<String, String> lockedValues, List<String> targets) {
+        if (lockedValues.isEmpty()) {
             return;
         }
         for (Field field : FIELDS) {
             if (targets.contains(field.key())) {
                 continue;
             }
-            String locked = previous.get(field.key());
-            if (StringUtils.isNotBlank(locked)) {
-                field.write().accept(output, locked);
+            if (lockedValues.containsKey(field.key())) {
+                field.write().accept(output, lockedValues.get(field.key()));
             }
         }
     }
@@ -365,12 +419,19 @@ public class SettingDraftService {
      * @param tone          用户已定的基调（可空）
      * @param perspective   用户已定的视角（可空）
      * @param extraHints    任意额外要求（可空）
-     * @param targets       本次要重生成的字段；空 = 全部重生成。其余字段原样锁定
-     * @param previous      当前已有内容：既作为锁定字段的取值来源，也作为"本次必须有所区别"的对照
+     * @param targets       本次要重生成的字段；空 = 全部候选字段减显式锁。单字段保留非目标旧值
+     * @param previous      当前已有内容：保留字段的取值来源与目标字段上一版对照，不自动锁定机器偏好
+     * @param lockedFields  用户明确保留的字段；可空，不能与显式 targets 冲突
      */
     public record DraftRequest(String theme, String style, String targetAudience, String tone,
                                String perspective, String extraHints, List<String> targets,
-                               Map<String, String> previous) {
+                               Map<String, String> previous, List<String> lockedFields) {
+        /** 兼容旧调用方：未显式声明锁字段。 */
+        public DraftRequest(String theme, String style, String targetAudience, String tone,
+                            String perspective, String extraHints, List<String> targets,
+                            Map<String, String> previous) {
+            this(theme, style, targetAudience, tone, perspective, extraHints, targets, previous, null);
+        }
     }
 
     /**

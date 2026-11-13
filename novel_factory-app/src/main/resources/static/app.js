@@ -92,6 +92,10 @@
 
     // ===== 生成表单 =====
     const form = document.getElementById('generate-form');
+    /** 表单版本：草稿或续写读取返回时，若用户已改表单，忽略旧结果。 */
+    let generateFormRevision = 0;
+    /** 续写读取请求序号：切换故事后旧响应不得覆盖新表单。 */
+    let resumeRequest = 0;
     const btnSubmit = document.getElementById('btn-submit');
     const btnCancel = document.getElementById('btn-cancel');
     const jobStatusDiv = document.getElementById('job-status');
@@ -227,6 +231,14 @@
     form.addEventListener('submit', function (e) {
         e.preventDefault();
         submitGenerate();
+    });
+
+    /** 表单版本：草稿返回时若用户已改表单，忽略旧结果。续写下拉切换不计入。 */
+    form.addEventListener('input', function (e) {
+        if (e.target.id !== 'resumeStoryDir') generateFormRevision++;
+    });
+    form.addEventListener('change', function (e) {
+        if (e.target.id !== 'resumeStoryDir') generateFormRevision++;
     });
 
     /**
@@ -515,9 +527,16 @@
 
     /** 载入某个故事的设定；resolve(true) 表示可以接着提交 */
     function loadResume(storyDirName) {
+        const request = ++resumeRequest;
+        const revision = generateFormRevision;
         renderResumeHint('正在读取「' + storyDirName + '」的设定…', null);
         return fetchJson('/api/stories/' + encodeURIComponent(storyDirName) + '/resume')
         .then(function (info) {
+            if (request !== resumeRequest || resumeSelect.value !== storyDirName) return false;
+            if (revision !== generateFormRevision) {
+                renderResumeHint('读取期间表单已修改，未覆盖当前内容。请重新选择此故事读取完整设定后再提交。', false);
+                return false;
+            }
             // chapterCount 不回填：后端固定给 DEFAULT_RESUME_BATCH_SIZE=5（“这次写几章”是用户自己的选择），
             // 无差别回填会把用户刚改的 20 静默改回 5。
             // 金手指三件套也不走 applyFormValues：checkbox 只设 value 不设 checked，必须显式回填
@@ -555,6 +574,9 @@
 
     resumeSelect.addEventListener('change', function () {
         const storyDirName = resumeSelect.value;
+        // 切换故事后，上一本的草稿保留项、迟到响应和额外要求都不再适用。
+        clearSettingDraftContext();
+        generateFormRevision++;
         if (!storyDirName) {
             renderResumeHint(null);
             setCheatEditingEnabled(true);   // 切回“新建故事”：金手指三件套恢复可编辑
@@ -609,6 +631,9 @@
 
     /** 可作为「用户已定偏好」上报的字段；其余字段只能通过 targets / previous 表达 */
     const DRAFT_PINNABLE = ['style', 'targetAudience', 'tone', 'perspective'];
+    // 只有用户点击保留控件才形成精确保留；AI 回填和手动编辑都不会自动加锁。
+    const draftLockedFields = new Set();
+    const draftAiAppliedFields = new Set();
 
     /**
      * 常用题材。刻意都命中 GenreTypeVO 的关键词表（玄幻 / 悬疑 / 言情三族）——
@@ -630,6 +655,22 @@
     const themeInput = document.getElementById('theme');
 
     let draftTimer = null;
+    let settingDraftRequest = 0;
+
+    function clearSettingDraftContext() {
+        settingDraftRequest++;
+        stopDraftStatus();
+        draftLockedFields.clear();
+        draftAiAppliedFields.clear();
+        draftHintsInput.value = '';
+        document.querySelectorAll('.draft-lock-btn').forEach(function (button) {
+            button.setAttribute('aria-pressed', 'false');
+            button.classList.remove('active');
+            button.textContent = '保留此项';
+        });
+        renderDraftStatus(null);
+        highlightActivePreset();
+    }
 
     function fieldInput(key) {
         return document.getElementById(DRAFT_FIELD_INPUTS[key]);
@@ -674,19 +715,17 @@
         Object.keys(DRAFT_FIELD_INPUTS).forEach(function (key) {
             const el = fieldInput(key);
             const value = el ? String(el.value || '').trim() : '';
-            if (value !== '') previous[key] = value;
+            if (value !== '' || draftLockedFields.has(key)) previous[key] = value;
         });
         return previous;
     }
 
-    /**
-     * 用户已定偏好：只在"本次不重写它"时上报。
-     * 否则会和 prompt 里"本次必须与上一版不同"打架——同一字段既被要求保持、又被要求改写。
-     */
+    /** 首次手填偏好可以约束构思；AI 回填的偏好只有明确保留才再次上报。 */
     function collectPinnedFields(targets) {
         const pinned = {};
         DRAFT_PINNABLE.forEach(function (key) {
-            if (targets && targets.indexOf(key) >= 0) {
+            if ((targets && targets.indexOf(key) >= 0)
+                    || (draftAiAppliedFields.has(key) && !draftLockedFields.has(key))) {
                 // 本次要重写它，就绝不能再声称"用户已定"——显式置 null 而不是省略该键，
                 // 否则 prompt 里同一字段会既被要求保持、又被要求改写
                 pinned[key] = null;
@@ -702,7 +741,7 @@
     function setDraftBusy(busy) {
         btnDraftAll.disabled = busy;
         btnDraftOutline.disabled = busy;
-        Array.prototype.forEach.call(document.querySelectorAll('.regen-btn'), function (btn) {
+        Array.prototype.forEach.call(document.querySelectorAll('.regen-btn, .draft-lock-btn'), function (btn) {
             btn.disabled = busy;
         });
     }
@@ -751,16 +790,36 @@
             return;
         }
 
+        const isFull = !targets || targets.length === 0;
+        const conflicts = isFull ? [] : targets.filter(function (key) { return draftLockedFields.has(key); });
+        if (conflicts.length) {
+            renderDraftStatus('无法重生成已保留的字段：' + conflicts.map(function (key) {
+                return FIELD_LABELS[key] || key;
+            }).join('、') + '。请先取消「保留此项」。', false);
+            return;
+        }
+        if (isFull && draftLockedFields.size === Object.keys(DRAFT_FIELD_INPUTS).length) {
+            renderDraftStatus('全部字段均已保留，无需调用 AI；要重新构思请先取消部分「保留此项」。', true);
+            return;
+        }
+        const pinned = collectPinnedFields(targets);
         const previous = collectDraftPrevious();
+        // 首次/手填偏好由独立字段表达，不冒充上一版机器内容；单字段仍传完整非目标旧值。
+        if (isFull) DRAFT_PINNABLE.forEach(function (key) {
+            if (pinned[key] && !draftLockedFields.has(key)) delete previous[key];
+        });
         const body = {
             theme: theme,
             extraHints: String(draftHintsInput.value || '').trim() || null,
             targets: targets && targets.length ? targets : null,
+            lockedFields: Array.from(draftLockedFields),
             previous: Object.keys(previous).length ? previous : null
         };
-        Object.assign(body, collectPinnedFields(targets));
+        Object.assign(body, pinned);
+        const request = ++settingDraftRequest;
+        const revision = generateFormRevision;
+        const storyDir = resumeSelect.value;
 
-        const isFull = !targets || targets.length === 0;
         stopDraftStatus();
         startDraftStatus(isFull ? '构思整份设定集'
                 : '重写' + targets.map(function (k) { return FIELD_LABELS[k] || k; }).join('、'));
@@ -771,13 +830,19 @@
             body: JSON.stringify(body)
         })
         .then(function (draft) {
+            if (request !== settingDraftRequest || storyDir !== resumeSelect.value) return;
             stopDraftStatus();
+            if (revision !== generateFormRevision) {
+                renderDraftStatus('草稿返回时表单已修改，已忽略旧结果；当前内容保持不变。', false);
+                return;
+            }
             const applied = applyDraft(draft, targets);
             renderDraftStatus('已回填 ' + applied + ' 个字段'
                     + (isFull ? '（可以直接改，也可以点任意字段旁的 ↻ 单独重生成）' : '')
                     + (draft.rationale ? '\nAI 的取舍说明：' + draft.rationale : ''), true);
         })
         .catch(function (err) {
+            if (request !== settingDraftRequest || storyDir !== resumeSelect.value) return;
             stopDraftStatus();
             renderDraftStatus('生成失败：' + err.message, false);
         });
@@ -789,13 +854,19 @@
      * 宁可留着用户原本写的内容，也不要因为后端漏返回一个字段就把输入框清空。
      */
     function applyDraft(draft, targets) {
-        const only = targets && targets.length ? targets : null;
+        const only = Array.isArray(draft.regenerated) ? draft.regenerated
+                : (targets && targets.length ? targets : null);
         const values = {};
         Object.keys(DRAFT_FIELD_INPUTS).forEach(function (key) {
-            if (only && only.indexOf(key) < 0) return;
-            values[DRAFT_FIELD_INPUTS[key]] = draft[key];   // 草稿字段名 → 表单控件 name
+            if ((only && only.indexOf(key) < 0) || draftLockedFields.has(key)) return;
+            if (draft[key] != null && String(draft[key]).trim() !== '') {
+                values[DRAFT_FIELD_INPUTS[key]] = draft[key];
+            }
         });
         const applied = applyFormValues(values);
+        Object.keys(DRAFT_FIELD_INPUTS).forEach(function (key) {
+            if (Object.prototype.hasOwnProperty.call(values, DRAFT_FIELD_INPUTS[key])) draftAiAppliedFields.add(key);
+        });
         if (applied > 0) highlightActivePreset();
         return applied;
     }
@@ -804,8 +875,9 @@
         const existing = collectDraftPrevious();
         // 总章数不算"已有创作内容"，不该因为它非空就弹覆盖确认
         delete existing.totalChapters;
+        draftLockedFields.forEach(function (key) { delete existing[key]; });
         if (Object.keys(existing).length > 0
-                && !window.confirm('这会用新的一版覆盖下方表单里已有的内容（题材与额外要求除外）。继续？')) {
+                && !window.confirm('这会用新的一版覆盖未保留的已有内容（题材、额外要求与「保留此项」除外）。继续？')) {
             return;
         }
         requestSettingDraft(null);
@@ -815,7 +887,11 @@
         requestSettingDraft(['outline']);
     });
 
-    themeInput.addEventListener('input', highlightActivePreset);
+    draftHintsInput.addEventListener('input', function () { generateFormRevision++; });
+    themeInput.addEventListener('input', function () {
+        generateFormRevision++;
+        highlightActivePreset();
+    });
 
     /** 给每个可重生成字段的 label 挂一个 ↻：点它只换这一个字段，其余字段由后端锁定不变 */
     function mountRegenButtons() {
@@ -837,6 +913,30 @@
                 requestSettingDraft([key]);
             });
             label.appendChild(btn);
+
+            const lockBtn = document.createElement('button');
+            lockBtn.type = 'button';
+            lockBtn.className = 'draft-lock-btn';
+            lockBtn.dataset.field = key;
+            lockBtn.textContent = '保留此项';
+            lockBtn.setAttribute('aria-pressed', 'false');
+            lockBtn.title = '明确保留「' + (FIELD_LABELS[key] || key) + '」的当前内容，整份重生时也不覆盖';
+            lockBtn.addEventListener('click', function (e) {
+                e.preventDefault();
+                e.stopPropagation();
+                if (draftLockedFields.has(key)) draftLockedFields.delete(key);
+                else draftLockedFields.add(key);
+                const locked = draftLockedFields.has(key);
+                lockBtn.setAttribute('aria-pressed', String(locked));
+                lockBtn.classList.toggle('active', locked);
+                lockBtn.textContent = locked ? '已保留' : '保留此项';
+            });
+            label.appendChild(lockBtn);
+            el.addEventListener('input', function () {
+                // 用户可重新表达偏好，但编辑本身仍不等于「精确保留」。
+                generateFormRevision++;
+                draftAiAppliedFields.delete(key);
+            });
         });
     }
 

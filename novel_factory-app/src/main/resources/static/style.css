@@ -1159,6 +1159,37 @@ textarea { resize: vertical; line-height: 1.7; }
     cursor: not-allowed;
 }
 
+/* 明确保留开关：默认不选中，AI 回填不改变选择。 */
+.draft-lock-btn {
+    margin-left: 6px;
+    padding: 1px 5px;
+    font-size: 10px;
+    line-height: 16px;
+    border: 1px solid var(--line-strong);
+    border-radius: 3px;
+    background: transparent;
+    color: var(--text-faint);
+    cursor: pointer;
+    vertical-align: middle;
+}
+
+.draft-lock-btn[aria-pressed="true"],
+.draft-lock-btn:hover:not(:disabled) {
+    border-color: var(--accent);
+    color: var(--accent);
+    background: var(--accent-dim);
+}
+
+.draft-lock-btn:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+}
+
+.draft-lock-btn:disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+}
+
 /* 回填后短暂高亮：让用户看见刚才哪几个字段被改了 */
 @keyframes nf-field-flash {
     0%   { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-dim); }

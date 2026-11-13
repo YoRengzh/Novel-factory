@@ -32,4 +32,10 @@ public class SettingDraftRequestDTO {
 
     /** 上一版草稿（字段名→值）：非目标字段锁定为该值，并作为上下文供模型参考衔接 */
     private Map<String, String> previous;
+
+    /**
+     * 用户明确保留的字段：即使整份重生成也原样回填。
+     * 可与 targets 同时出现于不同字段；同一字段同时重生成和保留会被拒绝。
+     */
+    private List<String> lockedFields;
 }

@@ -20,6 +20,7 @@ import java.util.Map;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -271,6 +272,83 @@ class SettingDraftServiceTest {
     private static SettingDraftService.DraftRequest request(List<String> targets, Map<String, String> previous) {
         return new SettingDraftService.DraftRequest(
                 "都市异能", null, null, null, null, null, targets, previous);
+    }
+
+    private static SettingDraftService.DraftRequest request(List<String> targets, Map<String, String> previous,
+                                                            List<String> lockedFields) {
+        return new SettingDraftService.DraftRequest(
+                "都市异能", null, null, null, null, null, targets, previous, lockedFields);
+    }
+
+    @Test
+    void draft_explicitLockKeepsFieldEvenWhenFullGenerationWouldRewriteIt() {
+        stubLlm(FULL_DRAFT);
+        Map<String, String> previous = Map.of("worldSetting", "作者确定的世界观");
+
+        SettingDraftService.Result result = settingDraftService.draft(STORY_VO,
+                request(null, previous, List.of("worldSetting")));
+
+        assertEquals("作者确定的世界观", result.fields().getWorldSetting(),
+                "显式保留字段不得被整份重生成覆盖");
+        assertFalse(result.regenerated().contains("worldSetting"),
+                "保留字段不在本次实际重生成列表中");
+        assertTrue(capturedPrompt(1).get(0).contains("作者确定的世界观"),
+                "保留值必须进入既有设定约束");
+    }
+
+    @Test
+    void draft_allFieldsLockedReturnsCurrentValuesWithoutModelCall() {
+        Map<String, String> previous = Map.of(
+                "novelTitle", "作者书名", "style", "作者风格", "worldSetting", "作者世界观",
+                "perspective", "作者视角", "targetAudience", "作者受众", "tone", "作者基调",
+                "protagonist", "作者主人公", "outline", "作者大纲", "chapterGoal", "作者目标",
+                "totalChapters", "120");
+
+        SettingDraftService.Result result = settingDraftService.draft(STORY_VO,
+                request(null, previous, List.copyOf(previous.keySet())));
+
+        assertEquals("作者书名", result.fields().getNovelTitle());
+        assertEquals("作者世界观", result.fields().getWorldSetting());
+        assertEquals(120, result.fields().getTotalChapters());
+        assertTrue(result.regenerated().isEmpty());
+        verify(llmInvokeService, times(0)).invoke(any(), any(), any(), anyString(), any());
+    }
+
+    @Test
+    void draft_rejectsFieldRequestedBothForRegenerationAndRetention() {
+        AppException ex = assertThrows(AppException.class, () -> settingDraftService.draft(STORY_VO,
+                request(List.of("outline"), Map.of("outline", "旧大纲"), List.of("outline"))));
+
+        assertEquals(ResponseCode.ILLEGAL_PARAMETER.getCode(), ex.getCode());
+        assertTrue(ex.getInfo().contains("同时要求重生成和保留"));
+        verify(llmInvokeService, times(0)).invoke(any(), any(), any(), anyString(), any());
+    }
+
+    @Test
+    void draft_lockedFieldWithoutCurrentValueIsRejectedBeforeModelCall() {
+        AppException ex = assertThrows(AppException.class, () -> settingDraftService.draft(STORY_VO,
+                request(null, null, List.of("worldSetting"))));
+
+        assertEquals(ResponseCode.ILLEGAL_PARAMETER.getCode(), ex.getCode());
+        assertTrue(ex.getInfo().contains("保留字段缺少当前值"));
+        verify(llmInvokeService, times(0)).invoke(any(), any(), any(), anyString(), any());
+    }
+
+    @Test
+    void draftDto_passesLockedFieldsThrough() {
+        stubLlm(FULL_DRAFT);
+        SettingDraftService spy = org.mockito.Mockito.spy(settingDraftService);
+        SettingDraftRequestDTO request = new SettingDraftRequestDTO();
+        request.setTheme("都市异能");
+        request.setPrevious(Map.of("worldSetting", "既有世界观"));
+        request.setLockedFields(List.of("worldSetting"));
+
+        spy.draftDto(request);
+
+        ArgumentCaptor<SettingDraftService.DraftRequest> captor =
+                ArgumentCaptor.forClass(SettingDraftService.DraftRequest.class);
+        org.mockito.Mockito.verify(spy).draft(any(), captor.capture());
+        assertEquals(List.of("worldSetting"), captor.getValue().lockedFields());
     }
 
     /** 单次 LLM 打桩：命中后按调用次数依次返回（避免对同一 mock 二次打桩触发旧答案） */
