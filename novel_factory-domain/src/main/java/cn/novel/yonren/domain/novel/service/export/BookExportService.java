@@ -82,6 +82,8 @@ public class BookExportService {
     private List<ChapterContentEntity> loadChapters(Path storyDir) throws IOException {
         List<Integer> chapterNumbers;
         try {
+            // 先补完中断的提交：日志残留时正文可能已换而账本未跟上，直接导出会拿到半一致的章节。
+            storyRepository.recoverChapterCommit(storyDir);
             chapterNumbers = storyRepository.readChapterNumbers(storyDir);
         } catch (Exception e) {
             throw new IOException("导出中止：读取章节列表失败（" + e.getMessage() + "）", e);

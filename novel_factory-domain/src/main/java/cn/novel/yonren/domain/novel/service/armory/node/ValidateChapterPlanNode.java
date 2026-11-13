@@ -20,7 +20,7 @@ import org.springframework.stereotype.Service;
 public class ValidateChapterPlanNode extends AbstractArmorySupport {
 
     @Resource
-    private PlanApprovalGateNode planApprovalGateNode;
+    private GenerateChapterContentNode generateChapterContentNode;
 
     @Override
     protected StoryGenerateResultAggregate doApply(ArmoryCommandEntity requestParameter, DefaultArmoryFactory.DynamicContext dynamicContext) throws Exception {
@@ -41,7 +41,7 @@ public class ValidateChapterPlanNode extends AbstractArmorySupport {
 
     @Override
     public StrategyHandler<ArmoryCommandEntity, DefaultArmoryFactory.DynamicContext, StoryGenerateResultAggregate> get(ArmoryCommandEntity requestParameter, DefaultArmoryFactory.DynamicContext dynamicContext) throws Exception {
-        // 校验通过后进审批门：门关闭时它直连正文生成，开启时先挂起等人工裁决
-        return planApprovalGateNode;
+        // 校验通过即进入正文生成：正式生成走有界自动处理，不设人工裁决点
+        return generateChapterContentNode;
     }
 }

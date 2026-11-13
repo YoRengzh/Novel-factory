@@ -260,10 +260,14 @@ public class StoryManageService {
         entity.setChapterNo(chapterNo);
         entity.setTitle(existing == null || existing.getTitle() == null ? "" : existing.getTitle());
         entity.setContent(request.getContent());
-        repo(() -> storyRepository.writeChapters(storyDir, List.of(entity)));
+        // 走正式编辑事务：正文、接受记录与待回流标记一次落盘。
+        // 先写正文再补摘要的两步写法，一旦在中间失败就会留下"正文已改、摘要仍是旧版且无任何标记"的静默不一致。
+        repo(() -> storyRepository.saveHumanEdit(storyDir, entity,
+                new IStoryRepository.PendingChapterEdit(chapterNo, false)));
 
         // 记忆回流是整章级的 LLM 调用。段落级润色/扩写不改情节事实，
         // 重算摘要是纯浪费——前端传 reflow=false 跳过；续写引入了新内容，必须回流，否则账本与正文脱节。
+        // 跳过回流时待回流标记保留，下次显式回流或继续生成时会补上。
         ChapterSaveResponseDTO dto = new ChapterSaveResponseDTO();
         dto.setSaved(true);
         if (Boolean.FALSE.equals(request.getReflow())) {

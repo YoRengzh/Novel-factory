@@ -1,23 +1,19 @@
 package cn.novel.yonren.domain.novel.service.job;
 
-import cn.novel.yonren.api.dto.ChapterPlanApprovalRequestDTO;
 import cn.novel.yonren.api.dto.JobStatusResponseDTO;
 import cn.novel.yonren.api.dto.StoryGenerateRequestDTO;
 import cn.novel.yonren.domain.novel.adapter.repository.IStoryRepository;
-import cn.novel.yonren.domain.novel.model.aggregate.ChapterPlanAggregate;
 import cn.novel.yonren.domain.novel.model.aggregate.StoryGenerateResultAggregate;
 import cn.novel.yonren.domain.novel.model.entity.ArmoryCommandEntity;
 import cn.novel.yonren.domain.novel.model.entity.ChapterSummaryEntity;
 import cn.novel.yonren.domain.novel.model.entity.QualityDebtEntity;
 import cn.novel.yonren.domain.novel.config.StoryProperties;
 import cn.novel.yonren.domain.novel.service.armory.StoryGenerateService;
-import cn.novel.yonren.domain.novel.service.armory.factory.DefaultArmoryFactory;
 import cn.novel.yonren.domain.novel.service.armory.plan.ChapterPlanChecks;
 import cn.novel.yonren.domain.novel.model.valobj.quality.BatchHealthReport;
 import cn.novel.yonren.domain.novel.service.armory.quality.BatchHealthService;
 import cn.novel.yonren.types.enums.ResponseCode;
 import cn.novel.yonren.types.exception.AppException;
-import cn.novel.yonren.types.exception.PlanApprovalSuspendedException;
 import cn.novel.yonren.types.utils.SnowflakeIdWorker;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.lang3.StringUtils;
@@ -27,17 +23,11 @@ import org.springframework.stereotype.Service;
 import cn.novel.yonren.types.enums.JobStatus;
 import java.nio.file.Path;
 import java.util.List;
-import java.util.Map;
-import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.Executors;
 import java.util.concurrent.RejectedExecutionException;
-import java.util.concurrent.ScheduledExecutorService;
-import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.ThreadPoolExecutor;
-import java.util.concurrent.TimeUnit;
 
 /**
- * 作业编排服务：异步提交 → 单线程 worker 执行 → 进度/取消/章节计划裁决/终态。
+ * 作业编排服务：异步提交 → 单线程 worker 执行 → 进度/取消/终态。
  * D9 个人用范围：只做触发/进度/取消/裁决，无列表/详情/导出；job-status.json 仅供崩溃后人工查看。
  * MDC trace-id 与 jobId 同源，生成期间全部日志与 LLM usage 记账按 job 归因
  */
@@ -47,25 +37,6 @@ public class StoryJobService {
 
     /** workerId=2：storyId 已占用 workerId=1（PersistChapterPlanNode），双实例同 workerId 同毫秒会碰撞 */
     private static final SnowflakeIdWorker JOB_ID_WORKER = new SnowflakeIdWorker(2);
-
-    /** 审批门挂起的作业（内存态，与 JobRegistry 同生命周期：进程重启即失效，job-status.json 仅供人工查看） */
-    private final Map<String, PendingApproval> pendingApprovals = new ConcurrentHashMap<>();
-
-    /**
-     * 审批超时计时器：独立单线程守护调度器。
-     * **不复用 jobExecutor**——用唯一的生成线程去 sleep 等超时，等于把整个作业队列冻住。
-     * 守护线程 + 关闭时显式收尾：应用退出不因它挂起
-     */
-    private final ScheduledExecutorService approvalTimer = Executors.newSingleThreadScheduledExecutor(r -> {
-        Thread t = new Thread(r, "plan-approval-timer");
-        t.setDaemon(true);
-        return t;
-    });
-
-    @jakarta.annotation.PreDestroy
-    void shutdownApprovalTimer() {
-        approvalTimer.shutdownNow();
-    }
 
     private final StoryGenerateService storyGenerateService;
     private final JobRegistry jobRegistry;
@@ -104,7 +75,7 @@ public class StoryJobService {
      * 也让作业状态能读出"这是第几批"，日志与归因不必再去数批次区间。
      */
     public GenerationJob submit(ArmoryCommandEntity command, int batchRound) {
-        // 同一故事的并发作业守卫：审批门挂起时线程已归还，此时再提交一个续写作业，
+        // 同一故事的并发作业守卫：同一故事已有运行中作业时再提交一个续写作业，
         // 两个作业各持一份陈旧 DynamicContext，后完成者会用整表覆盖正文/摘要（静默丢章，
         // 被覆盖那批的 token 全白烧）。编辑/回滚/删除/打点端点都有同款守卫，唯独提交入口此前没有
         if (StringUtils.isNotBlank(command.getResumeStoryDir())
@@ -133,22 +104,6 @@ public class StoryJobService {
         return jobRegistry.get(jobId);
     }
 
-    /**
-     * 当前待裁决的章节计划（AI 原版，供状态查询透出给前端展示与编辑）；非挂起态返回 null。
-     * 计划同时已落盘到 runDir/chapter-plan.yml，前端也可直接从故事目录读取
-     */
-    public ChapterPlanAggregate pendingChapterPlan(String jobId) {
-        PendingApproval pending = pendingApprovals.get(jobId);
-        if (pending != null) {
-            return pending.plan;
-        }
-        // 不变式：状态置位（审批门节点）与待裁决记录登记（本类）非原子，中间有微窗口；
-        // 作业在置位时已携带计划，故"状态可见 ⇒ 计划可读"成立。非挂起态一律 null——
-        // 裁决退出走 exitApprovalWait，作业侧计划已随之清空，不会读到过期内容
-        GenerationJob job = jobRegistry.get(jobId);
-        return job != null && job.isAwaitingApproval() ? job.getAwaitingPlan() : null;
-    }
-
     /** 协作取消：CREATED 直接置 CANCELLED；RUNNING 置 CANCELLING（当前章完成后停）；终态幂等。未知返回 null */
     public GenerationJob cancel(String jobId) {
         GenerationJob job = jobRegistry.cancel(jobId);
@@ -156,171 +111,17 @@ public class StoryJobService {
             // 故事目录已知（续写/首章后）时立即把取消受理态写盘；未知则等 worker 终态落盘
             persistJobStatusIfPossible(null, job);
         }
-        // 审批门挂起中取消：清掉待裁决记录并撤销超时计时器，避免计时器到点后又去续跑
-        clearPending(jobId);
         return job;
     }
 
-
-    public GenerationJob approveChapterPlan(String jobId, ChapterPlanAggregate editedPlan) {
-        PendingApproval pending = pendingApprovals.get(jobId);
-        if (pending == null || !pending.job.isAwaitingApproval()) {
-            return null;
-        }
-        ChapterPlanAggregate plan = normalizeApprovedPlan(pending, editedPlan);
-        validateApprovedPlan(pending, plan);
-
-        if (!claimPending(jobId, pending)) {
-            return null;
-        }
-        boolean edited = editedPlan != null && editedPlan.getChapters() != null;
-        // 人工裁决才计数：超时自动放行不计入，观测层据此区分"人认可过计划"与"没人管"
-        pending.job.recordHumanApproval();
-        if (edited) {
-            log.info("作业 {} 章节计划经人工裁决通过（携带修订稿，{} 章）",
-                    jobId, plan.getChapters() == null ? 0 : plan.getChapters().size());
-        } else {
-            log.info("作业 {} 章节计划经人工裁决通过（采纳 AI 原版，未修订）", jobId);
-        }
-        enqueueResume(pending, plan);
-        return pending.job;
-    }
-
-    /** 人工裁决：驳回 → 本批中止（计划已落盘，可另起命令复用）。返回 null 表示不在挂起态 */
-    public GenerationJob rejectChapterPlan(String jobId) {
-        PendingApproval pending = pendingApprovals.get(jobId);
-        if (pending == null || !pending.job.isAwaitingApproval()) {
-            return null;
-        }
-        if (!claimPending(jobId, pending)) {
-            return null;
-        }
-        pending.job.exitApprovalWait();
-        pending.job.markCancelled();
-        // 驳回不是失败：终态复用 CANCELLED（已有的状态之一），语义细节记在观测字段
-        pending.job.setCurrentStage("PLAN_REJECTED");
-        log.info("作业 {} 章节计划被人工驳回，本批中止（已生成 {} 章，计划保留在 run 目录）",
-                jobId, countChaptersQuietly(pending.job.getStoryDirName()));
-        persistJobStatusIfPossible(pending.command, pending.job);
-        return pending.job;
-    }
-
-    /**
-     * 取走待裁决记录（原子：只有取到的一方可以推进作业，避免"审批与超时同时到点"的双重推进）。
-     * 取到后撤销超时计时器
-     */
-    private boolean claimPending(String jobId, PendingApproval pending) {
-        if (!pendingApprovals.remove(jobId, pending)) {
-            return false;
-        }
-        ScheduledFuture<?> task = pending.timeoutTask;
-        if (task != null) {
-            task.cancel(false);
-        }
-        return true;
-    }
-
-    /** 清理待裁决记录（取消作业时调用；不改动作业状态，状态迁移归 cancel 路径） */
-    private void clearPending(String jobId) {
-        PendingApproval pending = pendingApprovals.remove(jobId);
-        if (pending != null && pending.timeoutTask != null) {
-            pending.timeoutTask.cancel(false);
-        }
-    }
-
-    /**
-     * 规整待批准的计划：未携带修订稿 → 采纳 AI 原版；
-     * storyId 沿用原版（人工只需改剧情字段，不该被要求维护系统生成的 ID）
-     */
-    private ChapterPlanAggregate normalizeApprovedPlan(PendingApproval pending, ChapterPlanAggregate editedPlan) {
-        if (editedPlan == null || editedPlan.getChapters() == null) {
-            return pending.plan;
-        }
-        if (StringUtils.isBlank(editedPlan.getStoryId()) && pending.plan != null) {
-            editedPlan.setStoryId(pending.plan.getStoryId());
-        }
-        return editedPlan;
-    }
-
-    /**
-     * 修订稿机械校验：预期章数与起点取挂起时上下文里的实际规划口径——
-     * 跨阶段批次的计划是惰性分段生成的，此刻只规划到首段，因此预期章数必须用
-     * plannedChapterCount（首段章数）而非批次总章数，否则合法修订会被误判为"章数不符"
-     */
-    private void validateApprovedPlan(PendingApproval pending, ChapterPlanAggregate plan) {
-        DefaultArmoryFactory.DynamicContext ctx = pending.dynamicContext;
-        Integer plannedChapterCount = ctx.getPlannedChapterCount();
-        int expectedCount = plannedChapterCount != null
-                ? plannedChapterCount
-                : pending.command.getStoryContextEntity().getChapterCount();
-        int expectedStart = ctx.getChapterOffset() + 1;
-
-        if (plan == null || plan.getChapters() == null || plan.getChapters().isEmpty()) {
-            throw new AppException(ResponseCode.NULL_EXCEPTION.getCode(),
-                    "章节计划不允许置空：请传原计划或修正后的完整计划（预期 " + expectedCount
-                            + " 章，自第 " + expectedStart + " 章起）");
-        }
-        ChapterPlanChecks.validateSegmentStructure(plan.getChapters(), expectedCount, expectedStart);
-    }
-
-    /**
-     * 裁决落地后重新入队：同一作业（同 jobId、同 run 目录）继续跑剩余阶段。
-     * 投递失败按作业失败处理——此时已无法回到挂起态（线程已释放、上下文还在内存里但无人推进）
-     */
-    private void enqueueResume(PendingApproval pending, ChapterPlanAggregate approvedPlan) {
-        if (!pending.job.exitApprovalWait()) {
-            log.warn("作业 {} 裁决后无法回到待执行态（当前 {}），放弃续跑",
-                    pending.job.getJobId(), pending.job.getStatus());
-            return;
-        }
-        try {
-            jobExecutor.execute(() -> runResumeJob(pending, approvedPlan));
-        } catch (RejectedExecutionException e) {
-            pending.job.markFailed("审批通过但作业队列已满，请携带 resumeStoryDir 重新提交本批");
-            log.warn("作业 {} 审批后投递被拒：队列已满", pending.job.getJobId());
-        }
-    }
-
-    /**
-     * 审批超时处置。刻意只提供两种出路，且都是"已有状态之一"：
-     * AUTO_APPROVE（默认）= 按 AI 原版计划继续，等同于退化成黑盒模式；
-     * ABORT = 中止本批。不引入第三种终局语义，避免状态机组合膨胀
-     */
-    private void onApprovalTimeout(String jobId) {
-        PendingApproval pending = pendingApprovals.get(jobId);
-        if (pending == null || !pending.job.isAwaitingApproval()) {
-            return;
-        }
-        String action = StringUtils.trimToEmpty(
-                storyProperties.getPlanApproval() == null ? null
-                        : storyProperties.getPlanApproval().getTimeoutAction()).toUpperCase();
-
-        if ("ABORT".equals(action)) {
-            if (!claimPending(jobId, pending)) {
-                return;
-            }
-            pending.job.exitApprovalWait();
-            pending.job.markCancelled();
-            pending.job.setCurrentStage("PLAN_APPROVAL_TIMEOUT_ABORTED");
-            log.info("作业 {} 章节计划审批超时，按 ABORT 中止本批（计划保留在 run 目录）", jobId);
-            persistJobStatusIfPossible(pending.command, pending.job);
-            return;
-        }
-
-        if (!claimPending(jobId, pending)) {
-            return;
-        }
-        log.info("作业 {} 章节计划审批超时，按 AUTO_APPROVE 放行（退化为黑盒模式，采纳 AI 原版计划）", jobId);
-        enqueueResume(pending, pending.plan);
-    }
 
     /**
      * worker 线程执行体（jobExecutor 单线程串行，符合 质量 > token > 速度 的优先级）
      */
     private void runJob(ArmoryCommandEntity command, GenerationJob job) {
         MDC.put("trace-id", job.getJobId());
-        // 上下文提到方法作用域：审批门挂起后要用同一个上下文续跑剩余阶段
-        DefaultArmoryFactory.DynamicContext dynamicContext = storyGenerateService.newDynamicContext(job);
+        cn.novel.yonren.domain.novel.service.armory.factory.DefaultArmoryFactory.DynamicContext dynamicContext =
+                storyGenerateService.newDynamicContext(job);
         try {
             // 排队期已取消：registry 已置 CANCELLED（markRunning 对终态拒绝）或取消信号已置位——
             // 跳过整棵规则树，不烧 token
@@ -331,10 +132,6 @@ public class StoryJobService {
             persistJobStatusIfPossible(command, job);
             StoryGenerateResultAggregate result = storyGenerateService.generate(command, job, dynamicContext);
             finishJob(command, job, result);
-        } catch (PlanApprovalSuspendedException suspend) {
-            // 审批挂起：**不是失败**。计划已落盘、作业已转 AWAITING_APPROVAL，
-            // 此处直接归还线程，等裁决/超时后再用同一作业续跑剩余阶段
-            registerPendingApproval(command, job, dynamicContext, suspend);
         } catch (Throwable e) {
             if (job.isCancelRequested()) {
                 // 取消信号已置位时发生的异常（含规划期取消检查抛出）：按 CANCELLED 终态处理，
@@ -354,41 +151,6 @@ public class StoryJobService {
     }
 
     /**
-     * 审批通过/超时放行后的续跑执行体：从"正文生成"阶段继续，不重跑规划段。
-     * 与 {@link #runJob} 共用收尾逻辑，状态机与自动续批行为保持一致
-     */
-    private void runResumeJob(PendingApproval pending, ChapterPlanAggregate approvedPlan) {
-        GenerationJob job = pending.job;
-        MDC.put("trace-id", job.getJobId());
-        try {
-            // markApprovedAndRequeue 已把状态置回 CREATED，此处按既有排队语义推进
-            if (!job.markRunning() || job.isCancelRequested()) {
-                job.markCancelled();
-                return;
-            }
-            pending.dynamicContext.setChapterPlanAggregate(approvedPlan);
-            persistJobStatusIfPossible(pending.command, job);
-            StoryGenerateResultAggregate result = storyGenerateService.resumeAfterPlanApproval(
-                    pending.command, job, pending.dynamicContext);
-            finishJob(pending.command, job, result);
-        } catch (Throwable e) {
-            if (job.isCancelRequested()) {
-                // 与 runJob 同款收敛：取消信号已置位时抛出的异常（含续跑期惰性规划的取消检查）
-                // 按 CANCELLED 终态处理——此前这里一律 markFailed，用户取消会被误报成失败
-                job.markCancelled();
-                job.setCurrentStage("CANCELLED_DURING_RUN");
-                log.info("作业 {} 在取消请求后终止：{}", job.getJobId(), extractMessage(e));
-            } else {
-                job.markFailed(extractMessage(e));
-                log.error("作业 {} 审批后续跑失败：{}", job.getJobId(), job.getErrorMessage(), e);
-            }
-        } finally {
-            persistJobStatusIfPossible(pending.command, job);
-            MDC.remove("trace-id");
-        }
-    }
-
-    /**
      * 正常路径收尾（终态 + 自动续批）。
      * 自动续批只在"正常完成"分支尝试：失败/取消/熔断都不续——失败续批只会把同一个错误再犯一遍，且更贵
      */
@@ -403,37 +165,6 @@ public class StoryJobService {
         } else {
             job.markCompleted(result == null ? null : result.getStoryDirName());
             scheduleNextBatchIfNeeded(command, job, result);
-        }
-    }
-
-    /** 登记待裁决记录并启动超时计时器（计时器线程独立，不占 jobExecutor） */
-    private void registerPendingApproval(ArmoryCommandEntity command, GenerationJob job,
-                                        DefaultArmoryFactory.DynamicContext dynamicContext,
-                                        PlanApprovalSuspendedException suspend) {
-        if (!job.isAwaitingApproval()) {
-            // 挂起态的置位归审批门节点；这里兜底告警，避免"登记了待裁决但作业状态不对"
-            // 表现为 approve 静默返回 null 这种极难排查的失效
-            log.warn("作业 {} 抛出审批挂起信号但状态并非 AWAITING_APPROVAL（当前 {}），审批门可能未正确置位",
-                    job.getJobId(), job.getStatus());
-        }
-        StoryProperties.PlanApprovalProperties cfg = storyProperties.getPlanApproval();
-        long timeoutSeconds = cfg != null && cfg.getTimeoutSeconds() > 0 ? cfg.getTimeoutSeconds() : 7200L;
-        PendingApproval pending = new PendingApproval(job, command, dynamicContext,
-                dynamicContext.getChapterPlanAggregate());
-        pending.timeoutTask = approvalTimer.schedule(() -> safeRunTimeout(job.getJobId()),
-                timeoutSeconds, TimeUnit.SECONDS);
-        pendingApprovals.put(job.getJobId(), pending);
-        log.info("作业 {} 已挂起等待章节计划裁决：{}；超时 {} 秒后按 {} 处置",
-                job.getJobId(), suspend.getMessage(), timeoutSeconds,
-                cfg == null ? "AUTO_APPROVE" : cfg.getTimeoutAction());
-    }
-
-    /** 超时回调兜底：调度线程里的任何异常都不许逃逸（否则后续超时任务静默失效） */
-    private void safeRunTimeout(String jobId) {
-        try {
-            onApprovalTimeout(jobId);
-        } catch (Exception e) {
-            log.warn("作业 {} 审批超时处置异常，已忽略", jobId, e);
         }
     }
 
@@ -629,21 +360,7 @@ public class StoryJobService {
         return job == null ? null : toJobStatusDTO(job);
     }
 
-    /** 章节计划裁决通过（可携带人工修订稿）；不在挂起态返回 null（由 trigger 层映射 409） */
-    public JobStatusResponseDTO approveChapterPlanDto(String jobId,
-                                                      ChapterPlanApprovalRequestDTO request) {
-        GenerationJob job = approveChapterPlan(jobId,
-                cn.novel.yonren.domain.novel.service.armory.StoryCommandAssembler.toChapterPlan(request));
-        return job == null ? null : toJobStatusDTO(job);
-    }
-
-    /** 章节计划裁决驳回；不在挂起态返回 null（由 trigger 层映射 409） */
-    public JobStatusResponseDTO rejectChapterPlanDto(String jobId) {
-        GenerationJob job = rejectChapterPlan(jobId);
-        return job == null ? null : toJobStatusDTO(job);
-    }
-
-    /** 作业状态 → DTO：15+ 字段拆装。仅挂起态透出计划（非挂起态前端拿到也无事可做） */
+    /** 作业状态 → DTO 拆装 */
     private JobStatusResponseDTO toJobStatusDTO(GenerationJob job) {
         JobStatusResponseDTO dto = new JobStatusResponseDTO();
         dto.setJobId(job.getJobId());
@@ -657,37 +374,7 @@ public class StoryJobService {
         dto.setFinishedAtMs(job.getFinishedAtMs());
         dto.setErrorMessage(job.getErrorMessage());
         dto.setChapterDurations(job.getChapterDurations());
-        dto.setAwaitingPlanApprovalAtMs(job.getAwaitingPlanApprovalAtMs());
-        dto.setPlanApprovalDeadlineMs(job.getPlanApprovalDeadlineMs());
-        dto.setApprovalRound(job.getApprovalRound());
         dto.setHealthReport(job.getLastHealthReport());
-        // 仅挂起态透出计划：非挂起态前端拿到计划也无事可做，且避免把大对象挂在每次轮询上
-        if (job.isAwaitingApproval()) {
-            dto.setPendingChapterPlan(pendingChapterPlan(job.getJobId()));
-        }
         return dto;
-    }
-
-    /**
-     * 待裁决的章节计划（内存态）。
-     * 持有 DynamicContext 引用是本设计的关键：挂起期间上下文的 storyDir/runDir/蓝图链/
-     * 计划分段原样保留，恢复时无需从磁盘重建，也不会重复烧规划 token。
-     * 与 JobRegistry 同样是"单进程个人使用，重启即失效"的取舍
-     */
-    private static final class PendingApproval {
-        private final GenerationJob job;
-        private final ArmoryCommandEntity command;
-        private final DefaultArmoryFactory.DynamicContext dynamicContext;
-        /** AI 原版计划：超时 AUTO_APPROVE 与"未修订直接通过"都采纳它 */
-        private final ChapterPlanAggregate plan;
-        private volatile ScheduledFuture<?> timeoutTask;
-
-        private PendingApproval(GenerationJob job, ArmoryCommandEntity command,
-                               DefaultArmoryFactory.DynamicContext dynamicContext, ChapterPlanAggregate plan) {
-            this.job = job;
-            this.command = command;
-            this.dynamicContext = dynamicContext;
-            this.plan = plan;
-        }
     }
 }

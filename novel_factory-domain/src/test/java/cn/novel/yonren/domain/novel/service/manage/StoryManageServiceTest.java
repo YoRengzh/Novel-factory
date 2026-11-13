@@ -239,7 +239,7 @@ class StoryManageServiceTest {
 
         assertTrue(dto.isSaved());
         assertTrue(dto.isSummaryUpdated());
-        verify(storyRepository).writeChapters(eq(STORY_DIR), any());
+        verify(storyRepository).saveHumanEdit(eq(STORY_DIR), any(), any());
         verify(chapterEditService).reflow(STORY_DIR, 1, content);
     }
 
@@ -260,10 +260,10 @@ class StoryManageServiceTest {
         request.setContent(content);
         service.saveChapter(DIR, 1, request);
 
-        ArgumentCaptor<List<ChapterContentEntity>> captor = ArgumentCaptor.forClass(List.class);
-        verify(storyRepository).writeChapters(eq(STORY_DIR), captor.capture());
-        assertEquals("原有标题", captor.getValue().get(0).getTitle());
-        assertEquals(content, captor.getValue().get(0).getContent());
+        ArgumentCaptor<ChapterContentEntity> captor = ArgumentCaptor.forClass(ChapterContentEntity.class);
+        verify(storyRepository).saveHumanEdit(eq(STORY_DIR), captor.capture(), any());
+        assertEquals("原有标题", captor.getValue().getTitle());
+        assertEquals(content, captor.getValue().getContent());
     }
 
     @Test
@@ -279,10 +279,10 @@ class StoryManageServiceTest {
         request.setContent(content);
         service.saveChapter(DIR, 9, request);
 
-        ArgumentCaptor<List<ChapterContentEntity>> captor = ArgumentCaptor.forClass(List.class);
-        verify(storyRepository).writeChapters(eq(STORY_DIR), captor.capture());
-        assertEquals("", captor.getValue().get(0).getTitle());
-        assertEquals(content, captor.getValue().get(0).getContent());
+        ArgumentCaptor<ChapterContentEntity> captor = ArgumentCaptor.forClass(ChapterContentEntity.class);
+        verify(storyRepository).saveHumanEdit(eq(STORY_DIR), captor.capture(), any());
+        assertEquals("", captor.getValue().getTitle());
+        assertEquals(content, captor.getValue().getContent());
     }
 
     /**
@@ -308,7 +308,7 @@ class StoryManageServiceTest {
         ChapterSaveResponseDTO dto = service.saveChapter(DIR, 1, request);
 
         assertTrue(dto.isSaved(), "短正文不再被 1500 字线拒绝");
-        verify(storyRepository).writeChapters(eq(STORY_DIR), any());
+        verify(storyRepository).saveHumanEdit(eq(STORY_DIR), any(), any());
     }
 
     /** reflow=false 时跳过回流：段落级润色/扩写不改事实，重算摘要是纯浪费（实测几分钟） */

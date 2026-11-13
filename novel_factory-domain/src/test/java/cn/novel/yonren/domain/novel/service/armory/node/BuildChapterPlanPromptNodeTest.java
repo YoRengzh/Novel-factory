@@ -4,7 +4,6 @@ import cn.novel.yonren.domain.novel.model.entity.ArmoryCommandEntity;
 import cn.novel.yonren.domain.novel.model.entity.StageBlueprintEntity;
 import cn.novel.yonren.domain.novel.model.entity.StoryContextEntity;
 import cn.novel.yonren.domain.novel.model.valobj.StoryVO;
-import cn.novel.yonren.domain.novel.config.StoryProperties;
 import cn.novel.yonren.domain.novel.service.armory.factory.DefaultArmoryFactory;
 import cn.novel.yonren.domain.novel.service.armory.memory.RollingOutlineService;
 import cn.novel.yonren.domain.novel.service.armory.plan.ChapterPlanPromptService;
@@ -27,7 +26,7 @@ import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.Mockito.when;
 
 /**
- * 装配章节计划 prompt 节点测试：节点只保留批次级编排（分段计算 + 审批门整批提前规划），
+ * 装配章节计划 prompt 节点测试：节点只保留批次级编排（分段计算 + 惰性首段装配），
  * prompt 装配内容的测试见 ChapterPlanPromptServiceTest
  */
 class BuildChapterPlanPromptNodeTest {
@@ -41,10 +40,6 @@ class BuildChapterPlanPromptNodeTest {
     /** 卷链语义：用真实实现（spy）——分段规则由 RollingOutlineServiceTest 覆盖 */
     @Spy
     private RollingOutlineService rollingOutlineService = new RollingOutlineService();
-
-    /** 审批门配置：真实实例（spy），逐用例改 enabled/scope */
-    @Spy
-    private StoryProperties storyProperties = new StoryProperties();
 
     @InjectMocks
     private BuildChapterPlanPromptNode node;
@@ -74,25 +69,9 @@ class BuildChapterPlanPromptNodeTest {
         assertSame(stage2, segments.get(1).blueprint());
     }
 
-    // ---- 审批门整批提前规划（R3）：门开且本批在作用范围内时，人工裁决覆盖全部段落 ----
-
     @Test
-    void doApply_gateEnabledInScope_plansAllSegmentsEagerly() throws Exception {
-        storyProperties.getPlanApproval().setEnabled(true);
-        when(planPromptService.buildPlanPrompt(any(), anyInt(), anyInt(), any(), anyBoolean(), any(), any()))
-                .thenReturn("段prompt");
-
-        DefaultArmoryFactory.DynamicContext ctx = crossStageContext(new GenerationJob("job-1"));
-        node.doApply(command(), ctx);
-
-        assertEquals(2, ctx.getPlanSegmentPrompts().size(), "两段 prompt 必须一次装配齐");
-        assertEquals(4, ctx.getPlannedSegmentEnd(), "已规划区间覆盖整批，审批通过后不再触发惰性规划");
-        assertEquals(4, ctx.getPlannedChapterCount(), "审批校验按整批章数执行");
-    }
-
-    @Test
-    void doApply_gateDisabled_keepsLazyFirstSegmentOnly() throws Exception {
-        // 门关闭（默认）：跨段批次保持惰性分段——只装配首段
+    void doApply_crossStageBatch_keepsLazyFirstSegmentOnly() throws Exception {
+        // 跨段批次一律惰性分段：只装配首段，后续段在生成推进到段边界时用最新记忆规划
         when(planPromptService.buildPlanPrompt(any(), anyInt(), anyInt(), any(), anyBoolean(), any(), any()))
                 .thenReturn("段prompt");
 
@@ -102,22 +81,6 @@ class BuildChapterPlanPromptNodeTest {
         assertEquals(1, ctx.getPlanSegmentPrompts().size());
         assertEquals(2, ctx.getPlannedSegmentEnd());
         assertEquals(2, ctx.getPlannedChapterCount());
-    }
-
-    @Test
-    void doApply_gateEnabledButOutOfScope_keepsLazyFirstSegmentOnly() throws Exception {
-        // FIRST_BATCH_ONLY（默认 scope）下第 2 批不挂起：无需整批提前规划
-        storyProperties.getPlanApproval().setEnabled(true);
-        GenerationJob secondBatch = new GenerationJob("job-2");
-        secondBatch.setBatchRound(2);
-        when(planPromptService.buildPlanPrompt(any(), anyInt(), anyInt(), any(), anyBoolean(), any(), any()))
-                .thenReturn("段prompt");
-
-        DefaultArmoryFactory.DynamicContext ctx = crossStageContext(secondBatch);
-        node.doApply(command(), ctx);
-
-        assertEquals(1, ctx.getPlanSegmentPrompts().size());
-        assertEquals(2, ctx.getPlannedSegmentEnd());
     }
 
     private DefaultArmoryFactory.DynamicContext crossStageContext(GenerationJob job) {

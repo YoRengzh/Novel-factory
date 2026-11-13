@@ -77,8 +77,6 @@ public class StoryGenerateService {
 
     /**
      * 复用外部持有的 DynamicContext 执行规则树。
-     * 供章节计划审批门挂起后**续跑剩余阶段**使用：挂起期间上下文（storyDir/runDir/蓝图链/
-     * 计划分段/故事上下文）原样保留在内存，恢复时无需从磁盘重建，也不会重复烧规划 token。
      *
      * 注意：本重载**不重复**执行续写预载与完结上限收敛——这两步已在首次进入时作用于同一上下文，
      * 重跑会重复预载记忆并可能因目录已建而改变语义
@@ -103,22 +101,6 @@ public class StoryGenerateService {
         dynamicContext.setJob(job);
         return dynamicContext;
     }
-
-    public StoryGenerateResultAggregate resumeAfterPlanApproval(ArmoryCommandEntity command, GenerationJob job,
-                                                               DefaultArmoryFactory.DynamicContext dynamicContext) throws Exception {
-        if (dynamicContext == null || dynamicContext.getChapterPlanAggregate() == null) {
-            throw new AppException(ResponseCode.UN_ERROR.getCode(),
-                    "审批续跑上下文缺失章节计划（挂起现场已失效），请改用 resumeStoryDir 携带计划重新提交本批");
-        }
-        if (job == null) {
-            throw new AppException(ResponseCode.UN_ERROR.getCode(),
-                    "审批续跑仅支持异步作业路径（同步调试路径不经过审批门，无续跑语义）");
-        }
-        dynamicContext.setPlanApproved(true);
-        dynamicContext.setJob(job);
-        return generateChapterContentNode.apply(command, dynamicContext);
-    }
-
 
     private void enforceChapterLimit(ArmoryCommandEntity command, DefaultArmoryFactory.DynamicContext dynamicContext) throws Exception {
         Integer effective = resolveEffectiveMax(command, dynamicContext);

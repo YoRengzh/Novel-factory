@@ -3,7 +3,6 @@ package cn.novel.yonren.domain.novel.service.job;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
 import lombok.Setter;
-import cn.novel.yonren.domain.novel.model.aggregate.ChapterPlanAggregate;
 import cn.novel.yonren.domain.novel.model.valobj.quality.BatchHealthReport;
 import cn.novel.yonren.types.enums.JobStatus;
 import org.apache.commons.lang3.StringUtils;
@@ -79,25 +78,6 @@ public class GenerationJob {
      */
     private volatile int batchRound = 1;
 
-    /**
-     * 章节计划审批门的挂起信息（非挂起态为 null）。
-     * awaitingPlanApprovalAtMs：进入挂起的时刻（epoch 毫秒）；
-     * planApprovalDeadlineMs：裁决截止时刻，前端据此倒计时，超时由审批服务按配置放行或中止；
-     * approvalRound：本作业已完成的人工裁决轮次（超时自动放行不计入；观测用，也用于区分"人改过"与"没人管"）
-     */
-    private volatile Long awaitingPlanApprovalAtMs;
-
-    private volatile Long planApprovalDeadlineMs;
-
-    private volatile int approvalRound;
-
-    /**
-     * 待裁决的章节计划：与挂起态**一次性交接**，支撑"状态可见 ⇒ 计划可读"不变式——
-     * 此前状态由审批门节点置位、计划由服务层登记，两者非原子，中间的微窗口里状态查询会读到 null
-     * （机器繁忙时稳定复现）。transient：作业状态文件只承载标量观测字段，计划本体另有 runDir 落盘
-     */
-    private transient volatile ChapterPlanAggregate awaitingPlan;
-
     public GenerationJob(String jobId) {
         this.jobId = jobId;
         this.status = JobStatus.CREATED;
@@ -112,55 +92,6 @@ public class GenerationJob {
         }
         status = JobStatus.RUNNING;
         return true;
-    }
-
-    /**
-     * 进入章节计划审批挂起态（仅 RUNNING 可进入）。
-     * 置位后 worker 会归还线程，作业在内存注册表中等待裁决，不占用 jobExecutor
-     */
-    public synchronized boolean markAwaitingApproval(long deadlineMs) {
-        return markAwaitingApproval(deadlineMs, null);
-    }
-
-    /**
-     * 进入审批挂起态并交接待裁决计划（仅 RUNNING 可进入）。
-     * **先写计划字段再置状态**：volatile 写序保证"读到 AWAITING_APPROVAL 的读者必然也能读到计划"，
-     * 使 {@code pendingChapterPlan} 不再受"服务层登记尚未完成"的时序影响
-     */
-    public synchronized boolean markAwaitingApproval(long deadlineMs, ChapterPlanAggregate pendingPlan) {
-        if (status != JobStatus.RUNNING) {
-            return false;
-        }
-        this.awaitingPlan = pendingPlan;
-        status = JobStatus.AWAITING_APPROVAL;
-        this.awaitingPlanApprovalAtMs = System.currentTimeMillis();
-        this.planApprovalDeadlineMs = deadlineMs;
-        return true;
-    }
-
-    public synchronized boolean exitApprovalWait() {
-        if (status != JobStatus.AWAITING_APPROVAL) {
-            return false;
-        }
-        status = JobStatus.CREATED;
-        this.awaitingPlanApprovalAtMs = null;
-        this.planApprovalDeadlineMs = null;
-        this.awaitingPlan = null;
-        return true;
-    }
-
-    /**
-     * 记一次人工裁决（仅人工 approve 路径调用）。
-     * 用途：区分"人看过并放行/改过"与"没人管、被超时自动放行"——
-     * 前者说明计划质量被人工认可，后者说明审批门可能纯属流程负担，观测层据此判断门是否值得开
-     */
-    public synchronized void recordHumanApproval() {
-        this.approvalRound++;
-    }
-
-    /** 是否处于等待人工裁决（审批门挂起中） */
-    public boolean isAwaitingApproval() {
-        return status == JobStatus.AWAITING_APPROVAL;
     }
 
     public synchronized void updateProgress(String stage, int currentChapter, int totalChapters, String storyDirName) {

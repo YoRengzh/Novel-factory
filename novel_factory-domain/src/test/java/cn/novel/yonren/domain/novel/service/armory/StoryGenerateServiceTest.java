@@ -330,29 +330,6 @@ class StoryGenerateServiceTest {
         verify(storyRepository, never()).writeStoryMeta(any(), any());
     }
 
-    // ---- 审批续跑入口守卫（R4）：树腰入口的前提是挂起现场原样保留，残缺时快速失败 ----
-
-    @Test
-    void resumeAfterPlanApproval_failsFastWhenContextMissingPlan() {
-        DefaultArmoryFactory.DynamicContext ctx = new DefaultArmoryFactory.DynamicContext();
-
-        AppException e = assertThrows(AppException.class, () -> storyGenerateService.resumeAfterPlanApproval(
-                new ArmoryCommandEntity(), new GenerationJob("job-1"), ctx));
-
-        assertTrue(e.getInfo().contains("挂起现场已失效"), e.getInfo());
-    }
-
-    @Test
-    void resumeAfterPlanApproval_failsFastWhenJobMissing() {
-        DefaultArmoryFactory.DynamicContext ctx = new DefaultArmoryFactory.DynamicContext();
-        ctx.setChapterPlanAggregate(ChapterPlanAggregate.builder().build());
-
-        AppException e = assertThrows(AppException.class, () -> storyGenerateService.resumeAfterPlanApproval(
-                new ArmoryCommandEntity(), null, ctx));
-
-        assertTrue(e.getInfo().contains("异步作业路径"), e.getInfo());
-    }
-
     @SuppressWarnings("unchecked")
     private void stubStrategyReturn() throws Exception {
         StrategyHandler<ArmoryCommandEntity, DefaultArmoryFactory.DynamicContext, StoryGenerateResultAggregate> handler =

@@ -36,8 +36,6 @@ public class StoryProperties {
     private LedgerAdjudicateProperties ledgerAdjudicate = new LedgerAdjudicateProperties();
     // 无人值守续写计划（自续批；默认关闭，开启后作业会自动连续花 token）
     private RunPlanProperties runPlan = new RunPlanProperties();
-    // 章节计划审批门（human-in-the-loop；默认关闭，开启后每批正文生成前挂起等人裁决）
-    private PlanApprovalProperties planApproval = new PlanApprovalProperties();
 
     public StoryVO toStoryVO() {
         StoryVO storyVO = new StoryVO();
@@ -185,55 +183,6 @@ public class StoryProperties {
         private int maxBatches = 0;
         /** 批末体检分级达到该档即停止续批，交人工过问：WATCH / DEGRADED / CRITICAL，默认 CRITICAL */
         private String stopOnHealthLevel = "CRITICAL";
-    }
-
-    /**
-     * 章节计划审批门（human-in-the-loop）：本批章节计划生成并落盘后，正文生成之前
-     * 把计划交人工裁决，改动/驳回后再决定是否写正文。
-     *
-     * 默认关闭：关闭时为纯黑盒路径，节点链与历史行为完全一致（计划校验后直连正文生成）。
-     *
-     * 实现语义是"挂起"而非"阻塞"：jobExecutor 是单线程池，在工作线程里等待会冻住
-     * 全部排队作业；因此挂起时直接归还线程（作业转 AWAITING_APPROVAL），裁决/超时后再重新入队，
-     * 复用同一个 jobId 与 run 目录继续跑剩余阶段。
-     *
-     * 与 {@code story.run-plan} 自续批存在语义冲突：自续批"只问体检不问人"，每批都会停下来等人；
-     * 同时开启时本门默认只在首批生效（见 scope）。
-     */
-    @Data
-    public static class PlanApprovalProperties {
-        /** 是否开启审批门（关闭时计划校验后直连正文生成，行为与历史一致） */
-        private boolean enabled = false;
-        /**
-         * 挂起等待人工裁决的时长（秒）。因挂起不占用线程，可以放宽到小时级，
-         * 用户不必守在屏幕前；超时后按 timeoutAction 处置
-         */
-        private long timeoutSeconds = 7200L;
-        /**
-         * 超时处置：AUTO_APPROVE = 按 AI 原版计划继续（等同于退化成黑盒模式，默认推荐）；
-         * ABORT = 置 CANCELLED 中止本批。
-         * 刻意只提供这两种：超时必须是"已有状态之一"，否则会引入第三种终局语义
-         */
-        private String timeoutAction = "AUTO_APPROVE";
-        /**
-         * 门的作用范围：FIRST_BATCH_ONLY = 仅首个批次需要裁决（首批定下全书调性，后续是延续，默认）；
-         * EVERY_BATCH = 每批都要裁决。
-         * FIRST_BATCH_ONLY 兼作与自续批并存时的隔离手段
-         */
-        private String scope = "FIRST_BATCH_ONLY";
-
-        /**
-         * 本批是否在门的作用范围内。口径的唯一实现——审批门节点（是否挂起）与
-         * 规划节点（是否整批提前规划以便全量裁决）共用，避免两处判定各自演化。
-         * 与历史判定逐字一致：EVERY_BATCH 恒真；其余值（含未识别）按 FIRST_BATCH_ONLY 处理
-         */
-        public boolean coversBatch(int batchRound) {
-            String normalized = scope == null ? "" : scope.trim().toUpperCase();
-            if ("EVERY_BATCH".equals(normalized)) {
-                return true;
-            }
-            return batchRound <= 1;
-        }
     }
 
 }

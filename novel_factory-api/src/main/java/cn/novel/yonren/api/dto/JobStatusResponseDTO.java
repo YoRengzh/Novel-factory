@@ -13,7 +13,7 @@ public class JobStatusResponseDTO {
     /** 作业 ID（轮询/取消/计划裁决等接口的定位键） */
     private String jobId;
 
-    /** 作业状态：CREATED 排队 / RUNNING 执行中 / CANCELLING 取消已受理 / AWAITING_APPROVAL 计划审批挂起 / FAILED 失败 / COMPLETED 完成 / CANCELLED 已取消 */
+    /** 作业状态：CREATED 排队 / RUNNING 执行中 / CANCELLING 取消已受理 / FAILED 失败 / COMPLETED 完成 / CANCELLED 已取消 */
     private String status;
 
     /** 故事目录名（resume 时提交即知；首发由 worker 首章进度回填） */
@@ -46,22 +46,6 @@ public class JobStatusResponseDTO {
      * 对 HTTP 响应无影响：JSON 对象键本就是字符串，Jackson 两种类型的输出完全一致。
      */
     private Map<String, Long> chapterDurations;
-
-    /**
-     * 待裁决的章节计划（仅 status=AWAITING_APPROVAL 时非空）。
-     * 结构与 {@code ChapterPlanApprovalRequestDTO} 一致，可原样取回、改完再 POST 回 approve 端点。
-     * 声明为 Object 以保持 api 模块不依赖 domain（与 StoryGenerateResponseDTO.chapterPlan 同一取舍）
-     */
-    private Object pendingChapterPlan;
-
-    /** 进入审批挂起的时刻（epoch 毫秒）；非挂起态为 null */
-    private Long awaitingPlanApprovalAtMs;
-
-    /** 裁决截止时刻（epoch 毫秒）；前端据此倒计时。超时后由后端按配置放行或中止 */
-    private Long planApprovalDeadlineMs;
-
-    /** 本作业已完成的人工裁决轮次（超时放行不计入，用于区分"人改过"与"没人管"的观测） */
-    private Integer approvalRound;
 
     /**
      * 最近一次批末体检报告（每批 5 章结束更新；null=本作业尚无体检）。

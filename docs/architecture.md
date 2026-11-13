@@ -57,7 +57,7 @@ domain 的 `model` 包是纯数据层：无 Spring 注解、无文件 IO，且�
 
 ### 2.1 批级节点链
 
-`StoryGenerateService` 驱动一条显式的节点链（`domain/.../service/armory/node/`，共 12 个节点）：
+`StoryGenerateService` 驱动一条显式的节点链（`domain/.../service/armory/node/`，共 11 个节点）：
 
 ```
 RootNode
@@ -69,15 +69,14 @@ RootNode
                      └─ CallChapterPlanLlmNode
                          └─ ParseChapterPlanNode
                              └─ ValidateChapterPlanNode
-                                 └─ PlanApprovalGateNode    # 可选：人工裁决门
-                                     └─ GenerateChapterContentNode
-                                         └─ PersistChapterPlanNode
+                                 └─ GenerateChapterContentNode
+                                     └─ PersistChapterPlanNode
 ```
 
 两个非显然点：
 
-- **审批门不阻塞线程。** `PlanApprovalGateNode` 在挂起时抛 `PlanApprovalSuspendedException` 作为控制信号，作业转为 `AWAITING_APPROVAL` 并**归还工作线程**——`jobExecutor` 是单线程池，在工作线程里等待会冻住所有排队作业。裁决或超时后复用同一 jobId 与 run 目录续跑。关闭该门时节点链与历史行为逐字节一致。
-- **跨阶段批次的计划是惰性分段生成的**，所以审批门只拦得到首段计划（配置项 `plan-approval.scope` 可限定为首批）。
+- **正式生成不设人工裁决点。** 计划通过结构校验后直接进入正文生成，异常一律以明确失败终止，不挂起等待人工放行。
+- **跨阶段批次的计划是惰性分段生成的**：只装配首段，后续段在正文推进到段边界时用最新记忆即时规划，避免整批计划基于陈旧大纲。
 
 ### 2.2 逐章循环（ChapterWorker）
 
@@ -278,4 +277,4 @@ docs/workspace/stories/
 样本不足时指标会被标记为不可信而不是报 0（"指标消失"与"变健康"长得一模一样）；降级必须留痕（`recallDegradedShare`、`auditVerifyDegradedShare`、`fallbackModeShare`）；不可截断块被丢弃要在日志点名。**任何静默的降级都被视为缺陷。**
 
 **5.5 长跑要可中断、可回滚、可续写。**
-预算命中在章边界停（不留半截章）、逐章检查点、审批门归还线程而非阻塞、续写前锁步校验、续批失败不影响已成功批次。
+预算命中在章边界停（不留半截章）、逐章检查点与原子提交、续写前锁步校验、续批失败不影响已成功批次。

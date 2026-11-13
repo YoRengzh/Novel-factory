@@ -62,7 +62,7 @@ class StoryJobServiceTest {
         storyRepository = mock(IStoryRepository.class);
         runPlanService = mock(RunPlanService.class);
         batchHealthService = mock(cn.novel.yonren.domain.novel.service.armory.quality.BatchHealthService.class);
-        // 审批门默认关闭的配置对象：本测试类针对作业编排，审批流程另见 StoryJobServicePlanApprovalTest
+        // 本测试类针对作业编排（提交/取消/终态/续批）
         storyProperties = new cn.novel.yonren.domain.novel.config.StoryProperties();
         executor = new ThreadPoolExecutor(1, 1, 60, TimeUnit.SECONDS,
                 new LinkedBlockingQueue<>(16), new ThreadPoolExecutor.AbortPolicy());
@@ -105,7 +105,7 @@ class StoryJobServiceTest {
     @Test
     void submit_rejectsSecondJobForSameStory() throws Exception {
         // 同一故事并发两个作业：后完成者会用陈旧上下文整表覆盖正文/摘要。
-        // 审批门挂起时线程已归还，这条守卫是唯一能挡住“另一个续写作业插进来”的地方
+        // 这条守卫是唯一能挡住"另一个续写作业插进来"的地方
         when(storyGenerateService.generate(any(), any(), any())).thenAnswer(inv -> {
             Thread.sleep(300);   // 让第一个作业在提交第二个时仍在 RUNNING
             return StoryGenerateResultAggregate.builder().storyDirName("20260903-story-0001").build();

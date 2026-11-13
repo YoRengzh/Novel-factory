@@ -1,6 +1,5 @@
 package cn.novel.yonren.domain.novel.service.armory;
 
-import cn.novel.yonren.api.dto.ChapterPlanApprovalRequestDTO;
 import cn.novel.yonren.api.dto.StoryGenerateRequestDTO;
 import cn.novel.yonren.domain.novel.model.aggregate.ChapterPlanAggregate;
 import cn.novel.yonren.domain.novel.model.entity.ArmoryCommandEntity;
@@ -53,7 +52,6 @@ public final class StoryCommandAssembler {
                 .storyContextEntity(storyContextEntity)
                 .resumeStoryDir(request.getResumeStoryDir())
                 .maxChapterCount(request.getMaxChapterCount())
-                .autoApprovePlan(request.getAutoApprovePlan())
                 .creativeNotes(request.getCreativeNotes())
                 .build();
 
@@ -83,41 +81,6 @@ public final class StoryCommandAssembler {
                     "worldId 格式非法：仅允许字母数字开头、1-63 位字母数字/下划线/连字符，收到：" + worldId);
         }
         return trimmed;
-    }
-
-    /**
-     * 章节计划裁决请求 → 领域聚合（DTO 适配）。
-     * 返回 null 表示"未携带修订稿"（chapters 为空），由领域层采纳 AI 原版计划。
-     *
-     * {@code chapterType} 用 {@link ChapterType#of} 容错解析：未识别值降级 NORMAL，
-     * 避免前端传 "NORMAL"/"普通" 之类的变体导致整次裁决 400
-     */
-    public static ChapterPlanAggregate toChapterPlan(ChapterPlanApprovalRequestDTO request) {
-        if (request == null || request.getChapters() == null || request.getChapters().isEmpty()) {
-            return null;
-        }
-        List<ChapterPlanItemEntity> items = new ArrayList<>(request.getChapters().size());
-        for (ChapterPlanApprovalRequestDTO.Chapter chapter : request.getChapters()) {
-            ChapterPlanItemEntity item = new ChapterPlanItemEntity();
-            item.setChapterNo(chapter.getChapterNo());
-            item.setTitle(chapter.getTitle());
-            item.setGoal(chapter.getGoal());
-            item.setCharacters(chapter.getCharacters());
-            item.setKeyEvents(chapter.getKeyEvents());
-            item.setEndingHook(chapter.getEndingHook());
-            item.setChapterType(ChapterType.of(chapter.getChapterType()));
-            // 裁决卡未展示、但下游消费的字段：原样透传，否则人工改一个字就会把它们清空
-            item.setDialogueScenes(chapter.getDialogueScenes());
-            item.setTimeAdvance(chapter.getTimeAdvance());
-            item.setSuspenseBeat(chapter.getSuspenseBeat());
-            item.setMainLineAdvance(chapter.getMainLineAdvance());
-            items.add(item);
-        }
-        return ChapterPlanAggregate.builder()
-                .storyId(request.getStoryId())
-                .chapters(items)
-                .risks(request.getRisks())
-                .build();
     }
 
 }

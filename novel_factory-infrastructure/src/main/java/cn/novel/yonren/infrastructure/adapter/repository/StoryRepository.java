@@ -289,11 +289,11 @@ public class StoryRepository implements IStoryRepository {
             sb.append("    goal: ").append(quote(item.getGoal())).append(System.lineSeparator());
             writeStringList(sb, "characters", item.getCharacters());
             writeStringList(sb, "keyEvents", item.getKeyEvents());
-            // 对话承载声明（逐字取自 keyEvents 的子集）：人工裁决时核对"本章有没有戏"就看这几条
+            // 对话承载声明（逐字取自 keyEvents 的子集）：核对"本章有没有戏"就看这几条
             writeStringList(sb, "dialogueScenes", item.getDialogueScenes());
             sb.append("    endingHook: ").append(quote(item.getEndingHook())).append(System.lineSeparator());
             sb.append("    chapterType: ").append(item.getChapterType() == null ? "normal" : item.getChapterType().getCode()).append(System.lineSeparator());
-            // 悬念档位（主线推进标尺）：人工裁决时最该看的一项——它直接反映主线有没有在往前走
+            // 悬念档位（主线推进标尺）：它直接反映主线有没有在往前走
             sb.append("    suspenseBeat: ").append(quote(item.getSuspenseBeat())).append(System.lineSeparator());
         }
 

@@ -64,7 +64,7 @@ public class GenerateChapterContentNode extends AbstractArmorySupport {
                 storyDir = storyRepository.createStoryDirectory();
                 dynamicContext.setStoryDir(storyDir);
             }
-            // run 目录复用已存在的（审批门已建过一次）：createRunDirectory 非幂等，
+            // run 目录复用已存在的：createRunDirectory 非幂等，
             // 同一 jobId 二次创建会抛冲突；与树尾持久化节点「有则复用」的口径一致。
             // 审批挂起后恢复执行时本方法会被再调一次，复用是必需而非优化
             Path runDir = dynamicContext.getRunDir();
@@ -75,7 +75,7 @@ public class GenerateChapterContentNode extends AbstractArmorySupport {
             }
             if (dynamicContext.getJob() != null) {
                 dynamicContext.getJob().setRunDirName(runDir.getFileName().toString());
-                // 故事目录一经创建即回填作业：审批门挂起时前端要靠它定位计划与正文，
+                // 故事目录一经创建即回填作业：前端靠它定位计划与正文，
                 // 不能等到链尾持久化才填（挂起根本走不到链尾）
                 dynamicContext.getJob().setStoryDirName(storyDir.getFileName().toString());
             }

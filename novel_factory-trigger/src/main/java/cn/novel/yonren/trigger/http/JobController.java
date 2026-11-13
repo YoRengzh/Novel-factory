@@ -1,6 +1,5 @@
 package cn.novel.yonren.trigger.http;
 
-import cn.novel.yonren.api.dto.ChapterPlanApprovalRequestDTO;
 import cn.novel.yonren.api.dto.JobStatusResponseDTO;
 import cn.novel.yonren.api.dto.StoryGenerateRequestDTO;
 import cn.novel.yonren.domain.novel.service.job.StoryJobService;
@@ -62,35 +61,6 @@ public class JobController {
         if (dto == null) {
             throw new ResponseStatusException(HttpStatus.NOT_FOUND, "作业不存在：" + jobId);
         }
-        return dto;
-    }
-
-    /**
-     * 章节计划裁决：通过（可携带人工修订稿）。
-     * 修订稿未过机械校验（0003 参数为空 / 0004 参数重复）由 ApiExceptionHandler 统一转 400，
-     * 作业仍在挂起态等用户改正后重提
-     */
-    @PostMapping("/{jobId}/chapter-plan/approve")
-    public JobStatusResponseDTO approveChapterPlan(@PathVariable("jobId") String jobId,
-                                                   @RequestBody(required = false) ChapterPlanApprovalRequestDTO request) {
-        JobStatusResponseDTO dto = storyJobService.approveChapterPlanDto(jobId, request);
-        if (dto == null) {
-            throw new ResponseStatusException(HttpStatus.CONFLICT,
-                    "作业不在待裁决状态（可能已超时放行、已取消或已裁决过）：" + jobId);
-        }
-        log.info("章节计划裁决通过：{}", jobId);
-        return dto;
-    }
-
-    /** 章节计划裁决：驳回 → 本批中止（计划保留在 run 目录，可另起命令复用） */
-    @PostMapping("/{jobId}/chapter-plan/reject")
-    public JobStatusResponseDTO rejectChapterPlan(@PathVariable("jobId") String jobId) {
-        JobStatusResponseDTO dto = storyJobService.rejectChapterPlanDto(jobId);
-        if (dto == null) {
-            throw new ResponseStatusException(HttpStatus.CONFLICT,
-                    "作业不在待裁决状态（可能已超时放行、已取消或已裁决过）：" + jobId);
-        }
-        log.info("章节计划裁决驳回：{}", jobId);
         return dto;
     }
 }

@@ -163,26 +163,6 @@ story:
     # 体检分级达到该档即停止自动续批，交人工过问：WATCH / DEGRADED / CRITICAL
     stop-on-health-level: CRITICAL
 
-  # 章节计划审批门（human-in-the-loop）：本批计划生成并落盘后、正文生成之前，把计划交人工裁决。
-  # **默认关闭**——关闭时节点链与历史逐字节一致（校验后直连正文生成）。
-  # 开启后作业转为 AWAITING_APPROVAL 并**归还线程**（不是阻塞：jobExecutor 是单线程池，
-  # 在工作线程里等待会冻住全部排队作业），裁决/超时后复用同一 jobId 与 run 目录续跑剩余阶段。
-  # 裁决端点：GET /api/jobs/{jobId} 看计划  POST /api/jobs/{jobId}/chapter-plan/approve|reject
-  # 注意：同步端点 POST /api/story/generate-chapter 不支持本门（会阻塞到全批结束，必撞 HTTP 超时）
-  # 注意：跨阶段批次的计划是惰性分段生成的，本门只拦得到首段计划
-  plan-approval:
-    # 开启后在"计划已校验、正文未写"处挂起作业，工作台出现【章节计划裁决】卡片，
-    # 可就地改 title/goal/keyEvents/章型后放行（人工修订稿会重过机械校验）。
-    # 局限：跨阶段批次的计划是惰性分段生成的，本门只拦得到【首段】计划。
-    enabled: false
-    # 挂起等待裁决的时长（秒）。因不占线程可放宽到小时级，用户不必守在屏幕前
-    timeout-seconds: 120
-    # 超时处置：AUTO_APPROVE = 按 AI 原版计划继续（等同退化成黑盒模式）/ ABORT = 中止本批。
-    # 刻意只有两种：超时必须是"已有状态之一"，否则会引入第三种终局语义
-    timeout-action: AUTO_APPROVE
-    # 作用范围：FIRST_BATCH_ONLY = 仅首批裁决（首批定调，后续是延续；也是与 run-plan 自续批并存的隔离）/ EVERY_BATCH
-    scope: FIRST_BATCH_ONLY
-
   # 全书总章数上限（完结保护）：enforce-chapter-limit=true 时强制 max-chapter-count，
   # 续写偏移达到上限即拒绝生成（故事已完结）；本批超出的章节数会被自动截断
   constraints:

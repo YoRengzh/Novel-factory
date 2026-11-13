@@ -343,7 +343,7 @@ class ChapterWorkerTest {
 
         assertEquals(1, ctx.getChapterContents().size(), "取消信号置位后应完成当前章即停");
         verify(llmInvokeService, times(1)).invoke(any(), any(), any(), anyString(), anyMap());
-        verify(storyRepository, times(1)).writeChapters(any(), any());
+        verify(storyRepository, times(1)).commitChapter(eq(STORY_DIR), any(), anyList(), any());
         verify(storyRepository, times(1)).writeJobStatus(eq(STORY_DIR), same(job));
         assertEquals(Integer.valueOf(1), job.getCurrentChapter());
     }
@@ -476,7 +476,7 @@ class ChapterWorkerTest {
 
         chapterWorker.generateAll(command(), ctx);
 
-        verify(storyRepository, times(2)).writeChapters(any(), any());
+        verify(storyRepository, times(2)).commitChapter(eq(STORY_DIR), any(), anyList(), any());
         verify(chapterSummaryService, times(2)).summarize(any(), any(), anyString(), anyInt(), anyString(), anyList(), any());
     }
 
@@ -665,13 +665,12 @@ class ChapterWorkerTest {
         chapterWorker.generateAll(command(), ctx);
 
         // 落盘正文必须是抢救回来的那段（不是空串）
-        org.mockito.ArgumentCaptor<java.util.List<cn.novel.yonren.domain.novel.model.entity.ChapterContentEntity>> captor =
-                org.mockito.ArgumentCaptor.forClass(java.util.List.class);
+        org.mockito.ArgumentCaptor<cn.novel.yonren.domain.novel.model.entity.ChapterContentEntity> captor =
+                org.mockito.ArgumentCaptor.forClass(cn.novel.yonren.domain.novel.model.entity.ChapterContentEntity.class);
         verify(storyRepository, org.mockito.Mockito.atLeastOnce())
-                .writeChapters(any(), captor.capture());
-        boolean salvaged = captor.getAllValues().stream()
-                .flatMap(java.util.List::stream)
-                .anyMatch(c -> c.getContent() != null && c.getContent().contains("这是真正文内容"));
-        assertTrue(salvaged, "重复键时必须抢救首个非空 content，而不是落盘空稿");
+                .commitChapter(any(), captor.capture(), anyList(), any());
+        assertTrue(captor.getAllValues().stream()
+                        .anyMatch(c -> c.getContent() != null && c.getContent().contains("这是真正文内容")),
+                "重复键时必须抢救首个非空 content，而不是落盘空稿");
     }
 }

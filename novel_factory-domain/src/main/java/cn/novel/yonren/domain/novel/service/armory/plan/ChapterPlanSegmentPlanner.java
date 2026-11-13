@@ -264,8 +264,8 @@ public class ChapterPlanSegmentPlanner {
             throw new AppException(ResponseCode.UN_ERROR.getCode(),
                     label + "追进度跳接两次重规划仍未通过时间校验（大纲预算 " + pacingBudgetYear
                             + " 年，滞后 " + blueprint.getPacingLagYears() + " 年）。"
-                            + "为防止整批在旧时间线空转，本批终止：请在人工裁决中显式声明时间跳跃，"
-                            + "或调整大纲段时间标记后重试");
+                            + "为防止整批在旧时间线空转，本批终止：请在大纲中显式声明时间跳跃，"
+                            + "或调整段时间标记后重试");
         }
         if (stillBadLadder != null || stillBadMainLine != null || stillBadTimeAdvance != null
                 || stillBadSceneReplay != null || stillBadDialogue != null || stillBadNetGrowth != null

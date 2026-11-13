@@ -51,9 +51,6 @@
     // 否则列表属于 A 而 currentStoryDir 已是 B，保存会把 A 的正文写进 B
     let storyViewToken = 0;
     // 章节计划裁决：待裁决计划的本地快照（用于比对"用户是否改过"）+ 倒计时定时器
-    let pendingPlanSnapshot = null;
-    let pendingPlanSignature = null;
-    let approvalTimer = null;
 
     // ===== DOM 元素 =====
     const btnLogout = document.getElementById('btn-logout');
@@ -139,14 +136,7 @@
     function renderProgressBar(job) {
         var filled = 0;
         var meta;
-        if (job.status === 'AWAITING_APPROVAL') {
-            // 挂起态：正文尚未开始，进度条冻结在已完成章数上，不进也不退
-            if (job.currentChapter != null && job.totalChapters) {
-                filled = Math.min(PROGRESS_WIDTH, Math.max(0,
-                    Math.round(PROGRESS_WIDTH * job.currentChapter / job.totalChapters)));
-            }
-            meta = '已挂起：等待章节计划裁决（正文尚未开始）';
-        } else if (job.status === 'CANCELLING') {
+        if (job.status === 'CANCELLING') {
             // 停止中：进度条冻结在当前进度。必须放在章号分支之前——轮询到 CANCELLING 时
             // currentChapter 已有值，若先命中章号分支，显示会与取消前完全一致（看不出在停）
             if (job.currentChapter != null && job.totalChapters) {
@@ -285,7 +275,6 @@
         .then(function (job) {
             currentJobId = job.jobId;
             saveJobId(job.jobId);
-            hideApprovalCard();   // 新作业：清掉上一轮可能残留的裁决卡片
             pollStatus();
             startPolling();
         })
@@ -347,8 +336,6 @@
         .then(function (job) {
             pollFailures = 0;
             renderJobStatus(job);
-            // AWAITING_APPROVAL 刻意不在终态里：挂起期间必须继续轮询，
-            // 否则用户裁决完 / 超时放行后，前端不会跟进
             if (isTerminal(job.status)) {
                 stopPolling();
                 clearSavedJobId();
@@ -364,7 +351,6 @@
                 stopPolling();
                 clearSavedJobId();
                 currentJobId = null;
-                hideApprovalCard();
                 jobStatusDiv.classList.add('hidden');
                 progressCard.classList.add('hidden');
                 btnSubmit.disabled = false;
@@ -409,10 +395,6 @@
         lines.push(row('状态', statusBadge(job.status)));
         if (job.storyDirName) lines.push(row('故事目录', job.storyDirName));
         if (job.currentStage) lines.push(row('阶段', esc(job.currentStage)));
-        if (job.status === 'AWAITING_APPROVAL' && job.awaitingPlanApprovalAtMs) {
-            lines.push(row('挂起于', new Date(job.awaitingPlanApprovalAtMs).toLocaleTimeString()));
-        }
-        if (job.approvalRound) lines.push(row('人工裁决', '已提交 ' + job.approvalRound + ' 轮'));
         if (job.errorMessage) lines.push(row('错误', '<span class="error-text">' + esc(job.errorMessage) + '</span>'));
         if (job.chapterDurations && Object.keys(job.chapterDurations).length > 0) {
             const durs = Object.entries(job.chapterDurations).map(function (e) {
@@ -421,8 +403,6 @@
             lines.push(row('耗时', durs));
         }
         statusDetail.innerHTML = lines.join('');
-        // 裁决卡片随状态联动：进入挂起态出现，离开即收起
-        renderApprovalCard(job);
         // 中断（失败/取消）时给出"接着往下写"的入口
         renderResumeAction(job);
         // 批末体检随轮询更新（每批结束出现；无体检报告时隐藏）
@@ -434,12 +414,11 @@
             'PENDING': '#8b93a7',
             'RUNNING': '#7dd3fc',
             'CANCELLING': '#fbbf24',
-            'AWAITING_APPROVAL': '#fbbf24',
             'COMPLETED': '#34d399',
             'FAILED': '#f87171',
             'CANCELLED': '#fbbf24'
         };
-        const names = { 'AWAITING_APPROVAL': '待裁决', 'CANCELLING': '停止中' };
+        const names = { 'CANCELLING': '停止中' };
         const color = colors[status] || '#8b93a7';
         const label = names[status] ? names[status] + ' (' + status + ')' : status;
         return '<span style="color:' + color + ';font-weight:600">' + esc(label) + '</span>';
@@ -942,321 +921,6 @@
 
     renderThemePresets();
     mountRegenButtons();
-
-    // ===== 章节计划裁决（human-in-the-loop） =====
-    // 后端在「计划已校验、正文未写」处把作业挂起并透出 pendingChapterPlan；
-    // 前端只做两件事：把计划渲染成可编辑表单、把裁决结果 POST 回去。
-    // 注意：AWAITING_APPROVAL 不是终态，轮询必须继续跑（超时后由后端自动放行或中止）。
-    const approvalCard = document.getElementById('approval-card');
-    const approvalPlanDiv = document.getElementById('approval-plan');
-    const approvalCountdown = document.getElementById('approval-countdown');
-    const approvalHint = document.getElementById('approval-hint');
-    const approvalError = document.getElementById('approval-error');
-    const btnApprovePlan = document.getElementById('btn-approve-plan');
-    const btnRejectPlan = document.getElementById('btn-reject-plan');
-
-    const CHAPTER_TYPE_OPTIONS = [
-        { value: 'normal', label: 'normal · 常规推进章' },
-        { value: 'transition', label: 'transition · 过渡章' },
-        { value: 'climax', label: 'climax · 高潮章' },
-        { value: 'finale', label: 'finale · 卷末收束章' }
-    ];
-
-    let countdownDeadline = null;
-
-    function renderApprovalCard(job) {
-        if (!job || job.status !== 'AWAITING_APPROVAL') {
-            if (!approvalCard.classList.contains('hidden')) hideApprovalCard();
-            return;
-        }
-        approvalCard.classList.remove('hidden');
-        const plan = job.pendingChapterPlan || null;
-        const signature = JSON.stringify(plan);
-        // 轮询每 2s 到一次，而计划本身不会变；只有签名变化才重建 DOM，
-        // 否则用户正在编辑的输入框会被反复清空
-        if (signature !== pendingPlanSignature) {
-            pendingPlanSignature = signature;
-            pendingPlanSnapshot = plan;
-            buildApprovalPlan(plan);
-        }
-        startApprovalCountdown(job.planApprovalDeadlineMs);
-    }
-
-    function hideApprovalCard() {
-        stopApprovalCountdown();
-        pendingPlanSnapshot = null;
-        pendingPlanSignature = null;
-        approvalPlanDiv.innerHTML = '';
-        approvalCountdown.textContent = '';
-        setApprovalError(null);
-        setApprovalBusy(false);
-        approvalCard.classList.add('hidden');
-    }
-
-    function setApprovalError(msg) {
-        if (!msg) {
-            approvalError.classList.add('hidden');
-            approvalError.textContent = '';
-            return;
-        }
-        approvalError.classList.remove('hidden');
-        approvalError.textContent = msg;
-    }
-
-    function setApprovalBusy(busy) {
-        btnApprovePlan.disabled = busy;
-        btnRejectPlan.disabled = busy;
-        btnApprovePlan.textContent = busy ? '提 交 中...' : '采 纳 并 通 过';
-    }
-
-    function startApprovalCountdown(deadlineMs) {
-        if (!deadlineMs) {
-            stopApprovalCountdown();
-            approvalCountdown.textContent = '';
-            return;
-        }
-        // 每次轮询都会调到这里；同一截止点已在倒计时则不重启（否则会不断重置 1s 定时器）
-        if (approvalTimer && countdownDeadline === deadlineMs) return;
-        stopApprovalCountdown();
-        countdownDeadline = deadlineMs;
-        const tick = function () {
-            const left = deadlineMs - Date.now();
-            if (left <= 0) {
-                approvalCountdown.textContent = '已到截止时刻，等待后端处理…';
-                stopApprovalCountdown();
-                return;
-            }
-            const totalSec = Math.floor(left / 1000);
-            const mm = String(Math.floor(totalSec / 60)).padStart(2, '0');
-            const ss = String(totalSec % 60).padStart(2, '0');
-            approvalCountdown.textContent = '裁决剩余 ' + mm + ':' + ss;
-        };
-        tick();
-        approvalTimer = setInterval(tick, 1000);
-    }
-
-    function stopApprovalCountdown() {
-        if (approvalTimer) {
-            clearInterval(approvalTimer);
-            approvalTimer = null;
-        }
-        countdownDeadline = null;
-    }
-
-    function makeText(tag, cls, text) {
-        const el = document.createElement(tag);
-        if (cls) el.className = cls;
-        el.textContent = text;
-        return el;
-    }
-
-    function makeField(labelText, control, fullWidth) {
-        const wrap = document.createElement('div');
-        wrap.className = fullWidth ? 'form-group full-width' : 'form-group';
-        const label = document.createElement('label');
-        label.textContent = labelText;
-        wrap.appendChild(label);
-        wrap.appendChild(control);
-        return wrap;
-    }
-
-    function buildApprovalPlan(plan) {
-        approvalPlanDiv.innerHTML = '';
-        setApprovalError(null);
-        if (!plan || !plan.chapters || plan.chapters.length === 0) {
-            approvalHint.textContent = '后端未透出计划内容，可直接采纳——后端将使用已落盘的计划继续生成正文。';
-            return;
-        }
-        approvalHint.textContent = 'AI 已生成下列 ' + plan.chapters.length
-            + ' 章计划（当前规划段），正文尚未开始。可直接采纳，也可就地修订后通过。';
-        plan.chapters.forEach(function (ch) {
-            approvalPlanDiv.appendChild(buildApprovalChapter(ch));
-        });
-        if (plan.risks && plan.risks.length > 0) {
-            const riskBox = document.createElement('div');
-            riskBox.className = 'approval-risks';
-            riskBox.appendChild(makeText('h4', 'plan-risks-title', '规划风险自评'));
-            plan.risks.forEach(function (r) {
-                riskBox.appendChild(makeText('p', 'approval-risk-item', '· ' + r));
-            });
-            approvalPlanDiv.appendChild(riskBox);
-        }
-    }
-
-    function buildApprovalChapter(ch) {
-        const box = document.createElement('div');
-        box.className = 'approval-chapter';
-        box.dataset.chapterNo = ch.chapterNo;
-
-        const head = document.createElement('div');
-        head.className = 'approval-chapter-head';
-        head.appendChild(makeText('span', 'approval-chapter-no', 'CH ' + ch.chapterNo));
-        const title = document.createElement('input');
-        title.type = 'text';
-        title.className = 'ap-title';
-        title.value = ch.title || '';
-        head.appendChild(title);
-        box.appendChild(head);
-
-        const grid = document.createElement('div');
-        grid.className = 'approval-grid';
-
-        const goal = document.createElement('textarea');
-        goal.className = 'ap-goal';
-        goal.rows = 3;
-        goal.value = ch.goal || '';
-        grid.appendChild(makeField('本章目标 *', goal));
-
-        const typeSel = document.createElement('select');
-        typeSel.className = 'ap-type';
-        const current = normalizeType(ch.chapterType);
-        CHAPTER_TYPE_OPTIONS.forEach(function (t) {
-            const opt = document.createElement('option');
-            opt.value = t.value;
-            opt.textContent = t.label;
-            if (t.value === current) opt.selected = true;
-            typeSel.appendChild(opt);
-        });
-        grid.appendChild(makeField('章型', typeSel));
-
-        const chars = document.createElement('textarea');
-        chars.className = 'ap-characters';
-        chars.rows = 2;
-        chars.value = (ch.characters || []).join('、');
-        grid.appendChild(makeField('出场角色（顿号分隔）', chars));
-
-        const hook = document.createElement('textarea');
-        hook.className = 'ap-hook';
-        hook.rows = 2;
-        hook.value = ch.endingHook || '';
-        grid.appendChild(makeField('章末钩子', hook));
-
-        const events = document.createElement('textarea');
-        events.className = 'ap-events';
-        events.rows = 4;
-        events.value = (ch.keyEvents || []).join('\n');
-        grid.appendChild(makeField('关键事件 *（每行一条）', events, true));
-
-        box.appendChild(grid);
-        return box;
-    }
-
-    /** 与后端 ChapterTypeVO.of 同一套容错口径：空值/未识别一律按 normal，避免"没改却判成改过" */
-    function normalizeType(v) {
-        const t = String(v || '').trim().toLowerCase();
-        return t === '' ? 'normal' : t;
-    }
-
-    function splitBySeparator(raw) {
-        return String(raw || '').split(/[、,，;；]/)
-            .map(function (s) { return s.trim(); })
-            .filter(function (s) { return s !== ''; });
-    }
-
-    function splitLines(raw) {
-        return String(raw || '').split(/\r?\n/)
-            .map(function (s) { return s.trim(); })
-            .filter(function (s) { return s !== ''; });
-    }
-
-    function sameList(a, b) {
-        if (a.length !== b.length) return false;
-        for (let i = 0; i < a.length; i++) {
-            if (a[i] !== b[i]) return false;
-        }
-        return true;
-    }
-
-    function sourceChapter(no) {
-        if (!pendingPlanSnapshot || !pendingPlanSnapshot.chapters) return null;
-        for (let i = 0; i < pendingPlanSnapshot.chapters.length; i++) {
-            if (pendingPlanSnapshot.chapters[i].chapterNo === no) return pendingPlanSnapshot.chapters[i];
-        }
-        return null;
-    }
-
-    function isSameChapter(a, b) {
-        return a.title === (b.title || '')
-            && a.goal === (b.goal || '')
-            && a.endingHook === (b.endingHook || '')
-            && a.chapterType === normalizeType(b.chapterType)
-            && sameList(a.characters, b.characters || [])
-            && sameList(a.keyEvents, b.keyEvents || []);
-    }
-
-    /**
-     * 表单 → 裁决请求体。
-     * 返回 null 表示"用户没改任何东西"：按后端契约，chapters 为空即"采纳 AI 原版"，
-     * 比"把原样表单回传一遍"更能表达真实意图，也少一次无谓的机械校验。
-     * 改过则必须回传完整章节列表（后端把非空 chapters 整体视为人工修订稿）。
-     */
-    function collectRevisedPlan() {
-        if (!pendingPlanSnapshot || !pendingPlanSnapshot.chapters) return null;
-        const rows = approvalPlanDiv.querySelectorAll('.approval-chapter');
-        if (rows.length === 0) return null;
-        const chapters = [];
-        let changed = false;
-        Array.prototype.forEach.call(rows, function (row) {
-            const no = parseInt(row.dataset.chapterNo, 10);
-            const src = sourceChapter(no) || {};
-            const item = {
-                chapterNo: no,
-                title: row.querySelector('.ap-title').value.trim(),
-                goal: row.querySelector('.ap-goal').value.trim(),
-                characters: splitBySeparator(row.querySelector('.ap-characters').value),
-                keyEvents: splitLines(row.querySelector('.ap-events').value),
-                endingHook: row.querySelector('.ap-hook').value.trim(),
-                chapterType: row.querySelector('.ap-type').value,
-                // 裁决卡不展示、但后端会整体替换计划：原样带回，少传即等于清空
-                // （时间锚 / 悬念档位 / 主线推进 / 对白承载声明）
-                dialogueScenes: src.dialogueScenes || [],
-                timeAdvance: src.timeAdvance || null,
-                suspenseBeat: src.suspenseBeat || null,
-                mainLineAdvance: src.mainLineAdvance || null
-            };
-            if (!isSameChapter(item, src)) changed = true;
-            chapters.push(item);
-        });
-        if (!changed) return null;
-        return {
-            storyId: pendingPlanSnapshot.storyId || null,
-            chapters: chapters,
-            risks: pendingPlanSnapshot.risks || []
-        };
-    }
-
-    function submitDecision(url, payload) {
-        setApprovalError(null);
-        setApprovalBusy(true);
-        fetchJson(url, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(payload || {})
-        })
-        .then(function (job) {
-            setApprovalBusy(false);
-            showToast(payload && payload.chapters ? '已按修订稿通过' : '裁决已提交');
-            renderJobStatus(job);
-            startPolling();   // 兜底：若轮询曾因终态停止，这里恢复
-        })
-        .catch(function (err) {
-            setApprovalBusy(false);
-            // 400 = 修订稿没过结构校验，作业仍在挂起，就地改正后重提；
-            // 409 = 已超时放行/已取消，下次轮询会让卡片自动收起
-            setApprovalError('裁决未生效：' + err.message);
-        });
-    }
-
-    btnApprovePlan.addEventListener('click', function () {
-        if (!currentJobId) return;
-        submitDecision('/api/jobs/' + currentJobId + '/chapter-plan/approve', collectRevisedPlan());
-    });
-
-    btnRejectPlan.addEventListener('click', function () {
-        if (!currentJobId) return;
-        if (!window.confirm('驳回将中止本批生成（已落盘的计划仍保留在 run 目录）。确认驳回？')) return;
-        submitDecision('/api/jobs/' + currentJobId + '/chapter-plan/reject', null);
-    });
 
     // ===== 故事库 =====
     const storiesDiv = document.getElementById('stories');

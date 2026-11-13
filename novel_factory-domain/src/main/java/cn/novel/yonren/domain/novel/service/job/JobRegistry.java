@@ -34,8 +34,8 @@ public class JobRegistry {
     /**
      * 淘汰超额的终态作业
      *
-     * 只淘汰终态（COMPLETED/FAILED/CANCELLED）——运行中、排队中与审批挂起的作业
-     * 仍在被 worker/前端引用，淘汰会造成"作业凭空消失"。
+     * 只淘汰终态（COMPLETED/FAILED/CANCELLED）——运行中与排队中的作业仍在被 worker/前端引用，
+     * 淘汰会造成"作业凭空消失"。
      * 按 startedAtMs 排序保留最新：自动续批链的子作业按时间递增，天然保住最近的一批。
      */
     private void evictTerminalOverflow() {
@@ -70,9 +70,8 @@ public class JobRegistry {
     }
 
     /**
-     * 指定故事是否有运行中的作业（CREATED/RUNNING/CANCELLING/AWAITING_APPROVAL）：
+     * 指定故事是否有运行中的作业（CREATED/RUNNING/CANCELLING）：
      * 编辑端点据此拒绝修改正在生成的故事，防止正文与记忆不一致。
-     * AWAITING_APPROVAL 必须计入——审批门挂起的作业尚未定稿本批，此时改正文会与即将写入的计划冲突
      */
     public boolean isActiveForStory(String storyDirName) {
         if (storyDirName == null) {
@@ -80,8 +79,7 @@ public class JobRegistry {
         }
         for (GenerationJob job : jobs.values()) {
             JobStatus s = job.getStatus();
-            if ((s == JobStatus.CREATED || s == JobStatus.RUNNING || s == JobStatus.CANCELLING
-                    || s == JobStatus.AWAITING_APPROVAL)
+            if ((s == JobStatus.CREATED || s == JobStatus.RUNNING || s == JobStatus.CANCELLING)
                     && storyDirName.equals(job.getStoryDirName())) {
                 return true;
             }
@@ -91,7 +89,6 @@ public class JobRegistry {
 
     /**
      * 协作取消：CREATED → 直接 CANCELLED（未启动）；RUNNING → CANCELLING（当前章完成后停）；
-     * AWAITING_APPROVAL → 直接 CANCELLED（审批门已释放线程，无在途工作，无需等待当前章）；
      * CANCELLING 幂等；终态不动。未知 jobId 返回 null
      */
     public GenerationJob cancel(String jobId) {
@@ -102,7 +99,7 @@ public class JobRegistry {
         if (!job.requestCancel()) {
             return job;
         }
-        if (job.getStatus() == JobStatus.CREATED || job.getStatus() == JobStatus.AWAITING_APPROVAL) {
+        if (job.getStatus() == JobStatus.CREATED) {
             job.markCancelled();
         } else if (job.getStatus() == JobStatus.RUNNING) {
             job.markCancelling();

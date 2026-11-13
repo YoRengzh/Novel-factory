@@ -22,7 +22,7 @@ import static org.mockito.Mockito.when;
 /**
  * 作业端点 HTTP 层测试（分层重构后）：
  * 业务断言由 domain 的 StoryJobService/StoryCommandAssembler 测试覆盖，
- * 本类只验证 DTO 门面调用、状态码映射（503 队列满 / 404 未知作业 / 409 非挂起态裁决）。
+ * 本类只验证 DTO 门面调用与状态码映射（503 队列满 / 404 未知作业）。
  */
 class JobControllerTest {
 
@@ -130,25 +130,5 @@ class JobControllerTest {
                 () -> jobController.cancel("nope"));
 
         assertEquals(HttpStatus.NOT_FOUND, e.getStatusCode());
-    }
-
-    @Test
-    void approve_notAwaiting_throws409() {
-        when(storyJobService.approveChapterPlanDto(any(), any())).thenReturn(null);
-
-        ResponseStatusException e = assertThrows(ResponseStatusException.class,
-                () -> jobController.approveChapterPlan("job-1", null));
-
-        assertEquals(HttpStatus.CONFLICT, e.getStatusCode());
-    }
-
-    @Test
-    void reject_notAwaiting_throws409() {
-        when(storyJobService.rejectChapterPlanDto("job-1")).thenReturn(null);
-
-        ResponseStatusException e = assertThrows(ResponseStatusException.class,
-                () -> jobController.rejectChapterPlan("job-1"));
-
-        assertEquals(HttpStatus.CONFLICT, e.getStatusCode());
     }
 }

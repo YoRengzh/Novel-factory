@@ -30,16 +30,10 @@ import java.util.Map;
 /**
  * 规则树工厂。
  *
- * 树的合法入口只有两个，新增入口必须先在此登记：
+ * 树的合法入口只有一个，新增入口必须先在此登记：
  *
  *   · 完整树入口：{@code armoryStrategyHandler().apply(command, dynamicContext)}——
- *       从 RootNode 顺序走完全部节点；
- *   · 树腰入口：{@code StoryGenerateService.resumeAfterPlanApproval}——
- *       审批挂起后从正文生成节点续跑剩余阶段。前提：DynamicContext 来自挂起现场
- *       原样保留（含已批准计划/蓝图链/分段边界/故事上下文），规划段不会重跑。
- *       上下文残缺时该方法快速失败。
- *
- * 在规划段节点内新增的任何逻辑，树腰入口不会执行——依赖这一点做设计决策时务必想清楚。
+ *       从 RootNode 顺序走完全部节点。
  */
 @Service
 public class DefaultArmoryFactory {
@@ -66,7 +60,7 @@ public class DefaultArmoryFactory {
      * | chapterSummaries         | worker 逐章追加并逐章同步回写                     | 下一章记忆/规划/Persist | 摘要失败即终止本批（质量门） |
      * | consistencyIndex         | worker 每章 rebuild 后写回                        | Persist/下一章 prompt | |
      * | styleStat/styleFingerprints | worker 滚动合并                                | 下一章 prompt/Persist | |
-     * | storyDir/runDir          | 服务层预载(续写)/计划检查点创建                   | worker/审批门/Persist | 创建非幂等，禁止重复创建 |
+     * | storyDir/runDir          | 服务层预载(续写)/计划检查点创建                   | worker/Persist        | 创建非幂等，禁止重复创建 |
      * | chapterOffset            | StoryGenerateService 预载（首发 0）              | 全树                 | 进树后只读 |
      * | prevChapterTail          | 服务层预载 → worker 每章覆写                      | 下一章 prompt/规划   | 语义恒为"上一章结尾" |
      * | pendingConflicts         | 服务层预载 → worker 每章覆写                      | 下一章记忆           | 语义恒为"最近一章偏差警示" |
@@ -78,9 +72,8 @@ public class DefaultArmoryFactory {
      * | plannedChapterCount      | BuildChapterPlanPromptNode                       | 校验/审批校验        | null=回退批次章数 |
      * | prompt/rawResult         | 规划链                                           | LLM 调用/复盘落盘    | rawResult 为最终采纳稿 |
      * | usedPromptMap            | 各节点/服务合并式写入（key 前缀区分）             | Persist              | 只增不覆盖 |
-     * | job                      | StoryGenerateService 注入                        | worker/审批门        | 同步调试路径为 null |
+     * | job                      | StoryGenerateService 注入                        | worker               | 同步调试路径为 null |
      * | maxChapterCount          | StoryGenerateService（sticky cap）               | 蓝图预算/Persist     | 落盘后不可抬高 |
-     * | planApproved             | 审批通过/续跑时置位                              | 审批门               | 置位后门直通 |
      * | creativeNotes            | StoryGenerateService 从 command 复制             | 三个规划 prompt      | 作者指令，进 prompt 顶部不裁剪 |
      *
      */
@@ -162,9 +155,6 @@ public class DefaultArmoryFactory {
         private java.util.List<String> styleFingerprints;
         // 本批创作要点（导演通道）：作者自由文本，注入卷/阶段/计划 prompt 顶部
         private String creativeNotes;
-        // 章节计划审批门：本批计划已经过人工裁决（通过或超时放行）。
-        // 置位后审批门直接放行到正文生成，不再重复挂起；恢复执行走"从正文阶段续跑"路径时也置位以便观测归因
-        private boolean planApproved;
     }
 
 }

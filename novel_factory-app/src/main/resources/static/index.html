@@ -197,28 +197,6 @@
                     </div>
                 </div>
 
-                <!-- 章节计划裁决（human-in-the-loop）：仅当作业进入 AWAITING_APPROVAL 时出现。
-                     对应后端 yml story.plan-approval.enabled=true；关闭时此卡片永不出现，页面行为不变 -->
-                <div id="approval-card" class="content-card hidden" data-page-node-id="Gpw3sy9GHUtrl2sz22OQly">
-                    <div class="section-label" data-page-node-id="hif3Q4FFF46wZgTwNDoPcF">PLAN REVIEW</div>
-                    <div class="list-header" data-page-node-id="MsalV4UGzVfWVfNFwHGbT2">
-                        <h3 class="status-title" data-page-node-id="1BaSg6qyDXYFNrZzg7QFN0">章节计划裁决</h3>
-                        <span id="approval-countdown" class="approval-countdown" data-page-node-id="wcWVHUegcWuZi53AKrgnpy"></span>
-                    </div>
-                    <p id="approval-hint" class="settings-hint" data-page-node-id="8lfyy5ECCRu45WzxJ9g53G"></p>
-                    <p class="settings-hint" data-page-node-id="FV8tLpueVgkw3Xd8MyNa0p">
-                        「采纳并通过」直接放行 AI 原版；就地修订后通过时，后端会重新做结构机械校验
-                        （章数、章号连续、编号唯一、标题/目标/关键事件非空），校验不过会退回本卡片继续改。
-                        章号与章数由系统决定，不参与修改；驳回将中止本批，计划仍保留在 run 目录。
-                    </p>
-                    <div id="approval-plan" class="approval-plan" data-page-node-id="XSBZljlE0B2STnvRpYEvPA"></div>
-                    <div id="approval-error" class="approval-error hidden" data-page-node-id="U8mTmIJgfN3cfBKFBjqDR6"></div>
-                    <div class="form-actions" data-page-node-id="NnFZHqrPbCGL0fDV64IBSX">
-                        <button type="button" id="btn-approve-plan" class="btn-primary" data-page-node-id="BvL93KpIEpNzJXUWRHlkum">采 纳 并 通 过</button>
-                        <button type="button" id="btn-reject-plan" class="btn-secondary" data-page-node-id="zbUR6RWFo819mcns4jWxeN">驳 回 本 批</button>
-                    </div>
-                </div>
-
                 <!-- 运行观测：与作业状态卡同页，token 用量 + 批末体检构成生成页的量化观测 -->
                 <div class="content-card">
                     <div class="section-label">OBSERVATORY</div>

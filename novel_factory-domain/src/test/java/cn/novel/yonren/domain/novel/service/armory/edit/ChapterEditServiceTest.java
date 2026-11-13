@@ -89,6 +89,47 @@ class ChapterEditServiceTest {
     }
 
     @Test
+    void reflow_clearsPendingEditMarkerForThisChapter(@TempDir Path storyDir) throws Exception {
+        List<ChapterSummaryEntity> summaries = new ArrayList<>(List.of(
+                ChapterSummaryEntity.builder().chapterNo(1).title("第一章").summary("旧摘要").build()));
+        when(storyRepository.readChapterSummaries(storyDir)).thenReturn(summaries);
+        when(storyRepository.readChapterPlanItem(storyDir, 1))
+                .thenReturn(ChapterPlanItemEntity.builder().chapterNo(1).title("第一章").build());
+        when(chapterMemoryService.renderLedgerPrompt(anyList())).thenReturn("账本");
+        when(storyRepository.readPendingChapterEdit(storyDir))
+                .thenReturn(new IStoryRepository.PendingChapterEdit(1, false));
+        String content = "新".repeat(1500);
+        when(chapterSummaryService.summarize(any(), any(), eq(content), eq(1), eq("账本"), anyList()))
+                .thenReturn(ChapterSummaryEntity.builder().chapterNo(1).summary("新摘要").build());
+
+        service.reflow(storyDir, 1, content);
+
+        // 摘要已跟上正文，待回流标记必须清除，否则后续生成会一直认为记忆落后。
+        verify(storyRepository).writePendingChapterEdit(storyDir, null);
+    }
+
+    @Test
+    void reflow_keepsEarlierPendingEditWhenReflowingLaterChapter(@TempDir Path storyDir) throws Exception {
+        List<ChapterSummaryEntity> summaries = new ArrayList<>(List.of(
+                ChapterSummaryEntity.builder().chapterNo(1).title("第一章").summary("一").build(),
+                ChapterSummaryEntity.builder().chapterNo(2).title("第二章").summary("二").build()));
+        when(storyRepository.readChapterSummaries(storyDir)).thenReturn(summaries);
+        when(storyRepository.readChapterPlanItem(storyDir, 2))
+                .thenReturn(ChapterPlanItemEntity.builder().chapterNo(2).title("第二章").build());
+        when(chapterMemoryService.renderLedgerPrompt(anyList())).thenReturn("账本");
+        when(storyRepository.readPendingChapterEdit(storyDir))
+                .thenReturn(new IStoryRepository.PendingChapterEdit(1, false));
+        String content = "新".repeat(1500);
+        when(chapterSummaryService.summarize(any(), any(), eq(content), eq(2), eq("账本"), anyList()))
+                .thenReturn(ChapterSummaryEntity.builder().chapterNo(2).summary("新二").build());
+
+        service.reflow(storyDir, 2, content);
+
+        // 第 1 章的待回流仍然存在，不能因为重建了第 2 章就当作全部同步。
+        verify(storyRepository, never()).writePendingChapterEdit(storyDir, null);
+    }
+
+    @Test
     void reflow_outOfBounds_returnsWarning(@TempDir Path storyDir) throws Exception {
         when(storyRepository.readChapterSummaries(storyDir))
                 .thenReturn(new ArrayList<>(List.of(

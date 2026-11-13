@@ -616,8 +616,9 @@ public class ChapterWorker {
             // 其余为增强件（风格/蓝图/排期/向量索引），保持 fail-soft：写失败不影响正文与记忆的完整性。
             if (storyDir != null) {
                 try {
-                    storyRepository.writeChapters(storyDir, List.of(chapterContent));
-                    storyRepository.writeChapterSummaries(storyDir, summaries);
+                    // 正文与摘要必须同一次提交：分成两次独立写，中间崩溃会留下"有正文、无摘要"的缺口，
+                    // 而 resume 的锁步校验对缺口硬失败，用户只能手工修目录。
+                    storyRepository.commitChapter(storyDir, chapterContent, summaries, null);
                 } catch (Exception e) {
                     log.error("第 {} 章核心交付物（正文/摘要）落盘失败，终止本批——"
                             + "继续生成会在正文编号上留缺口，resume 锁步校验将拒绝续写", globalNo, e);

@@ -84,23 +84,6 @@ class GenerationJobTest {
         assertNotNull(job.getStartedAtMs());
     }
 
-    @Test
-    void markAwaitingApproval_handsOverPendingPlanAtomically() {
-        // 不变式：状态置位与计划交接同一次调用完成（先写计划再置状态），
-        // 于是"读到 AWAITING_APPROVAL 的读者必然也能读到计划"，不再受服务层登记时序影响
-        GenerationJob job = new GenerationJob("job-1");
-        job.markRunning();
-        var plan = cn.novel.yonren.domain.novel.model.aggregate.ChapterPlanAggregate.builder()
-                .storyId("story-1").chapters(java.util.List.of()).build();
-
-        assertTrue(job.markAwaitingApproval(123L, plan));
-
-        assertTrue(job.isAwaitingApproval());
-        assertSame(plan, job.getAwaitingPlan(), "状态可见 ⇒ 计划可读");
-        assertTrue(job.exitApprovalWait());
-        assertNull(job.getAwaitingPlan(), "退出挂起必须清空，防裁决后读到过期计划");
-    }
-
     /**
      * 回归守卫：job-status.json 必须是**合法 JSON**。
      * 实测缺陷：fastjson2 把 {@code Map<Integer,Long>} 的键写成不带引号的 {@code {1:114150}}，

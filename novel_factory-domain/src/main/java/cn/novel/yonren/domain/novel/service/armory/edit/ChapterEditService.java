@@ -1,8 +1,7 @@
 package cn.novel.yonren.domain.novel.service.armory.edit;
 
 import cn.novel.yonren.domain.novel.adapter.repository.IStoryRepository;
-import cn.novel.yonren.domain.novel.model.entity.ChapterPlanItemEntity;
-import cn.novel.yonren.domain.novel.model.entity.ChapterSummaryEntity;
+import cn.novel.yonren.domain.novel.model.entity.ChapterPlanItemEntity;import cn.novel.yonren.domain.novel.model.entity.ChapterSummaryEntity;
 import cn.novel.yonren.domain.novel.model.valobj.StoryVO;
 import cn.novel.yonren.domain.novel.config.StoryProperties;
 import cn.novel.yonren.domain.novel.service.armory.memory.ChapterMemoryService;
@@ -45,6 +44,8 @@ public class ChapterEditService {
      */
     public ReflowResult reflow(Path storyDir, int chapterNo, String newContent) {
         try {
+            // 先补完可能残留的编辑事务，再读记忆：否则读到的是正文已换、摘要未跟上的中间态。
+            storyRepository.recoverChapterCommit(storyDir);
             List<ChapterSummaryEntity> summaries = new ArrayList<>(storyRepository.readChapterSummaries(storyDir));
             if (chapterNo < 1 || chapterNo > summaries.size()) {
                 return new ReflowResult(false, false,
@@ -73,6 +74,11 @@ public class ChapterEditService {
 
             summaries.set(chapterNo - 1, newSummary);
             storyRepository.writeChapterSummaries(storyDir, summaries);
+            // 摘要已跟上正文：清除待回流标记。若仍有更早章节的待办，保留其起始章。
+            IStoryRepository.PendingChapterEdit pending = storyRepository.readPendingChapterEdit(storyDir);
+            if (pending != null && pending.fromChapter() >= chapterNo) {
+                storyRepository.writePendingChapterEdit(storyDir, null);
+            }
 
             storyMemoryService.indexChapter(
                     storyVO.getModule(), storyDir, summaries, chapterNo, null);
