@@ -33,21 +33,70 @@ public class JobRegistry {
      */
     private final java.util.Set<String> storyOperations = ConcurrentHashMap.newKeySet();
 
+    /** 全局资料维护与同步资料调用共用门闩，避免删除后旧请求再发布索引。 */
+    private boolean referenceOperation;
+    private int referenceUses;
+
+    public synchronized boolean tryBeginReferenceUse() {
+        if (referenceOperation) {
+            return false;
+        }
+        referenceUses++;
+        return true;
+    }
+
+    public synchronized void endReferenceUse() {
+        if (referenceUses <= 0) {
+            throw new IllegalStateException("资料调用门闩未取得");
+        }
+        referenceUses--;
+    }
+
+    public synchronized boolean tryBeginReferenceOperation() {
+        if (isReferenceBusy()) {
+            return false;
+        }
+        referenceOperation = true;
+        return true;
+    }
+
+    public synchronized void endReferenceOperation() {
+        referenceOperation = false;
+    }
+
+    public synchronized boolean isReferenceBusy() {
+        return referenceOperation || referenceUses > 0 || !storyOperations.isEmpty() || jobs.values().stream()
+                .anyMatch(job -> !isTerminal(job.getStatus()));
+    }
+
+    public synchronized String referenceBusyReason() {
+        if (referenceOperation) return "资料索引正在维护，请等待操作完成";
+        if (referenceUses > 0) return "有资料调用正在进行，请等待模型调用结束";
+        if (!storyOperations.isEmpty()) return "有书籍维护操作正在进行，请等待保存或编辑完成";
+        if (jobs.values().stream().anyMatch(job -> !isTerminal(job.getStatus()))) {
+            return "有排队、运行或取消中的生成作业，请等待作业完全结束";
+        }
+        return "";
+    }
+
     /** 检查与登记必须原子执行，避免两个并发维护请求同时取得同一本书。 */
     public synchronized boolean tryBeginStoryOperation(String storyDirName) {
         if (storyDirName == null || storyDirName.isBlank()) {
             return false;
         }
-        return !isActiveForStory(storyDirName) && storyOperations.add(storyDirName);
+        return !referenceOperation && !isActiveForStory(storyDirName) && storyOperations.add(storyDirName);
     }
 
-    public void endStoryOperation(String storyDirName) {
+    public synchronized void endStoryOperation(String storyDirName) {
         if (storyDirName != null) {
             storyOperations.remove(storyDirName);
         }
     }
 
     public synchronized void register(GenerationJob job) {
+        if (referenceOperation) {
+            throw new IllegalStateException("资料索引正在维护，暂不能提交生成作业");
+        }
         jobs.put(job.getJobId(), job);
         evictTerminalOverflow();
     }
@@ -87,7 +136,7 @@ public class JobRegistry {
 
     /** 在同一个锁内检查故事是否空闲并登记续写作业。 */
     public synchronized boolean tryRegister(GenerationJob job) {
-        if (isActiveForStory(job.getStoryDirName())) {
+        if (referenceOperation || isActiveForStory(job.getStoryDirName())) {
             return false;
         }
         register(job);
@@ -103,9 +152,12 @@ public class JobRegistry {
      * 指定故事是否有运行中的作业（CREATED/RUNNING/CANCELLING）：
      * 编辑端点据此拒绝修改正在生成的故事，防止正文与记忆不一致。
      */
-    public boolean isActiveForStory(String storyDirName) {
+    public synchronized boolean isActiveForStory(String storyDirName) {
         if (storyDirName == null) {
             return false;
+        }
+        if (referenceOperation) {
+            return true;
         }
         if (storyOperations.contains(storyDirName)) {
             return true;

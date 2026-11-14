@@ -13,6 +13,9 @@ import cn.novel.yonren.types.enums.PromptScene;
 import cn.novel.yonren.types.exception.AppException;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
+
+import java.nio.file.Path;
 
 import java.util.List;
 import java.util.Map;
@@ -37,9 +40,12 @@ import static org.mockito.Mockito.when;
  */
 class DynamicReferenceServiceTest {
 
+    @TempDir
+    Path temp;
     private ReferenceIndexLoader referenceIndexLoader;
     private LlmReferenceSelector selector;
     private VectorReferenceRetriever retriever;
+    private VectorReferenceRetriever.Prepared legacyPrepared;
     private PromptRuleFileLoader fileLoader;
     private ReferenceSelectorProperties properties;
     private LlmRuntimeConfig llmRuntimeConfig;
@@ -50,6 +56,9 @@ class DynamicReferenceServiceTest {
         referenceIndexLoader = mock(ReferenceIndexLoader.class);
         selector = mock(LlmReferenceSelector.class);
         retriever = mock(VectorReferenceRetriever.class);
+        legacyPrepared = mock(VectorReferenceRetriever.Prepared.class);
+        when(retriever.prepare(any())).thenReturn(legacyPrepared);
+        when(legacyPrepared.versionKey()).thenReturn("frozen-space-v1");
         fileLoader = mock(PromptRuleFileLoader.class);
         properties = new ReferenceSelectorProperties();
         llmRuntimeConfig = mock(LlmRuntimeConfig.class);
@@ -59,7 +68,7 @@ class DynamicReferenceServiceTest {
         service = new DynamicReferenceService(referenceIndexLoader, selector, retriever, fileLoader,
                 properties, llmRuntimeConfig, null, new ReferenceUsagePolicy(), null);
 
-        when(referenceIndexLoader.getIndex()).thenReturn(List.of());
+        when(referenceIndexLoader.getIndex()).thenReturn(List.of(entry("dialogue-writing")));
         when(fileLoader.load(anyString())).thenReturn("资料内容");
     }
 
@@ -107,7 +116,7 @@ class DynamicReferenceServiceTest {
 
         List<PromptRule> rules = service.selectAsRules(null, PromptScene.CHAPTER_PLAN, planCtx());
 
-        verify(retriever, never()).retrieve(any(), any(), any());
+        verify(retriever, never()).retrieve(any(VectorReferenceRetriever.Prepared.class), any(), any());
         verify(selector, times(1)).select(any(), any(), any(), anyList());
         assertEquals(1, rules.size());
     }
@@ -158,14 +167,10 @@ class DynamicReferenceServiceTest {
                 entry("worldbuilding"), entry("villain-design")));
         when(selector.select(any(), any(), any(), anyList())).thenReturn(List.of());
 
-        service.selectAsRules(null, PromptScene.SETTING_DRAFT,
-                PromptContext.builder().theme("玄幻").targetFields(List.of("tone")).build());
+        assertTrue(service.selectAsRules(null, PromptScene.SETTING_DRAFT,
+                PromptContext.builder().theme("玄幻").targetFields(List.of("tone")).build()).isEmpty());
 
-        @SuppressWarnings("unchecked")
-        org.mockito.ArgumentCaptor<List<ReferenceIndexEntry>> captor =
-                org.mockito.ArgumentCaptor.forClass(List.class);
-        verify(selector).select(any(), any(), any(), captor.capture());
-        assertTrue(captor.getValue().isEmpty(), "只重生基调时世界/反派资料不应进入候选");
+        verify(selector, never()).select(any(), any(), any(), anyList());
     }
 
     private static ReferenceIndexEntry entry(String fileName) {
@@ -319,7 +324,7 @@ class DynamicReferenceServiceTest {
     @Test
     void vectorModeRoutesToRetrieverWithoutLlmCall() {
         properties.setMode("vector");
-        when(retriever.retrieve(any(), any(), any()))
+        when(retriever.retrieve(any(VectorReferenceRetriever.Prepared.class), any(), any()))
                 .thenReturn(List.of("dialogue-writing"));
 
         List<PromptRule> rules = service.selectAsRules(null, PromptScene.CHAPTER_CONTENT, contentCtx(ChapterType.NORMAL));
@@ -332,7 +337,7 @@ class DynamicReferenceServiceTest {
     @Test
     void vectorFailureTerminatesWithoutLlmFallback() {
         properties.setMode("vector");
-        when(retriever.retrieve(any(), any(), any()))
+        when(retriever.retrieve(any(VectorReferenceRetriever.Prepared.class), any(), any()))
                 .thenThrow(new IllegalStateException("qdrant down"));
 
         // 快速失败：向量链路任何失败（欠费/向量库/网络）都终止作业，绝不降级 LLM 选择
@@ -341,7 +346,100 @@ class DynamicReferenceServiceTest {
 
         assertTrue(ex.getInfo().contains("不降级"));
         verify(selector, never()).select(any(), any(), any(), anyList());
-        verify(retriever, times(1)).retrieve(any(), any(), any());
+        verify(retriever, times(1)).retrieve(any(VectorReferenceRetriever.Prepared.class), any(), any());
+    }
+
+    @Test
+    void corpusVersionInvalidatesLoadedRulesWhenTitleAndDigestStayUnchanged() {
+        when(referenceIndexLoader.corpusVersion()).thenReturn("body-v1", "body-v2", "body-v2");
+        when(selector.select(any(), any(), any(), anyList())).thenReturn(List.of("dialogue-writing"));
+        when(fileLoader.load("references/dialogue-writing.md")).thenReturn("旧正文", "新正文");
+
+        var first = service.selectAsRules(null, PromptScene.CHAPTER_CONTENT, contentCtx(ChapterType.NORMAL));
+        var second = service.selectAsRules(null, PromptScene.CHAPTER_CONTENT, contentCtx(ChapterType.NORMAL));
+        var third = service.selectAsRules(null, PromptScene.CHAPTER_CONTENT, contentCtx(ChapterType.NORMAL));
+
+        assertEquals("旧正文", first.get(0).getContent());
+        assertEquals("新正文", second.get(0).getContent());
+        assertEquals("新正文", third.get(0).getContent());
+        verify(selector, times(2)).select(any(), any(), any(), anyList());
+    }
+
+    @Test
+    void disabledSourceCannotLeakFromOldCacheOrOutOfBoundsSelector() {
+        var policy = new ReferenceSourcePolicy(temp.resolve("state.json"));
+        when(referenceIndexLoader.sourcePolicy()).thenReturn(policy);
+        when(referenceIndexLoader.corpusVersion()).thenAnswer(inv -> "corpus-r" + policy.revision());
+        when(selector.select(any(), any(), any(), anyList())).thenReturn(List.of("dialogue-writing"));
+        assertEquals(1, service.selectAsRules(null, PromptScene.CHAPTER_CONTENT,
+                contentCtx(ChapterType.NORMAL)).size());
+        policy.setEnabled("dialogue-writing", false);
+        assertTrue(service.selectAsRules(null, PromptScene.CHAPTER_CONTENT,
+                contentCtx(ChapterType.NORMAL)).isEmpty());
+        policy.setEnabled("dialogue-writing", true);
+        assertEquals(1, service.selectAsRules(null, PromptScene.CHAPTER_CONTENT,
+                contentCtx(ChapterType.NORMAL)).size());
+        verify(selector, times(2)).select(any(), any(), any(), anyList());
+    }
+
+    @Test
+    void emptyEligibleCorpusShortCircuitsBothLegacyAndBlockPaths() {
+        when(referenceIndexLoader.getIndex()).thenReturn(List.of());
+        properties.setMode("vector");
+        var block = mock(ReferenceBlockRetriever.class);
+        properties.getContentBlocks().setEnabled(true);
+        service = new DynamicReferenceService(referenceIndexLoader, selector, retriever, fileLoader,
+                properties, llmRuntimeConfig, null, new ReferenceUsagePolicy(), block);
+        assertTrue(service.selectAsRules(null, PromptScene.CHAPTER_CONTENT, contentCtx(ChapterType.NORMAL)).isEmpty());
+        verify(block, never()).prepare(any());
+        verify(retriever, never()).retrieve(any(VectorReferenceRetriever.Prepared.class), any(), any());
+        verify(selector, never()).select(any(), any(), any(), anyList());
+    }
+
+    @Test
+    void legacyAndLlmSelectionsRecheckDisabledSourcesBeforeLoading() {
+        var policy = new ReferenceSourcePolicy(temp.resolve("state.json"));
+        policy.setEnabled("dialogue-writing", false);
+        when(referenceIndexLoader.sourcePolicy()).thenReturn(policy);
+        when(referenceIndexLoader.getIndex()).thenReturn(List.of(entry("dialogue-writing"), entry("pacing-control")));
+        when(selector.select(any(), any(), any(), anyList())).thenReturn(List.of("dialogue-writing"));
+        assertTrue(service.selectAsRules(null, PromptScene.CHAPTER_CONTENT, contentCtx(ChapterType.NORMAL)).isEmpty());
+        properties.setMode("vector");
+        when(retriever.retrieve(any(VectorReferenceRetriever.Prepared.class), any(), any())).thenReturn(List.of("dialogue-writing"));
+        assertTrue(service.selectAsRules(null, PromptScene.CHAPTER_CONTENT, contentCtx(ChapterType.NORMAL)).isEmpty());
+        verify(fileLoader, never()).load("references/dialogue-writing.md");
+    }
+
+    @Test
+    void legacyCacheIncludesTheFrozenEffectiveEmbeddingVersion() {
+        properties.setMode("vector");
+        when(legacyPrepared.versionKey()).thenReturn("space-v1", "space-v2", "space-v2");
+        when(retriever.retrieve(eq(legacyPrepared), any(), any())).thenReturn(List.of("dialogue-writing"));
+        service.selectAsRules(null, PromptScene.CHAPTER_CONTENT, contentCtx(ChapterType.NORMAL));
+        service.selectAsRules(null, PromptScene.CHAPTER_CONTENT, contentCtx(ChapterType.NORMAL));
+        service.selectAsRules(null, PromptScene.CHAPTER_CONTENT, contentCtx(ChapterType.NORMAL));
+        verify(retriever, times(3)).prepare(any());
+        verify(retriever, times(2)).retrieve(eq(legacyPrepared), any(), any());
+    }
+
+    @Test
+    void cachedLegacySelectionCannotHideAnEmbeddingSpaceChange() {
+        properties.setMode("vector");
+        when(retriever.retrieve(eq(legacyPrepared), any(), any())).thenReturn(List.of("dialogue-writing"));
+        service.selectAsRules(null, PromptScene.CHAPTER_CONTENT, contentCtx(ChapterType.NORMAL));
+        when(retriever.prepare(any())).thenThrow(new IllegalStateException("空间已变化，请显式重建"));
+        assertThrows(AppException.class,
+                () -> service.selectAsRules(null, PromptScene.CHAPTER_CONTENT, contentCtx(ChapterType.NORMAL)));
+        verify(retriever, times(1)).retrieve(eq(legacyPrepared), any(), any());
+    }
+
+    @Test
+    void publicInvalidateForcesSelectionAgainWithoutChangingCorpus() {
+        when(selector.select(any(), any(), any(), anyList())).thenReturn(List.of("dialogue-writing"));
+        service.selectAsRules(null, PromptScene.CHAPTER_CONTENT, contentCtx(ChapterType.NORMAL));
+        service.invalidate();
+        service.selectAsRules(null, PromptScene.CHAPTER_CONTENT, contentCtx(ChapterType.NORMAL));
+        verify(selector, times(2)).select(any(), any(), any(), anyList());
     }
 
     private PromptContext planCtx() {

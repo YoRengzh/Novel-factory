@@ -3,10 +3,14 @@ package cn.novel.yonren.infrastructure.adapter.repository;
 import cn.novel.yonren.domain.novel.adapter.repository.VectorStore;
 import cn.novel.yonren.domain.novel.model.valobj.ScoredVectorPoint;
 import cn.novel.yonren.domain.novel.model.valobj.StoredPoint;
+import cn.novel.yonren.domain.novel.model.valobj.VectorCollectionInfo;
 import cn.novel.yonren.domain.novel.model.valobj.VectorPoint;
+import cn.novel.yonren.domain.novel.model.valobj.VectorPointPage;
+import cn.novel.yonren.domain.novel.model.valobj.VectorPointView;
 import io.qdrant.client.QdrantClient;
 import io.qdrant.client.QdrantGrpcClient;
 import io.qdrant.client.grpc.Collections.CollectionInfo;
+import io.qdrant.client.grpc.Collections.CollectionStatus;
 import io.qdrant.client.grpc.Collections.CreateCollection;
 import io.qdrant.client.grpc.Collections.Distance;
 import io.qdrant.client.grpc.Collections.VectorParams;
@@ -34,14 +38,23 @@ import io.qdrant.client.grpc.Points.WithPayloadSelector;
 import io.qdrant.client.grpc.Points.WithVectorsSelector;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Component;
 
+import java.io.ByteArrayInputStream;
+import java.io.ByteArrayOutputStream;
+import java.io.DataInputStream;
+import java.io.DataOutputStream;
+import java.io.IOException;
 import java.util.ArrayList;
+import java.util.Base64;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
+import java.util.UUID;
 import java.util.concurrent.TimeUnit;
 
 /**
@@ -57,6 +70,9 @@ public class QdrantVectorStore implements VectorStore {
     private static final long TIMEOUT_SECONDS = 30;
     /** 滚动分页页大小：对账要把整集合读回来（不含向量，单点很轻），256 足够少批次 */
     private static final int SCROLL_PAGE_SIZE = 256;
+    private static final String CURSOR_PREFIX = "qdrant-v1-";
+    private static final int MAX_CURSOR_LENGTH = 100_000;
+    private final String collectionPrefix;
     //熔断到哪个时刻
     private volatile long circuitOpenUntilMs = 0;
     /**
@@ -68,8 +84,12 @@ public class QdrantVectorStore implements VectorStore {
 
     private final QdrantClient client;
 
+    @Autowired
     public QdrantVectorStore(@Value("${story.vector-store.host:localhost}") String host,
-                             @Value("${story.vector-store.port:6334}") int port) {
+                             @Value("${story.vector-store.port:6334}") int port,
+                             @Value("${story.memory.collection-prefix:novel-memory}") String collectionPrefix) {
+        validateCollectionName(collectionPrefix);
+        this.collectionPrefix = collectionPrefix;
         QdrantClient created = null;
         try {
             // QdrantGrpcClient 构建时会做一次版本健康检查，Qdrant 未启动会在此抛异常；
@@ -80,6 +100,102 @@ public class QdrantVectorStore implements VectorStore {
             log.warn("Qdrant 客户端初始化失败（{}:{}），向量链路降级回 LLM 选择器：{}", host, port, e.getMessage());
         }
         this.client = created;
+    }
+
+    /** 保留原两参数生产构造的源兼容性；Spring 显式使用带 prefix 的构造。 */
+    public QdrantVectorStore(String host, int port) {
+        this(host, port, "novel-memory");
+    }
+
+    /** 测试只注入 mock，不构建 gRPC channel，也不连接任何真实服务。 */
+    QdrantVectorStore(QdrantClient client) {
+        this(client, "novel-memory");
+    }
+
+    QdrantVectorStore(QdrantClient client, String collectionPrefix) {
+        validateCollectionName(collectionPrefix);
+        this.client = Objects.requireNonNull(client);
+        this.collectionPrefix = collectionPrefix;
+    }
+
+    @Override
+    public String backendName() {
+        return "qdrant";
+    }
+
+    @Override
+    public List<VectorCollectionInfo> listCollections() {
+        QdrantClient qdrant = requireClient();
+        List<String> names;
+        try {
+            names = qdrant.listCollectionsAsync().get(TIMEOUT_SECONDS, TimeUnit.SECONDS);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new IllegalStateException("向量集合列举被中断", e);
+        } catch (Exception e) {
+            tripCircuitOnConnectionFailure(e);
+            throw new IllegalStateException("向量集合列举失败: " + e.getMessage(), e);
+        }
+        List<VectorCollectionInfo> result = new ArrayList<>();
+        for (String name : names.stream().filter(this::isManagedCollection).distinct().sorted().toList()) {
+            try {
+                CollectionInfo info = qdrant.getCollectionInfoAsync(name).get(TIMEOUT_SECONDS, TimeUnit.SECONDS);
+                int size = vectorSizeOf(info);
+                String error = info.hasOptimizerStatus() ? info.getOptimizerStatus().getError() : "";
+                if (error.isBlank() && info.getStatus() == CollectionStatus.Red) {
+                    error = "Qdrant 集合状态异常：" + info.getStatus();
+                }
+                result.add(new VectorCollectionInfo(name, size > 0 ? size : null, info.getPointsCount(),
+                        error.isBlank() ? "ready" : "error", error.isBlank() ? null : error));
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                throw new IllegalStateException("向量集合列举被中断", e);
+            } catch (Exception e) {
+                tripCircuitOnConnectionFailure(e);
+                result.add(new VectorCollectionInfo(name, null, -1, "error", e.getMessage()));
+            }
+        }
+        return List.copyOf(result);
+    }
+
+    @Override
+    public VectorPointPage pagePoints(String collection, String cursor, int limit) {
+        validateCollectionName(collection);
+        if (limit < 1 || limit > 100) {
+            throw new IllegalArgumentException("向量分页 limit 必须为 1..100");
+        }
+        PointId offset = cursor == null ? null : decodeCursor(collection, cursor);
+        QdrantClient qdrant = requireClient();
+        try {
+            if (!qdrant.collectionExistsAsync(collection).get(TIMEOUT_SECONDS, TimeUnit.SECONDS)) {
+                return new VectorPointPage(List.of(), null);
+            }
+            ScrollPoints.Builder request = ScrollPoints.newBuilder()
+                    .setCollectionName(collection)
+                    .setLimit(limit)
+                    .setWithPayload(WithPayloadSelector.newBuilder().setEnable(true).build())
+                    .setWithVectors(WithVectorsSelector.newBuilder().setEnable(false).build());
+            if (offset != null) {
+                request.setOffset(offset);
+            }
+            ScrollResponse page = qdrant.scrollAsync(request.build()).get(TIMEOUT_SECONDS, TimeUnit.SECONDS);
+            List<VectorPointView> points = page.getResultList().stream()
+                    .map(point -> new VectorPointView(pointIdOf(point.getId()), toStringPayload(point.getPayloadMap())))
+                    .toList();
+            return new VectorPointPage(points, page.hasNextPageOffset()
+                    ? encodeCursor(collection, page.getNextPageOffset()) : null);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new IllegalStateException("向量分页被中断", e);
+        } catch (Exception e) {
+            tripCircuitOnConnectionFailure(e);
+            throw new IllegalStateException("向量分页失败: " + e.getMessage(), e);
+        }
+    }
+
+    @Override
+    public void dropCollection(String collection) {
+        removeCollection(collection, "删除");
     }
 
     /** Qdrant 初始化失败后 client 为 null，各操作抛出可被降级链捕获的异常 */
@@ -98,6 +214,7 @@ public class QdrantVectorStore implements VectorStore {
 
     @Override
     public void ensureCollection(String collection, int vectorSize) {
+        validateCollectionName(collection);
         QdrantClient qdrant = requireClient();
         try {
             // 先查存在性：每章检查点都会幂等重入，盲调 create 会让客户端对 ALREADY_EXISTS 打 ERROR 堆栈
@@ -141,13 +258,23 @@ public class QdrantVectorStore implements VectorStore {
     /** 集合当前向量维度；结构缺失（老集合/并发删除）返回 0，交由后续 upsert 暴露 */
     private int vectorSizeOf(QdrantClient qdrant, String collection) throws Exception {
         CollectionInfo info = qdrant.getCollectionInfoAsync(collection).get(TIMEOUT_SECONDS, TimeUnit.SECONDS);
+        return vectorSizeOf(info);
+    }
+
+    private int vectorSizeOf(CollectionInfo info) {
         if (!info.hasConfig() || !info.getConfig().hasParams() || !info.getConfig().getParams().hasVectorsConfig()) {
             return 0;
         }
-        VectorParams params = info.getConfig().getParams().getVectorsConfig().getParams();
-        // proto3 标量无 has 方法：未设置时 getSize() 返回 0，按"未知"处理（跳过守卫，交由 upsert 暴露）
-        long size = params.getSize();
-        return size > 0 ? (int) size : 0;
+        VectorsConfig vectors = info.getConfig().getParams().getVectorsConfig();
+        long size = vectors.hasParams() ? vectors.getParams().getSize() : 0;
+        if (vectors.hasParamsMap()) {
+            // 管理摘要只有一个 dimensions 槽；多 named vector 不冒充单一维度。
+            if (vectors.getParamsMap().getMapCount() != 1) {
+                return 0;
+            }
+            size = vectors.getParamsMap().getMapMap().values().iterator().next().getSize();
+        }
+        return size > 0 && size <= Integer.MAX_VALUE ? (int) size : 0;
     }
 
     /** 集合已存在但维度与当前 embedding 输出不一致：必须显式失败并指引重建，禁止静默混用 */
@@ -159,6 +286,7 @@ public class QdrantVectorStore implements VectorStore {
 
     @Override
     public void upsert(String collection, List<VectorPoint> points) {
+        validateCollectionName(collection);
         QdrantClient qdrant = requireClient();
         if (points == null || points.isEmpty()) {
             return;
@@ -177,7 +305,7 @@ public class QdrantVectorStore implements VectorStore {
                 p.getPayload().forEach((k, v) -> payload.put(k,
                         JsonWithInt.Value.newBuilder().setStringValue(v).build()));
                 structs.add(PointStruct.newBuilder()
-                        .setId(PointId.newBuilder().setUuid(p.getId()).build())
+                        .setId(parsePointId(p.getId()))
                         .setVectors(Vectors.newBuilder()
                                 .setVector(Vector.newBuilder().addAllData(toFloatList(p.getVector())).build())
                                 .build())
@@ -205,18 +333,23 @@ public class QdrantVectorStore implements VectorStore {
 
     @Override
     public void clear(String collection) {
+        removeCollection(collection, "清空");
+    }
+
+    private void removeCollection(String collection, String action) {
+        validateCollectionName(collection);
         QdrantClient qdrant = requireClient();
         try {
             if (qdrant.collectionExistsAsync(collection).get(TIMEOUT_SECONDS, TimeUnit.SECONDS)) {
                 qdrant.deleteCollectionAsync(collection).get(TIMEOUT_SECONDS, TimeUnit.SECONDS);
-                log.info("向量集合已清空（删除后将由下次写入重建）：{}", collection);
+                log.info("向量集合已{}（删除后将由下次写入重建）：{}", action, collection);
             }
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
-            throw new IllegalStateException("向量集合清空被中断", e);
+            throw new IllegalStateException("向量集合" + action + "被中断", e);
         } catch (Exception e) {
             tripCircuitOnConnectionFailure(e);
-            throw new IllegalStateException("向量集合清空失败: " + e.getMessage(), e);
+            throw new IllegalStateException("向量集合" + action + "失败: " + e.getMessage(), e);
         }
     }
 
@@ -228,6 +361,7 @@ public class QdrantVectorStore implements VectorStore {
     @Override
     public List<ScoredVectorPoint> search(String collection, float[] queryVector, int limit,
                                           String field, java.util.Collection<String> fieldValues) {
+        validateCollectionName(collection);
         if (fieldValues != null && fieldValues.isEmpty()) {
             return List.of();
         }
@@ -255,7 +389,7 @@ public class QdrantVectorStore implements VectorStore {
             List<ScoredVectorPoint> points = new ArrayList<>(results.size());
             for (ScoredPoint sp : results) {
                 points.add(ScoredVectorPoint.builder()
-                        .id(sp.getId().getUuid())
+                        .id(pointIdOf(sp.getId()))
                         .score(sp.getScore())
                         .payload(toStringPayload(sp.getPayloadMap()))
                         .build());
@@ -272,6 +406,7 @@ public class QdrantVectorStore implements VectorStore {
 
     @Override
     public List<StoredPoint> listPoints(String collection) {
+        validateCollectionName(collection);
         QdrantClient qdrant = requireClient();
         List<StoredPoint> points = new ArrayList<>();
         try {
@@ -314,12 +449,13 @@ public class QdrantVectorStore implements VectorStore {
 
     @Override
     public void delete(String collection, List<String> ids) {
+        validateCollectionName(collection);
         if (ids == null || ids.isEmpty()) {
             return;
         }
         QdrantClient qdrant = requireClient();
         PointsIdsList idList = PointsIdsList.newBuilder()
-                .addAllIds(ids.stream().map(id -> PointId.newBuilder().setUuid(id).build()).toList())
+                .addAllIds(ids.stream().map(QdrantVectorStore::parsePointId).toList())
                 .build();
         try {
             qdrant.deleteAsync(DeletePoints.newBuilder()
@@ -339,6 +475,7 @@ public class QdrantVectorStore implements VectorStore {
 
     @Override
     public long count(String collection) {
+        validateCollectionName(collection);
         QdrantClient qdrant = requireClient();
         try {
             if (!qdrant.collectionExistsAsync(collection).get(TIMEOUT_SECONDS, TimeUnit.SECONDS)) {
@@ -354,9 +491,108 @@ public class QdrantVectorStore implements VectorStore {
         }
     }
 
-    /** 点 id 取字面量：本链路写入的点都是 UUID，非法形态按数值型兜底，避免对账时静默丢键 */
+    /** 数值 id 为 Qdrant 的 uint64，必须按无符号十进制还原，不能变成负数字符串。 */
     private String pointIdOf(PointId id) {
-        return id.hasUuid() ? id.getUuid() : String.valueOf(id.getNum());
+        if (id.hasUuid()) {
+            return id.getUuid();
+        }
+        if (id.hasNum()) {
+            return Long.toUnsignedString(id.getNum());
+        }
+        throw new IllegalStateException("Qdrant 返回空点 id");
+    }
+
+    private static PointId parsePointId(String id) {
+        if (id == null || id.isEmpty()) {
+            throw new IllegalArgumentException("Qdrant 点 id 为空");
+        }
+        try {
+            if (id.matches("[0-9]{1,20}")) {
+                return PointId.newBuilder().setNum(Long.parseUnsignedLong(id)).build();
+            }
+            // uuid 缩写或路径不被接收，保留已存在的标准 UUID 字面值。
+            if (!UUID.fromString(id).toString().equalsIgnoreCase(id)) {
+                throw new IllegalArgumentException("Qdrant UUID 格式非法");
+            }
+            return PointId.newBuilder().setUuid(id).build();
+        } catch (IllegalArgumentException e) {
+            throw new IllegalArgumentException("Qdrant 点 id 必须为 UUID 或 uint64", e);
+        }
+    }
+
+    private void validateCollectionName(String name) {
+        if (name == null || name.isBlank() || name.contains("..") || name.endsWith(".")) {
+            throw new IllegalArgumentException("向量集合名非法");
+        }
+        for (int i = 0; i < name.length(); i++) {
+            char c = name.charAt(i);
+            if (!Character.isLetterOrDigit(c) && c != '-' && c != '_' && c != '.') {
+                throw new IllegalArgumentException("向量集合名含非法字符");
+            }
+        }
+        if (collectionPrefix != null && name.startsWith(collectionPrefix + "-")) {
+            String suffix = name.substring(collectionPrefix.length() + 1);
+            if (suffix.isBlank() || suffix.equals(".") || suffix.endsWith(".")) {
+                throw new IllegalArgumentException("故事集合 suffix 非法");
+            }
+        }
+    }
+
+    private boolean isManagedCollection(String name) {
+        try {
+            validateCollectionName(name);
+            return matchesPrefix(name, "novel-references") || matchesPrefix(name, "novel-reference-blocks")
+                    || matchesPrefix(name, "novel-world")
+                    || (name.startsWith(collectionPrefix + "-") && name.length() > collectionPrefix.length() + 1);
+        } catch (IllegalArgumentException e) {
+            return false;
+        }
+    }
+
+    private static boolean matchesPrefix(String name, String prefix) {
+        return name.equals(prefix) || (name.startsWith(prefix + "-") && name.length() > prefix.length() + 1);
+    }
+
+    /** cursor 封装原始 protobuf PointId；UUID/num oneof 与 scroll offset 语义完全保留。 */
+    private static String encodeCursor(String collection, PointId offset) {
+        try {
+            ByteArrayOutputStream bytes = new ByteArrayOutputStream();
+            try (DataOutputStream out = new DataOutputStream(bytes)) {
+                out.writeUTF(collection);
+                out.write(offset.toByteArray());
+            }
+            return CURSOR_PREFIX + Base64.getUrlEncoder().withoutPadding().encodeToString(bytes.toByteArray());
+        } catch (IOException e) {
+            throw new IllegalStateException("向量分页游标编码失败", e);
+        }
+    }
+
+    private static PointId decodeCursor(String collection, String cursor) {
+        if (!cursor.startsWith(CURSOR_PREFIX) || cursor.length() > MAX_CURSOR_LENGTH) {
+            throw new IllegalArgumentException("向量分页游标非法");
+        }
+        try {
+            String token = cursor.substring(CURSOR_PREFIX.length());
+            byte[] bytes = Base64.getUrlDecoder().decode(token);
+            if (!Base64.getUrlEncoder().withoutPadding().encodeToString(bytes).equals(token)) {
+                throw new IllegalArgumentException("向量分页游标编码非法");
+            }
+            try (DataInputStream in = new DataInputStream(new ByteArrayInputStream(bytes))) {
+                if (!collection.equals(in.readUTF())) {
+                    throw new IllegalArgumentException("向量分页游标不属于本集合");
+                }
+                PointId offset = PointId.parseFrom(in.readAllBytes());
+                if ((!offset.hasUuid() && !offset.hasNum()) || !offset.getUnknownFields().asMap().isEmpty()) {
+                    throw new IllegalArgumentException("向量分页游标缺少有效点 id");
+                }
+                if (offset.hasUuid()) {
+                    parsePointId(offset.getUuid());
+                }
+                return offset;
+            }
+        } catch (IOException | IllegalArgumentException e) {
+            throw new IllegalArgumentException("向量分页游标非法", e);
+        }
     }
 
     private List<Float> toFloatList(float[] vector) {

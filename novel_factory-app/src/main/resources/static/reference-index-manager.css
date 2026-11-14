@@ -1,0 +1,54 @@
+/* 集合粒度索引管理；所有后端内容以 textContent 渲染，沿用应用主题。 */
+.reference-index-manager { min-width: 0; overflow-wrap: anywhere; }
+.reference-index-manager .list-header { flex-wrap: wrap; align-items: center; gap: 8px; }
+.reference-index-manager .section-title { margin: 0; margin-right: auto; }
+.reference-index-manager button { letter-spacing: 0; font-size: 12px; padding: 8px 12px; }
+.reference-index-manager :is(button, select, input, summary):focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+.reference-index-summary { color: var(--text-secondary); font-size: 13px; white-space: pre-wrap; }
+.reference-index-heading { font-size: 15px; margin: 20px 0 12px; }
+.reference-index-toolbar { display: flex; align-items: end; flex-wrap: wrap; gap: 12px; margin: 20px 0 12px; }
+.reference-index-toolbar label, .reference-index-aux label { display: grid; gap: 6px; color: var(--text-secondary); font-size: 12px; }
+.reference-index-toolbar select, .reference-index-aux select { min-width: 160px; max-width: 100%; padding: 8px; background: var(--panel-2); color: var(--text); border: 1px solid var(--line-strong); border-radius: 5px; }
+.reference-index-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin: 12px 0; }
+.reference-index-actions > span { font-size: 12px; color: var(--text-secondary); }
+.reference-index-table-wrap { max-width: 100%; overflow-x: auto; border: 1px solid var(--line-strong); border-radius: 7px; margin-top: 14px; }
+.reference-index-table { width: 100%; min-width: 780px; border-collapse: collapse; font-size: 12px; text-align: left; }
+.reference-index-table th { color: var(--text-secondary); background: var(--panel-2); font-weight: 600; }
+.reference-index-table th, .reference-index-table td { padding: 10px 12px; border-bottom: 1px solid var(--line); vertical-align: top; }
+.reference-index-table tbody tr:last-child td { border-bottom: 0; }
+.reference-index-table tbody tr.is-selected { background: var(--accent-dim); }
+.reference-index-table input[type="checkbox"] { width: 16px; height: 16px; accent-color: var(--accent); cursor: pointer; }
+.reference-index-table input:disabled { cursor: default; }
+.reference-index-name { display: block; max-width: 250px; font-weight: 600; }
+.reference-index-owner { min-width: 180px; max-width: 300px; white-space: pre-wrap; }
+.reference-index-number { text-align: right; white-space: nowrap; }
+.reference-index-row-actions { display: flex; flex-direction: column; gap: 6px; min-width: 126px; }
+.reference-index-row-actions button { padding: 5px 8px; }
+.reference-index-meta { font-size: 11px; color: var(--text-secondary); margin: 5px 0; white-space: pre-wrap; }
+.reference-index-list { display: grid; gap: 10px; min-width: 0; }
+.reference-index-entry, .reference-index-point { min-width: 0; border: 1px solid var(--line-strong); border-radius: 7px; padding: 12px; background: var(--panel-2); }
+.reference-index-entry h4, .reference-index-point h4 { font-size: 14px; margin: 0 0 8px; }
+.reference-index-status, .reference-index-task, .reference-index-results, .reference-index-preview { margin-top: 16px; padding: 14px; border: 1px solid var(--line-strong); border-radius: 7px; background: var(--panel-2); font-size: 13px; white-space: pre-wrap; }
+.reference-index-preview { border-color: var(--accent); }
+.reference-index-preview h3, .reference-index-results h3 { font-size: 15px; margin: 0 0 10px; }
+.reference-index-preview p, .reference-index-task p, .reference-index-results p { margin: 8px 0; }
+.reference-index-results ul { margin: 10px 0 0; padding-left: 20px; }
+.reference-index-results li { margin: 8px 0; }
+.reference-index-manager .is-error, .reference-index-error { color: var(--error); }
+.reference-index-manager .is-error { border-color: var(--error); }
+.reference-index-manager .is-success { color: var(--ok); border-color: var(--ok); }
+.reference-index-aux { margin-top: 20px; border-top: 1px solid var(--line-strong); padding-top: 12px; }
+.reference-index-aux summary { cursor: pointer; font-size: 13px; color: var(--text-secondary); }
+.reference-index-aux[open] summary { margin-bottom: 14px; }
+.reference-index-points-panel { margin-top: 14px; }
+.reference-index-points-status { margin: 10px 0; font-size: 12px; color: var(--text-secondary); }
+.reference-index-point-text { margin-top: 12px; padding: 12px; background: var(--panel); border: 1px solid var(--line); border-radius: 5px; font: inherit; font-size: 13px; line-height: 1.85; white-space: pre-wrap; overflow-wrap: anywhere; max-height: 320px; overflow-y: auto; }
+.reference-index-manager .empty-hint { padding: 20px 12px; }
+@media (max-width: 760px) {
+    .reference-index-manager { padding: 18px 12px; }
+    .reference-index-manager .section-title { flex-basis: 100%; }
+    .reference-index-toolbar label { flex: 1 1 160px; }
+    .reference-index-toolbar select { width: 100%; min-width: 0; }
+    .reference-index-entry, .reference-index-point, .reference-index-preview, .reference-index-task, .reference-index-results, .reference-index-status { padding: 12px; }
+    .reference-index-manager button { max-width: 100%; overflow-wrap: anywhere; }
+}

@@ -3,7 +3,10 @@ package cn.novel.yonren.infrastructure.adapter.repository;
 import cn.novel.yonren.domain.novel.adapter.repository.VectorStore;
 import cn.novel.yonren.domain.novel.model.valobj.ScoredVectorPoint;
 import cn.novel.yonren.domain.novel.model.valobj.StoredPoint;
+import cn.novel.yonren.domain.novel.model.valobj.VectorCollectionInfo;
 import cn.novel.yonren.domain.novel.model.valobj.VectorPoint;
+import cn.novel.yonren.domain.novel.model.valobj.VectorPointPage;
+import cn.novel.yonren.domain.novel.model.valobj.VectorPointView;
 import com.alibaba.fastjson2.JSON;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -14,24 +17,29 @@ import org.springframework.stereotype.Component;
 
 import java.io.BufferedInputStream;
 import java.io.BufferedOutputStream;
+import java.io.ByteArrayInputStream;
+import java.io.ByteArrayOutputStream;
 import java.io.DataInputStream;
 import java.io.DataOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
-import java.nio.charset.StandardCharsets;
 import java.nio.file.AtomicMoveNotSupportedException;
 import java.nio.file.Files;
+import java.nio.file.LinkOption;
 import java.nio.file.Path;
+import java.nio.file.attribute.BasicFileAttributes;
 import java.nio.file.StandardCopyOption;
 import java.nio.file.StandardOpenOption;
 import java.util.ArrayList;
+import java.util.Base64;
+import java.util.Collections;
 import java.util.Comparator;
-import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
-import java.util.UUID;
+import java.util.TreeMap;
 import java.util.concurrent.ConcurrentHashMap;
 
 /**
@@ -46,8 +54,9 @@ import java.util.concurrent.ConcurrentHashMap;
  * 本实现写入时归一化为单位向量、检索时点积——单位向量的点积在数学上恒等于余弦相似度，
  * 召回排序与 Qdrant 时代严格一致；少一次检索期除法，代价是写入期一次性归一化。
  *
- * 落盘契约：每集合一个文件（集合名安全化后命名），写全部走
+ * 落盘契约：每集合一个文件（验证后使用原名，不做可能碰撞的字符替换），写全部走
  * 临时文件 + 原子替换（同 {@link StoryRepository} 的崩溃安全模式），读走内存快照。
+ * 全实例锁覆盖读、读改写、落盘和删除，避免旧快照在删除后复活集合。
  * 文件格式见 {@link #MAGIC}。
  *
  * 集合路由：故事集合（前缀 novel-memory-）写入根目录下对应故事目录的 memory/，
@@ -68,6 +77,9 @@ public class EmbeddedVectorStore implements VectorStore {
     private static final String SHARED_DIR = "vector-store";
     /** 文件扩展名 */
     private static final String EXT = ".nvbin";
+    private static final String CURSOR_PREFIX = "embedded-v1-";
+    private static final int MAX_CURSOR_LENGTH = 180_000;
+    private static final LinkOption[] NOFOLLOW = {LinkOption.NOFOLLOW_LINKS};
 
     /** 共享集合（世界/参考资料）的落盘根目录 */
     private final Path rootDir;
@@ -93,8 +105,9 @@ public class EmbeddedVectorStore implements VectorStore {
 
     /** 测试用构造：显式指定两个落盘根，隔离于真实仓库目录 */
     EmbeddedVectorStore(Path rootDir, Path workspaceDir, String collectionPrefix) {
-        this.rootDir = rootDir;
-        this.workspaceDir = workspaceDir;
+        validateName(collectionPrefix);
+        this.rootDir = rootDir.toAbsolutePath().normalize();
+        this.workspaceDir = workspaceDir.toAbsolutePath().normalize();
         this.collectionPrefix = collectionPrefix;
         log.info("内置向量库初始化：共享根 {}，故事根 {}（mode=embedded，零外部进程）",
                 rootDir.toAbsolutePath(), workspaceDir.toAbsolutePath());
@@ -102,12 +115,113 @@ public class EmbeddedVectorStore implements VectorStore {
 
     /** 单点的内存形态：归一化后的向量 + 业务 payload */
     private record Stored(float[] vector, Map<String, String> payload) {
+        private Stored {
+            vector = vector.clone();
+            payload = payload == null ? Map.of()
+                    : Collections.unmodifiableMap(new LinkedHashMap<>(payload));
+        }
     }
 
-    // ==================== 七个端口方法 ====================
+    // ==================== 管理只读视图与删除 ====================
 
     @Override
-    public void ensureCollection(String collection, int vectorSize) {
+    public synchronized String backendName() {
+        return "embedded";
+    }
+
+    @Override
+    public synchronized List<VectorCollectionInfo> listCollections() {
+        Map<String, VectorCollectionInfo> result = new TreeMap<>();
+        Path shared = checkedPath(rootDir, rootDir.resolve(SHARED_DIR));
+        try {
+            if (Files.isDirectory(shared, NOFOLLOW)) {
+                try (var files = Files.list(shared)) {
+                    for (Path file : files.toList()) {
+                        String name = collectionNameOf(file);
+                        if (name == null || !isManagedCollection(name) || name.startsWith(collectionPrefix + "-")) {
+                            continue;
+                        }
+                        result.put(name, infoOf(name));
+                    }
+                }
+            }
+            checkedPath(workspaceDir, workspaceDir);
+            if (Files.isDirectory(workspaceDir, NOFOLLOW)) {
+                try (var stories = Files.list(workspaceDir)) {
+                    for (Path story : stories.toList()) {
+                        // 不跟随故事链接，也不扫描正文/任意子目录，仅检查约定的向量文件。
+                        if (!Files.isDirectory(story, NOFOLLOW)) {
+                            continue;
+                        }
+                        String name = collectionPrefix + "-" + story.getFileName();
+                        try {
+                            Path file = fileOf(name);
+                            if (Files.exists(file, NOFOLLOW)) {
+                                result.put(name, infoOf(name));
+                            }
+                        } catch (IllegalArgumentException e) {
+                            // 不合法的磁盘目录不成为管理入口；合法名称的链接/越界则保留 error 留痕。
+                            if (isValidName(name) && isValidName(story.getFileName().toString())) {
+                                result.put(name, errorInfo(name, e));
+                            }
+                        } catch (IllegalStateException e) {
+                            result.put(name, errorInfo(name, e));
+                        }
+                    }
+                }
+            }
+        } catch (IOException e) {
+            throw new IllegalStateException("向量集合列举失败: " + e.getMessage(), e);
+        }
+        return List.copyOf(result.values());
+    }
+
+    @Override
+    public synchronized VectorPointPage pagePoints(String collection, String cursor, int limit) {
+        if (limit < 1 || limit > 100) {
+            throw new IllegalArgumentException("向量分页 limit 必须为 1..100");
+        }
+        fileOf(collection);
+        String afterId = cursor == null ? null : decodeCursor(collection, cursor);
+        CollectionState state = readFromDisk(collection);
+        List<VectorPointView> points = state.points.entrySet().stream()
+                .sorted(Map.Entry.comparingByKey())
+                .filter(e -> afterId == null || e.getKey().compareTo(afterId) > 0)
+                .limit(limit + 1L)
+                .map(e -> new VectorPointView(e.getKey(), e.getValue().payload()))
+                .collect(java.util.stream.Collectors.toCollection(ArrayList::new));
+        String nextCursor = null;
+        if (points.size() > limit) {
+            points.remove(points.size() - 1);
+            nextCursor = encodeCursor(collection, points.get(points.size() - 1).id());
+        }
+        return new VectorPointPage(points, nextCursor);
+    }
+
+    @Override
+    public synchronized void dropCollection(String collection) {
+        removeCollection(collection, "删除");
+    }
+
+    private VectorCollectionInfo infoOf(String name) {
+        try {
+            // 管理摘要读取磁盘快照而非热缓存，运行中的文件损坏同样必须可见。
+            CollectionState state = readFromDisk(name);
+            return new VectorCollectionInfo(name, state.vectorSize > 0 ? state.vectorSize : null,
+                    state.points.size(), "ready", null);
+        } catch (RuntimeException e) {
+            return errorInfo(name, e);
+        }
+    }
+
+    private VectorCollectionInfo errorInfo(String name, RuntimeException e) {
+        return new VectorCollectionInfo(name, null, -1, "error", e.getMessage());
+    }
+
+    // ==================== 既有业务端口方法 ====================
+
+    @Override
+    public synchronized void ensureCollection(String collection, int vectorSize) {
         if (vectorSize <= 0) {
             throw new IllegalStateException("向量集合 " + collection + " 的声明维度非法：" + vectorSize);
         }
@@ -134,7 +248,8 @@ public class EmbeddedVectorStore implements VectorStore {
     }
 
     @Override
-    public void upsert(String collection, List<VectorPoint> points) {
+    public synchronized void upsert(String collection, List<VectorPoint> points) {
+        fileOf(collection);
         if (points == null || points.isEmpty()) {
             return;
         }
@@ -157,7 +272,7 @@ public class EmbeddedVectorStore implements VectorStore {
     }
 
     @Override
-    public List<ScoredVectorPoint> search(String collection, float[] queryVector, int limit) {
+    public synchronized List<ScoredVectorPoint> search(String collection, float[] queryVector, int limit) {
         return search(collection, queryVector, limit, null, null);
     }
 
@@ -166,8 +281,9 @@ public class EmbeddedVectorStore implements VectorStore {
      * 事后删点会让不允许的候选占满名额，合法但分数稍低的点永远拿不到。
      */
     @Override
-    public List<ScoredVectorPoint> search(String collection, float[] queryVector, int limit,
+    public synchronized List<ScoredVectorPoint> search(String collection, float[] queryVector, int limit,
                                           String field, java.util.Collection<String> fieldValues) {
+        fileOf(collection);
         if (fieldValues != null && fieldValues.isEmpty()) {
             return List.of();
         }
@@ -208,20 +324,24 @@ public class EmbeddedVectorStore implements VectorStore {
     }
 
     @Override
-    public void clear(String collection) {
+    public synchronized void clear(String collection) {
+        removeCollection(collection, "清空");
+    }
+
+    private void removeCollection(String collection, String action) {
         Path file = fileOf(collection);
         try {
             Files.deleteIfExists(file);
         } catch (IOException e) {
-            throw new IllegalStateException("向量集合清空失败: " + e.getMessage(), e);
+            throw new IllegalStateException("向量集合" + action + "失败: " + e.getMessage(), e);
         }
         collections.remove(collection);
         dimensions.remove(collection);
-        log.info("向量集合已清空（删除文件，下次写入自动重建）：{}", collection);
+        log.info("向量集合已{}（删除文件，下次 ensureCollection 可重建）：{}", action, collection);
     }
 
     @Override
-    public List<StoredPoint> listPoints(String collection) {
+    public synchronized List<StoredPoint> listPoints(String collection) {
         // 对账契约：集合不存在 = 空表（与 QdrantVectorStore 语义一致，调用方据此走全量写入）
         Path file = fileOf(collection);
         if (!Files.exists(file)) {
@@ -241,7 +361,8 @@ public class EmbeddedVectorStore implements VectorStore {
     }
 
     @Override
-    public void delete(String collection, List<String> ids) {
+    public synchronized void delete(String collection, List<String> ids) {
+        fileOf(collection);
         if (ids == null || ids.isEmpty()) {
             return;
         }
@@ -259,7 +380,7 @@ public class EmbeddedVectorStore implements VectorStore {
     }
 
     @Override
-    public long count(String collection) {
+    public synchronized long count(String collection) {
         Path file = fileOf(collection);
         if (!Files.exists(file)) {
             return 0;
@@ -274,12 +395,13 @@ public class EmbeddedVectorStore implements VectorStore {
     }
 
     private CollectionState load(String collection) {
+        Path file = fileOf(collection);
         ConcurrentHashMap<String, Stored> map = collections.get(collection);
         if (map != null) {
             // 缓存命中前先确认磁盘文件仍在：用户可能手动删除故事目录（连同 nvbin）以释放空间。
             // 文件消失 → 丢弃缓存并回到"集合不存在"状态，避免已删数据被搜索命中或被下次写入复活。
             // 一次 stat 调用微秒级，且只在内存命中的路径上多这一次。
-            if (!Files.exists(fileOf(collection))) {
+            if (!Files.exists(file, NOFOLLOW)) {
                 collections.remove(collection);
                 dimensions.remove(collection);
                 log.info("向量集合 {} 的磁盘文件已不存在（故事目录被删除），缓存已失效", collection);
@@ -290,10 +412,12 @@ public class EmbeddedVectorStore implements VectorStore {
             return new CollectionState(dim, Map.copyOf(map));
         }
         CollectionState loaded = readFromDisk(collection);
-        ConcurrentHashMap<String, Stored> fresh = toConcurrent(loaded.points());
-        collections.putIfAbsent(collection, fresh);
-        dimensions.putIfAbsent(collection, loaded.vectorSize());
-        return new CollectionState(dimensions.get(collection), Map.copyOf(collections.get(collection)));
+        if (!Files.exists(file, NOFOLLOW)) {
+            return loaded;
+        }
+        collections.put(collection, toConcurrent(loaded.points()));
+        dimensions.put(collection, loaded.vectorSize());
+        return new CollectionState(loaded.vectorSize(), Map.copyOf(loaded.points()));
     }
 
     private CollectionState readFromDisk(String collection) {
@@ -301,7 +425,8 @@ public class EmbeddedVectorStore implements VectorStore {
         if (!Files.exists(file)) {
             return new CollectionState(0, Map.of());
         }
-        try (InputStream in = new BufferedInputStream(Files.newInputStream(file, StandardOpenOption.READ))) {
+        try (InputStream in = new BufferedInputStream(
+                Files.newInputStream(file, StandardOpenOption.READ, LinkOption.NOFOLLOW_LINKS))) {
             DataInputStream dis = new DataInputStream(in);
             int magic = dis.readInt();
             if (magic != MAGIC) {
@@ -313,7 +438,13 @@ public class EmbeddedVectorStore implements VectorStore {
             }
             int dim = dis.readInt();
             int count = dis.readInt();
-            Map<String, Stored> points = new LinkedHashMap<>(Math.max(16, count * 2));
+            // NVTB v1 不变；先校验自描述长度，损坏头部不能触发超大数组分配或静默空集合。
+            long bytes = Files.size(file);
+            long minimumPointBytes = 4L + 4L * dim;
+            if (dim <= 0 || count < 0 || (count > 0 && minimumPointBytes > (bytes - 16) / count)) {
+                throw new IllegalStateException("向量文件头部非法（维度/点数越界）：" + file);
+            }
+            Map<String, Stored> points = new LinkedHashMap<>();
             for (int i = 0; i < count; i++) {
                 String id = dis.readUTF();
                 float[] vector = new float[dim];
@@ -323,7 +454,12 @@ public class EmbeddedVectorStore implements VectorStore {
                 String payloadJson = dis.readUTF();
                 Map<String, String> payload = payloadJson.isEmpty()
                         ? null : JSON.<Map<String, String>>parseObject(payloadJson, mapType());
-                points.put(id, new Stored(vector, payload));
+                if (points.put(id, new Stored(vector, payload)) != null) {
+                    throw new IllegalStateException("向量文件包含重复点 id：" + file);
+                }
+            }
+            if (dis.read() != -1) {
+                throw new IllegalStateException("向量文件含多余尾部数据：" + file);
             }
             return new CollectionState(dim, points);
         } catch (IOException e) {
@@ -339,11 +475,14 @@ public class EmbeddedVectorStore implements VectorStore {
      */
     private void persist(String collection, int vectorSize, Map<String, Stored> points) {
         Path file = fileOf(collection);
+        Path tmp = null;
         try {
             Files.createDirectories(file.getParent());
-            Path tmp = file.resolveSibling(file.getFileName() + ".tmp-" + UUID.randomUUID());
+            file = fileOf(collection); // 建目录后再次校验链接与真实根边界。
+            tmp = Files.createTempFile(file.getParent(), file.getFileName() + ".tmp-", "");
             try (OutputStream out = new BufferedOutputStream(
-                    Files.newOutputStream(tmp, StandardOpenOption.CREATE, StandardOpenOption.TRUNCATE_EXISTING))) {
+                    Files.newOutputStream(tmp, StandardOpenOption.WRITE, StandardOpenOption.TRUNCATE_EXISTING,
+                            LinkOption.NOFOLLOW_LINKS))) {
                 DataOutputStream dos = new DataOutputStream(out);
                 dos.writeInt(MAGIC);
                 dos.writeInt(FORMAT_VERSION);
@@ -360,8 +499,9 @@ public class EmbeddedVectorStore implements VectorStore {
                             ? "" : JSON.toJSONString(payload));
                 }
             }
+            file = fileOf(collection);
             try {
-                Files.move(tmp, file, StandardCopyOption.ATOMIC_MOVE);
+                Files.move(tmp, file, StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING);
             } catch (AtomicMoveNotSupportedException fallback) {
                 Files.move(tmp, file, StandardCopyOption.REPLACE_EXISTING);
             }
@@ -369,6 +509,14 @@ public class EmbeddedVectorStore implements VectorStore {
             dimensions.put(collection, vectorSize);
         } catch (IOException e) {
             throw new IllegalStateException("向量写入失败（" + file + "）：" + e.getMessage(), e);
+        } finally {
+            if (tmp != null) {
+                try {
+                    Files.deleteIfExists(tmp);
+                } catch (IOException e) {
+                    log.warn("向量临时文件清理失败（{}）：{}", tmp, e.getMessage());
+                }
+            }
         }
     }
 
@@ -389,24 +537,131 @@ public class EmbeddedVectorStore implements VectorStore {
      * 集合名 → 落盘文件。故事集合（前缀命中）路由进故事目录（workspaceDir 布局）的
      * memory/vectors/ 子目录，实现"删故事目录 = 向量随葬"；其余（世界/参考资料）进共享目录。
      */
+    /** 原名落盘：保留已有安全中文名与 -_.，非法名字必须拒绝，绝不替换成另一个集合。 */
     private Path fileOf(String collection) {
+        validateName(collection);
         String prefix = collectionPrefix + "-";
         if (collection.startsWith(prefix)) {
             String storyDir = collection.substring(prefix.length());
-            return workspaceDir.resolve(storyDir)
+            validateName(storyDir);
+            Path file = workspaceDir.resolve(storyDir)
                     .resolve(StorageKeys.MEMORY_DIR).resolve("vectors")
-                    .resolve(safeFileName(collection) + EXT);
+                    .resolve(collection + EXT);
+            return checkedPath(workspaceDir, file);
         }
-        return rootDir.resolve(SHARED_DIR).resolve(safeFileName(collection) + EXT);
+        return checkedPath(rootDir, rootDir.resolve(SHARED_DIR).resolve(collection + EXT));
     }
 
-    /** 集合名到文件名的安全化：仅允许字母数字-_.，其余替换，防路径穿越与非法字符 */
-    private static String safeFileName(String collection) {
-        StringBuilder sb = new StringBuilder(collection.length());
-        for (char c : collection.toCharArray()) {
-            sb.append(Character.isLetterOrDigit(c) || c == '-' || c == '_' || c == '.' ? c : '_');
+    private static void validateName(String name) {
+        if (name == null || name.isBlank() || name.contains("..") || name.endsWith(".")) {
+            throw new IllegalArgumentException("向量集合名/故事目录名非法");
         }
-        return sb.toString();
+        for (int i = 0; i < name.length(); i++) {
+            char c = name.charAt(i);
+            if (!Character.isLetterOrDigit(c) && c != '-' && c != '_' && c != '.') {
+                throw new IllegalArgumentException("向量集合名/故事目录名含非法字符");
+            }
+        }
+        String stem = name.split("\\.", 2)[0].toUpperCase(Locale.ROOT);
+        if (stem.matches("CON|PRN|AUX|NUL|COM[1-9¹²³]|LPT[1-9¹²³]")) {
+            throw new IllegalArgumentException("向量集合名/故事目录名为 Windows 保留名称");
+        }
+    }
+
+    private static boolean isValidName(String name) {
+        try {
+            validateName(name);
+            return true;
+        } catch (IllegalArgumentException e) {
+            return false;
+        }
+    }
+
+    private boolean isManagedCollection(String name) {
+        return isValidName(name) && (matchesPrefix(name, "novel-references")
+                || matchesPrefix(name, "novel-reference-blocks")
+                || matchesPrefix(name, "novel-world")
+                || (name.startsWith(collectionPrefix + "-")
+                    && isValidName(name.substring(collectionPrefix.length() + 1))));
+    }
+
+    private static boolean matchesPrefix(String name, String prefix) {
+        return name.equals(prefix) || (name.startsWith(prefix + "-") && name.length() > prefix.length() + 1);
+    }
+
+    private static String collectionNameOf(Path file) {
+        String filename = file.getFileName().toString();
+        return filename.endsWith(EXT) ? filename.substring(0, filename.length() - EXT.length()) : null;
+    }
+
+    /** 校验每个已存在的路径组件，包括配置根的祖先；不跟随符号链接/Windows junction。 */
+    private static Path checkedPath(Path root, Path path) {
+        Path absolute = path.toAbsolutePath().normalize();
+        if (!absolute.startsWith(root)) {
+            throw new IllegalArgumentException("向量文件路径越出配置根目录");
+        }
+        Path current = absolute.getRoot();
+        try {
+            for (Path part : absolute) {
+                current = current.resolve(part);
+                if (!Files.exists(current, NOFOLLOW)) {
+                    break;
+                }
+                BasicFileAttributes attrs = Files.readAttributes(current, BasicFileAttributes.class, NOFOLLOW);
+                Path real = current.toRealPath();
+                if (attrs.isSymbolicLink() || attrs.isOther() || !real.equals(current.toRealPath(NOFOLLOW))) {
+                    throw new IllegalArgumentException("向量文件路径包含符号链接或重解析路径");
+                }
+                // Windows 不区分大小写；另一个名字不能成为已有集合/故事目录的别名。
+                if (current.startsWith(root) && !current.equals(root)
+                        && !current.getFileName().toString().equals(real.getFileName().toString())) {
+                    throw new IllegalArgumentException("向量文件路径与既有名称发生别名碰撞");
+                }
+            }
+            if (Files.exists(root, NOFOLLOW) && Files.exists(absolute, NOFOLLOW)
+                    && !absolute.toRealPath().startsWith(root.toRealPath())) {
+                throw new IllegalArgumentException("向量文件真实路径越出配置根目录");
+            }
+        } catch (IOException e) {
+            throw new IllegalStateException("向量文件路径校验失败: " + e.getMessage(), e);
+        }
+        return absolute;
+    }
+
+    private static String encodeCursor(String collection, String id) {
+        try {
+            ByteArrayOutputStream bytes = new ByteArrayOutputStream();
+            try (DataOutputStream out = new DataOutputStream(bytes)) {
+                out.writeUTF(collection);
+                out.writeUTF(id);
+            }
+            return CURSOR_PREFIX + Base64.getUrlEncoder().withoutPadding().encodeToString(bytes.toByteArray());
+        } catch (IOException e) {
+            throw new IllegalStateException("向量分页游标编码失败", e);
+        }
+    }
+
+    private static String decodeCursor(String collection, String cursor) {
+        if (!cursor.startsWith(CURSOR_PREFIX) || cursor.length() > MAX_CURSOR_LENGTH) {
+            throw new IllegalArgumentException("向量分页游标非法");
+        }
+        try {
+            String token = cursor.substring(CURSOR_PREFIX.length());
+            byte[] bytes = Base64.getUrlDecoder().decode(token);
+            if (!Base64.getUrlEncoder().withoutPadding().encodeToString(bytes).equals(token)) {
+                throw new IllegalArgumentException("向量分页游标编码非法");
+            }
+            try (DataInputStream in = new DataInputStream(new ByteArrayInputStream(bytes))) {
+                String encodedCollection = in.readUTF();
+                String id = in.readUTF();
+                if (!collection.equals(encodedCollection) || in.read() != -1) {
+                    throw new IllegalArgumentException("向量分页游标不属于本集合");
+                }
+                return id;
+            }
+        } catch (IOException | IllegalArgumentException e) {
+            throw new IllegalArgumentException("向量分页游标非法", e);
+        }
     }
 
     // ==================== 数学 ====================

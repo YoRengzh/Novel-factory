@@ -5,6 +5,8 @@ import cn.novel.yonren.domain.novel.model.valobj.LlmCall;
 import cn.novel.yonren.domain.novel.model.valobj.StoryVO;
 import cn.novel.yonren.domain.novel.service.armory.prompt.PromptBuilder;
 import cn.novel.yonren.domain.novel.service.armory.prompt.reference.DynamicReferenceService;
+import cn.novel.yonren.domain.novel.service.job.JobRegistry;
+import org.springframework.test.util.ReflectionTestUtils;
 import cn.novel.yonren.domain.novel.model.valobj.prompt.PromptContext;
 import cn.novel.yonren.types.enums.ModelScene;
 import cn.novel.yonren.types.enums.PromptScene;
@@ -24,6 +26,43 @@ import static org.mockito.Mockito.when;
  * 直接用最便宜档位生成千字级设定集，是"一键生成质量低下"的直接原因。
  */
 class LlmInvokeServiceSceneRoutingTest {
+
+    @Test
+    void modelFailureStillReleasesGlobalReferenceUse() {
+        PromptBuilder promptBuilder = mock(PromptBuilder.class);
+        LlmGateway gateway = mock(LlmGateway.class);
+        DynamicReferenceService references = mock(DynamicReferenceService.class);
+        JobRegistry registry = new JobRegistry();
+        when(promptBuilder.collectRules(any(), any())).thenReturn(List.of());
+        when(references.selectAsRules(any(), any(), any())).thenReturn(List.of());
+        when(gateway.complete(any(), any())).thenAnswer(call -> {
+            org.junit.jupiter.api.Assertions.assertFalse(registry.tryBeginReferenceOperation());
+            throw new IllegalStateException("test model failure");
+        });
+        LlmInvokeService service = new LlmInvokeService(promptBuilder, gateway, references);
+        ReflectionTestUtils.setField(service, "jobRegistry", registry);
+        StoryVO story = new StoryVO();
+        story.setModule(new StoryVO.Module());
+        org.junit.jupiter.api.Assertions.assertThrows(IllegalStateException.class, () ->
+                service.invoke(story, PromptScene.SETTING_DRAFT, PromptContext.builder().build(), "draft", null));
+        org.junit.jupiter.api.Assertions.assertTrue(registry.tryBeginReferenceOperation());
+        registry.endReferenceOperation();
+    }
+
+    @Test
+    void maintenanceRejectsSynchronousDraftBeforeLoadingRules() {
+        JobRegistry registry = new JobRegistry();
+        org.junit.jupiter.api.Assertions.assertTrue(registry.tryBeginReferenceOperation());
+        PromptBuilder promptBuilder = mock(PromptBuilder.class);
+        LlmGateway gateway = mock(LlmGateway.class);
+        DynamicReferenceService references = mock(DynamicReferenceService.class);
+        LlmInvokeService service = new LlmInvokeService(promptBuilder, gateway, references);
+        ReflectionTestUtils.setField(service, "jobRegistry", registry);
+        org.junit.jupiter.api.Assertions.assertThrows(IllegalStateException.class, () ->
+                service.invoke(new StoryVO(), PromptScene.SETTING_DRAFT, PromptContext.builder().build(), "draft", null));
+        org.mockito.Mockito.verifyNoInteractions(promptBuilder, gateway, references);
+        registry.endReferenceOperation();
+    }
 
     @Test
     void settingDraftRoutesToItsOwnSceneModel() {

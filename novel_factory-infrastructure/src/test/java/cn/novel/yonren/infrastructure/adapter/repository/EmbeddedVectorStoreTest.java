@@ -2,21 +2,35 @@ package cn.novel.yonren.infrastructure.adapter.repository;
 
 import cn.novel.yonren.domain.novel.model.valobj.ScoredVectorPoint;
 import cn.novel.yonren.domain.novel.model.valobj.StoredPoint;
+import cn.novel.yonren.domain.novel.model.valobj.VectorCollectionInfo;
 import cn.novel.yonren.domain.novel.model.valobj.VectorPoint;
+import cn.novel.yonren.domain.novel.model.valobj.VectorPointPage;
+import cn.novel.yonren.domain.novel.model.valobj.VectorPointView;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
+import java.io.DataOutputStream;
 import java.io.IOException;
 import java.nio.file.Files;
+import java.nio.file.LinkOption;
 import java.nio.file.Path;
+import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.HashMap;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
 
+import static org.junit.jupiter.api.Assumptions.assumeTrue;
+import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -281,5 +295,401 @@ class EmbeddedVectorStoreTest {
         EmbeddedVectorStore restarted = new EmbeddedVectorStore(tempDir.resolve("root"),
                 tempDir.resolve("workspace"), "novel-memory");
         assertThrows(IllegalStateException.class, () -> restarted.count("c11"));
+    }
+
+    // ---------- 管理列表与分页：只读、受管名称、无向量 ----------
+
+    @Test
+    void listingAndMissingPageDoNotCreateDirectories() {
+        assertEquals("embedded", store.backendName());
+        assertTrue(store.listCollections().isEmpty());
+        assertEquals(new VectorPointPage(List.of(), null), store.pagePoints("novel-references", null, 100));
+        assertFalse(Files.exists(tempDir.resolve("root")));
+        assertFalse(Files.exists(tempDir.resolve("workspace")));
+    }
+
+    @Test
+    void listCollectionsOnlyIncludesManagedFamiliesAndKeepsChineseStoryNames() throws IOException {
+        String block = "novel-reference-blocks-v2-abcd-d2";
+        String story = "novel-memory-诡秘之主_卷一";
+        List<String> expected = List.of("novel-references", block, story, "novel-world-shared");
+        for (String name : expected) {
+            store.ensureCollection(name, 2);
+        }
+        store.upsert("novel-references", List.of(point("p", vec(1, 0), "ref", "原始资料")));
+        for (String name : List.of("c1", "other-app", "novel-worldish", "novel-referencesOther")) {
+            store.ensureCollection(name, 2);
+        }
+        Path shared = tempDir.resolve("root/vector-store");
+        Files.write(shared.resolve("notes.nvbin"), new byte[]{1, 2, 3});
+        Files.write(shared.resolve("novel-world-temp.nvbin.tmp-ignored"), new byte[]{1, 2, 3});
+        Files.copy(shared.resolve("novel-references.nvbin"), shared.resolve("novel-memory-misplaced.nvbin"));
+        Path unrelated = tempDir.resolve("workspace/another-story/chapters");
+        Files.createDirectories(unrelated);
+        Files.write(unrelated.resolve("novel-world-hidden.nvbin"), new byte[]{1, 2, 3});
+
+        List<VectorCollectionInfo> infos = store.listCollections();
+        assertEquals(expected.stream().sorted().toList(), infos.stream().map(VectorCollectionInfo::name).toList());
+        for (VectorCollectionInfo info : infos) {
+            assertEquals(2, info.dimensions());
+            assertEquals("ready", info.status());
+            assertNull(info.error());
+        }
+        assertEquals(1, infos.stream().filter(info -> info.name().equals("novel-references")).findFirst().orElseThrow().pointCount());
+        assertTrue(Files.exists(tempDir.resolve("workspace/诡秘之主_卷一/memory/vectors")
+                .resolve(story + ".nvbin")), "安全中文名应直接使用原文件名，不迁移/替换");
+    }
+
+    @Test
+    void listCollectionsUsesConfiguredStoryPrefix() {
+        EmbeddedVectorStore custom = new EmbeddedVectorStore(tempDir.resolve("root"),
+                tempDir.resolve("workspace"), "custom-memory");
+        custom.ensureCollection("custom-memory-中文故事", 2);
+        custom.ensureCollection("novel-memory-not-managed", 2);
+        assertEquals(List.of("custom-memory-中文故事"), custom.listCollections().stream()
+                .map(VectorCollectionInfo::name).toList());
+    }
+
+    @Test
+    void pagePointsIsSortedBoundedAndReturnsAllPayloadWithoutVector() {
+        String collection = "novel-references";
+        store.ensureCollection(collection, 2);
+        Map<String, String> payload = new HashMap<>(Map.of("kind", "ref", "text", "全文",
+                "fileName", "资料.txt", "group", "用户资料", "docId", "doc-1", "contentHash", "abc"));
+        store.upsert(collection, List.of(point("c", vec(1, 0), "ref", "c"),
+                VectorPoint.builder().id("a").vector(vec(1, 0)).payload(payload).build(),
+                point("b", vec(1, 0), "ref", "b")));
+        payload.put("text", "调用者修改不得穿透快照");
+
+        VectorPointPage first = store.pagePoints(collection, null, 2);
+        assertEquals(List.of("a", "b"), first.points().stream().map(VectorPointView::id).toList());
+        assertEquals("全文", first.points().get(0).payload().get("text"));
+        assertEquals("doc-1", first.points().get(0).payload().get("docId"));
+        assertEquals(6, first.points().get(0).payload().size());
+        assertNotNull(first.nextCursor());
+        assertThrows(UnsupportedOperationException.class, () -> first.points().clear());
+        assertThrows(UnsupportedOperationException.class, () -> first.points().get(0).payload().put("text", "改"));
+        assertEquals(List.of("id", "payload"), Arrays.stream(VectorPointView.class.getRecordComponents())
+                .map(java.lang.reflect.RecordComponent::getName).toList());
+        assertEquals(List.of("points", "nextCursor"), Arrays.stream(VectorPointPage.class.getRecordComponents())
+                .map(java.lang.reflect.RecordComponent::getName).toList());
+
+        VectorPointPage last = store.pagePoints(collection, first.nextCursor(), 2);
+        assertEquals(List.of("c"), last.points().stream().map(VectorPointView::id).toList());
+        assertNull(last.nextCursor());
+        assertEquals(3, store.pagePoints(collection, null, 100).points().size());
+    }
+
+    @Test
+    void stableCursorSurvivesRestartAndDeletionOfBoundaryPoint() {
+        String collection = "novel-references";
+        store.ensureCollection(collection, 2);
+        store.upsert(collection, List.of(point("c", vec(1, 0), "ref", "c"),
+                point("a", vec(1, 0), "ref", "a"), point("b", vec(1, 0), "ref", "b")));
+        String cursor = store.pagePoints(collection, null, 1).nextCursor();
+        store.delete(collection, List.of("a", "b"));
+        store.upsert(collection, List.of(point("d", vec(1, 0), "ref", "d")));
+        EmbeddedVectorStore restarted = new EmbeddedVectorStore(tempDir.resolve("root"),
+                tempDir.resolve("workspace"), "novel-memory");
+        assertEquals(List.of("c", "d"), restarted.pagePoints(collection, cursor, 100).points().stream()
+                .map(VectorPointView::id).toList());
+    }
+
+    @Test
+    void pointIdsThatLookLikePathsRemainOpaqueDataNotFilePaths() {
+        String collection = "novel-references";
+        store.ensureCollection(collection, 2);
+        store.upsert(collection, List.of(point("../../outside", vec(1, 0), "ref", "path-like id"),
+                point("z", vec(1, 0), "ref", "z")));
+        VectorPointPage first = store.pagePoints(collection, null, 1);
+        assertEquals("../../outside", first.points().get(0).id());
+        assertFalse(first.nextCursor().contains(".."));
+        assertEquals("z", store.pagePoints(collection, first.nextCursor(), 1).points().get(0).id());
+        assertFalse(Files.exists(tempDir.resolve("outside")));
+    }
+
+    @Test
+    void pagePointsRejectsInvalidLimitsMalformedAndCrossCollectionCursors() {
+        for (int limit : new int[]{-1, 0, 101, Integer.MAX_VALUE}) {
+            assertThrows(IllegalArgumentException.class, () -> store.pagePoints("novel-references", null, limit));
+        }
+        for (String cursor : List.of("", "../outside", "C:\\outside", "embedded-v1-@@", "embedded-v1-AA")) {
+            assertThrows(IllegalArgumentException.class, () -> store.pagePoints("novel-references", cursor, 1));
+        }
+        store.ensureCollection("novel-references", 2);
+        store.upsert("novel-references", List.of(point("a", vec(1, 0), "ref", "a"), point("b", vec(1, 0), "ref", "b")));
+        String cursor = store.pagePoints("novel-references", null, 1).nextCursor();
+        assertThrows(IllegalArgumentException.class, () -> store.pagePoints("novel-world-shared", cursor, 1));
+    }
+
+    @Test
+    void corruptManagedCollectionIsVisibleWithoutBreakingOtherCollections() throws IOException {
+        store.ensureCollection("novel-references", 2);
+        store.upsert("novel-references", List.of(point("p", vec(1, 0), "ref", "healthy")));
+        store.ensureCollection("novel-reference-blocks-v2-broken-d2", 2);
+        Path broken = tempDir.resolve("root/vector-store/novel-reference-blocks-v2-broken-d2.nvbin");
+        Files.write(broken, new byte[]{1, 2, 3, 4});
+
+        List<VectorCollectionInfo> infos = store.listCollections();
+        VectorCollectionInfo bad = infos.stream().filter(info -> info.name().contains("broken")).findFirst().orElseThrow();
+        assertEquals("error", bad.status());
+        assertEquals(-1, bad.pointCount(), "损坏集合点数未知，不能冒充空集合");
+        assertNotNull(bad.error());
+        assertNull(bad.dimensions());
+        assertEquals("ready", infos.stream().filter(info -> info.name().equals("novel-references")).findFirst().orElseThrow().status());
+        assertThrows(IllegalStateException.class, () -> store.pagePoints(bad.name(), null, 1));
+        assertDoesNotThrow(() -> store.dropCollection(bad.name()));
+        assertFalse(Files.exists(broken));
+        assertEquals(1, store.listCollections().size());
+    }
+
+    @Test
+    void corruptedHeaderCannotBecomeAnEmptyReadyCollection() throws IOException {
+        Path shared = tempDir.resolve("root/vector-store");
+        Files.createDirectories(shared);
+        for (int[] header : List.of(new int[]{-1, 1}, new int[]{2, -1}, new int[]{2, Integer.MAX_VALUE})) {
+            String name = "novel-reference-blocks-bad-" + Math.abs((long) header[0]) + "-" + Math.abs((long) header[1]);
+            try (DataOutputStream out = new DataOutputStream(Files.newOutputStream(shared.resolve(name + ".nvbin")))) {
+                out.writeInt(0x4E565442);
+                out.writeInt(1);
+                out.writeInt(header[0]);
+                out.writeInt(header[1]);
+            }
+        }
+        assertEquals(3, store.listCollections().size());
+        assertTrue(store.listCollections().stream().allMatch(info -> info.status().equals("error")));
+    }
+
+    @Test
+    void dropIsIdempotentActuallyDeletesFileAndLeavesOtherStoryAssets() throws IOException {
+        String collection = "novel-memory-中文故事";
+        assertDoesNotThrow(() -> store.dropCollection(collection));
+        assertFalse(Files.exists(tempDir.resolve("workspace")));
+        store.ensureCollection(collection, 2);
+        store.upsert(collection, List.of(point("p", vec(1, 0), "chapter", "t")));
+        Path memory = tempDir.resolve("workspace/中文故事/memory");
+        Path unrelated = memory.resolve("summaries.json");
+        Files.writeString(unrelated, "keep");
+        Path file = memory.resolve("vectors").resolve(collection + ".nvbin");
+        store.dropCollection(collection);
+        assertFalse(Files.exists(file));
+        assertEquals("keep", Files.readString(unrelated));
+        assertEquals(0, store.count(collection));
+        assertTrue(store.listPoints(collection).isEmpty());
+        assertTrue(store.listCollections().isEmpty());
+        assertEquals(new VectorPointPage(List.of(), null), store.pagePoints(collection, null, 1));
+        assertDoesNotThrow(() -> store.dropCollection(collection));
+        store.ensureCollection(collection, 3);
+        assertEquals(3, store.listCollections().get(0).dimensions());
+    }
+
+    // ---------- 安全：拒绝越界/别名，不以替换后的安全名访问其它集合 ----------
+
+    @Test
+    void everyCollectionOperationRejectsUnsafeNamesEvenWhenInputIsEmpty() {
+        for (String name : List.of("../outside", "novel-memory-../outside", "novel-memory-..",
+                "novel-memory-.", "novel-memory-", "C:\\outside", "C:outside", "\\\\server\\share",
+                "/absolute", "novel-memory-CON", "NUL.txt", "novel-references-a?b", "ends.", "a\u0000b")) {
+            assertThrows(IllegalArgumentException.class, () -> store.ensureCollection(name, 2), name);
+            assertThrows(IllegalArgumentException.class, () -> store.upsert(name, List.of()), name);
+            assertThrows(IllegalArgumentException.class, () -> store.search(name, vec(1, 0), 1), name);
+            assertThrows(IllegalArgumentException.class, () -> store.listPoints(name), name);
+            assertThrows(IllegalArgumentException.class, () -> store.pagePoints(name, null, 1), name);
+            assertThrows(IllegalArgumentException.class, () -> store.count(name), name);
+            assertThrows(IllegalArgumentException.class, () -> store.delete(name, List.of()), name);
+            assertThrows(IllegalArgumentException.class, () -> store.clear(name), name);
+            assertThrows(IllegalArgumentException.class, () -> store.dropCollection(name), name);
+        }
+        assertFalse(Files.exists(tempDir.resolve("root")));
+        assertFalse(Files.exists(tempDir.resolve("workspace")));
+    }
+
+    @Test
+    void rejectedReplacementNamesCannotAliasAnExistingCollection() {
+        store.ensureCollection("novel-references-a_b", 2);
+        store.upsert("novel-references-a_b", List.of(point("p", vec(1, 0), "ref", "保留")));
+        for (String name : List.of("novel-references-a/b", "novel-references-a?b", "novel-references-a b")) {
+            assertThrows(IllegalArgumentException.class, () -> store.dropCollection(name));
+            assertThrows(IllegalArgumentException.class, () -> store.pagePoints(name, null, 1));
+        }
+        assertEquals(1, store.count("novel-references-a_b"));
+        assertEquals("保留", store.pagePoints("novel-references-a_b", null, 1).points().get(0).payload().get("text"));
+    }
+
+    @Test
+    void caseInsensitiveFileAliasIsRejectedWhenPlatformHasOne() throws IOException {
+        String collection = "novel-references-Case";
+        store.ensureCollection(collection, 2);
+        Path file = tempDir.resolve("root/vector-store").resolve(collection + ".nvbin");
+        Path alias = file.resolveSibling("novel-references-case.nvbin");
+        assumeTrue(Files.exists(alias) && Files.isSameFile(file, alias), "平台文件名区分大小写");
+        assertThrows(IllegalArgumentException.class, () -> store.dropCollection("novel-references-case"));
+        assertTrue(Files.exists(file));
+    }
+
+    @Test
+    void symbolicCollectionFileIsErrorAndCannotBeReadWrittenOrDeleted() throws IOException {
+        store.ensureCollection("novel-references", 2);
+        Path outside = tempDir.resolve("outside.nvbin");
+        Files.writeString(outside, "outside must remain untouched");
+        String name = "novel-reference-blocks-linked";
+        Path link = tempDir.resolve("root/vector-store").resolve(name + ".nvbin");
+        createSymbolicLinkOrSkip(link, outside);
+        assertThrows(IllegalArgumentException.class, () -> store.count(name));
+        assertThrows(IllegalArgumentException.class, () -> store.ensureCollection(name, 2));
+        assertThrows(IllegalArgumentException.class, () -> store.pagePoints(name, null, 1));
+        assertThrows(IllegalArgumentException.class, () -> store.dropCollection(name));
+        VectorCollectionInfo info = store.listCollections().stream().filter(it -> it.name().equals(name)).findFirst().orElseThrow();
+        assertEquals("error", info.status());
+        assertEquals("outside must remain untouched", Files.readString(outside));
+        assertTrue(Files.isSymbolicLink(link));
+    }
+
+    @Test
+    void symbolicStoryDirectoryCannotEscapeWorkspaceAndIsNotEnumerated() throws IOException {
+        Path outside = tempDir.resolve("outside-story");
+        Files.createDirectories(outside);
+        Files.createDirectories(tempDir.resolve("workspace"));
+        createSymbolicLinkOrSkip(tempDir.resolve("workspace/linked"), outside);
+        assertThrows(IllegalArgumentException.class, () -> store.ensureCollection("novel-memory-linked", 2));
+        assertThrows(IllegalArgumentException.class, () -> store.dropCollection("novel-memory-linked"));
+        assertTrue(store.listCollections().isEmpty());
+        try (var files = Files.list(outside)) {
+            assertEquals(0, files.count());
+        }
+    }
+
+    @Test
+    void symbolicRootAndMemoryDirectoriesCannotEscapeManagedRoots() throws IOException {
+        Path outside = tempDir.resolve("outside");
+        Files.createDirectories(outside);
+        Path rootLink = tempDir.resolve("linked-root");
+        createSymbolicLinkOrSkip(rootLink, outside);
+        EmbeddedVectorStore linked = new EmbeddedVectorStore(rootLink, tempDir.resolve("workspace"), "novel-memory");
+        assertThrows(IllegalArgumentException.class, () -> linked.listCollections());
+        assertThrows(IllegalArgumentException.class, () -> linked.ensureCollection("novel-references", 2));
+        Path story = tempDir.resolve("workspace/linked-memory");
+        Files.createDirectories(story);
+        createSymbolicLinkOrSkip(story.resolve("memory"), outside);
+        assertThrows(IllegalArgumentException.class, () -> store.ensureCollection("novel-memory-linked-memory", 2));
+        assertEquals("error", store.listCollections().get(0).status());
+        try (var files = Files.list(outside)) {
+            assertEquals(0, files.count());
+        }
+    }
+
+    // ---------- 并发：读改写与删除必须共用同一锁，不能复活旧快照 ----------
+
+    @Test
+    void clearAndDropCannotBeOverwrittenByAnInFlightUpsertSnapshot() throws Exception {
+        assertMutationWaitsForUpsert(() -> store.dropCollection("novel-references-atomic"), List.of());
+        assertMutationWaitsForUpsert(() -> store.clear("novel-references-atomic"), List.of());
+    }
+
+    @Test
+    void pointDeletionCannotBeOverwrittenByAnInFlightUpsertSnapshot() throws Exception {
+        assertMutationWaitsForUpsert(() -> store.delete("novel-references-atomic", List.of("old")), List.of("new"));
+    }
+
+    @Test
+    void concurrentUpsertsDoNotLoseIndependentPoints() throws Exception {
+        String collection = "novel-references-concurrent";
+        store.ensureCollection(collection, 2);
+        var executor = Executors.newFixedThreadPool(4);
+        CountDownLatch start = new CountDownLatch(1);
+        try {
+            List<java.util.concurrent.Future<?>> writes = new ArrayList<>();
+            for (int i = 0; i < 16; i++) {
+                String id = "point-" + i;
+                writes.add(executor.submit(() -> {
+                    try {
+                        start.await();
+                    } catch (InterruptedException e) {
+                        Thread.currentThread().interrupt();
+                        throw new IllegalStateException(e);
+                    }
+                    store.upsert(collection, List.of(point(id, vec(1, 0), "ref", id)));
+                }));
+            }
+            start.countDown();
+            for (var write : writes) {
+                write.get(10, TimeUnit.SECONDS);
+            }
+        } finally {
+            start.countDown();
+            executor.shutdownNow();
+            assertTrue(executor.awaitTermination(5, TimeUnit.SECONDS));
+        }
+        assertEquals(16, store.count(collection));
+        EmbeddedVectorStore restarted = new EmbeddedVectorStore(tempDir.resolve("root"),
+                tempDir.resolve("workspace"), "novel-memory");
+        assertEquals(16, restarted.count(collection));
+    }
+
+    private void assertMutationWaitsForUpsert(Runnable mutation, List<String> expectedIds) throws Exception {
+        String collection = "novel-references-atomic";
+        store.ensureCollection(collection, 2);
+        store.upsert(collection, List.of(point("old", vec(1, 0), "ref", "old")));
+        CountDownLatch snapshotTaken = new CountDownLatch(1);
+        CountDownLatch releaseUpsert = new CountDownLatch(1);
+        CountDownLatch mutationStarted = new CountDownLatch(1);
+        CountDownLatch mutationDone = new CountDownLatch(1);
+        List<VectorPoint> blocking = new java.util.AbstractList<>() {
+            @Override
+            public VectorPoint get(int index) {
+                snapshotTaken.countDown();
+                try {
+                    if (!releaseUpsert.await(5, TimeUnit.SECONDS)) {
+                        throw new IllegalStateException("测试未释放写入");
+                    }
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                    throw new IllegalStateException(e);
+                }
+                return point("new", vec(1, 0), "ref", "new");
+            }
+
+            @Override
+            public int size() {
+                return 1;
+            }
+        };
+        var executor = Executors.newFixedThreadPool(2);
+        try {
+            var write = executor.submit(() -> store.upsert(collection, blocking));
+            assertTrue(snapshotTaken.await(5, TimeUnit.SECONDS));
+            var removal = executor.submit(() -> {
+                mutationStarted.countDown();
+                try {
+                    mutation.run();
+                } finally {
+                    mutationDone.countDown();
+                }
+            });
+            assertTrue(mutationStarted.await(5, TimeUnit.SECONDS));
+            assertFalse(mutationDone.await(150, TimeUnit.MILLISECONDS), "删除必须等待持有旧快照的写入释放锁");
+            releaseUpsert.countDown();
+            write.get(5, TimeUnit.SECONDS);
+            removal.get(5, TimeUnit.SECONDS);
+        } finally {
+            releaseUpsert.countDown();
+            executor.shutdownNow();
+            assertTrue(executor.awaitTermination(5, TimeUnit.SECONDS));
+        }
+        assertEquals(expectedIds, store.pagePoints(collection, null, 100).points().stream().map(VectorPointView::id).toList());
+        EmbeddedVectorStore restarted = new EmbeddedVectorStore(tempDir.resolve("root"),
+                tempDir.resolve("workspace"), "novel-memory");
+        assertEquals(expectedIds.size(), restarted.count(collection));
+        if (expectedIds.isEmpty()) {
+            assertFalse(Files.exists(tempDir.resolve("root/vector-store").resolve(collection + ".nvbin")));
+        }
+    }
+
+    private static void createSymbolicLinkOrSkip(Path link, Path target) throws IOException {
+        try {
+            Files.createSymbolicLink(link, target);
+        } catch (IOException | UnsupportedOperationException | SecurityException e) {
+            assumeTrue(false, "平台不支持/不允许符号链接：" + e.getMessage());
+        }
     }
 }

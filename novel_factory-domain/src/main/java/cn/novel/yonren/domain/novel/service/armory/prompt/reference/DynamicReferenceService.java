@@ -45,7 +45,7 @@ public class DynamicReferenceService {
      */
     private final ReferenceBlockRetriever blockRetriever;
 
-    /** 选择结果缓存：LRU（accessOrder）+ 容量封顶；key 含索引哈希，资料更新即失效 */
+    /** 选择结果缓存：LRU + 容量封顶，完整正文/启停版本参与 key。 */
     private final Map<String, List<PromptRule>> selectionCache = Collections.synchronizedMap(
             new LinkedHashMap<>(16, 0.75f, true) {
                 @Override
@@ -65,7 +65,11 @@ public class DynamicReferenceService {
             return List.of();
         }
 
-        List<ReferenceIndexEntry> index = referenceIndexLoader.getIndex();
+        List<ReferenceIndexEntry> index = filterEnabled(referenceIndexLoader.getIndex());
+        if (index.isEmpty()) {
+            invalidate();
+            return List.of();
+        }
         // 按场景裁剪索引：58 份平铺时选择器要在长表里挑 3 份，选准率随条目数下降；
         // 先筛到该场景实际可用的分组，选择范围更聚焦（向量模式不受影响，它走语义召回）
         boolean blockMode = blockRetriever != null && isBlockMode(config, scene);
@@ -73,7 +77,29 @@ public class DynamicReferenceService {
         if (!blockMode) {
             sceneIndex = filterByUsage(sceneIndex, scene, ctx);
         }
+        if (sceneIndex.isEmpty()) {
+            return List.of();
+        }
         String cacheKey = buildCacheKey(module, scene, ctx, sceneIndex) + "|" + blockMode;
+        ReferenceBlockRetriever.Prepared prepared = null;
+        VectorReferenceRetriever.Prepared legacyPrepared = null;
+        if (blockMode) {
+            try {
+                prepared = blockRetriever.prepare(module);
+                cacheKey += "|" + prepared.versionKey();
+            } catch (Exception e) {
+                throw new AppException(ResponseCode.UN_ERROR.getCode(),
+                        "动态资料块准备失败，不降级文件级路径，作业终止：" + e.getMessage(), e);
+            }
+        } else if (isVectorMode(config)) {
+            try {
+                legacyPrepared = vectorReferenceRetriever.prepare(module);
+                cacheKey += "|" + legacyPrepared.versionKey();
+            } catch (Exception e) {
+                throw new AppException(ResponseCode.UN_ERROR.getCode(),
+                        "动态资料向量准备失败，不降级 LLM 选择，作业终止：" + e.getMessage(), e);
+            }
+        }
         if (config.isCacheEnabled()) {
             List<PromptRule> cached = selectionCache.get(cacheKey);
             if (cached != null) {
@@ -83,7 +109,7 @@ public class DynamicReferenceService {
         }
 
         if (blockMode) {
-            List<PromptRule> blocks = selectBlocks(module, scene, ctx, sceneIndex);
+            List<PromptRule> blocks = selectBlocks(prepared, scene, ctx, sceneIndex);
             if (config.isCacheEnabled()) {
                 selectionCache.put(cacheKey, blocks);
             }
@@ -95,7 +121,7 @@ public class DynamicReferenceService {
             // 快速失败：向量链路任何失败（欠费/鉴权/向量库/网络）都终止作业，不降级 LLM 选择——
             // llm 选择质量明显差于向量检索，静默降级会让作业在低质量注入下跑完
             try {
-                selected = vectorReferenceRetriever.retrieve(module, scene, ctx);
+                selected = vectorReferenceRetriever.retrieve(legacyPrepared, scene, ctx);
             } catch (Exception e) {
                 throw new AppException(ResponseCode.UN_ERROR.getCode(),
                         "动态资料向量检索失败，不降级 LLM 选择，作业终止：" + e.getMessage(), e);
@@ -106,7 +132,9 @@ public class DynamicReferenceService {
         // 正文场景用收紧预算：写正文时模型需要的是本章计划而非教材，整篇资料会稀释注意力
         int recallChars = scene == PromptScene.CHAPTER_CONTENT
                 ? config.getContentSceneRecallChars() : config.getMaxRecallChars();
-        List<PromptRule> rules = loadRules(selected, config.getMaxSelected(), recallChars, scene, ctx);
+        Set<String> eligibleFiles = sceneIndex.stream().map(ReferenceIndexEntry::getFileName)
+                .collect(Collectors.toUnmodifiableSet());
+        List<PromptRule> rules = loadRules(selected, config.getMaxSelected(), recallChars, scene, ctx, eligibleFiles);
 
         if (config.isCacheEnabled()) {
             selectionCache.put(cacheKey, rules);
@@ -114,6 +142,23 @@ public class DynamicReferenceService {
         log.info("动态资料装配完成，key: {}, 模式: {}, 选中 {} 份，注入 {} 条规则",
                 cacheKey, llmRuntimeConfig.effectiveReferenceMode(config.getMode()), selected.size(), rules.size());
         return rules;
+    }
+
+    /** 管理变更后可显式清选择缓存；不触发选择、embedding 或向量写入。 */
+    public void invalidate() {
+        selectionCache.clear();
+    }
+
+    private boolean sourceEnabled(String fileName) {
+        ReferenceSourcePolicy policy = referenceIndexLoader.sourcePolicy();
+        return fileName != null && (policy == null || policy.isEnabled(fileName));
+    }
+
+    private List<ReferenceIndexEntry> filterEnabled(List<ReferenceIndexEntry> index) {
+        if (index == null || index.isEmpty()) {
+            return List.of();
+        }
+        return index.stream().filter(entry -> entry != null && sourceEnabled(entry.getFileName())).toList();
     }
 
     /**
@@ -164,13 +209,13 @@ public class DynamicReferenceService {
      * 块级选择：本地快照上先按用途资格筛出允许的原子，再把白名单交给服务端过滤，
      * 确保不合格候选不会先占满 topK。失败快速终止，不静默降级到文件级。
      */
-    private List<PromptRule> selectBlocks(StoryVO.Module module, PromptScene scene, PromptContext ctx,
+    private List<PromptRule> selectBlocks(ReferenceBlockRetriever.Prepared prepared, PromptScene scene, PromptContext ctx,
                                           List<ReferenceIndexEntry> sceneIndex) {
         ReferenceSelectorProperties.ContentBlocks blocks = selectorProperties.blocksFor(scene);
         try {
-            ReferenceBlockRetriever.Prepared prepared = blockRetriever.prepare(module);
             Set<String> usageAllowedAtoms = prepared.snapshot().atoms().stream()
-                    .filter(atom -> usagePolicy.allowsSection(atom.docId(), atom.headingPath(), scene, ctx))
+                    .filter(atom -> sourceEnabled(atom.docId())
+                            && usagePolicy.allowsSection(atom.docId(), atom.headingPath(), scene, ctx))
                     .map(ReferenceAtom::atomId).collect(Collectors.toUnmodifiableSet());
             Set<String> usageDocs = prepared.snapshot().atoms().stream()
                     .filter(atom -> usageAllowedAtoms.contains(atom.atomId()))
@@ -241,11 +286,14 @@ public class DynamicReferenceService {
                 + String.valueOf(baseUrl) + "|" + String.valueOf(model) + "|"
                 + llmRuntimeConfig.effectiveReferenceMode(selectorProperties.getMode()) + "|"
                 + usagePolicy.version() + "|" + ctx.getTargetFields() + "|"
-                + index.hashCode();
+                + referenceIndexLoader.corpusVersion() + "|" + index.hashCode();
     }
 
     private List<PromptRule> loadRules(List<String> fileNames, int maxSelected, int maxRecallChars, PromptScene scene,
-                                       PromptContext ctx) {
+                                       PromptContext ctx, Set<String> eligibleFiles) {
+        if (fileNames == null || fileNames.isEmpty() || eligibleFiles.isEmpty()) {
+            return List.of();
+        }
         List<PromptRule> rules = new ArrayList<>();
         int remainingChars = Math.max(0, maxRecallChars);
         for (String fileName : fileNames) {
@@ -253,7 +301,8 @@ public class DynamicReferenceService {
                 break;
             }
             // 选择器或向量检索可能返回未登记来源；落盘前再核一次资格，避免绕过候选过滤。
-            if (!usagePolicy.allowsDocument(fileName, scene, ctx)) {
+            if (!eligibleFiles.contains(fileName) || !sourceEnabled(fileName)
+                    || !usagePolicy.allowsDocument(fileName, scene, ctx)) {
                 continue;
             }
             String content = fileLoader.load("references/" + fileName + ".md");
@@ -267,7 +316,7 @@ public class DynamicReferenceService {
             rules.add(new PromptRule("ref-" + fileName, bounded, PromptRule.InjectPosition.USER_TAIL));
             remainingChars -= bounded.length();
         }
-        return rules;
+        return List.copyOf(rules);
     }
 
     /** 尽量在段落边界截断，且明确告知模型资料是不完整摘录。 */

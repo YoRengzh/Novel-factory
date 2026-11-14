@@ -2,7 +2,9 @@ package cn.novel.yonren.domain.novel.adapter.repository;
 
 import cn.novel.yonren.domain.novel.model.valobj.ScoredVectorPoint;
 import cn.novel.yonren.domain.novel.model.valobj.StoredPoint;
+import cn.novel.yonren.domain.novel.model.valobj.VectorCollectionInfo;
 import cn.novel.yonren.domain.novel.model.valobj.VectorPoint;
+import cn.novel.yonren.domain.novel.model.valobj.VectorPointPage;
 
 import java.util.Collection;
 import java.util.List;
@@ -12,6 +14,26 @@ import java.util.List;
  * 集合维度与距离度量在首次创建时定死（与 embedding 模型输出维度严格一致）。
  */
 public interface VectorStore {
+
+    /** 后端逻辑名称；默认方法保留既有业务 stub 的源兼容性。 */
+    default String backendName() {
+        throw new UnsupportedOperationException("该向量适配器未实现后端名称");
+    }
+
+    /** 只列本应用受管集合；单集合读取失败以 error 摘要返回，不影响其它集合。 */
+    default List<VectorCollectionInfo> listCollections() {
+        throw new UnsupportedOperationException("该向量适配器未实现集合列举");
+    }
+
+    /** 管理只读分页，不含向量；limit 必须为 1..100，cursor 只接受本后端生成的游标。 */
+    default VectorPointPage pagePoints(String collection, String cursor, int limit) {
+        throw new UnsupportedOperationException("该向量适配器未实现点分页");
+    }
+
+    /** 真正删除集合及其点；集合不存在时幂等忽略，不改变既有 clear 契约。 */
+    default void dropCollection(String collection) {
+        throw new UnsupportedOperationException("该向量适配器未实现集合删除");
+    }
 
     /** 确保集合存在（已存在则不动） */
     void ensureCollection(String collection, int vectorSize);

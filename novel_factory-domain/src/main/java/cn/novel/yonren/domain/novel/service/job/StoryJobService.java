@@ -83,7 +83,7 @@ public class StoryJobService {
         }
         if (!jobRegistry.tryRegister(job)) {
             throw new AppException(ResponseCode.ILLEGAL_PARAMETER.getCode(),
-                    "该故事有运行中的作业或维护操作，请稍后再提交：" + command.getResumeStoryDir());
+                    "该故事或资料索引有运行中的作业／维护操作，请稍后再提交");
         }
         try {
             jobExecutor.execute(() -> runJob(command, job));

@@ -77,10 +77,13 @@
             document.querySelectorAll('.tab-content').forEach(function (c) { c.classList.remove('active'); });
             btn.classList.add('active');
             document.getElementById('tab-' + btn.dataset.tab).classList.add('active');
+            if (btn.dataset.tab !== 'library') clearBookTransientUi();
+            syncBookNavigation();
             if (btn.dataset.tab === 'library') { loadStories(); }
-            // 03 项目模型配置与 05 设置共用同一份配置视图（GET /api/config/llm）：一次拉取，两页同时刷新
+            // 04 项目模型配置与 06 设置共用同一份配置视图（GET /api/config/llm）：一次拉取，两页同时刷新
             if (btn.dataset.tab === 'models' || btn.dataset.tab === 'settings') { loadLlmConfig(); }
-            // 04 资料设置进入时同步「我的参考资料 / 文风 / 资料检索方式」卡片
+            if (btn.dataset.tab === 'reference-index' && referenceIndexManager) { referenceIndexManager.refresh(); }
+            // 05 资料设置进入时同步「我的参考资料 / 文风 / 资料检索方式」卡片
             if (btn.dataset.tab === 'assets') { loadLlmConfig(); loadUserAssets(); }
             // 回到生成页时刷新故事列表：刚写完的故事应能立刻被续写
             if (btn.dataset.tab === 'generate') { loadStoryOptions(); loadMetrics(); }
@@ -935,9 +938,11 @@
     const chapterListTitle = document.getElementById('chapter-list-title');
 
     document.getElementById('btn-back-chapters').addEventListener('click', function () {
+        ++storyViewToken;
+        clearBookTransientUi();
         chapterViewDiv.classList.add('hidden');
         chapterListDiv.classList.remove('hidden');
-        hideChapterNav();
+        syncBookNavigation();
     });
 
     document.getElementById('btn-refresh-workbench').addEventListener('click', function () {
@@ -956,18 +961,49 @@
     const btnNextChapter = document.getElementById('btn-next-chapter');
     const chapterNav = document.getElementById('chapter-navigation');
 
+    function isBookLibraryVisible() {
+        return !!currentStoryDir && document.getElementById('tab-library').classList.contains('active')
+            && !document.getElementById('book-workspace').classList.contains('hidden');
+    }
+
+    function isBookChapterVisible() {
+        return isBookLibraryVisible() && !document.getElementById('book-panel-chapters').classList.contains('hidden')
+            && !chapterViewDiv.classList.contains('hidden');
+    }
+
     function hideChapterNav() {
         chapterNav.classList.add('hidden');
+        btnPrevChapter.classList.add('hidden');
+        btnNextChapter.classList.add('hidden');
     }
 
     function updateChapterNavigation() {
         var index = chapterSequence.indexOf(currentChapterNo);
-        var prevVisible = index > 0;
-        var nextVisible = index >= 0 && index < chapterSequence.length - 1;
+        var visible = isBookChapterVisible();
+        var prevVisible = visible && index > 0;
+        var nextVisible = visible && index >= 0 && index < chapterSequence.length - 1;
         btnPrevChapter.classList.toggle('hidden', !prevVisible);
         btnNextChapter.classList.toggle('hidden', !nextVisible);
-        // 既无上一章又无下一章（如单章故事）时，整体隐藏右侧悬浮导航
+        // 正文页之外不能留下 fixed 章节导航（全局 tab 的祖先隐藏不影响 body 浮层）。
         chapterNav.classList.toggle('hidden', !(prevVisible || nextVisible));
+    }
+
+    function syncBookNavigation() {
+        document.getElementById('btn-back-stories').classList.toggle('hidden', !isBookLibraryVisible());
+        updateChapterNavigation();
+        if (!isBookChapterVisible()) clearBookTransientUi();
+    }
+
+    function clearBookTransientUi() {
+        resetSegmentSelection();
+        closeSegmentDialog();
+        segmentOriginal.textContent = '';
+        segmentEdited.textContent = '';
+        segmentNote.textContent = '';
+        btnSegmentApply.disabled = true;
+        var selection = window.getSelection();
+        if (selection && selection.removeAllRanges) selection.removeAllRanges();
+        hideChapterNav();
     }
 
     function navigateChapter(direction) {
@@ -1268,6 +1304,7 @@
 
     function loadChapters(storyDir, resetWorkspace = false) {
         const token = ++storyViewToken;
+        clearBookTransientUi();
         fetchJson('/api/stories/' + encodeURIComponent(storyDir) + '/chapters')
         .then(function (chapters) {
             if (token !== storyViewToken) return;   // 过期响应：用户已切到别的故事
@@ -1278,8 +1315,9 @@
             libraryList.classList.add('hidden');
             chapterViewDiv.classList.add('hidden');
             chapterListDiv.classList.remove('hidden');
-           hideChapterNav();
+            hideChapterNav();
             if (bookWorkspace && (changedBook || resetWorkspace)) bookWorkspace.open(storyDir);
+            syncBookNavigation();
             chapterListTitle.textContent = '章节目录';
             if (chapters.length === 0) {
                 chaptersDiv.innerHTML = '<p class="empty-hint">暂无章节</p>';
@@ -1473,8 +1511,8 @@
     }
     function loadChapter(storyDir, chapterNo) {
         const token = ++storyViewToken;
-        // 换章即作废上次选中：否则用户在新章里点一次就会沿用旧片段
-        if (typeof resetSegmentSelection === 'function') resetSegmentSelection();
+        // 换章即作废旧选区与异步段落响应，不把上章弹层带入新章。
+        clearBookTransientUi();
         fetchJson('/api/stories/' + encodeURIComponent(storyDir) + '/chapters/' + chapterNo)
         .then(function (ch) {
             if (token !== storyViewToken) return;   // 过期响应：已切到别的故事/章节
@@ -1496,9 +1534,9 @@
             chapterHasUnsavedEdits = false;
             chapterFactsChanged = false;
             chapterSnapshotOnEnter = null;
-            updateChapterNavigation();
-            // 章节切换后回到新章节开头，避免沿用上一章的滚动位置。
-            chapterViewTitle.scrollIntoView({ behavior: 'auto', block: 'start' });
+            syncBookNavigation();
+            // 全局页已切走时不滚动隐藏正文；重新进入小说库再由导航显示。
+            if (isBookChapterVisible()) chapterViewTitle.scrollIntoView({ behavior: 'auto', block: 'start' });
         })
         .catch(function (err) {
             showToast('加载章节失败：' + err.message);
@@ -1523,6 +1561,8 @@
     let segmentSelection = null;
     /** 最近一次 AI 改写结果 */
     let segmentResult = null;
+    /** 退出、切页或关闭弹层即使尚有模型响应，也不能重新打开全局浮层。 */
+    let segmentRequestToken = 0;
     /**
      * 本次编辑是否已改掉情节事实（决定保存时是否重跑摘要回流）。
      * 润色/扩写只改表达不改事实 → false（跳过回流，省几分钟）；
@@ -1559,6 +1599,10 @@
      */
     function maybeShowSegmentToolbar() {
         if (!segmentToolbar) return;
+        if (!isBookChapterVisible()) {
+            resetSegmentSelection();
+            return;
+        }
         // 编辑态不显示：contenteditable 里选字是常规编辑动作
         if (contentEdit && !contentEdit.classList.contains('hidden')) {
             resetSegmentSelection();
@@ -1641,6 +1685,7 @@
     }
 
     function closeSegmentDialog() {
+        ++segmentRequestToken;
         segmentDialog.classList.add('hidden');
         segmentResult = null;
         hideSegmentToolbar();
@@ -1706,7 +1751,8 @@
 
     /** 调用后端做一次段落编辑 */
     function runSegmentEdit(action) {
-        if (!segmentSelection) return;
+        if (!segmentSelection || !isBookChapterVisible()) return;
+        const requestToken = ++segmentRequestToken;
         if (!currentStoryDir || !currentChapterNo) {
             showToast('请先打开一章正文');
             return;
@@ -1733,9 +1779,11 @@
             })
         })
         .then(function (res) {
+            if (requestToken !== segmentRequestToken || !isBookChapterVisible()) return;
             openSegmentDialog(action, res);
         })
         .catch(function (err) {
+            if (requestToken !== segmentRequestToken || !isBookChapterVisible()) return;
             segmentNote.textContent = label + '失败：' + err.message;
             segmentNote.classList.remove('hidden');
             btnSegmentApply.disabled = true;
@@ -3610,6 +3658,14 @@
         });
     }
 
+    // ===== 资料索引管理（只接线；进入独立索引 tab 仅 refresh，不自动触发收费操作） =====
+    const referenceIndexManager = window.ReferenceIndexManager ? window.ReferenceIndexManager.create({
+        document: document,
+        fetchJson: function (url, options) { return fetchJson(url, options); },
+        confirm: function (message) { return window.confirm(message); },
+        notify: function (message) { showToast(message); }
+    }) : null;
+
     // ===== 书内工作区（作者维护与品质问题）=====
     // 独立组件：只做渲染与请求，状态与互斥由自身持有；app.js 只负责打开/关闭与注入工作台数据。
     const bookWorkspace = window.BookWorkspace ? window.BookWorkspace.create({
@@ -3618,21 +3674,33 @@
         confirm: function (message) { return window.confirm(message); },
         notify: function (message) { showToast(message); },
         // 章节编辑器仍有未保存改动时，工作区的保存不得把上下文切走
-        isExtraDirty: function () { return chapterHasUnsavedEdits; }
+        isExtraDirty: function () { return chapterHasUnsavedEdits; },
+        onTabChange: function () { syncBookNavigation(); }
     }) : null;
     function closeBook() {
         ++storyViewToken;
+        clearBookTransientUi();
         currentStoryDir = null;
         currentChapterNo = null;
+        chapterSequence = [];
         chapterHasUnsavedEdits = false;
-        hideChapterNav();
+        chapterFactsChanged = false;
+        chapterSnapshotOnEnter = null;
+        chapterViewDiv.classList.remove('editing');
+        chapterViewDiv.classList.add('hidden');
+        chapterListDiv.classList.remove('hidden');
+        document.getElementById('chapter-issue-context').classList.add('hidden');
+        saveResult.classList.add('hidden');
         if (bookWorkspace) bookWorkspace.open('');
+        document.getElementById('book-workspace').classList.add('hidden');
         libraryList.classList.remove('hidden');
+        syncBookNavigation();
     }
 
     document.getElementById('btn-back-stories').addEventListener('click', function () {
         if (!bookWorkspace || bookWorkspace.canLeave()) closeBook();
     });
+    syncBookNavigation();
     document.getElementById('btn-refresh-chapters').addEventListener('click', function () {
         if (currentStoryDir) loadChapters(currentStoryDir);
     });

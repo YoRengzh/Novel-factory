@@ -6,6 +6,7 @@
     <title>StartDrafts</title>
     <link rel="stylesheet" href="style.css" data-page-node-id="njce1GWWRJakUhAUukzdHE">
     <link rel="stylesheet" href="book-workspace.css">
+    <link rel="stylesheet" href="reference-index-manager.css">
 </head>
 <body data-page-node-id="HR1gysp1ogdC9U0cmacZqK">
     <!-- ==================== 主应用 ==================== -->
@@ -26,16 +27,20 @@
                         <span class="tab-no" data-page-node-id="nH5Km9Lz496smh8RHCDlZU">02</span>
                         <span data-page-node-id="2p1Otw5yGX9zbA7xzZM4Ku">小说库</span>
                     </button>
+                    <button class="nav-tab" data-tab="reference-index">
+                        <span class="tab-no">03</span>
+                        <span>索引管理</span>
+                    </button>
                     <button class="nav-tab" data-tab="models" data-page-node-id="GYzdLsq8uHIw5QJOZkfYCy">
-                        <span class="tab-no" data-page-node-id="1rS3kA1RSg2IVFm8dQjTZY">03</span>
+                        <span class="tab-no" data-page-node-id="1rS3kA1RSg2IVFm8dQjTZY">04</span>
                         <span data-page-node-id="dlByrlRiW95MEuUKxjAaoE">项目模型配置</span>
                     </button>
                     <button class="nav-tab" data-tab="assets" data-page-node-id="AssetsTabBox">
-                        <span class="tab-no" data-page-node-id="AssetsTabNo">04</span>
+                        <span class="tab-no" data-page-node-id="AssetsTabNo">05</span>
                         <span data-page-node-id="AssetsTabLabel">资料设置</span>
                     </button>
                     <button class="nav-tab" data-tab="settings" data-page-node-id="SetTabNo04Box">
-                        <span class="tab-no" data-page-node-id="SetTabNo04">05</span>
+                        <span class="tab-no" data-page-node-id="SetTabNo04">06</span>
                         <span data-page-node-id="SetTabLabel04">设置</span>
                     </button>
                 </nav>
@@ -230,7 +235,7 @@
 
                 <div id="book-workspace" class="book-workspace hidden">
                     <header class="book-workspace-header">
-                        <div class="book-breadcrumb"><button id="btn-back-stories" class="btn-back" type="button">← 小说库</button><span>书内工作区</span></div>
+                        <div class="book-breadcrumb"><span>小说库 / 书内工作区</span></div>
                         <div class="list-header"><h2 id="book-workspace-title" class="section-title">正在读取书籍…</h2><span id="book-unsaved" class="book-unsaved hidden" role="status">有未保存修改</span></div>
                         <nav class="book-tabs" aria-label="书内工作区" role="tablist">
                             <button id="book-tab-overview" type="button" role="tab" data-book-tab="overview" aria-controls="book-panel-overview" aria-selected="false">概要</button>
@@ -387,7 +392,7 @@
                 </div>
             </section>
 
-            <!-- 03 项目模型配置：功能开关 + 场景模型 -->
+            <!-- 04 项目模型配置：功能开关 + 场景模型 -->
             <section id="tab-models" class="tab-content">
                 <div class="content-card" id="feature-toggle-card">
                     <div class="section-label">QUALITY / SPEED</div>
@@ -412,7 +417,7 @@
                     <div class="section-label" data-page-node-id="sSR1Tmu4uw419PZ0mJdSw5">SCENE MODELS</div>
                     <h2 class="section-title" data-page-node-id="m1nbxq44CG3VtAfwuNTpcf">场景模型</h2>
                     <p class="settings-hint" data-page-node-id="bZref5VnUGT8zfPHK2oAmJ">
-                        <b>说明</b>：每个生成场景可独立指定模型 / 输出上限 / 采样温度，以及<b>走哪个中转站</b>（留空 = 跟随全局）。优先级：场景覆盖 &gt; 全局覆盖（05 设置里的接入配置）&gt; 程序内置配置（场景条目缺项回落统一模型）。启用场景级 API 后，模型下拉优先展示该行所选中转站的模型；只有“跟随全局”才使用全局站的列表。<b>选站只决定地址、密钥和协议，不会自动选模型</b>：模型留空仍继承下层模型名，换站后请确认所需模型。“内置默认”列仅供参考，不代表覆盖后的实际配置。保存即生效、跨重启保留。
+                        <b>说明</b>：每个生成场景可独立指定模型 / 输出上限 / 采样温度，以及<b>走哪个中转站</b>（留空 = 跟随全局）。优先级：场景覆盖 &gt; 全局覆盖（06 设置里的接入配置）&gt; 程序内置配置（场景条目缺项回落统一模型）。启用场景级 API 后，模型下拉优先展示该行所选中转站的模型；只有“跟随全局”才使用全局站的列表。<b>选站只决定地址、密钥和协议，不会自动选模型</b>：模型留空仍继承下层模型名，换站后请确认所需模型。“内置默认”列仅供参考，不代表覆盖后的实际配置。保存即生效、跨重启保留。
                     </p>
                     <div class="scene-api-switch" data-page-node-id="ScApiSwitchRow1">
                         <label class="switch-label" for="scene_api_enabled">
@@ -420,7 +425,7 @@
                             <span>启用场景级 API（每个场景可独立选择中转站）</span>
                         </label>
                         <span class="settings-hint scene-api-hint" id="scene-api-hint">
-                            关闭时：所有场景强制走 05 设置里「模型接入」选中的中转站，场景选站一律不生效；
+                            关闭时：所有场景强制走 06 设置里「模型接入」选中的中转站，场景选站一律不生效；
                             打开时：每个场景可在下方各行选自己的中转站，模型列表以所选站为准（留空 = 跟随全局）。
                             ChatGPT 订阅接入使用独立模型列表，不使用中转站 API。
                         </span>
@@ -494,7 +499,7 @@
 
             </section>
 
-            <!-- 05 设置：模型接入 / 中转站 / 嵌入 -->
+            <!-- 06 设置：模型接入 / 中转站 / 嵌入 -->
             <section id="tab-settings" class="tab-content">
 <div class="content-card" data-page-node-id="5Av8rDPYjFthtcITvetBGG">
                     <div class="section-label" data-page-node-id="JfIEFhnRZGoL2mJbUImJKU">SETTINGS</div>
@@ -650,7 +655,71 @@
 
             </section>
 
-            <!-- 04 资料设置：资料检索方式 / 我的参考资料 / 文风（写作提示词资料的自留地）-->
+            <!-- 03 索引管理：集合级预览与确认，独立于全局模型设置。 -->
+            <section id="tab-reference-index" class="tab-content">
+                <section id="reference-index-manager" class="content-card reference-index-manager" aria-labelledby="reference-index-title">
+                    <div class="section-label">COLLECTION INDEX</div>
+                    <div class="list-header">
+                        <h2 id="reference-index-title" class="section-title">索引管理</h2>
+                        <button id="btn-refresh-reference-index" class="btn-secondary" type="button">刷新状态</button>
+                    </div>
+                    <p class="settings-hint">按集合管理参考资料、小说私有记忆和共享世界索引；所属小说只按服务端信息展示。删除仅影响向量索引，不删除正文、摘要、story-bible 或参考资料原文。重建可能产生 Embedding 费用，必须先预览完整影响与成本，再确认执行。</p>
+                    <p id="reference-index-summary" class="reference-index-summary">进入「索引管理」后读取集合状态；不会自动重建。</p>
+                    <div id="reference-index-status" class="reference-index-status hidden" role="status" aria-live="polite"></div>
+                    <div id="reference-index-task" class="reference-index-task hidden" role="status" aria-live="polite"></div>
+                    <div id="reference-index-results" class="reference-index-results hidden" role="status" aria-live="polite"></div>
+                    <section id="reference-index-preview" class="reference-index-preview hidden" aria-label="操作影响与成本" aria-live="polite"></section>
+                    <div class="reference-index-toolbar">
+                        <label for="reference-index-kind-filter">集合类型
+                            <select id="reference-index-kind-filter">
+                                <option value="">全部类型</option>
+                                <option value="reference">reference · 参考资料</option>
+                                <option value="story">story · 小说私有记忆</option>
+                                <option value="world">world · 世界记忆</option>
+                            </select>
+                        </label>
+                        <label for="reference-index-owner-filter">所属小说 / 全局参考资料
+                            <select id="reference-index-owner-filter"><option value="">全部小说 / 参考资料</option></select>
+                        </label>
+                    </div>
+                    <div class="reference-index-actions">
+                        <button id="btn-reference-select-visible" class="btn-secondary" type="button" disabled>选择可见集合</button>
+                        <button id="btn-reference-clear-selection" class="btn-secondary" type="button" disabled>取消全部选择</button>
+                        <span id="reference-index-selection" role="status" aria-live="polite">已选择 0 个 · 每批最多 100 个</span>
+                    </div>
+                    <div class="reference-index-actions">
+                        <button id="btn-delete-reference-index" class="btn-secondary" type="button" disabled>预览删除集合</button>
+                        <button id="btn-rebuild-reference-index" class="btn-secondary" type="button" disabled>预览重建集合</button>
+                    </div>
+                    <div id="reference-index-collections" class="reference-index-table-wrap"><p class="empty-hint">尚未读取集合。</p></div>
+                    <details id="reference-index-sources-details" class="reference-index-aux">
+                        <summary>辅助 · 资料来源停用 / 恢复（默认收起）</summary>
+                        <p class="settings-hint">这是资料检索开关，不是集合删除；不会删除资料原文。</p>
+                        <div id="reference-index-sources" class="reference-index-list"><p class="empty-hint">尚未读取资料源。</p></div>
+                    </details>
+                    <details id="reference-index-points-details" class="reference-index-aux">
+                        <summary>辅助 · 只读分块预览（默认收起）</summary>
+                        <p class="settings-hint">仅供诊断，不提供点级修改或删除。</p>
+                        <label for="reference-index-inspect-collection">集合
+                            <select id="reference-index-inspect-collection"><option value="">选择集合，只读查看分块</option></select>
+                        </label>
+                        <div class="reference-index-actions"><button id="btn-read-reference-points" class="btn-secondary" type="button" disabled>读取分块</button></div>
+                        <section id="reference-index-points-panel" class="reference-index-points-panel hidden" aria-labelledby="reference-index-points-title">
+                            <h3 id="reference-index-points-title" class="reference-index-heading">只读分块预览</h3>
+                            <p id="reference-index-points-status" class="reference-index-points-status" role="status" aria-live="polite"></p>
+                            <div id="reference-index-points" class="reference-index-list"></div>
+                            <div class="reference-index-actions">
+                                <button id="btn-reference-points-prev" class="btn-secondary" type="button" disabled>上一页</button>
+                                <span id="reference-index-points-page">第 1 页 · 每页 25 块</span>
+                                <button id="btn-reference-points-next" class="btn-secondary" type="button" disabled>下一页</button>
+                            </div>
+                        </section>
+                    </details>
+                </section>
+
+            </section>
+
+            <!-- 05 资料设置：资料检索方式 / 我的参考资料 / 文风（写作提示词资料的自留地）-->
             <section id="tab-assets" class="tab-content">
                 <div class="content-card">
                     <div class="section-label">REFERENCE MODE</div>
@@ -761,6 +830,9 @@
 
     <div id="toast" class="toast hidden" data-page-node-id="JLwZtxLpWafkz4wtVD3Pre"></div>
 
+    <!-- 返回只在小说库书内显示，fixed 贴于页头下沿；不移动通知。 -->
+    <button id="btn-back-stories" class="btn-back book-return hidden" type="button" aria-label="返回小说库">← 小说库</button>
+
     <!-- 左下角：版本通知入口 -->
     <button id="btn-update" class="update-fab" type="button" title="检查更新">
         <span class="update-fab-dot" id="update-fab-dot"></span>
@@ -804,6 +876,7 @@
     <div id="chatgpt-model-options" class="model-dropdown"></div>
 
     <script src="book-workspace.js"></script>
+    <script src="reference-index-manager.js"></script>
 
     <script src="app.js"></script>
 </body>

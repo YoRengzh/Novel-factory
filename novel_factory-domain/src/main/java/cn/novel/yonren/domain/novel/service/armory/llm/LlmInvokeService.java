@@ -5,6 +5,8 @@ import cn.novel.yonren.domain.novel.model.valobj.LlmCall;
 import cn.novel.yonren.domain.novel.model.valobj.StoryVO;
 import cn.novel.yonren.domain.novel.service.armory.prompt.PromptBuilder;
 import cn.novel.yonren.domain.novel.service.armory.prompt.reference.DynamicReferenceService;
+import cn.novel.yonren.domain.novel.service.job.JobRegistry;
+import jakarta.annotation.Resource;
 import cn.novel.yonren.domain.novel.model.valobj.prompt.PromptContext;
 import cn.novel.yonren.domain.novel.model.valobj.prompt.PromptRule;
 import cn.novel.yonren.types.enums.ModelScene;
@@ -32,6 +34,9 @@ public class LlmInvokeService {
     private final LlmGateway llmGateway;
     private final DynamicReferenceService dynamicReferenceService;
 
+    @Resource
+    private JobRegistry jobRegistry;
+
     /**
      * 调用大模型：按场景动态注入规则
      *
@@ -56,6 +61,20 @@ public class LlmInvokeService {
      * @param maxTokensOverride 单次输出上限覆盖；null 用场景 yml 配置
      */
     public String invokeWithScene(StoryVO storyVO, PromptScene scene, PromptContext ctx, String userPrompt,
+                                  Map<String, String> usedPromptMap, ModelScene modelScene,
+                                  String labelOverride, Integer maxTokensOverride) {
+        if (jobRegistry != null && !jobRegistry.tryBeginReferenceUse()) {
+            throw new IllegalStateException("资料索引正在维护，请稍后再调用模型");
+        }
+        try {
+            return invokePrepared(storyVO, scene, ctx, userPrompt, usedPromptMap, modelScene,
+                    labelOverride, maxTokensOverride);
+        } finally {
+            if (jobRegistry != null) jobRegistry.endReferenceUse();
+        }
+    }
+
+    private String invokePrepared(StoryVO storyVO, PromptScene scene, PromptContext ctx, String userPrompt,
                                   Map<String, String> usedPromptMap, ModelScene modelScene,
                                   String labelOverride, Integer maxTokensOverride) {
         StoryVO.Module module = storyVO.getModule();

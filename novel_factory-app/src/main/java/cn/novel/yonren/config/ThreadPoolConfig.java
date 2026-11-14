@@ -53,6 +53,16 @@ public class ThreadPoolConfig {
      * 串行避免 LLM 并发花费与故事目录竞争
      * 拒绝策略必须 Abort——队列满时抛拒绝异常由 submit 转 503，绝不能用 CallerRuns 吞掉"立即返回 jobId"语义
      */
+    /** 资料重建独立于小说生成，维护期间由 JobRegistry 全局门闩拒绝新的生成提交。 */
+    @Bean(name = "referenceIndexExecutor", destroyMethod = "shutdown")
+    @ConditionalOnMissingBean(name = "referenceIndexExecutor")
+    public ThreadPoolExecutor referenceIndexExecutor() {
+        return new ThreadPoolExecutor(1, 1, 30, TimeUnit.SECONDS,
+                new LinkedBlockingQueue<>(1),
+                new CustomizableThreadFactory("novel-reference-index-"),
+                new ThreadPoolExecutor.AbortPolicy());
+    }
+
     @Bean(name = "jobExecutor")
     @ConditionalOnMissingBean(name = "jobExecutor")
     public ThreadPoolExecutor jobExecutor() {

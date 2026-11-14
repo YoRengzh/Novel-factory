@@ -2,15 +2,20 @@ package cn.novel.yonren.domain.novel.service.armory.prompt.reference;
 
 import cn.novel.yonren.domain.novel.model.valobj.prompt.ReferenceIndexEntry;
 
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.List;
 import java.util.stream.Collectors;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
-import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -19,7 +24,15 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  */
 class ReferenceIndexLoaderTest {
 
+    @TempDir
+    Path temp;
     private final ReferenceIndexLoader loader = new ReferenceIndexLoader();
+
+    @BeforeEach
+    void isolateState() {
+        loader.overrideUserReferencesDirForTest(temp.resolve("references"));
+        loader.setSourcePolicy(new ReferenceSourcePolicy(temp.resolve("state.json")));
+    }
 
     @Test
     void index_containsReferencesRootFiles() {
@@ -109,6 +122,62 @@ class ReferenceIndexLoaderTest {
     @Test
     void index_cachedAcrossCalls() {
         assertSame(loader.getIndex(), loader.getIndex());
+    }
+
+    @Test
+    void indexSnapshotsCannotBeMutatedThroughListOrEntrySetters() {
+        assertThrows(UnsupportedOperationException.class, () -> loader.getIndex().clear());
+        assertThrows(UnsupportedOperationException.class, () -> loader.getAllIndex().clear());
+        ReferenceIndexEntry entry = byName("dialogue-writing");
+        assertThrows(UnsupportedOperationException.class, () -> entry.setTitle("污染标题"));
+        assertThrows(UnsupportedOperationException.class, () -> entry.setFileName("wrong"));
+        assertEquals("dialogue-writing", byName("dialogue-writing").getFileName());
+    }
+
+    @Test
+    void fullBodyChangeInvalidatesVersionWithoutMetadataChange() throws Exception {
+        Path dir = temp.resolve("references");
+        Files.createDirectories(dir);
+        Path file = dir.resolve("my-source.md");
+        Files.writeString(file, "# 同一标题\n\n同一简介\n\n## 内容\n旧正文");
+        loader.refresh();
+        String firstVersion = loader.corpusVersion();
+        ReferenceIndexEntry original = byName("my-source");
+
+        Files.writeString(file, "# 同一标题\n\n同一简介\n\n## 内容\n新正文");
+        loader.refresh();
+        assertEquals(original, byName("my-source"));
+        assertNotEquals(firstVersion, loader.corpusVersion());
+    }
+
+    @Test
+    void disabledFileStaysInAllIndexAndDisabledAfterEditDeleteAndRestart() throws Exception {
+        Path dir = temp.resolve("references");
+        Files.createDirectories(dir);
+        Path file = dir.resolve("my-source.md");
+        Files.writeString(file, "# 标题\n\n简介\n\n## 内容\n正文");
+        loader.refresh();
+        String enabledVersion = loader.corpusVersion();
+        loader.sourcePolicy().setEnabled("my-source", false);
+        assertFalse(loader.getIndex().stream().anyMatch(e -> e.getFileName().equals("my-source")));
+        assertTrue(loader.getAllIndex().stream().anyMatch(e -> e.getFileName().equals("my-source")));
+        assertNotEquals(enabledVersion, loader.corpusVersion());
+
+        Files.writeString(file, "# 标题\n\n简介\n\n## 内容\n改写后仍停用");
+        loader.refresh();
+        assertFalse(loader.sourcePolicy().isEnabled("my-source"));
+        Files.delete(file);
+        loader.refresh();
+        assertFalse(loader.getAllIndex().stream().anyMatch(e -> e.getFileName().equals("my-source")));
+
+        var restarted = new ReferenceIndexLoader();
+        restarted.overrideUserReferencesDirForTest(dir);
+        restarted.setSourcePolicy(new ReferenceSourcePolicy(temp.resolve("state.json")));
+        assertFalse(restarted.sourcePolicy().isEnabled("my-source"));
+        assertEquals(loader.corpusVersion(), restarted.corpusVersion());
+        Files.writeString(file, "# 重新导入\n\n正文");
+        restarted.refresh();
+        assertFalse(restarted.getIndex().stream().anyMatch(e -> e.getFileName().equals("my-source")));
     }
 
     private ReferenceIndexEntry byName(String fileName) {

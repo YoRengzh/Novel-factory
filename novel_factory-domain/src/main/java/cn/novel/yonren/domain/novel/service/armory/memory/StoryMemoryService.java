@@ -26,6 +26,12 @@ import org.springframework.web.client.ResourceAccessException;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.LinkOption;
+import java.nio.file.StandardCopyOption;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
+import java.util.HexFormat;
+import java.util.LinkedHashMap;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -117,6 +123,188 @@ public class StoryMemoryService {
 
     /** 待写入点：stableKey 生成稳定点 id，text 用于向量化，payload 携带展示元数据 */
     private record MemText(String stableKey, String text, Map<String, String> payload) {
+    }
+
+    /** 集合维护的只读成本与来源版本，不暴露文本或向量。 */
+    public record IndexPreview(String collection, int pointCount, long embeddingChars, int embeddingBatches,
+                               String sourceVersion) {
+    }
+
+    public static final class CollectionPlan {
+        private final IndexPreview preview;
+        private final List<MemText> texts;
+        private final EmbeddingGateway.EmbeddingSession session;
+        private final Path storyDir;
+        private final String indexSignature;
+        private final String bibleHash;
+
+        private CollectionPlan(IndexPreview preview, List<MemText> texts, EmbeddingGateway.EmbeddingSession session,
+                               Path storyDir, String indexSignature, String bibleHash) {
+            this.preview = preview;
+            this.texts = List.copyOf(texts);
+            this.session = session;
+            this.storyDir = storyDir;
+            this.indexSignature = indexSignature;
+            this.bibleHash = bibleHash;
+        }
+
+        public IndexPreview preview() { return preview; }
+    }
+
+    public CollectionPlan prepareStoryCollection(StoryVO.Module module, Path storyDir,
+                                                 List<ChapterSummaryEntity> summaries, List<VolumeBlueprintEntity> volumes) {
+        return prepareStoryCollection(module, storyDir, summaries, volumes, null);
+    }
+
+    /** 只按正式摘要、设定和卷蓝图重建该书，不从旧向量 payload 恢复污染内容。 */
+    public CollectionPlan prepareStoryCollection(StoryVO.Module module, Path storyDir,
+                                                 List<ChapterSummaryEntity> summaries, List<VolumeBlueprintEntity> volumes,
+                                                 EmbeddingGateway.EmbeddingSession frozenSession) {
+        Objects.requireNonNull(storyDir, "story directory");
+        List<MemText> texts = new ArrayList<>();
+        for (ChapterSummaryEntity summary : Objects.requireNonNull(summaries, "chapter summaries")) {
+            if (summary == null || summary.getChapterNo() == null || summary.getChapterNo() <= 0) {
+                throw new IllegalStateException("正式章节摘要缺少有效章号，不能重建集合");
+            }
+            texts.addAll(chapterTexts(storyDir, summary));
+        }
+        appendLedgerTexts(storyDir, texts, summaries, null);
+        String bible = readBibleForMaintenance(storyDir);
+        texts.addAll(bibleTexts(storyDir, bible));
+        for (VolumeBlueprintEntity volume : Objects.requireNonNull(volumes, "volume blueprints")) {
+            if (volume == null || volume.getVolumeNo() == null || volume.getVolumeNo() <= 0) {
+                throw new IllegalStateException("卷蓝图缺少有效卷号，不能重建集合");
+            }
+            texts.add(volumeText(storyDir, volume));
+        }
+        return collectionPlan(module, collectionOf(storyDir), texts, storyDir, bible, frozenSession);
+    }
+
+    public CollectionPlan prepareWorldCollection(StoryVO.Module module, String worldId, List<Path> storyDirs,
+                                                 EmbeddingGateway.EmbeddingSession frozenSession) {
+        if (!isValidWorldId(worldId)) throw new IllegalArgumentException("共享世界标识不合法");
+        List<MemText> texts = new ArrayList<>();
+        for (Path storyDir : Objects.requireNonNull(storyDirs, "world stories")) {
+            texts.addAll(worldBibleTexts(storyDir, worldId, readBibleForMaintenance(storyDir)));
+        }
+        return collectionPlan(module, worldCollectionOf(worldId), texts, null, null, frozenSession);
+    }
+
+    private CollectionPlan collectionPlan(StoryVO.Module module, String collection, List<MemText> sourceTexts,
+                                           Path storyDir, String bible, EmbeddingGateway.EmbeddingSession frozenSession) {
+        Set<String> ids = new HashSet<>();
+        List<MemText> texts = sourceTexts.stream().map(text -> {
+            if (StringUtils.isBlank(text.text()) || !ids.add(stableId(text.stableKey()))) {
+                throw new IllegalStateException("重建文本为空或集合点标识重复");
+            }
+            return new MemText(text.stableKey(), text.text(), Map.copyOf(text.payload()));
+        }).toList();
+        EmbeddingGateway.EmbeddingSession session = frozenSession;
+        if (!texts.isEmpty() && session == null) session = embeddingGateway.session(module);
+        if (!texts.isEmpty() && (session == null || StringUtils.isBlank(session.signature()))) {
+            throw new IllegalStateException("无法冻结向量接入，不能重建集合");
+        }
+        StringBuilder source = new StringBuilder(collection).append('|').append(MEMORY_SCHEMA_VERSION);
+        for (MemText text : texts) {
+            source.append('|').append(text.stableKey()).append('|').append(text.text())
+                    .append('|').append(new java.util.TreeMap<>(text.payload()));
+        }
+        source.append('|').append(session == null ? "" : session.signature())
+                .append('|').append(session == null ? "" : session.dimensions());
+        String version;
+        try {
+            version = HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256")
+                    .digest(source.toString().getBytes(StandardCharsets.UTF_8)));
+        } catch (NoSuchAlgorithmException e) {
+            throw new IllegalStateException("缺少 SHA-256", e);
+        }
+        long chars = texts.stream().mapToLong(text -> text.text().length()).sum();
+        return new CollectionPlan(new IndexPreview(collection, texts.size(), chars, (texts.size() + EMBED_BATCH - 1) / EMBED_BATCH,
+                version), texts, session, storyDir, indexSignature(module), bibleHash(bible));
+    }
+
+    /** 管理专用严格写入：向量全部校验成功才替换目标集合，失败不吞掉，也不连带清共享世界。 */
+    public void rebuildCollection(CollectionPlan plan) {
+        Objects.requireNonNull(plan, "collection plan");
+        List<VectorPoint> points = new ArrayList<>();
+        Integer dimensions = plan.session == null ? null : plan.session.dimensions();
+        for (int start = 0; start < plan.texts.size(); start += EMBED_BATCH) {
+            List<MemText> batch = plan.texts.subList(start, Math.min(start + EMBED_BATCH, plan.texts.size()));
+            List<float[]> vectors = plan.session.embed(batch.stream().map(MemText::text).toList());
+            if (vectors == null || vectors.size() != batch.size()) throw new IllegalStateException("向量数量与重建文本不匹配");
+            for (int index = 0; index < batch.size(); index++) {
+                float[] vector = vectors.get(index);
+                if (vector == null || vector.length == 0) throw new IllegalStateException("重建返回空向量");
+                if (dimensions == null) dimensions = vector.length;
+                if (vector.length != dimensions) throw new IllegalStateException("重建返回向量维度不一致");
+                for (float value : vector) if (!Float.isFinite(value)) throw new IllegalStateException("重建返回非法向量数值");
+                MemText text = batch.get(index);
+                points.add(VectorPoint.builder().id(stableId(text.stableKey())).vector(vector.clone()).payload(text.payload()).build());
+            }
+        }
+        String collection = plan.preview.collection();
+        vectorStore.dropCollection(collection);
+        if (!points.isEmpty()) {
+            vectorStore.ensureCollection(collection, dimensions);
+            vectorStore.upsert(collection, points);
+        }
+        List<StoredPoint> stored = vectorStore.listPoints(collection);
+        Map<String, String> expected = new HashMap<>();
+        for (VectorPoint point : points) expected.put(point.getId(), point.getPayload().get("text"));
+        if (vectorStore.count(collection) != points.size() || stored.size() != points.size()
+                || stored.stream().map(StoredPoint::getId).distinct().count() != points.size()
+                || stored.stream().anyMatch(point -> !expected.containsKey(point.getId())
+                    || !Objects.equals(expected.get(point.getId()), point.getText()))) {
+            throw new IllegalStateException("集合重建后的点集对账失败");
+        }
+        if (plan.storyDir != null) writeMaintenanceMeta(plan);
+    }
+
+    /** 删除索引不删除原文；保留待补偿标记，后续章节写入需补齐历史而非只写最新章。 */
+    public void markCollectionDeleted(StoryVO.Module module, Path storyDir) {
+        CollectionPlan marker = new CollectionPlan(new IndexPreview(collectionOf(storyDir), 0, 0, 0, "deleted"),
+                List.of(), null, storyDir, indexSignature(module), bibleHash(readBibleForMaintenance(storyDir)));
+        writeMaintenanceMeta(marker, true);
+    }
+
+    private void writeMaintenanceMeta(CollectionPlan plan) {
+        writeMaintenanceMeta(plan, false);
+    }
+
+    private void writeMaintenanceMeta(CollectionPlan plan, boolean dirty) {
+        Path memory = plan.storyDir.resolve("memory");
+        Path file = memory.resolve(INDEX_META_FILE);
+        Path temporary = null;
+        try {
+            if (Files.isSymbolicLink(memory) || Files.isSymbolicLink(file)) throw new IOException("索引元数据路径不能为符号链接");
+            Files.createDirectories(memory);
+            temporary = Files.createTempFile(memory, "embedding-index-", ".tmp");
+            Map<String, Object> meta = new LinkedHashMap<>();
+            meta.put("signature", plan.indexSignature);
+            meta.put("schemaVersion", MEMORY_SCHEMA_VERSION);
+            meta.put("bibleHash", plan.bibleHash);
+            meta.put("dirty", dirty);
+            meta.put("sourceVersion", plan.preview.sourceVersion());
+            Files.writeString(temporary, com.alibaba.fastjson2.JSON.toJSONString(meta), StandardCharsets.UTF_8);
+            Files.move(temporary, file, StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING);
+        } catch (IOException e) {
+            throw new IllegalStateException("集合已写入但索引元数据保存失败，请重新核对", e);
+        } finally {
+            if (temporary != null) {
+                try { Files.deleteIfExists(temporary); } catch (IOException ignored) { }
+            }
+        }
+    }
+
+    private String readBibleForMaintenance(Path storyDir) {
+        Path file = storyDir.resolve("story-bible.txt");
+        if (Files.isSymbolicLink(file)) throw new IllegalStateException("设定来源不能为符号链接");
+        if (!Files.exists(file, LinkOption.NOFOLLOW_LINKS)) return null;
+        try {
+            return Files.readString(file, StandardCharsets.UTF_8).trim();
+        } catch (IOException e) {
+            throw new IllegalStateException("设定来源读取失败，不能重建集合", e);
+        }
     }
 
     /**
@@ -372,31 +560,29 @@ public class StoryMemoryService {
             return;
         }
         try {
-            String storyId = storyDir.getFileName().toString();
-            StringBuilder text = new StringBuilder();
-            text.append("第").append(volume.getVolumeNo()).append("卷《")
-                    .append(nullToBlank(volume.getTitle())).append("》：")
-                    .append(nullToBlank(volume.getThemeShift()));
-            if (volume.getBeats() != null && !volume.getBeats().isEmpty()) {
-                text.append("\n承转合：").append(String.join("；", volume.getBeats()));
-            }
-            if (volume.getVolumeExitConditions() != null && !volume.getVolumeExitConditions().isEmpty()) {
-                text.append("\n卷结束条件：").append(String.join("；", volume.getVolumeExitConditions()));
-            }
-            if (volume.getSeeds() != null && !volume.getSeeds().isEmpty()) {
-                text.append("\n卷级伏笔：").append(String.join("；", volume.getSeeds()));
-            }
-            Map<String, String> payload = new HashMap<>();
-            payload.put("kind", KIND_VOLUME);
-            payload.put("storyId", storyId);
-            payload.put("volumeNo", String.valueOf(volume.getVolumeNo()));
-            payload.put("title", nullToBlank(volume.getTitle()));
-            payload.put("text", text.toString());
-            embedAndUpsert(module, List.of(new MemText(storyId + "#volume#" + volume.getVolumeNo(),
-                    text.toString(), payload)), collectionOf(storyDir));
+            embedAndUpsert(module, List.of(volumeText(storyDir, volume)), collectionOf(storyDir));
         } catch (Exception e) {
             log.warn("卷向量索引失败，已跳过（不阻塞生成）：{}", e.getMessage());
         }
+    }
+
+    private MemText volumeText(Path storyDir, VolumeBlueprintEntity volume) {
+        String storyId = storyDir.getFileName().toString();
+        StringBuilder text = new StringBuilder();
+        text.append("第").append(volume.getVolumeNo()).append("卷《")
+                .append(nullToBlank(volume.getTitle())).append("》：").append(nullToBlank(volume.getThemeShift()));
+        if (volume.getBeats() != null && !volume.getBeats().isEmpty()) text.append("\n承转合：").append(String.join("；", volume.getBeats()));
+        if (volume.getVolumeExitConditions() != null && !volume.getVolumeExitConditions().isEmpty()) {
+            text.append("\n卷结束条件：").append(String.join("；", volume.getVolumeExitConditions()));
+        }
+        if (volume.getSeeds() != null && !volume.getSeeds().isEmpty()) text.append("\n卷级伏笔：").append(String.join("；", volume.getSeeds()));
+        Map<String, String> payload = new HashMap<>();
+        payload.put("kind", KIND_VOLUME);
+        payload.put("storyId", storyId);
+        payload.put("volumeNo", String.valueOf(volume.getVolumeNo()));
+        payload.put("title", nullToBlank(volume.getTitle()));
+        payload.put("text", text.toString());
+        return new MemText(storyId + "#volume#" + volume.getVolumeNo(), text.toString(), payload);
     }
 
     /**
@@ -917,8 +1103,11 @@ public class StoryMemoryService {
     }
 
     private List<MemText> bibleTexts(Path storyDir) {
-        String content = readBibleContent(storyDir);
-        if (content == null) {
+        return bibleTexts(storyDir, readBibleContent(storyDir));
+    }
+
+    private List<MemText> bibleTexts(Path storyDir, String content) {
+        if (StringUtils.isBlank(content)) {
             return List.of();
         }
         String storyId = storyDir.getFileName().toString();
@@ -929,8 +1118,11 @@ public class StoryMemoryService {
     }
 
     private List<MemText> worldBibleTexts(Path storyDir, String worldId) {
-        String content = readBibleContent(storyDir);
-        if (content == null) {
+        return worldBibleTexts(storyDir, worldId, readBibleContent(storyDir));
+    }
+
+    private List<MemText> worldBibleTexts(Path storyDir, String worldId, String content) {
+        if (StringUtils.isBlank(content)) {
             return List.of();
         }
         String storyId = storyDir.getFileName().toString();

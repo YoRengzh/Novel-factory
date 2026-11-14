@@ -69,6 +69,53 @@ class JobRegistryTest {
     }
 
     @Test
+    void referenceMaintenanceBlocksNewJobsAndCalls() {
+        assertTrue(registry.tryBeginReferenceOperation());
+        assertTrue(registry.isReferenceBusy());
+        assertFalse(registry.tryBeginReferenceUse());
+        assertFalse(registry.tryRegister(new GenerationJob("blocked")));
+        registry.endReferenceOperation();
+        assertTrue(registry.tryRegister(new GenerationJob("accepted")));
+    }
+
+    @Test
+    void synchronousCallBlocksMaintenanceUntilFinallyReleased() {
+        assertTrue(registry.tryBeginReferenceUse());
+        assertTrue(registry.tryBeginReferenceUse());
+        assertFalse(registry.tryBeginReferenceOperation());
+        registry.endReferenceUse();
+        assertFalse(registry.tryBeginReferenceOperation());
+        registry.endReferenceUse();
+        assertTrue(registry.tryBeginReferenceOperation());
+        registry.endReferenceOperation();
+    }
+
+    @Test
+    void cancellingJobStillBlocksGlobalMaintenance() {
+        GenerationJob job = new GenerationJob("active");
+        job.markRunning();
+        registry.register(job);
+        registry.cancel(job.getJobId());
+        assertFalse(registry.tryBeginReferenceOperation());
+        job.markCancelled();
+        assertTrue(registry.tryBeginReferenceOperation());
+        registry.endReferenceOperation();
+    }
+
+    @Test
+    void collectionMaintenanceAndAuthoringMaintenanceExcludeEachOther() {
+        assertTrue(registry.tryBeginStoryOperation("story-a"));
+        assertFalse(registry.tryBeginReferenceOperation());
+        registry.endStoryOperation("story-a");
+        assertTrue(registry.tryBeginReferenceOperation());
+        assertFalse(registry.tryBeginStoryOperation("story-b"));
+        assertTrue(registry.isActiveForStory("story-b"));
+        registry.endReferenceOperation();
+        assertTrue(registry.tryBeginStoryOperation("story-b"));
+        registry.endStoryOperation("story-b");
+    }
+
+    @Test
     void cancel_unknownReturnsNull() {
         assertNull(registry.cancel("nope"));
     }

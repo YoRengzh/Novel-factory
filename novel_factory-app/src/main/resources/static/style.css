@@ -27,6 +27,12 @@
     --error: #f87171;
     --mono: ui-monospace, "SF Mono", "Cascadia Code", Consolas, "JetBrains Mono", monospace;
     --serif: "Noto Serif SC", "Source Han Serif SC", "Songti SC", SimSun, serif;
+    /* 左侧通知与返回共用位置、尺寸；书内工作区按同一组变量预留空栏。 */
+    --left-rail-offset: 12px;
+    --left-rail-bottom: 96px;
+    --left-notice-height: 78px;
+    --left-return-width: 108px;
+    --left-rail-gap: 12px;
     /* 登录页霓虹色 */
     --neon-cyan: #00f0ff;
     /* 登录页粒子颜色（RGB 分量，canvas 读取） */
@@ -1311,11 +1317,11 @@ body.day input {
 /* ============================================================
    版本通知（左下角悬浮）
    ============================================================ */
-/* 贴左边缘的竖向窄标签：只占 26px 宽，不再侵入内容区（此前 90px 宽的横向按钮会压住卡片） */
+/* 竖向通知保留窄标签，与上方横向返回共用左侧空栏。 */
 .update-fab {
     position: fixed;
-    left: 0;
-    bottom: 96px;
+    left: var(--left-rail-offset);
+    bottom: var(--left-rail-bottom);
     z-index: 40;
     display: flex;
     flex-direction: column;
@@ -1323,10 +1329,10 @@ body.day input {
     gap: 8px;
     padding: 12px 6px;
     width: 26px;
+    height: var(--left-notice-height);
     background: var(--panel);
     border: 1px solid var(--line-strong);
-    border-left: none;
-    border-radius: 0 8px 8px 0;
+    border-radius: 8px;
     color: var(--text-secondary);
     font-family: var(--mono);
     font-size: 11px;
@@ -1366,9 +1372,9 @@ body.day input {
 
 .update-panel {
     position: fixed;
-    /* 面板从左边缘弹出：避开竖向标签本身（标签占 0~26px，面板从 34px 起） */
-    left: 34px;
-    bottom: 96px;
+    /* 面板避开左侧通知，与通知和返回共用 offset。 */
+    left: calc(var(--left-rail-offset) + 34px);
+    bottom: var(--left-rail-bottom);
     z-index: 41;
     width: min(460px, calc(100vw - 50px));
     max-height: min(70vh, 620px);
@@ -1476,9 +1482,8 @@ body.day input {
 }
 
 @media (max-width: 760px) {
-    /* 窄屏仍贴左边缘，但把标签抬高一点避免和底部按钮区重叠 */
-    .update-fab { bottom: 72px; }
-    .update-panel { left: 34px; bottom: 72px; width: calc(100vw - 46px); }
+    :root { --left-rail-offset: 8px; --left-rail-bottom: 72px; --left-return-width: 96px; --left-rail-gap: 8px; }
+    .update-panel { width: calc(100vw - var(--left-rail-offset) - 46px); }
 }
 
 /* ============================================================

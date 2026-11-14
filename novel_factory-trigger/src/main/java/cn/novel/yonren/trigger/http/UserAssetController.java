@@ -4,6 +4,7 @@ import cn.novel.yonren.api.dto.AssetContentDTO;
 import cn.novel.yonren.api.dto.StyleViewDTO;
 import cn.novel.yonren.api.dto.UserReferenceDTO;
 import cn.novel.yonren.domain.novel.service.armory.prompt.UserAssetStore;
+import cn.novel.yonren.domain.novel.service.armory.prompt.reference.ReferenceIndexManagementService;
 import jakarta.annotation.Resource;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.HttpStatus;
@@ -30,6 +31,9 @@ public class UserAssetController {
     @Resource
     private UserAssetStore userAssetStore;
 
+    @Resource
+    private ReferenceIndexManagementService referenceIndexManagement;
+
     // ===== 我的参考资料 =====
 
     @GetMapping("/references")
@@ -52,8 +56,11 @@ public class UserAssetController {
     public List<UserReferenceDTO> writeReference(@PathVariable("fileName") String fileName,
                                                  @RequestBody AssetContentDTO body) {
         try {
-            userAssetStore.writeReference(fileName, body == null ? null : body.getContent());
+            referenceIndexManagement.mutateReference(() ->
+                    userAssetStore.writeReference(fileName, body == null ? null : body.getContent()));
             return userAssetStore.listReferences();
+        } catch (ReferenceIndexManagementService.ConflictException e) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT, e.getMessage());
         } catch (IllegalArgumentException e) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, e.getMessage());
         } catch (Exception e) {
@@ -68,8 +75,11 @@ public class UserAssetController {
                                                   @RequestBody cn.novel.yonren.api.dto.ReferenceImportRequestDTO body) {
         try {
             String sourcePath = body == null ? null : body.getSourcePath();
-            userAssetStore.importReference(fileName, sourcePath == null ? null : java.nio.file.Path.of(sourcePath));
+            referenceIndexManagement.mutateReference(() ->
+                    userAssetStore.importReference(fileName, sourcePath == null ? null : java.nio.file.Path.of(sourcePath)));
             return userAssetStore.listReferences();
+        } catch (ReferenceIndexManagementService.ConflictException e) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT, e.getMessage());
         } catch (IllegalArgumentException e) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, e.getMessage());
         } catch (Exception e) {
@@ -81,8 +91,10 @@ public class UserAssetController {
     @DeleteMapping("/references/{fileName}")
     public List<UserReferenceDTO> deleteReference(@PathVariable("fileName") String fileName) {
         try {
-            userAssetStore.deleteReference(fileName);
+            referenceIndexManagement.mutateReference(() -> userAssetStore.deleteReference(fileName));
             return userAssetStore.listReferences();
+        } catch (ReferenceIndexManagementService.ConflictException e) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT, e.getMessage());
         } catch (IllegalArgumentException e) {
             throw new ResponseStatusException(HttpStatus.NOT_FOUND, e.getMessage());
         } catch (Exception e) {
@@ -103,6 +115,8 @@ public class UserAssetController {
         try {
             UserAssetStore.StyleContent content = userAssetStore.readStyle(code);
             return new AssetContentDTO(content.content(), content.overridden(), content.builtin());
+        } catch (ReferenceIndexManagementService.ConflictException e) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT, e.getMessage());
         } catch (IllegalArgumentException e) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, e.getMessage());
         } catch (Exception e) {
@@ -116,6 +130,8 @@ public class UserAssetController {
         try {
             userAssetStore.writeStyle(code, body == null ? null : body.getContent());
             return userAssetStore.listStyles();
+        } catch (ReferenceIndexManagementService.ConflictException e) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT, e.getMessage());
         } catch (IllegalArgumentException e) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, e.getMessage());
         } catch (Exception e) {

@@ -65,7 +65,7 @@ public class ReferenceBlockIndexer {
     private final Set<String> readyCollections = new LinkedHashSet<>();
 
     /** 只读取 classpath 资料和已冻结会话的元信息，不调用 embedding 或向量存储。 */
-    ReferenceBlockSnapshot loadSnapshot(EmbeddingGateway.EmbeddingSession session) {
+    public ReferenceBlockSnapshot loadSnapshot(EmbeddingGateway.EmbeddingSession session) {
         Objects.requireNonNull(session, "embedding session");
         String signature = session.signature();
         Integer dimensions = session.dimensions();
@@ -80,10 +80,22 @@ public class ReferenceBlockIndexer {
             throw new IllegalStateException("资料块策略版本不能为空");
         }
 
-        // 复制目录条目；后续构建和哈希只使用本次保存的值，不再回读目录或全文。
+        // 目录保留全量正文用于版本；构建仅限启用来源，停用资料的依赖身份由 docId# 前缀识别。
+        ReferenceSourcePolicy sourcePolicy = referenceIndexLoader.sourcePolicy();
+        Set<String> disabledSources = sourcePolicy == null ? Set.of() : sourcePolicy.disabledSources();
+        String loaderVersion = referenceIndexLoader.corpusVersion();
+        List<ReferenceIndexEntry> allEntries = referenceIndexLoader.getAllIndex();
+        if (allEntries == null || allEntries.isEmpty()) {
+            // 旧测试替身只 stub getIndex；真实 loader 的 getAllIndex 始终权威。
+            allEntries = referenceIndexLoader.getIndex();
+        }
+        if (allEntries == null) {
+            allEntries = List.of();
+        }
         List<Document> documents = new ArrayList<>();
         Set<String> docIds = new LinkedHashSet<>();
-        for (ReferenceIndexEntry entry : referenceIndexLoader.getIndex()) {
+        Set<String> enabledDocIds = new LinkedHashSet<>();
+        for (ReferenceIndexEntry entry : allEntries) {
             String docId = entry.getFileName();
             String path = entry.getRelativePath();
             if (StringUtils.isBlank(docId) || !docIds.add(docId)) {
@@ -92,13 +104,25 @@ public class ReferenceBlockIndexer {
             if (StringUtils.isBlank(path)) {
                 throw new IllegalStateException("资料相对路径不能为空：" + docId);
             }
+            if (!disabledSources.contains(docId)) {
+                enabledDocIds.add(docId);
+            }
             documents.add(new Document(docId, path, entry.getTitle(), entry.getGroup(), fileLoader.load(path)));
         }
         documents.sort(Comparator.comparing(Document::docId).thenComparing(Document::relativePath));
 
+        if (enabledDocIds.isEmpty()) {
+            String corpusHash = corpusHash(documents, List.of(), policyVersion, loaderVersion);
+            return new ReferenceBlockSnapshot(null, List.of(), Map.of(), corpusHash, signature,
+                    policyVersion, CHUNK_SCHEMA_VERSION, dimensions);
+        }
+
         List<ReferenceAtom> atoms = new ArrayList<>();
         Map<String, ReferenceAtom> byId = new LinkedHashMap<>();
         for (Document doc : documents) {
+            if (disabledSources.contains(doc.docId())) {
+                continue;
+            }
             if (StringUtils.isBlank(doc.content())) {
                 throw new IllegalStateException("参考资料缺失或为空：" + doc.relativePath());
             }
@@ -117,16 +141,54 @@ public class ReferenceBlockIndexer {
                 atoms.add(atom);
             }
         }
-        if (atoms.isEmpty()) {
-            throw new IllegalStateException("参考资料切块结果为空，无法建立块索引");
+        // 只去掉明确指向停用来源的边，再验证全部启用原子，未知依赖/环仍严格失败。
+        // 校验在递归排除之前执行，避免同时含坏依赖的原子被停用过滤悄悄吞掉。
+        Map<String, ReferenceAtom> closureForValidation = new LinkedHashMap<>();
+        for (ReferenceAtom atom : atoms) {
+            closureForValidation.put(atom.atomId(), atom.withRequires(atom.requires().stream()
+                    .filter(id -> !dependencyDisabled(id, byId, disabledSources)).toList()));
         }
-        List<String> problems = atomBuilder.validateClosure(byId, docIds);
+        List<String> problems = atomBuilder.validateClosure(closureForValidation, enabledDocIds);
         if (!problems.isEmpty()) {
             throw new IllegalStateException("资料块依赖闭包校验失败：" + String.join("；", problems));
         }
-        String corpusHash = corpusHash(documents, atoms, policyVersion);
-        return new ReferenceBlockSnapshot(null, atoms, byId, corpusHash, signature,
+        Set<String> excluded = new LinkedHashSet<>();
+        atoms.stream().filter(atom -> atom.requires().stream()
+                        .anyMatch(id -> dependencyDisabled(id, byId, disabledSources)))
+                .map(ReferenceAtom::atomId).forEach(excluded::add);
+        boolean changed;
+        do {
+            changed = false;
+            for (ReferenceAtom atom : atoms) {
+                if (!excluded.contains(atom.atomId()) && atom.requires().stream().anyMatch(excluded::contains)) {
+                    changed |= excluded.add(atom.atomId());
+                }
+            }
+        } while (changed);
+        atoms = atoms.stream().filter(atom -> !excluded.contains(atom.atomId())).toList();
+        Map<String, ReferenceAtom> enabledById = new LinkedHashMap<>();
+        atoms.forEach(atom -> enabledById.put(atom.atomId(), atom));
+        problems = atomBuilder.validateClosure(enabledById, enabledDocIds);
+        if (!problems.isEmpty()) {
+            throw new IllegalStateException("资料块启用闭包校验失败：" + String.join("；", problems));
+        }
+        String corpusHash = corpusHash(documents, atoms, policyVersion, loaderVersion);
+        return new ReferenceBlockSnapshot(null, atoms, enabledById, corpusHash, signature,
                 policyVersion, CHUNK_SCHEMA_VERSION, dimensions);
+    }
+
+    private static boolean dependencyDisabled(String atomId, Map<String, ReferenceAtom> atoms,
+                                               Set<String> disabledSources) {
+        ReferenceAtom target = atoms.get(atomId);
+        if (target != null) {
+            return disabledSources.contains(target.docId());
+        }
+        if (atomId == null) {
+            return false;
+        }
+        int separator = atomId.indexOf('#');
+        return separator > 0 && separator < atomId.length() - 1
+                && disabledSources.contains(atomId.substring(0, separator));
     }
 
     public record IndexPreview(String corpusHash, String policyVersion, String embeddingSignature,
@@ -146,9 +208,18 @@ public class ReferenceBlockIndexer {
 
     /** 兼容独立建索引调用；检索请求必须走带快照、会话和实际查询维度的重载。 */
     public ReferenceBlockSnapshot ensureIndex(StoryVO.Module module) {
-        EmbeddingGateway.EmbeddingSession session = embeddingGateway.session(module);
+        return ensureIndex(embeddingGateway.session(module));
+    }
+
+    /** 管理重建复用已冻结会话；未配置维度时由首批合法向量推断。 */
+    public ReferenceBlockSnapshot ensureIndex(EmbeddingGateway.EmbeddingSession session) {
         ReferenceBlockSnapshot snapshot = loadSnapshot(session);
         return buildIndex(snapshot, session, snapshot.dimensions());
+    }
+
+    /** 只清进程内 ready 集合，不调用 embedding、不删除任何存储集合。 */
+    public synchronized void invalidate() {
+        readyCollections.clear();
     }
 
     ReferenceBlockSnapshot ensureIndex(ReferenceBlockSnapshot snapshot,
@@ -169,6 +240,9 @@ public class ReferenceBlockIndexer {
         if (snapshot.dimensions() != null && actualDimensions != null
                 && !snapshot.dimensions().equals(actualDimensions)) {
             throw new IllegalStateException("查询维度与 embedding 声明维度不一致");
+        }
+        if (snapshot.atoms().isEmpty()) {
+            return snapshot; // 没有候选时不写空集合，也不需要推断 embedding 维度。
         }
         String collection = actualDimensions == null ? null : collectionName(snapshot, actualDimensions);
         if (collection != null && readyCollections.contains(collection)) {
@@ -294,15 +368,21 @@ public class ReferenceBlockIndexer {
         return java.util.Collections.unmodifiableMap(payload);
     }
 
-    private static String collectionName(ReferenceBlockSnapshot snapshot, int dimensions) {
+    /** 集合定位协议；actualDimensions 来自冻结配置或实际返回向量。 */
+    public static String collectionName(ReferenceBlockSnapshot snapshot, int dimensions) {
+        if (dimensions <= 0) {
+            throw new IllegalArgumentException("集合维度必须为正数");
+        }
         return COLLECTION_PREFIX + "-" + snapshot.version() + "-d" + dimensions;
     }
 
     /** 长度前缀避免字段串接歧义；完整全文和全部身份、依赖、策略语义都参与 SHA-256。 */
-    private static String corpusHash(List<Document> documents, List<ReferenceAtom> atoms, String policyVersion) {
+    private static String corpusHash(List<Document> documents, List<ReferenceAtom> atoms, String policyVersion,
+                                     String loaderVersion) {
         MessageDigest digest = newDigest();
         update(digest, String.valueOf(CHUNK_SCHEMA_VERSION));
         update(digest, policyVersion);
+        update(digest, loaderVersion);
         update(digest, String.valueOf(documents.size()));
         for (Document doc : documents) {
             update(digest, doc.docId());

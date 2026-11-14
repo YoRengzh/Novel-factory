@@ -2,6 +2,7 @@ package cn.novel.yonren.domain.novel.service.armory.prompt;
 
 import cn.novel.yonren.api.dto.UserReferenceDTO;
 import cn.novel.yonren.domain.novel.service.armory.prompt.reference.ReferenceIndexLoader;
+import cn.novel.yonren.domain.novel.service.armory.prompt.reference.ReferenceSourcePolicy;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -12,6 +13,7 @@ import java.util.List;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -35,6 +37,7 @@ class UserAssetStoreTest {
         fileLoader.overrideUserAssetRootForTest(tmp);
         indexLoader = new ReferenceIndexLoader();
         indexLoader.overrideUserReferencesDirForTest(tmp.resolve("references"));
+        indexLoader.setSourcePolicy(new ReferenceSourcePolicy(tmp.resolve("source-state.json")));
         store = new UserAssetStore(fileLoader, indexLoader);
     }
 
@@ -58,6 +61,41 @@ class UserAssetStoreTest {
         store.deleteReference("my-battle-exemplar");
         assertTrue(store.listReferences().isEmpty());
         assertNull(fileLoader.load("references/my-battle-exemplar.md"), "删除后缓存不得残留旧内容");
+    }
+
+    @Test
+    void bodyOnlyRewriteAndDeleteRefreshCorpusVersionButNeverReactivateSource() {
+        String original = "# 相同标题\n\n相同简介\n\n## 内容\n旧内容";
+        String edited = "# 相同标题\n\n相同简介\n\n## 内容\n新内容";
+        store.writeReference("my-source", original);
+        String first = indexLoader.corpusVersion();
+        var before = indexLoader.getAllIndex().stream()
+                .filter(entry -> entry.getFileName().equals("my-source")).findFirst().orElseThrow();
+        fileLoader.load("references/my-source.md");
+        indexLoader.sourcePolicy().setEnabled("my-source", false);
+        String disabledVersion = indexLoader.corpusVersion();
+
+        store.writeReference("my-source", edited);
+        assertEquals(edited, fileLoader.load("references/my-source.md"));
+        assertFalse(indexLoader.sourcePolicy().isEnabled("my-source"));
+        assertNotEquals(disabledVersion, indexLoader.corpusVersion());
+        assertEquals(before, indexLoader.getAllIndex().stream()
+                .filter(entry -> entry.getFileName().equals("my-source")).findFirst().orElseThrow());
+        String editedVersion = indexLoader.corpusVersion();
+
+        store.deleteReference("my-source");
+        assertNotEquals(editedVersion, indexLoader.corpusVersion());
+        assertFalse(indexLoader.sourcePolicy().isEnabled("my-source"));
+        assertNull(fileLoader.load("references/my-source.md"));
+        store.writeReference("my-source", original);
+        assertFalse(indexLoader.getIndex().stream().anyMatch(entry -> entry.getFileName().equals("my-source")));
+        assertNotEquals(first, indexLoader.corpusVersion(), "同名重导入仍携带停用 revision");
+    }
+
+    @Test
+    void readReferenceUsesTheSameStrictSourceNameValidation() {
+        assertThrows(IllegalArgumentException.class, () -> store.readReference("../source"));
+        assertThrows(IllegalArgumentException.class, () -> store.readReference("my-source.md"));
     }
 
     @Test

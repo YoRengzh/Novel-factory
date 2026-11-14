@@ -1,6 +1,11 @@
 package cn.novel.yonren.domain.novel.service.armory.prompt.strategy;
 
 import cn.novel.yonren.domain.novel.service.armory.prompt.PromptRuleFileLoader;
+import cn.novel.yonren.domain.novel.service.armory.prompt.reference.ReferenceSourcePolicy;
+import cn.novel.yonren.domain.novel.service.armory.prompt.PromptBuilder;
+import org.junit.jupiter.api.io.TempDir;
+import org.springframework.test.util.ReflectionTestUtils;
+import java.nio.file.Path;
 import cn.novel.yonren.domain.novel.model.valobj.prompt.PromptRule;
 import cn.novel.yonren.types.enums.PromptScene;
 import org.junit.jupiter.api.Test;
@@ -17,7 +22,23 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  */
 class AntiPaddingStrategyTest {
 
+    @TempDir
+    Path temp;
+
     private final AntiPaddingStrategy strategy = new AntiPaddingStrategy(new PromptRuleFileLoader());
+
+    @Test
+    void disabledReferenceCannotBypassThroughFixedStrategy() {
+        ReferenceSourcePolicy policy = new ReferenceSourcePolicy(temp.resolve("disabled.json"));
+        ReflectionTestUtils.setField(strategy, "sourcePolicy", policy);
+        policy.setEnabled("pacing-control", false);
+        String content = strategy.load(PromptScene.CHAPTER_CONTENT, null).get(0).getContent();
+        assertFalse(content.contains("灌水的定义"));
+        assertTrue(content.contains("注水检测"));
+        policy.setEnabled("quality-checklist", false);
+        assertFalse(strategy.supports(PromptScene.CHAPTER_CONTENT, null));
+        assertTrue(new PromptBuilder(List.of(strategy)).collectRules(PromptScene.CHAPTER_CONTENT, null).isEmpty());
+    }
 
     @Test
     void supports_chapterContentOnly() {

@@ -4,6 +4,7 @@ import cn.novel.yonren.api.dto.StyleViewDTO;
 import cn.novel.yonren.api.dto.UserReferenceDTO;
 import cn.novel.yonren.domain.novel.model.valobj.prompt.ReferenceIndexEntry;
 import cn.novel.yonren.domain.novel.service.armory.prompt.reference.ReferenceIndexLoader;
+import cn.novel.yonren.domain.novel.service.armory.prompt.reference.ReferenceSourcePolicy;
 import cn.novel.yonren.types.enums.GenreType;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -37,12 +38,8 @@ import java.util.List;
 @RequiredArgsConstructor
 public class UserAssetStore {
 
-    /** 文件名（不含扩展名）：小写字母/数字开头，只含小写字母/数字/连字符，≤60 位 */
-    private static final String NAME_PATTERN = "[a-z0-9][a-z0-9-]{0,59}";
     /** 单文件上限 10 万字符：参考资料显示注入预算只有数千字，过长只会在截断处浪费 */
     private static final int MAX_CONTENT_CHARS = 100_000;
-    /** design-* 前缀被索引加载器保留跳过，用户起了这个名字等于永远不被检索 */
-    private static final String DESIGN_PREFIX = "design-";
 
     private final PromptRuleFileLoader fileLoader;
     private final ReferenceIndexLoader referenceIndexLoader;
@@ -81,8 +78,9 @@ public class UserAssetStore {
 
     /** 读单条用户资料全文；不存在抛 IllegalArgumentException（404） */
     public String readReference(String fileName) {
-        Path file = referenceFile(fileName);
-        requireUserFile(file, fileName);
+        String name = validatedName(fileName);
+        Path file = referenceFile(name);
+        requireUserFile(file, name);
         try {
             return Files.readString(file, StandardCharsets.UTF_8);
         } catch (IOException e) {
@@ -221,13 +219,7 @@ public class UserAssetStore {
     // ===== 校验与工具 =====
 
     private static String validatedName(String fileName) {
-        if (fileName == null || !fileName.matches(NAME_PATTERN)) {
-            throw new IllegalArgumentException("资料名只能用小写字母、数字与连字符（≤60 位）：" + fileName);
-        }
-        if (fileName.startsWith(DESIGN_PREFIX)) {
-            throw new IllegalArgumentException("design- 前缀为保留字（内部设计文档），请换个名字");
-        }
-        return fileName;
+        return ReferenceSourcePolicy.validateSourceId(fileName);
     }
 
     private static String validatedContent(String content, String label) {
@@ -276,6 +268,7 @@ public class UserAssetStore {
         }
     }
 
+    /** 清正文加载缓存和全文语料版本；不解除该来源的持久化停用状态。 */
     private void refreshReferenceAssets(String name) {
         fileLoader.evict("references/" + name + ".md");
         referenceIndexLoader.refresh();

@@ -3,6 +3,8 @@ package cn.novel.yonren.domain.novel.service.armory.prompt.strategy;
 import cn.novel.yonren.domain.novel.service.armory.PromptRuleStrategy;
 import cn.novel.yonren.domain.novel.service.armory.prompt.CriticalPromptRule;
 import cn.novel.yonren.domain.novel.service.armory.prompt.PromptRuleFileLoader;
+import cn.novel.yonren.domain.novel.service.armory.prompt.reference.ReferenceSourcePolicy;
+import jakarta.annotation.Resource;
 import cn.novel.yonren.domain.novel.model.valobj.prompt.PromptContext;
 import cn.novel.yonren.domain.novel.model.valobj.prompt.PromptRule;
 import cn.novel.yonren.types.enums.PromptScene;
@@ -23,15 +25,23 @@ public class AntiPaddingStrategy implements PromptRuleStrategy, CriticalPromptRu
 
     private final PromptRuleFileLoader fileLoader;
 
+    @Resource
+    private ReferenceSourcePolicy sourcePolicy;
+
+    private boolean enabled(String id) {
+        return sourcePolicy == null || sourcePolicy.isEnabled(id);
+    }
+
     @Override
     public boolean supports(PromptScene scene, PromptContext ctx) {
-        return scene == PromptScene.CHAPTER_CONTENT;
+        return scene == PromptScene.CHAPTER_CONTENT
+                && (enabled("pacing-control") || enabled("quality-checklist"));
     }
 
     @Override
     public List<PromptRule> load(PromptScene scene, PromptContext ctx) {
-        String pacing = fileLoader.load("references/pacing-control.md");
-        String checklist = fileLoader.load("references/quality-checklist.md");
+        String pacing = enabled("pacing-control") ? fileLoader.load("references/pacing-control.md") : null;
+        String checklist = enabled("quality-checklist") ? fileLoader.load("references/quality-checklist.md") : null;
 
         StringBuilder sb = new StringBuilder();
         appendSection(sb, pacing, "## 灌水的定义", "## 矛盾冲突急救法");
