@@ -1,13 +1,24 @@
-/* 书内工作区：四个互斥一级页，创作分组保持独立，切换只隐藏 DOM。 */
+html.book-library-active { scrollbar-gutter: stable; }
+
+/* 书内页共用一层外框，宽度与小说列表一致；外侧书签不占内容列。 */
 .book-workspace {
+    --book-page-gutter: 48px;
+    --book-content-padding: 26px;
+    --book-left-padding: max(var(--book-content-padding), calc(52px - var(--book-page-gutter)));
+    --book-bookmark-width: min(146px, max(0px, calc(var(--book-page-gutter) - 6px)));
+    --book-bookmark-bottom: 104px;
+    position: relative;
     min-width: 0;
-    padding-left: calc(var(--left-rail-offset) + var(--left-return-width) + var(--left-rail-gap));
-    padding-right: 68px;
+    width: 100%;
+    padding: 0;
+    border: 1px solid var(--line);
+    border-radius: 6px;
+    background: var(--panel);
 }
-/* 贴页头下沿的独立返回入口；通知仍保留在左下角。 */
+/* 两个返回入口独立于正文流，通知仍保留在左下角。 */
 .book-return {
     position: fixed;
-    left: var(--left-rail-offset);
+    left: 0;
     top: 54px;
     bottom: auto;
     z-index: 40;
@@ -16,25 +27,30 @@
     writing-mode: horizontal-tb;
     justify-content: center;
     align-items: center;
-    width: var(--left-return-width);
-    min-height: 44px;
-    padding: 10px 12px;
+    width: 48px;
+    height: 30px;
+    min-height: 30px;
+    padding: 4px 6px;
     border: 1px solid var(--line-strong);
-    border-radius: 999px;
+    border-radius: 4px;
     background: var(--panel);
     color: var(--text-secondary);
+    font-size: 12px;
+    line-height: 20px;
     white-space: nowrap;
     letter-spacing: 0;
-    box-shadow: 0 4px 14px rgba(0, 0, 0, .24);
+    box-shadow: 0 2px 8px rgba(0, 0, 0, .18);
 }
+.book-return-chapters { top: 100px; width: 48px; height: 44px; flex-direction: column; line-height: 16px; }
+.book-return-chapters > span { display: block; }
 .book-return:hover:not(:disabled) { border-color: var(--accent); color: var(--accent); background: var(--panel-2); }
 .book-return:disabled { cursor: wait; opacity: .55; }
-.book-return:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
-.book-workspace-header { margin-bottom: 20px; padding: 22px 26px 0; border: 1px solid var(--line-strong); background: var(--panel); border-radius: 10px; }
+.book-return:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.book-workspace-header { width: 100%; margin: 0; padding: 20px var(--book-content-padding) 0 var(--book-left-padding); border: 0; border-bottom: 1px solid var(--line-strong); background: transparent; border-radius: 0; }
 .book-breadcrumb { display: flex; align-items: center; gap: 14px; margin-bottom: 12px; color: var(--text-secondary); font-size: 12px; }
-.book-breadcrumb .btn-back { font-size: 13px; }
 .book-workspace-header .section-title { margin: 0; overflow-wrap: anywhere; font-size: 23px; }
-.book-tabs { display: flex; gap: 8px; margin-top: 20px; flex-wrap: wrap; }
+.book-workspace-header .list-header { margin-bottom: 0; }
+.book-tabs { display: flex; gap: 8px; margin-top: 12px; flex-wrap: wrap; }
 .book-tabs button, .book-subnav button, .book-character-tabs button { border: 0; background: transparent; color: var(--text-secondary); font: inherit; cursor: pointer; padding: 12px 18px; text-align: left; }
 .book-tabs button { border-bottom: 3px solid transparent; }
 .book-tabs button.active { border-color: var(--accent); color: var(--accent); font-weight: 600; }
@@ -42,15 +58,44 @@
 .book-tabs button:disabled, .book-subnav button:disabled, .book-character-tabs button:disabled { cursor: wait; opacity: .55; }
 .book-workspace button:focus-visible, .book-workspace summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
 .book-workspace [role="tabpanel"] { min-width: 0; }
-.book-panel > .content-card { margin-top: 0; }
+.book-panel { width: 100%; margin: 0; padding: 0; display: flow-root; }
+.book-panel > .content-card,
+.book-authoring-content > .book-authoring-panel {
+    margin: 0;
+    padding: 22px var(--book-content-padding) var(--book-content-padding) var(--book-left-padding);
+    border: 0;
+    border-radius: 0;
+    background: transparent;
+}
+#book-panel-runs > .content-card ~ .content-card { border-top: 1px solid var(--line); }
+.book-panel > .config-status { margin: 16px var(--book-content-padding) 0 var(--book-left-padding); }
 .book-unsaved { color: var(--warn); background: var(--panel-2); border: 1px solid var(--warn); padding: 4px 10px; border-radius: 5px; font-size: 12px; }
-.book-authoring-layout { display: grid; grid-template-columns: 146px minmax(0, 1fr); gap: 18px; align-items: start; }
-.book-subnav { display: flex; flex-direction: column; background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 8px; position: sticky; top: 74px; }
-.book-subnav button { padding: 12px; border-radius: 5px; }
+.book-authoring-layout { display: grid; grid-template-columns: minmax(0, 1fr); align-items: start; }
+.book-authoring-content { grid-area: 1 / 1; min-width: 0; width: 100%; }
+/* 背景单独裁出浅 V 缺口，不裁剪按钮焦点；轨道悬挂在共用外框左边线。 */
+.book-subnav {
+    grid-area: 1 / 1;
+    justify-self: start;
+    align-self: start;
+    position: sticky;
+    top: 152px;
+    z-index: 12;
+    width: var(--book-bookmark-width);
+    margin-left: calc(-1 * var(--book-bookmark-width));
+    padding: 5px 4px 15px;
+    color: var(--text-secondary);
+    isolation: isolate;
+}
+.book-subnav::before,
+.book-subnav::after { content: ""; position: absolute; inset: 0; z-index: -1; border-radius: 4px 4px 0 0; clip-path: polygon(0 0, 100% 0, 100% 100%, 50% calc(100% - 9px), 0 100%); }
+.book-subnav::before { background: var(--line-strong); }
+.book-subnav::after { inset: 1px; background: var(--panel-2); }
+.book-subnav-links { display: flex; flex-direction: column; gap: 3px; max-height: max(90px, calc(100dvh - 152px - var(--book-bookmark-bottom) - 20px)); overflow-y: auto; scrollbar-width: thin; }
+.book-subnav .book-subnav-links button { flex: 0 0 auto; width: 100%; padding: 8px 3px; border-radius: 3px; font-size: 12px; line-height: 1.45; text-align: center; overflow-wrap: anywhere; }
 .book-subnav button.active, .book-character-tabs button.active { color: var(--accent); background: var(--accent-dim); font-weight: 600; }
-.book-authoring-content { min-width: 0; }
-.book-authoring-content .content-card { padding: 24px; margin-bottom: 18px; }
-.book-authoring-toolbar { display: flex; align-items: start; justify-content: space-between; gap: 12px; margin-bottom: 12px; }
+.book-authoring-content > .book-preview { margin: 0 var(--book-content-padding) 22px var(--book-left-padding); padding: 20px; }
+.book-authoring-toolbar { display: flex; align-items: start; justify-content: space-between; gap: 12px; margin: 0; padding: 18px var(--book-content-padding) 0 var(--book-left-padding); }
+#book-authoring-status { margin: 14px var(--book-content-padding) 0 var(--book-left-padding); }
 .book-authoring-toolbar .character-profile-meta { border: 0; padding: 0; margin: 0; font-size: 11px; flex: 1; }
 .book-authoring-toolbar button { flex: none; padding: 6px 10px; font-size: 12px; letter-spacing: 0; }
 .book-authoring-panel h3 { font-size: 19px; font-weight: 600; margin-bottom: 14px; }
@@ -68,7 +113,7 @@
 .book-workspace textarea { width: 100%; }
 .book-workspace .form-actions { flex-wrap: wrap; }
 .book-workspace .form-actions > button { min-width: 0; max-width: 100%; overflow-wrap: anywhere; }
-.book-workspace .chapter-text { overflow-wrap: anywhere; }
+.book-workspace .chapter-text { width: 100%; max-width: none; overflow-wrap: anywhere; }
 .book-workspace .chapter-actions { flex-wrap: wrap; }
 .book-workspace .character-card-fields { grid-template-columns: 1fr; }
 .book-workspace .character-decision-card { padding: 14px; }
@@ -100,25 +145,23 @@
 #book-character-facts-read { padding: 16px; border: 1px solid var(--line); background: var(--panel-2); border-radius: 6px; }
 .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); border: 0; }
 @media (max-width: 900px) {
-    .book-authoring-layout { grid-template-columns: 1fr; }
-    .book-subnav { flex-direction: row; flex-wrap: wrap; position: static; gap: 4px; }
-    .book-subnav button { padding: 8px 12px; }
-    .book-authoring-content .content-card { padding: 18px; }
+    .book-workspace { --book-content-padding: 18px; }
+    .book-subnav .book-subnav-links button { padding: 7px 2px; font-size: 11px; }
     .book-character-layout { grid-template-columns: 1fr; }
     .book-character-list { flex-direction: row; flex-wrap: wrap; border-right: 0; border-bottom: 1px solid var(--line); padding: 0 0 12px; }
     .book-tabs { gap: 0; }
     .book-tabs button { padding: 12px 10px; }
 }
 @media (max-width: 760px) {
-    .book-workspace { padding-right: 0; padding-bottom: 84px; }
+    #book-panel-chapters { padding-bottom: 64px; }
     /* 放在基础规则之后，窄窗导航才不会被后面的桌面 fixed 规则覆盖。 */
     #chapter-navigation { top: auto; bottom: 12px; right: 12px; transform: none; flex-direction: row; gap: 8px; padding: 8px; max-width: calc(100vw - 24px); }
     #chapter-navigation button { min-width: 0; min-height: 36px; padding: 8px 12px; }
     #chapter-navigation .nav-prev, #chapter-navigation .nav-next { writing-mode: horizontal-tb; text-orientation: mixed; letter-spacing: 0; }
 }
 @media (max-width: 560px) {
-    .book-workspace-header { padding: 16px 10px 0; }
-    .book-workspace .content-card, .book-authoring-content .content-card { padding: 12px; }
+    .book-workspace { --book-content-padding: 12px; }
+    .book-workspace-header { padding-top: 16px; }
     .book-workspace .list-header { flex-wrap: wrap; gap: 8px; }
     .book-workspace .form-grid { grid-template-columns: minmax(0, 1fr); }
     .book-workspace-header .section-title { font-size: 20px; }

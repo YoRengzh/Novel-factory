@@ -411,11 +411,25 @@ test('迟到旧任务响应不能覆盖新任务，刷新旧running快照不能�
 });
 
 // 只读分页保留既有编码与迟到响应保护。
-test('分块仅逻辑ID+编码cursor+limit25，支持上一页及数值0；无点级POST', async () => {
-    const h = harness({ handle: (record, self) => record.url.includes('/points?') ? { points: [{ id: 1, payload: { text: '本页正文' } }], nextCursor: record.url.includes('cursor=&') ? 'opaque/?&下一页' : null } : self.defaultReply(record) });
-    await h.api.refresh(); await h.inspect('ref/current'); assert.equal(h.requests.at(-1).url, BASE + '/collections/ref%2Fcurrent/points?cursor=&limit=25');
+test('小说记忆首页不发送空游标，读取仅GET且不触发集合变更', async () => {
+    const id = 'collection-b9129c994863a8efe442bd12';
+    const h = harness({ handle: (record, self) => {
+        if (record.url.includes('/points?') && /[?&]cursor=(&|$)/.test(record.url)) throw new Error('400 向量分页游标非法');
+        return self.defaultReply(record);
+    } });
+    Object.assign(h.summary.collections.find(item => item.id === 'story-1'), { id, name: 'novel-memory-20261114-story-0001' });
+    await h.api.refresh(); await h.inspect(id);
+    assert.equal(h.requests.at(-1).url, BASE + '/collections/' + id + '/points?limit=25');
+    assert.match(h.elements['reference-index-points'].textContent, /正文内容/);
+    assert.match(h.elements['reference-index-points-status'].textContent, /本页 1 块/);
+    assert.ok(h.requests.every(item => item.method === 'GET'));
+});
+test('分块首页省略cursor，翻页仅逻辑ID+编码cursor+limit25，支持上一页及数值0；无点级POST', async () => {
+    const h = harness({ handle: (record, self) => record.url.includes('/points?') ? { points: [{ id: 1, payload: { text: '本页正文' } }], nextCursor: record.url.includes('cursor=') ? null : 'opaque/?&下一页' } : self.defaultReply(record) });
+    await h.api.refresh(); await h.inspect('ref/current'); assert.equal(h.requests.at(-1).url, BASE + '/collections/ref%2Fcurrent/points?limit=25');
     await h.click('btn-reference-points-next'); assert.equal(h.requests.at(-1).url, BASE + '/collections/ref%2Fcurrent/points?cursor=opaque%2F%3F%26%E4%B8%8B%E4%B8%80%E9%A1%B5&limit=25');
     assert.match(h.elements['reference-index-points-page'].textContent, /第 2 页/); await h.click('btn-reference-points-prev'); assert.match(h.elements['reference-index-points-page'].textContent, /第 1 页/);
+    assert.equal(h.requests.at(-1).url, BASE + '/collections/ref%2Fcurrent/points?limit=25');
     const zero = harness(); zero.pointsResult.nextCursor = 0; await zero.api.refresh(); await zero.inspect('ref/current');
     assert.equal(zero.button('btn-reference-points-next').disabled, false); zero.pointsResult.nextCursor = null; await zero.click('btn-reference-points-next'); assert.ok(zero.requests.at(-1).url.includes('cursor=0&limit=25'));
     assert.equal(h.requests.some(item => item.method === 'POST'), false);

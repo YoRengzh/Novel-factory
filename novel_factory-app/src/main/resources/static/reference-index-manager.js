@@ -473,8 +473,10 @@
             const id = state.collectionId, epoch = ++pointsEpoch; state.pointsLoading = true;
             el('reference-index-points-status').textContent = '正在读取分块（不读取向量，不提供点级修改或删除）…';
             el('reference-index-points-status').classList.remove('is-error'); sync();
+            const query = cursor == null || cursor === ''
+                ? 'limit=25' : 'cursor=' + encodeURIComponent(cursor) + '&limit=25';
             return Promise.resolve().then(() => request(BASE + '/collections/' + encodeURIComponent(id)
-                + '/points?cursor=' + encodeURIComponent(cursor) + '&limit=25'))
+                + '/points?' + query))
                 .then(value => {
                     if (epoch !== pointsEpoch || id !== state.collectionId) return false;
                     if (!value || !Array.isArray(value.points) || !has(value, 'nextCursor')

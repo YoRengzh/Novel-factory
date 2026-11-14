@@ -211,6 +211,7 @@
             el('book-character-facts').readOnly = locked || !ready;
             doc.querySelectorAll('[data-book-tab], [data-authoring-tab], [data-character-tab]').forEach(item => { item.disabled = locked; });
             el('btn-back-stories').disabled = locked;
+            el('btn-back-chapters').disabled = locked;
             el('book-workspace').setAttribute('aria-busy', String(locked));
             Object.values(state.entryDrafts).forEach(draft => {
                 draft.controls.forEach(control => { control.disabled = locked || !ready; });

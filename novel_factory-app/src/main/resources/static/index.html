@@ -263,7 +263,7 @@
                             <div id="chapters" class="chapters-list"></div>
                         </div>
                         <div id="chapter-view" class="content-card hidden">
-                            <div class="list-header"><button id="btn-back-chapters" class="btn-back" type="button">← 章节目录</button><h3 id="chapter-view-title" class="section-title"></h3></div>
+                            <div class="list-header"><h3 id="chapter-view-title" class="section-title"></h3></div>
                             <div id="chapter-issue-context" class="book-issue-context hidden" role="status"></div>
                             <div class="chapter-actions">
                                 <button id="btn-edit" class="btn-secondary" type="button">编 辑</button>
@@ -280,7 +280,8 @@
 
                     <section id="book-panel-authoring" class="book-panel hidden" role="tabpanel" aria-labelledby="book-tab-authoring">
                         <div class="book-authoring-layout">
-                            <nav class="book-subnav" aria-label="创作管理" role="tablist">
+                            <nav class="book-subnav" aria-label="创作管理" role="tablist" aria-orientation="vertical">
+                              <div class="book-subnav-links">
                                 <button type="button" role="tab" data-authoring-tab="settings" aria-controls="book-authoring-settings" aria-selected="true" class="active">故事设定</button>
                                 <button type="button" role="tab" data-authoring-tab="characters" aria-controls="book-authoring-characters" aria-selected="false">人物档案</button>
                                 <button type="button" role="tab" data-authoring-tab="items" aria-controls="book-authoring-items" aria-selected="false">物品</button>
@@ -288,6 +289,7 @@
                                 <button type="button" role="tab" data-authoring-tab="foreshadow" aria-controls="book-authoring-foreshadow" aria-selected="false">伏笔</button>
                                 <button type="button" role="tab" data-authoring-tab="issues" aria-controls="book-authoring-issues" aria-selected="false">待处理问题</button>
                                 <button type="button" role="tab" data-authoring-tab="depth" aria-controls="book-authoring-depth" aria-selected="false">深度建议</button>
+                              </div>
                             </nav>
                             <div class="book-authoring-content">
                                 <div class="book-authoring-toolbar"><p id="book-authoring-meta" class="character-profile-meta">正在读取书级设定…</p><button id="btn-reload-authoring" class="btn-secondary" type="button">重新读取设定</button></div>
@@ -830,8 +832,9 @@
 
     <div id="toast" class="toast hidden" data-page-node-id="JLwZtxLpWafkz4wtVD3Pre"></div>
 
-    <!-- 返回只在小说库书内显示，fixed 贴于页头下沿；不移动通知。 -->
-    <button id="btn-back-stories" class="btn-back book-return hidden" type="button" aria-label="返回小说库">← 小说库</button>
+    <!-- 两级返回固定在左上边框，正文流仅保留标题；通知位置不变。 -->
+    <button id="btn-back-stories" class="btn-back book-return hidden" type="button" aria-label="返回小说库" title="返回小说库">返回</button>
+    <button id="btn-back-chapters" class="btn-back book-return book-return-chapters hidden" type="button" aria-label="返回章节目录" title="返回章节目录"><span>章节</span><span>目录</span></button>
 
     <!-- 左下角：版本通知入口 -->
     <button id="btn-update" class="update-fab" type="button" title="检查更新">

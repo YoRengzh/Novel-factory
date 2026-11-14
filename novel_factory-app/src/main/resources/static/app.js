@@ -938,8 +938,23 @@
     const chapterListTitle = document.getElementById('chapter-list-title');
 
     document.getElementById('btn-back-chapters').addEventListener('click', function () {
+        if (!isBookChapterVisible() || chapterSaving || (bookWorkspace && bookWorkspace.isBusy())) return;
+        const edited = !contentEdit.classList.contains('hidden');
+        const changed = chapterHasUnsavedEdits || (edited && chapterSnapshotOnEnter != null
+                && contentEdit.innerText !== chapterSnapshotOnEnter);
+        if (changed && !window.confirm('返回章节目录将丢弃本章未保存的修改，继续？')) return;
         ++storyViewToken;
         clearBookTransientUi();
+        chapterHasUnsavedEdits = false;
+        chapterFactsChanged = false;
+        chapterSnapshotOnEnter = null;
+        chapterViewDiv.classList.remove('editing');
+        contentEdit.classList.add('hidden');
+        contentReadonly.classList.remove('hidden');
+        btnEdit.classList.remove('hidden');
+        btnSave.classList.add('hidden');
+        btnCancelEdit.classList.add('hidden');
+        saveResult.classList.add('hidden');
         chapterViewDiv.classList.add('hidden');
         chapterListDiv.classList.remove('hidden');
         syncBookNavigation();
@@ -956,6 +971,7 @@
     const contentEdit = document.getElementById('chapter-content-edit');
     const saveResult = document.getElementById('save-result');
     let currentChapterNo = null;
+    let chapterSaving = false;
     let chapterSequence = [];
     const btnPrevChapter = document.getElementById('btn-prev-chapter');
     const btnNextChapter = document.getElementById('btn-next-chapter');
@@ -988,8 +1004,26 @@
         chapterNav.classList.toggle('hidden', !(prevVisible || nextVisible));
     }
 
+    function syncBookLayout() {
+        if (!isBookLibraryVisible()) return;
+        const workspace = document.getElementById('book-workspace');
+        const left = Math.max(0, workspace.getBoundingClientRect().left);
+        workspace.style.setProperty('--book-page-gutter', left + 'px');
+        const notice = document.getElementById('btn-update').getBoundingClientRect();
+        const noticeSpace = Math.max(0, window.innerHeight - notice.top + 10);
+        workspace.style.setProperty('--book-bookmark-bottom', noticeSpace + 'px');
+    }
+
     function syncBookNavigation() {
-        document.getElementById('btn-back-stories').classList.toggle('hidden', !isBookLibraryVisible());
+        document.documentElement.classList.toggle('book-library-active', document.getElementById('tab-library').classList.contains('active'));
+        const busy = chapterSaving || !!(bookWorkspace && bookWorkspace.isBusy());
+        const backStories = document.getElementById('btn-back-stories');
+        const backChapters = document.getElementById('btn-back-chapters');
+        backStories.classList.toggle('hidden', !isBookLibraryVisible());
+        backChapters.classList.toggle('hidden', !isBookChapterVisible());
+        backStories.disabled = busy;
+        backChapters.disabled = busy;
+        syncBookLayout();
         updateChapterNavigation();
         if (!isBookChapterVisible()) clearBookTransientUi();
     }
@@ -1108,7 +1142,10 @@
     }
 
     btnSave.addEventListener('click', function () {
-        if (!currentStoryDir || currentChapterNo == null) return;
+        if (!currentStoryDir || currentChapterNo == null || chapterSaving) return;
+        chapterSaving = true;
+        if (bookWorkspace) bookWorkspace.sync();
+        syncBookNavigation();
         btnSave.disabled = true;
         btnCancelEdit.disabled = true;
         saveResult.classList.add('hidden');
@@ -1148,6 +1185,9 @@
             });
         })
         .then(function (resp) {
+            chapterSaving = false;
+            if (bookWorkspace) bookWorkspace.sync();
+            syncBookNavigation();
             btnSave.disabled = false;
             btnCancelEdit.disabled = false;
             var warning = normalizeWarning(resp.warning);
@@ -1180,6 +1220,9 @@
             }
         })
         .catch(function (err) {
+            chapterSaving = false;
+            if (bookWorkspace) bookWorkspace.sync();
+            syncBookNavigation();
             btnSave.disabled = false;
             btnCancelEdit.disabled = false;
             var msg = err && err.message ? err.message : String(err);
@@ -3668,13 +3711,17 @@
 
     // ===== 书内工作区（作者维护与品质问题）=====
     // 独立组件：只做渲染与请求，状态与互斥由自身持有；app.js 只负责打开/关闭与注入工作台数据。
-    const bookWorkspace = window.BookWorkspace ? window.BookWorkspace.create({
+    let bookWorkspace = null;
+    bookWorkspace = window.BookWorkspace ? window.BookWorkspace.create({
         document: document,
         fetchJson: function (url, options) { return fetchJson(url, options); },
         confirm: function (message) { return window.confirm(message); },
         notify: function (message) { showToast(message); },
         // 章节编辑器仍有未保存改动时，工作区的保存不得把上下文切走
-        isExtraDirty: function () { return chapterHasUnsavedEdits; },
+        isExtraDirty: function () { return chapterHasUnsavedEdits || (chapterViewDiv.classList.contains('editing')
+                && chapterSnapshotOnEnter != null && contentEdit.innerText !== chapterSnapshotOnEnter); },
+        isExtraBusy: function () { return chapterSaving; },
+        onStateChange: function () { syncBookNavigation(); },
         onTabChange: function () { syncBookNavigation(); }
     }) : null;
     function closeBook() {
@@ -3684,6 +3731,7 @@
         currentChapterNo = null;
         chapterSequence = [];
         chapterHasUnsavedEdits = false;
+        chapterSaving = false;
         chapterFactsChanged = false;
         chapterSnapshotOnEnter = null;
         chapterViewDiv.classList.remove('editing');
@@ -3698,9 +3746,15 @@
     }
 
     document.getElementById('btn-back-stories').addEventListener('click', function () {
+        if (chapterSaving) return;
         if (!bookWorkspace || bookWorkspace.canLeave()) closeBook();
     });
     syncBookNavigation();
+    window.addEventListener('resize', syncBookLayout);
+    if (typeof ResizeObserver !== 'undefined') {
+        const bookLayoutObserver = new ResizeObserver(syncBookLayout);
+        bookLayoutObserver.observe(document.querySelector('.app-main'));
+    }
     document.getElementById('btn-refresh-chapters').addEventListener('click', function () {
         if (currentStoryDir) loadChapters(currentStoryDir);
     });

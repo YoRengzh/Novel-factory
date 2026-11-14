@@ -91,6 +91,13 @@ public class ReferenceSourcePolicy {
     }
 
     private State load() {
+        // 父路径存在但不是目录（被误建成普通文件）时，状态文件必然不存在，按"无状态"处理。
+        // 不能只靠 Files.notExists：Linux 上读这种路径会抛 ENOTDIR，Windows 上 notExists 直接返回
+        // true，同一份代码两个平台行为不同。落盘时仍会因父路径不可用而失败，不会静默丢状态。
+        Path parent = stateFile.getParent();
+        if (parent != null && Files.exists(parent) && !Files.isDirectory(parent)) {
+            return new State(Set.of(), 0L);
+        }
         if (Files.notExists(stateFile)) {
             return new State(Set.of(), 0L);
         }

@@ -90,11 +90,26 @@ class StoryJobServiceTest {
             return StoryGenerateResultAggregate.builder().storyDirName("20260903-story-0001").build();
         });
 
+        // 先占住唯一的 worker 线程，作业才必然停在 CREATED。
+        // 否则空闲线程可能在 submit 返回后、断言前就跑完整个 generate（CI 上就这样偶发过 COMPLETED）。
+        CountDownLatch workerBusy = new CountDownLatch(1);
+        CountDownLatch releaseWorker = new CountDownLatch(1);
+        executor.execute(() -> {
+            workerBusy.countDown();
+            try {
+                releaseWorker.await(10, TimeUnit.SECONDS);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+            }
+        });
+        assertTrue(workerBusy.await(10, TimeUnit.SECONDS));
+
         GenerationJob job = storyJobService.submit(ArmoryCommandEntity.builder().build());
 
         assertEquals(cn.novel.yonren.types.enums.JobStatus.CREATED, job.getStatus());
         assertNotNull(job.getJobId());
         assertTrue(job.getJobId().startsWith("job-"));
+        releaseWorker.countDown();
         awaitTerminal(job);
         assertEquals(cn.novel.yonren.types.enums.JobStatus.COMPLETED, job.getStatus());
         assertEquals("20260903-story-0001", job.getStoryDirName());

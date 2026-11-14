@@ -27,9 +27,9 @@
     --error: #f87171;
     --mono: ui-monospace, "SF Mono", "Cascadia Code", Consolas, "JetBrains Mono", monospace;
     --serif: "Noto Serif SC", "Source Han Serif SC", "Songti SC", SimSun, serif;
-    /* 左侧通知与返回共用位置、尺寸；书内工作区按同一组变量预留空栏。 */
+    /* 左侧通知共用底部定位；返回入口使用书内专属尺寸。 */
     --left-rail-offset: 12px;
-    --left-rail-bottom: 96px;
+    --left-rail-bottom: 16px;
     --left-notice-height: 78px;
     --left-return-width: 108px;
     --left-rail-gap: 12px;
@@ -1482,7 +1482,7 @@ body.day input {
 }
 
 @media (max-width: 760px) {
-    :root { --left-rail-offset: 8px; --left-rail-bottom: 72px; --left-return-width: 96px; --left-rail-gap: 8px; }
+    :root { --left-rail-offset: 8px; --left-rail-bottom: 12px; --left-return-width: 96px; --left-rail-gap: 8px; }
     .update-panel { width: calc(100vw - var(--left-rail-offset) - 46px); }
 }
 

@@ -3,6 +3,7 @@ package cn.novel.yonren.trigger.http;
 import cn.novel.yonren.api.dto.ReferenceIndexDTO;
 import cn.novel.yonren.domain.novel.service.armory.prompt.reference.ReferenceIndexManagementService;
 import lombok.RequiredArgsConstructor;
+import org.apache.commons.lang3.StringUtils;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -44,7 +45,9 @@ public class ReferenceIndexManagementController {
         if (limit < 1 || limit > 100 || cursor != null && cursor.length() > 512) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "分页参数不合法");
         }
-        return invoke(() -> service.points(id, cursor, limit));
+        // 首页允许缺省或空游标；非空游标原样交给适配器校验。
+        String pageCursor = StringUtils.isBlank(cursor) ? null : cursor;
+        return invoke(() -> service.points(id, pageCursor, limit));
     }
 
     @PostMapping("/preview")
