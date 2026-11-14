@@ -88,7 +88,7 @@ public class LlmInvokeService {
 
         String finalUserPrompt = userPrompt;
         if (!userTail.isBlank()) {
-            finalUserPrompt = userPrompt + "\n\n==== 以下为写作规则，创作时必须遵守 ====\n" + userTail;
+            finalUserPrompt = userPrompt + "\n\n==== 交付与事实约束优先；技法、风格和参考资料按场景取用，不新增剧情任务或数量配额 ====\n" + userTail;
         }
 
         String label = labelOverride != null ? labelOverride

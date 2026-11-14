@@ -1,13 +1,34 @@
 package cn.novel.yonren.domain.novel.model.valobj.quality;
 
 import cn.novel.yonren.domain.novel.model.entity.ChapterIssueEntity;
+import cn.novel.yonren.domain.novel.model.valobj.work.ChapterManuscript;
 
 import java.util.List;
 
 
 public record GateResult(List<ChapterIssueEntity> unresolvedBlocking, PassGrade grade,
                          int minorCount, List<ChapterIssueEntity> mechanicalMinor, int reviseRounds,
-                         List<ChapterIssueEntity> semanticMinors, boolean auditVerifyDegraded) {
+                         List<ChapterIssueEntity> semanticMinors, boolean auditVerifyDegraded,
+                         @com.fasterxml.jackson.annotation.JsonInclude(com.fasterxml.jackson.annotation.JsonInclude.Include.NON_NULL)
+                         String semanticFeedbackHash) {
+
+    public GateResult(List<ChapterIssueEntity> unresolvedBlocking, PassGrade grade,
+                      int minorCount, List<ChapterIssueEntity> mechanicalMinor, int reviseRounds,
+                      List<ChapterIssueEntity> semanticMinors, boolean auditVerifyDegraded) {
+        this(unresolvedBlocking, grade, minorCount, mechanicalMinor, reviseRounds,
+                semanticMinors, auditVerifyDegraded, null);
+    }
+
+    public GateResult withSemanticFeedbackHash(String hash) {
+        return new GateResult(unresolvedBlocking, grade, minorCount, mechanicalMinor, reviseRounds,
+                semanticMinors, auditVerifyDegraded, hash);
+    }
+
+    /** 首审统计保留；只有同版稿件的意见可作为后续写作反馈。 */
+    public List<ChapterIssueEntity> feedbackMinorsFor(ChapterManuscript manuscript) {
+        return manuscript != null && semanticFeedbackHash != null && semanticFeedbackHash.equals(manuscript.hash())
+                ? semanticMinors : List.of();
+    }
 
     /** 通过质量分级 */
     public enum PassGrade {

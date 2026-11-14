@@ -21,11 +21,11 @@ import org.springframework.stereotype.Service;
 public class BuildStoryContextNode extends AbstractArmorySupport {
 
     @Resource
-    private BuildVolumeBlueprintNode buildVolumeBlueprintNode;
+    private EnsureCharacterDecisionProfilesNode ensureCharacterDecisionProfilesNode;
 
     @Override
     public StrategyHandler<ArmoryCommandEntity, DefaultArmoryFactory.DynamicContext, StoryGenerateResultAggregate> get(ArmoryCommandEntity requestParameter, DefaultArmoryFactory.DynamicContext dynamicContext) {
-        return buildVolumeBlueprintNode;
+        return ensureCharacterDecisionProfilesNode;
     }
 
     @Override
@@ -80,7 +80,7 @@ public class BuildStoryContextNode extends AbstractArmorySupport {
               .append(interval <= 1
                       ? "每章至少有一次有意义的使用或提及；"
                       : "连续 " + interval + " 章内至少有一次有意义的使用或提及（超过该间隔会被质量门禁判 BLOCKING 并触发整章返工）；")
-              .append("全篇对运作原理的大段解释至多 2 次（首次建立或关键升级时），其余章节直接用行动展示过程与结果。\n");
+              .append("机制按读者理解和实际操作需要说明，既有原理不作无效复述，不限定全书解释次数。\n");
         }
 
         if (defaults != null) {

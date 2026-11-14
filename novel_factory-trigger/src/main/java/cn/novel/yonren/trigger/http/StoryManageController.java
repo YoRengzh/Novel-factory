@@ -45,9 +45,9 @@ import java.util.List;
  * {@link AppException} → HTTP 状态的映射；业务逻辑与实体触碰全部在
  * {@link StoryManageService}（domain）。
  *
- * ⚠️ 所有映射注解必须显式写参数名（如 {@code @PathVariable("storyDirName")}）：
- * 根 pom 钉的 maven-compiler-plugin 3.0 未开 {@code -parameters}，Spring 拿不到反射参数名，
- * 省略名字会在运行期抛 IllegalArgumentException（编译期无任何征兆）。
+ * 映射注解仍显式写参数名（如 {@code @PathVariable("storyDirName")}）：
+ * Maven 构建已由 Boot 父级管理编译插件并启用 {@code -parameters}，
+ * 显式名字保留 HTTP 契约，不依赖源码参数名或其它构建入口的编译设置。
  */
 @Slf4j
 @RestController

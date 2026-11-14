@@ -1,7 +1,7 @@
 package cn.novel.yonren.trigger.http;
 
-import com.alibaba.fastjson.JSON;
-import com.alibaba.fastjson.JSONObject;
+import com.alibaba.fastjson2.JSON;
+import com.alibaba.fastjson2.JSONObject;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
@@ -26,6 +26,16 @@ public class MetricsController {
     private static final String USAGE_PREFIX = "llm-usage";
     private static final String USAGE_SUFFIX = ".jsonl";
 
+    private final Path usageDir;
+
+    public MetricsController() {
+        this(USAGE_DIR);
+    }
+
+    MetricsController(Path usageDir) {
+        this.usageDir = usageDir;
+    }
+
     @GetMapping("/llm")
     public Map<String, Object> llm() {
         long calls = 0, failures = 0, promptChars = 0, responseChars = 0;
@@ -39,22 +49,31 @@ public class MetricsController {
                     if (line == null || line.isBlank()) continue;
                     try {
                         JSONObject item = JSON.parseObject(line);
-                        calls++;
-                        if (!item.getBooleanValue("success")) failures++;
-                        promptChars += item.getLongValue("promptChars");
-                        responseChars += item.getLongValue("responseChars");
-                        promptTokens += item.getLongValue("promptTokens");
-                        completionTokens += item.getLongValue("completionTokens");
-                        totalTokens += item.getLongValue("totalTokens");
-                        durationMs += item.getLongValue("durationMs");
+                        if (item == null) continue;
+                        // 整条记录可用后再累加，坏字段不能留下部分计数。
+                        boolean success = item.getBooleanValue("success");
+                        long pc = item.getLongValue("promptChars");
+                        long response = item.getLongValue("responseChars");
+                        long pt = item.getLongValue("promptTokens");
+                        long ct = item.getLongValue("completionTokens");
+                        long tt = item.getLongValue("totalTokens");
+                        long duration = item.getLongValue("durationMs");
                         long rc = item.getLongValue("reasoningChars");
                         long rt = item.getLongValue("reasoningTokens");
+                        String model = item.getString("model");
+                        calls++;
+                        if (!success) failures++;
+                        promptChars += pc;
+                        responseChars += response;
+                        promptTokens += pt;
+                        completionTokens += ct;
+                        totalTokens += tt;
+                        durationMs += duration;
                         if (rc > 0 || rt > 0) {
                             reasoningCalls++;
                             reasoningChars += rc;
                             reasoningTokens += rt;
                         }
-                        String model = item.getString("model");
                         if (model != null && !model.isBlank()) byModel.merge(model, 1L, Long::sum);
                     } catch (RuntimeException ignored) {
                         // 允许末尾半行或旧格式记录，不影响其余统计
@@ -90,11 +109,11 @@ public class MetricsController {
      * 本接口汇总全部——轮转只是防止单文件无界膨胀，观测口径仍是"全量"。
      * 目录缺失或列举失败返回空表（fail-soft）。
      */
-    private static List<Path> usageLogs() {
-        if (!Files.isDirectory(USAGE_DIR)) {
+    private List<Path> usageLogs() {
+        if (!Files.isDirectory(usageDir)) {
             return List.of();
         }
-        try (Stream<Path> stream = Files.list(USAGE_DIR)) {
+        try (Stream<Path> stream = Files.list(usageDir)) {
             List<Path> logs = new ArrayList<>();
             stream.filter(Files::isRegularFile)
                     .filter(p -> {

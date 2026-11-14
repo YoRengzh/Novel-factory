@@ -47,6 +47,10 @@ public final class StoryCommandAssembler {
                 .chapterCount(request.getChapterCount())
                 .worldId(worldId)
                 .build();
+        String depthMode = cn.novel.yonren.domain.novel.model.valobj.character.CharacterDepthSettings
+                .normalizeMode(request.getCharacterDepthMode());
+        // OFF保留缺席，与历史序列化及basis一致；显式非OFF只在启动时冻结。
+        if (!"OFF".equals(depthMode)) storyContextEntity.setCharacterDepthMode(depthMode);
 
         ArmoryCommandEntity command = ArmoryCommandEntity.builder()
                 .storyContextEntity(storyContextEntity)

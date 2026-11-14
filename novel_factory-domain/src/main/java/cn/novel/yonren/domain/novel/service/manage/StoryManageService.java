@@ -391,6 +391,24 @@ public class StoryManageService {
         dto.setItems(toLedgerDTO(chapterMemoryService.buildLedger(summaries, ChapterSummaryEntity::getItemStates)));
         dto.setFactions(toLedgerDTO(chapterMemoryService.buildLedger(summaries, ChapterSummaryEntity::getFactionStates)));
         dto.setQualityDebts(toQualityDebtDTO(debts));
+        var execution = repo(() -> storyRepository.readActiveCharacterExecution(storyDir));
+        for (var summary : summaries) {
+            var review = summary.getCharacterDepthReview();
+            if (review == null) continue;
+            var current = repo(() -> storyRepository.readChapter(storyDir, summary.getChapterNo()));
+            boolean stale = current == null || !java.util.Objects.equals(review.manuscriptHash(),
+                    cn.novel.yonren.domain.novel.model.valobj.work.ChapterManuscript.of(current).hash())
+                    || execution == null || execution.profiles() == null
+                    || !java.util.Objects.equals(review.profileHash(), execution.profiles().hash());
+            dto.getCharacterObservations().add(new StoryWorkbenchDTO.CharacterObservationDTO(summary.getChapterNo(),
+                    stale ? "STALE" : review.status() == null ? "NOT_EVALUATED" : review.status().name(),
+                    review.manuscriptHash(), review.profileHash(), review.findings() == null ? List.of()
+                    : review.findings().stream().filter(cn.novel.yonren.domain.novel.model.valobj.character.CharacterDepthReview::validFinding)
+                            .map(cn.novel.yonren.domain.novel.model.valobj.character.CharacterDepthReview.Finding::observation).toList()));
+        }
+        var causality = storyProperties == null ? null : storyProperties.getCausality();
+        dto.setCausalityPlanMode(causality == null || causality.getPlanMode() == null ? "OFF" : causality.getPlanMode().name());
+        dto.setCausalityAuditMode(causality == null || causality.getAuditMode() == null ? "OFF" : causality.getAuditMode().name());
 
         StoryWorkbenchDTO.WorkbenchMetrics metrics = new StoryWorkbenchDTO.WorkbenchMetrics();
         int totalWords = 0;

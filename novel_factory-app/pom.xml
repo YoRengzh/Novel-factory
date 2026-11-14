@@ -18,26 +18,9 @@
         </dependency>
         <dependency>
             <groupId>org.springframework.boot</groupId>
-            <artifactId>spring-boot-starter-test</artifactId>
-            <scope>test</scope>
-        </dependency>
-        <dependency>
-            <groupId>org.apache.tomcat.embed</groupId>
-            <artifactId>tomcat-embed-core</artifactId>
-        </dependency>
-        <dependency>
-            <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-configuration-processor</artifactId>
         </dependency>
 
-        <dependency>
-            <groupId>com.alibaba</groupId>
-            <artifactId>fastjson</artifactId>
-        </dependency>
-        <dependency>
-            <groupId>org.apache.commons</groupId>
-            <artifactId>commons-lang3</artifactId>
-        </dependency>
         <dependency>
             <groupId>org.projectlombok</groupId>
             <artifactId>lombok</artifactId>
@@ -63,15 +46,14 @@
     <build>
         <finalName>novel_factory-app</finalName>
         <resources>
-            <!-- yml 走过滤，允许用 ${...} 引用 Maven 属性 -->
+            <!-- 非静态资源沿用 Boot 的 @...@ Maven 属性过滤，保留 ${...} 运行时占位符 -->
             <resource>
                 <directory>src/main/resources</directory>
                 <filtering>true</filtering>
                 <includes>
                     <include>**/**</include>
                 </includes>
-                <!-- 前端静态资源必须绕开过滤：过滤会逐字节重写文本，
-                     一旦页面里出现 ${...} 形态的 JS 模板串就会被替换或报错 -->
+                <!-- 前端静态资源按原字节复制，避免模板串或占位符被构建期过滤改写 -->
                 <excludes>
                     <exclude>static/**</exclude>
                 </excludes>

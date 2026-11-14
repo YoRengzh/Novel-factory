@@ -633,12 +633,16 @@ public class StoryRepository implements IStoryRepository {
     }
 
     private String chapterWorkBasisLocked(Path storyDir, List<Integer> formalNumbers) throws IOException {
+        assertNoPendingAuthoringCommit(storyDir);
         StringBuilder input = new StringBuilder();
         for (Path path : basisSources(storyDir)) {
             input.append(Files.notExists(path) ? "-"
                     : ChapterManuscript.digest(Files.readString(path, StandardCharsets.UTF_8))).append('\n');
         }
         input.append(formalNumbers);
+        Path characters = workFile(storyDir, StorageKeys.CHARACTER_EXECUTION_FILE);
+        if (Files.exists(characters)) input.append("\ncharacter-execution:").append(
+                ChapterManuscript.digest(Files.readString(characters, StandardCharsets.UTF_8)));
         return ChapterManuscript.digest(input.toString());
     }
 
@@ -1048,11 +1052,47 @@ public class StoryRepository implements IStoryRepository {
     }
 
     @Override
+    public cn.novel.yonren.domain.novel.model.valobj.character.CharacterExecutionContext readActiveCharacterExecution(Path storyDir)
+            throws IOException {
+        final cn.novel.yonren.domain.novel.model.valobj.character.CharacterExecutionContext[] result =
+                new cn.novel.yonren.domain.novel.model.valobj.character.CharacterExecutionContext[1];
+        withStoryLock(storyDir, () -> {
+            if (Files.exists(storyDir.resolve(StorageKeys.AUTHORING_COMMIT_FILE))) {
+                throw new IllegalStateException("作者维护提交待恢复，不能读取半提交的执行引用");
+            }
+            Path file = workFile(storyDir, StorageKeys.CHARACTER_EXECUTION_FILE);
+            if (Files.notExists(file)) return;
+            try {
+                result[0] = JSON.parseObject(Files.readString(file, StandardCharsets.UTF_8),
+                        cn.novel.yonren.domain.novel.model.valobj.character.CharacterExecutionContext.class);
+                if (result[0] == null) throw new IllegalArgumentException("人物执行引用为空");
+                if (result[0].profiles() != null) cn.novel.yonren.domain.novel.service.armory.character.CharacterDecisionProfileService
+                        .validatePersisted(result[0].profiles());
+            } catch (RuntimeException invalid) {
+                throw corruptMemory(file, "人物执行引用", invalid);
+            }
+        });
+        return result[0];
+    }
+
+    @Override
+    public void writeActiveCharacterExecution(Path storyDir,
+            cn.novel.yonren.domain.novel.model.valobj.character.CharacterExecutionContext execution) throws IOException {
+        if (execution == null) throw new IllegalArgumentException("人物执行引用不能为空");
+        withStoryLock(storyDir, () -> {
+            recoverStoryAuthoringCommitLocked(storyDir);
+            Path file = workFile(storyDir, StorageKeys.CHARACTER_EXECUTION_FILE);
+            writeStringAtomic(file, JSON.toJSONString(execution));
+        });
+    }
+
+    @Override
     public cn.novel.yonren.domain.novel.model.valobj.authoring.StoryAuthoringSnapshot readActiveStoryAuthoring(Path storyDir)
             throws IOException {
         final cn.novel.yonren.domain.novel.model.valobj.authoring.StoryAuthoringSnapshot[] result =
                 new cn.novel.yonren.domain.novel.model.valobj.authoring.StoryAuthoringSnapshot[1];
         withStoryLock(storyDir, () -> {
+            assertNoPendingAuthoringCommit(storyDir);
             Path file = workFile(storyDir, StorageKeys.AUTHORING_CONTEXT_FILE);
             if (Files.notExists(file)) {
                 return;
@@ -1174,6 +1214,7 @@ public class StoryRepository implements IStoryRepository {
         final cn.novel.yonren.domain.novel.model.valobj.authoring.StoryAuthoringView[] result =
                 new cn.novel.yonren.domain.novel.model.valobj.authoring.StoryAuthoringView[1];
         withStoryLock(storyDir, () -> {
+            recoverStoryAuthoringCommitLocked(storyDir);
             AuthoringReadState state = readAuthoringStateLocked(storyDir);
             var preview = cn.novel.yonren.domain.novel.service.armory.authoring.StoryAuthoringService
                     .preview(state.view(), patch, state.bible(), state.chapters(), state.freezeHash());
@@ -1198,15 +1239,64 @@ public class StoryRepository implements IStoryRepository {
                 throw new IllegalStateException("保存期间工作副本或正文依据变化，请重新读取和预览");
             }
             String encoded = JSON.toJSONString(next);
-            writeStringAtomic(root, encoded);
-            writeStringAtomic(active, encoded);
+            Path journal = storyDir.resolve(StorageKeys.AUTHORING_COMMIT_FILE);
+            var commit = new AuthoringCommit(1, state.view().snapshot() == null ? null : state.view().snapshot().hash(),
+                    state.view().activeSnapshot() == null ? null : state.view().activeSnapshot().hash(), next);
+            writeStringAtomic(journal, JSON.toJSONString(commit));
+            recoverStoryAuthoringCommitLocked(storyDir);
             result[0] = new cn.novel.yonren.domain.novel.model.valobj.authoring.StoryAuthoringView(
                     cn.novel.yonren.domain.novel.service.armory.authoring.StoryAuthoringService
                             .mergedSettings(state.bible(), next),
-                    next.revision(), state.view().basis(), next, next,
+                    next.revision(), chapterWorkBasisLocked(storyDir, readChapterNumbers(storyDir)), next, next,
                     state.view().sources(), state.view().effectiveFromChapter());
         });
         return result[0];
+    }
+
+    private void assertNoPendingAuthoringCommit(Path storyDir) {
+        if (Files.exists(storyDir.resolve(StorageKeys.AUTHORING_COMMIT_FILE))) {
+            throw new IllegalStateException("作者维护提交待恢复，不能读取或保存半提交版本");
+        }
+    }
+
+    private record AuthoringCommit(int schemaVersion, String previousRootHash, String previousActiveHash,
+                                   cn.novel.yonren.domain.novel.model.valobj.authoring.StoryAuthoringSnapshot candidate) { }
+
+    @Override
+    public void recoverStoryAuthoringCommit(Path storyDir) throws IOException {
+        withStoryLock(storyDir, () -> recoverStoryAuthoringCommitLocked(storyDir));
+    }
+
+    private void recoverStoryAuthoringCommitLocked(Path storyDir) throws IOException {
+        Path journal = storyDir.resolve(StorageKeys.AUTHORING_COMMIT_FILE);
+        if (Files.notExists(journal)) return;
+        AuthoringCommit commit;
+        try {
+            commit = JSON.parseObject(Files.readString(journal, StandardCharsets.UTF_8), AuthoringCommit.class);
+            if (commit == null || commit.schemaVersion() != 1) throw new IllegalArgumentException("维护提交格式非法");
+            cn.novel.yonren.domain.novel.service.armory.authoring.StoryAuthoringService.validatePersisted(commit.candidate());
+        } catch (RuntimeException invalid) {
+            throw corruptMemory(journal, "作者维护提交", invalid);
+        }
+        Path root = storyDir.resolve(AUTHORING_ROOT_FILE);
+        Path active = workFile(storyDir, StorageKeys.AUTHORING_CONTEXT_FILE);
+        var currentRoot = readAuthoringFile(storyDir, root);
+        var currentActive = readAuthoringFile(storyDir, active);
+        String nextHash = commit.candidate().hash();
+        String rootHash = currentRoot == null ? null : currentRoot.hash();
+        String activeHash = currentActive == null ? null : currentActive.hash();
+        if ((!Objects.equals(rootHash, commit.previousRootHash()) && !Objects.equals(rootHash, nextHash))
+                || (!Objects.equals(activeHash, commit.previousActiveHash()) && !Objects.equals(activeHash, nextHash))) {
+            throw new IllegalStateException("维护提交来源已变化，拒绝用恢复日志覆盖其他版本");
+        }
+        validateAuthoringSources(storyDir, commit.candidate());
+        archiveAuthoring(storyDir, commit.candidate());
+        String encoded = JSON.toJSONString(commit.candidate());
+        writeStringAtomic(root, encoded);
+        writeStringAtomic(active, encoded);
+        if (commit.candidate().characterExecution() != null) writeStringAtomic(
+                workFile(storyDir, StorageKeys.CHARACTER_EXECUTION_FILE), JSON.toJSONString(commit.candidate().characterExecution()));
+        Files.delete(journal);
     }
 
     /** 作者维护只读状态：工作副本、执行引用、设定、正文与冻结哈希在同一锁内快照。 */
@@ -1221,6 +1311,9 @@ public class StoryRepository implements IStoryRepository {
     }
 
     private AuthoringReadState readAuthoringStateLocked(Path storyDir) throws IOException {
+        if (Files.exists(storyDir.resolve(StorageKeys.AUTHORING_COMMIT_FILE))) {
+            throw new IllegalStateException("作者维护提交待恢复，预览不可读取半提交版本");
+        }
         cn.novel.yonren.domain.novel.model.valobj.authoring.StoryAuthoringSnapshot root =
                 readAuthoringFile(storyDir, storyDir.resolve(AUTHORING_ROOT_FILE));
         cn.novel.yonren.domain.novel.model.valobj.authoring.StoryAuthoringSnapshot active =
@@ -1258,7 +1351,7 @@ public class StoryRepository implements IStoryRepository {
                                 .mergedSettings(bible, root),
                         root == null ? null : root.revision(),
                         chapterWorkBasis(storyDir),
-                        root, active, sources, formal.size() + 1);
+                        root, active, sources, formal.size() + 1, readActiveCharacterExecution(storyDir));
         return AuthoringReadState.of(view, bible, Map.copyOf(chapters),
                 ChapterManuscript.digest(frozen.toString()));
     }
@@ -1783,6 +1876,7 @@ public class StoryRepository implements IStoryRepository {
         final String[] idHolder = new String[1];
         final int[] countHolder = new int[1];
         withStoryLock(storyDir, () -> {
+            assertNoPendingAuthoringCommit(storyDir);
             List<Integer> chapterNumbers = readChapterNumbers(storyDir);
             int chapterCount = chapterNumbers.isEmpty() ? 0 : chapterNumbers.get(chapterNumbers.size() - 1);
             List<Path> sources = collectSnapshotSources(storyDir, chapterCount);
@@ -1829,6 +1923,7 @@ public class StoryRepository implements IStoryRepository {
         withStoryLock(storyDir, () -> {
             // 先补完未完成的提交，否则回滚会与残留日志竞争：日志在回滚后被重放，会把回滚点之后的正文写回来。
             recoverChapterCommitLocked(storyDir);
+            recoverStoryAuthoringCommitLocked(storyDir);
             Path metaPath = checkpointDirOf(storyDir, checkpointId).resolve(StorageKeys.CHECKPOINT_META_FILE);
             if (!Files.exists(metaPath)) {
                 throw new AppException(ResponseCode.UN_ERROR.getCode(), "检查点不存在：" + checkpointId);
@@ -1864,6 +1959,12 @@ public class StoryRepository implements IStoryRepository {
                 }
                 Files.createDirectories(dst.getParent());
                 Files.copy(src, dst, StandardCopyOption.REPLACE_EXISTING);
+            }
+            // 旧检查点缺少执行引用意味着当时未启用，不能残留未来激活版本。
+            for (String executionFile : List.of(StorageKeys.AUTHORING_CONTEXT_FILE, StorageKeys.CHARACTER_EXECUTION_FILE)) {
+                if (!manifest.contains(StorageKeys.MEMORY_DIR + "/" + executionFile)) {
+                    Files.deleteIfExists(workFile(storyDir, executionFile));
+                }
             }
             // 2) 裁剪超出检查点章号的正文（summaries.json 已随上步整份还原为 1..chapterCount）
             truncateChaptersBeyond(storyDir, meta.getChapterCount());
@@ -1964,6 +2065,8 @@ public class StoryRepository implements IStoryRepository {
         }
         Path memory = storyDir.resolve(StorageKeys.MEMORY_DIR);
         addIfExists(sources, memory.resolve(StorageKeys.SUMMARIES_FILE));
+        addIfExists(sources, memory.resolve(StorageKeys.AUTHORING_CONTEXT_FILE));
+        addIfExists(sources, memory.resolve(StorageKeys.CHARACTER_EXECUTION_FILE));
         // 提交底座资产必须随快照还原：待回流标记丢失会让回滚后的正文没有"摘要待重建"凭据，
         // 验收记录丢失会让已提交章节重新失去准入依据。
         addIfExists(sources, pendingChapterEditFile(storyDir));

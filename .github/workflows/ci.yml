@@ -36,7 +36,7 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-m2-
 
-      # 根 pom 的仓库指向阿里云 nexus（国内镜像）。CI 在境外访问可能不稳，
+      # 根 pom 的仓库指向阿里云 HTTPS 国内镜像。CI 在境外访问可能不稳，
       # 这里覆盖为 Maven Central，避免拉不到依赖导致假失败。
       - name: Run tests
         run: mvn -B -s .github/maven-ci-settings.xml test

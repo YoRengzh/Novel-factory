@@ -8,6 +8,7 @@ import cn.novel.yonren.domain.novel.service.armory.llm.PlanBranchService;
 import cn.novel.yonren.domain.novel.model.valobj.prompt.PromptContext;
 import cn.novel.yonren.domain.novel.service.job.GenerationJob;
 import cn.novel.yonren.types.exception.AppException;
+import com.alibaba.fastjson2.JSON;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
@@ -151,7 +152,7 @@ class ChapterPlanSegmentPlannerTest {
             aggregate.getChapters().get(i).setMainLineAdvance(blueprint.getMainLineByChapter().get(i).getAdvance());
         }
         when(llmInvokeService.invoke(any(), any(), any(), anyString(), any()))
-                .thenReturn(com.alibaba.fastjson.JSON.toJSONString(aggregate));
+                .thenReturn(JSON.toJSONString(aggregate));
 
         ChapterPlanSegmentPlanner.PlannedSegment planned = planner.planSegment(
                 new StoryVO(), PromptContext.builder().build(), "prompt",

@@ -192,6 +192,9 @@ public class ChapterWorker {
     @Resource
     private IStoryRepository storyRepository;
 
+    @Resource
+    private cn.novel.yonren.domain.novel.service.armory.character.CharacterStageProfileService characterStageProfileService;
+
     /**
      * 执行整批逐章生成，完成后把正文/摘要/质量债/风格统计回写 DynamicContext，
      * 树尾持久化节点据此统一落盘
@@ -262,6 +265,7 @@ public class ChapterWorker {
             }
             ChapterPlanItemEntity item = chapterPlan.getChapters().get(idx);
             int globalNo = item.getChapterNo();
+            cn.novel.yonren.domain.novel.service.armory.character.CharacterProfileReferences.validate(storyContext, item);
             // 下一章超出已规划覆盖区间（蓝图边界与分段错位的防御）→ 先补规划再取章
             if (segments != null && globalNo > plannedSegmentEnd) {
                 plannedSegmentEnd = planNextSegment(requestParameter, dynamicContext, segments,
@@ -379,15 +383,17 @@ public class ChapterWorker {
 
             String userPrompt = buildChapterPrompt(dynamicContext.getStoryContext(), item, fullPrefix, globalNo,
                     contract, storyContext);
-            String depthMode = StoryAuthoringService.characterDepthMode(storyContext);
-            if ("APPLY".equals(depthMode) || "OBSERVE".equals(depthMode)) {
-                var trajectory = CharacterStateProjector.trajectory(summaries, globalNo, item.getCharacters(), 12, 2400);
-                if ("APPLY".equals(depthMode)) {
-                    userPrompt += StoryAuthoringService.renderCharacterDecisions(trajectory.text());
-                } else {
-                    log.info("第 {} 章人物深度观察：{} 条已核对事件，{} 项诊断", globalNo,
-                            trajectory.events().size(), trajectory.diagnostics().size());
-                }
+            String depthMode = cn.novel.yonren.domain.novel.model.valobj.character.CharacterDepthSettings.mode(storyContext);
+            if ("APPLY".equals(depthMode)) {
+                var characterContext = new cn.novel.yonren.domain.novel.service.armory.character.CharacterContextAssembler()
+                        .assemble(storyContext, item.getCharacters(), globalNo);
+                userPrompt += characterContext.text();
+                userPrompt += cn.novel.yonren.domain.novel.service.armory.memory.CharacterDepthFeedbackProjector
+                        .renderFeedback(storyContext, summaries);
+                log.info("第 {} 章人物设计：{} 个字段，诊断{}", globalNo,
+                        characterContext.visibleFieldIds().size(), characterContext.diagnostics());
+            } else if ("OBSERVE".equals(depthMode)) {
+                log.info("第 {} 章人物设计OBSERVE：不改变写作提示词", globalNo);
             }
             // 段计划遗留违规：计划层二次重规划仍未通过的推进问题，在此转成对写手的硬约束。
             // 事件重合或档位倒退会削弱本章契约；携带违规说明，帮助写手区分本章与相邻章的推进。
@@ -472,7 +478,8 @@ public class ChapterWorker {
             }
             // 上章审校反馈（P2）：语义 MINOR（人设/审美等）本章起产生行动通道——压缩要点，
             // 下一章 prompt 的「审校反馈」块消费。此前清单被丢弃：审校每章报 7-9 条却无人行动
-            reviewFeedback = renderReviewFeedback(gateResult.semanticMinors());
+            reviewFeedback = renderReviewFeedback(gateResult.feedbackMinorsFor(
+                    cn.novel.yonren.domain.novel.model.valobj.work.ChapterManuscript.of(chapterContent)));
             // 文风指纹库：仅首轮全票通过的章节提取高信息密度句入库（滚动上限 50）
             if (gateResult.grade() == GateResult.PassGrade.CLEAN_PASS) {
                 List<String> additions = styleStatService.extractFingerprints(chapterContent.getContent());
@@ -565,6 +572,8 @@ public class ChapterWorker {
             // 章号/哈希一律以本地正文为准。定位不到证据或状态迁移非法的条目转 pending，不进权威状态。
             cn.novel.yonren.domain.novel.service.armory.memory.CharacterStateProjector.bind(
                     summary, manuscript, summaries);
+            summary.setCharacterDepthReview(cn.novel.yonren.domain.novel.service.armory.memory.CharacterDepthFeedbackProjector
+                    .observe(storyContext, item, manuscript, summary, summaries));
             summaries.add(summary);
 
             // 伏笔排期打标P2b）：本章新埋的种子与排期表配对，回填 scheduledPayoffChapter，
@@ -1038,6 +1047,8 @@ public class ChapterWorker {
                         "惰性分段规划失败：第 " + (plannedSegmentEnd + 1) + " 章起无对应阶段分段"));
         cn.novel.yonren.domain.novel.model.valobj.StoryVO.Module module =
                 requestParameter.getStoryVO() == null ? null : requestParameter.getStoryVO().getModule();
+        if (characterStageProfileService != null) characterStageProfileService.ensure(requestParameter, dynamicContext,
+                segment.blueprint(), segment.startChapter());
         String prompt = planPromptService.buildPlanPrompt(dynamicContext,
                 segment.startChapter(), segment.endChapter(), segment.blueprint(),
                 segment.endChapter() >= batchEnd, module,
@@ -1435,24 +1446,11 @@ public class ChapterWorker {
                         ? "" : String.join("、", contract.characters()))
                 .append("\n  关键事件：").append(contract.mustHappen() == null
                         ? "" : String.join("、", contract.mustHappen()))
-                .append("\n  结尾悬念：").append(contract.endingImage())
-                .append("\n【本章完成条件】以下条件全部自然完成后，本章立即结束、不再扩写：")
-                .append("\n  1) 关键事件全部落地并写出结果（见上）；")
-                // 2) 是形态要求而非字数要求，防止关键事件被压成提纲式交代。
-                .append("\n  2) **每个关键事件都必须演成一场戏**：有在场的对手或同伴、有一来一回的对话或具体动作、"
-                        + "有可看见的结果。**禁止**把关键事件压成一句过渡叙述（如「他把材料交了上去」"
-                        + "「两人谈完了」）——那是摘要，不是本章要交付的东西；")
-                // 3) 具体情感呈现属于人物内容，与抽象重复情绪的注水不同。
-                .append("\n  3) 至少一处**具体的情感时刻**：用动作、停顿、沉默、器物或对白把人物的情绪与关系变化"
-                        + "呈现出来（比如话说到一半把碗放下、伸手又收回去、把糖纸压平了才开口），"
-                        + "而不是用「他很担心」这类抽象心理总结；")
-                .append("\n  4) 结尾停在「结尾悬念」所指的画面或动作上。")
-                .append("\n  完成即收笔：**不要**为了凑字数追加新的冲突、解释、环境描写或**抽象的心理总结**；")
-                .append("宁可短而完整，不可长而注水。但上面的第 2、3 条是**内容本身**，不是凑数——")
-                .append("若发现写完还不足一场戏的量，说明事件被写薄了，该把它写细而不是收笔。")
-                .append("\n  建议骨架（可按剧情调整顺序，但因果链必须成立）：")
-                .append(contract.suggestedSkeleton())
-                .append("\n要求：");
+                .append("\n  结尾落点：").append(contract.endingImage())
+                .append("\n【本章完成条件】按计划真实完成事件，关键过程与结果必须让读者能够理解。")
+                .append("独处、观察、心理、动作与交流都可以承载事件，不要求同伴、对手、固定轮次或情感时刻。")
+                .append("结尾呼应具体计划落点，允许闭合和余韵，不为制造钩子另起冲突。")
+                .append("必要因果完整后收笔，不为凑数量追加人物、伤害、对白或解释。\n要求：");
         return sb.toString();
     }
 
@@ -1473,19 +1471,9 @@ public class ChapterWorker {
                     .append("。本章任何角色不得表现出超出上述范围的认知——")
                     .append("不得把\"怀疑\"写成\"确认\"，不得让角色知道他尚未获知的信息。");
         }
-        // 能力—阶段一致性通用化）：此前的失控批次先出现"婴儿写数论证明、列乘法竖式"，
-        // 收紧后重跑又绕道为"涂鸦=答案/摆物=警告/大人附会解读"。规则按通用原则表述（不限题材与年龄），
-        // 具体阶段以记忆前缀中的锚（【时序锚】）为准；时序锚可能因预算被裁，写作层红线不会。
-        sb.append("\n【角色能力边界】若上方记忆含【时序锚】：主角本章的动作、语言、书写、专注时长与精细操作")
-                .append("必须落在该阶段（年龄/伤情/状态）的极限内——认知可以超前（若故事设定允许），媒介不能超前；")
-                .append("超出的能力展示必须改写为阶段内的合法表达（偏好、注视、趋避、选择、单音节词、")
-                .append("被协助完成——以阶段常识为准）。")
-                .append("\n【特别禁令】两类能力展示变体同禁：")
-                .append("① 用任何**可被他人在事后解码出具体含义**的载体传递信息——涂鸦、摆物、敲击、手势、")
-                .append("节奏、器物位置都一样，只要他人能读出「某题答案/某警告/认出了某物」，就是能力展示，")
-                .append("不是阶段内表达；")
-                .append("② 让观察者在**单次**观察后就从主角行为中**确认**其掌握了具体知识或意图")
-                .append("——至多「觉得不寻常」，坐实为具体结论须经多次重复，且本章保留不确定口吻。");
+        sb.append("\n【角色能力边界】动作、语言和表达须符合已确立年龄、伤势、训练和特殊能力。")
+                .append("明确允许的认知超前不得被年龄常识抹去；不得靠更换载体绕过真实能力限制。")
+                .append("观察者依据已有信息和现场证据判断，是否确认取决于证据，不规定观察次数或确认套路。");
         return sb.toString();
     }
 
@@ -1495,18 +1483,16 @@ public class ChapterWorker {
      */
     private String renderWritingGuidance(int globalNo, StoryContextEntity storyContext) {
         StringBuilder sb = new StringBuilder();
-                sb                .append("\n4. 内容密度纪律（定性要求；**数量目标已在计划阶段落成每章安排，此处不再重复下达**）：")
-                .append("\n   - 每一段都必须带来信息增量：新信息进入读者视野 / 角色目标变化 / 关系或信任变化 / 资源或位置变化 / 风险升降 / 做出不可撤销的选择——只重复已知状态、或原地循环同一种情绪的段落必须删掉或合并；")
-                .append("\n   - 具体动作优先于抽象心理：用可感知的动作呈现（\"他攥紧刀柄指节泛白\"），禁止用\"感到愤怒\"等抽象心理替代动作；")
-                .append("\n   - 对话必须推进情节/揭示人物/制造冲突，\"你好\"\"吃了吗\"等无意义寒暄不计入；对话过密像剧本、过疏太干，按场景自然配比；")
-                .append("\n   - 严禁通过重复解释已建立的设定、增加环境描写、拉长心理独白来凑篇幅。")
-                .append("\n5. 金手指/核心能力运作机制全篇至多描述2次（首次建立时让读者理解运作方式、关键升级时展示能力变化），后续章节直接用行动展示操作过程和结果，不得每章用大段旁白重新解释原理；如需提醒读者机制存在，用角色的一个习惯性动作或一句话带过（如\"他又闭上眼，阵纹在视网膜上铺展开来\"——一句话带过不展开描述）")
-                .append("\n6. 同章内出现3次及以上同类操作（如连续修补3个节点、连续击败3个敌人、连续检查3个房间）时，每次必须有不同的观察角度、困难类型、操作方式或情绪状态，不得用同一种句式重复；第一次详细描写建立操作模式和难度，第二次简化描写但增加新困难或意外，第三次用结果或他人反应带出（不再重复操作过程）")
-                .append("\n7. 禁止\"这不是X，这是Y\"式定义旁白及其排比连用；禁止大段连续心理独白（超过3句）；禁止用旁白直接命名情绪（\"他感到愤怒/悲伤/震惊\"→改为用行为呈现，如\"他攥紧拳头\"）；关键转折用动作或对话呈现，不靠旁白总结；禁止已建立的设定/金手指机制在后续章节重复解释（\"这就是XX的原理\"\"XX的本质是\"）")
+        sb.append("\n4. 内容有效性：按计划的重要性展开起因、行动、回应和后果，不要求每段新增情报。")
+                .append("心理、环境、等待和后果消化可以承担阅读功能，不为了数量目标删掉必要信息或追加事件。")
+                .append("交流服从人物意图和已知信息，让提问、回答、条件和改变决定的依据清楚相接。")
+                .append("\n5. 核心能力机制按读者理解与计划需要说明，既有原理无需无效复述，不设全篇解释次数。")
+                .append("\n6. 同类操作按实际差异与重要性选择详略，不按次数强制轮换角度、困难或情绪。")
+                .append("\n7. 心理叙述、情绪直述和旁白可服务视角与作者风格，不设句数上限；重要事件不能靠空泛总结代替过程。")
                 .append("\n8. 正文为纯文本，禁止使用任何 Markdown 标记：不得用星号加粗或强调（包括 * 与 **）、不得用井号标题、横线列表、下划线；人物的心理活动、系统面板/提示、技能名称、注入脑海的旁白一律用自然语言直接叙述，靠上下文呈现层次，不得用任何符号包裹或高亮；严禁在正文中出现章节编号（如\"第30章\"\"第十二章\"）或\"本章/上一章/下一章\"等作者层面的元信息。回忆过往事件时，必须用时间/地点/事件指代，绝对不能用章节编号：错误示例\"第12章他在阵眼核心发现的\"→正确写法\"十二天前在阵眼核心发现的\"；错误示例\"第28章袭击事件后\"→正确写法\"上次遇袭之后\"；错误示例\"第6章那个模糊的感知\"→正确写法\"之前那次模糊的感知\"。唯一例外——角色说出口的对白必须用中文双引号“”包裹：上述禁令只针对 Markdown 标记与作者层面元信息，绝不适用于对白；严禁为了遵守纯文本要求而丢弃对白引号。不要输出解释。")
-                .append("\n9. 结尾必须落在真实的悬念/未决/情绪拉扯点上（呼应 endingHook），把读者拽进下一章；严禁用\"本章就这样结束了\"式的总结性收尾，严禁章末感悟升华（\"从此\"\"这就是\"\"终于\"等人生感悟/主题总结/金句点题），结尾必须停在画面或动作上；严禁在事件平息后空转两段才落笔。")
+                .append("\n9. 结尾呼应 endingHook 的具体指向，未决、闭合或余韵均合法；不强制悬念或画面动作，不为制造钩子另起冲突。")
                 .append(renderRegisterGuidance(storyContext))
-                .append("\n11. 禁止重复使用已出现过的情节模式（情节复用检测）：如果之前已经写过\"公开演示能力→众人震惊→获得授权\"\"被权威质疑→当场证明→获得支持\"\"独自进入禁地→发现惊天秘密→被未知存在盯上\"等套路，本章不得再用相同套路；同类情节必须有不同的场景、对手、困难、结果或情绪走向。每章的核心冲突解决方式必须与前5章不同。如果【已用情节模式黑名单】（如有）中列出了近期使用过的情节模式，本章必须避开。")
+                .append("\n11. 检查无意义的情节复用，但因果上必要的同类解法可以再次使用，不要求每章换解法、增加对手或伤害。")
                 .append("\n\n请严格按照以下 JSON 格式输出：")
                 .append("\n{\"chapterNo\":").append(globalNo)
                 .append(",\"title\":\"章节标题\",\"content\":\"章节正文\"}");
@@ -1518,8 +1504,8 @@ public class ChapterWorker {
         GenreType genre = GenreType.match(context == null ? null : context.getTheme(),
                 context == null ? null : context.getStyle());
         StringBuilder rule = new StringBuilder("\n10. 【语言与语域契约】客观叙述、人物对话和内心判断必须符合故事时代与世界设定；")
-                .append("人物措辞必须符合其年龄、身份、教育、职业与已知信息。严禁让儿童、古代人物或低认知角色无来源地使用成熟学术腔、管理报告腔、互联网黑话或时代错位词；")
-                .append("必须表达复杂判断时，改写为该人物能观察到的动作、物件、经验和口语，不得借叙述者替角色发表论文式总结。");
+                .append("人物措辞符合身份、已知信息与作者风格；明确的认知超前、特殊训练或世界设定不能被年龄常识抹平。")
+                .append("复杂判断可用内心、对白、讲述或行动表达，不统一改成物件与短促口语。");
         if (genre == GenreType.FANTASY) {
             rule.append("玄幻/仙侠题材描述世界、动作、对话与环境时，优先使用设定内已有词汇（如灵气、阵纹、符箓、灵脉、宗门、长老、法宝）；")
                     .append("握手信号、加密信号、波形数据、服务器、协议、分布式节点、灰度、缓存、日志等程序员术语不得充当客观世界名词，")

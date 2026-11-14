@@ -28,6 +28,7 @@ import cn.novel.yonren.domain.novel.service.job.GenerationJob;
 import cn.novel.yonren.types.enums.PromptScene;
 import cn.novel.yonren.types.enums.ResponseCode;
 import cn.novel.yonren.types.exception.AppException;
+import com.alibaba.fastjson2.JSON;
 import jakarta.annotation.Resource;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.lang3.StringUtils;
@@ -182,6 +183,9 @@ public class BuildStageBlueprintNode extends AbstractArmorySupport {
                 // 当前卷作为弧的全局方向锚（无卷退化为 null → 两段式，不注入卷方向锚）
                 dynamicContext.getCurrentVolume());
 
+        if (cn.novel.yonren.domain.novel.model.valobj.character.CharacterDepthSettings.applies(requestParameter.getStoryContextEntity())) {
+            prompt += "\n可选castFocus提供本阶段明确核心人物的原名数组，泛称不算姓名；没有明确名单就省略，不为补卡编造人物。";
+        }
         StoryContextEntity storyContext = requestParameter.getStoryContextEntity();
         PromptContext promptContext = PromptContext.builder()
                 .theme(storyContext.getTheme())
@@ -692,7 +696,7 @@ public class BuildStageBlueprintNode extends AbstractArmorySupport {
         String retryPrompt = rollingOutlineService.buildMainLineRepairPrompt(storyContext, blueprint,
                 dynamicContext.getChapterSummaries())
                 + "\n【待修改的上一版章级推进】（不是合格示例）\n"
-                + com.alibaba.fastjson.JSON.toJSONString(blueprint.getMainLineByChapter())
+                + JSON.toJSONString(blueprint.getMainLineByChapter())
                 + RollingOutlineService.mainLineDisciplineFeedback(issues);
         Map<String, String> retryPrompts = new HashMap<>();
         String raw;

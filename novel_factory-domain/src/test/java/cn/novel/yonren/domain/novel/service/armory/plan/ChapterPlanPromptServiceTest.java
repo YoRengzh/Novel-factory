@@ -164,10 +164,9 @@ class ChapterPlanPromptServiceTest {
 
         String prompt = service.buildPlanPrompt(ctx);
 
-        // 破除阵营套路：多方交锋禁止对称出场，必须信息差/时间差
-        assertTrue(prompt.contains("【禁止对称出场】"));
-        assertTrue(prompt.contains("信息差和时间差"));
-        assertTrue(prompt.contains("非对称性和意外感"));
+        assertFalse(prompt.contains("【禁止对称出场】"));
+        assertFalse(prompt.contains("两次危机之间必须"));
+        assertTrue(prompt.contains("多方冲突的出场顺序、信息差与时间差按情境决定"));
     }
 
     @Test
@@ -717,6 +716,35 @@ class ChapterPlanPromptServiceTest {
      * 它下一段就掉出视野、只能等阶段出口——而阶段可长达 30-80 章。
      */
     @Test
+    void sameSegmentPlantingHonorsItsPayoffInsteadOfBeingMisclassifiedAsLongTerm() {
+        for (int[] schedule : new int[][]{{21, 21}, {21, 25}, {23, 23}, {24, 25}}) {
+            StringBuilder sb = new StringBuilder();
+            ChapterPlanPromptService.appendForeshadowScheduleBlock(sb, schedulesOf(
+                    sched("同段线索", schedule[0], schedule[1], ForeshadowScheduleEntity.STATUS_PLANNED)), 21, 25);
+            assertTrue(sb.toString().contains("第 " + schedule[1] + " 章兑现"));
+            assertFalse(sb.toString().contains("本段不得兑现"));
+        }
+        StringBuilder future = new StringBuilder();
+        ChapterPlanPromptService.appendForeshadowScheduleBlock(future, schedulesOf(
+                sched("跨段线索", 21, 26, ForeshadowScheduleEntity.STATUS_PLANNED)), 21, 25);
+        assertTrue(future.toString().contains("本段不得兑现"));
+    }
+
+    @Test
+    void appliedScenePlanDoesNotContainObsoleteWritingQuotas() {
+        var context = DefaultArmoryFactory.DynamicContext.builder().storyContext("本书设定")
+                .storyContextEntity(StoryContextEntity.builder().theme("玄幻修真").style("升级流").build())
+                .chapterSummaries(List.of()).build();
+        String prompt = service.buildPlanPrompt(context);
+        for (String obsolete : List.of("3-5 字一句", "能力展示节奏·硬约束", "不像孩子", "两次危机之间必须", "【禁止对称出场】")) {
+            assertFalse(prompt.contains(obsolete), obsolete);
+        }
+        assertTrue(prompt.contains("scenes 是唯一生成源"));
+        assertTrue(prompt.contains("既成事实与能力限制高于预想情节"));
+        assertTrue(prompt.contains("不要求每场转折或付出代价"));
+    }
+
+    @Test
     void scheduleBlock_persistsOverdueInjection() {
         StringBuilder sb = new StringBuilder();
         // 段区间 21-25；该线计划第 19 章收，已逾期
@@ -928,13 +956,7 @@ class ChapterPlanPromptServiceTest {
         assertEquals("", sb.toString(), "健康态不应注入反馈块：" + sb);
     }
 
-    /**
-     * 计划层必须把"对白承载"与"场面级场景"写成硬要求。
-     *
-     * 对白条数一旦写成固定配额，模型就会为凑数另造事件清单；场景契约下改由
-     * intention/resistance/outcome 保证场景真的能演。计划的写法直接决定正文的写法：
-     * 一句话的场景在正文里只会被展开成一句过渡叙述。
-     */
+    /** 场景保持权威与可理解性，但不以对白配额替代完整过程。 */
     @Test
     void segmentPrompt_requiresDialogueCarriageAndSceneLevelScenes() {
         StageBlueprintEntity blueprint = StageBlueprintEntity.builder()
@@ -946,10 +968,9 @@ class ChapterPlanPromptServiceTest {
 
         String prompt = service.buildPlanPrompt(ctx, 16, 20, blueprint, false, null, null);
 
-        assertTrue(prompt.contains("多数场景应由人物当面的对话/冲突/协作承载"), prompt);
-        assertTrue(prompt.contains("谁对谁、围绕什么分歧"), prompt);
-        assertTrue(prompt.contains("必须写到「场面」级"), prompt);
-        assertTrue(prompt.contains("在场人物 + 起因或分歧 + 落点或结果"), prompt);
+        assertFalse(prompt.contains("多数场景应由人物当面的对话/冲突/协作承载"), prompt);
+        assertTrue(prompt.contains("按场景的重要性展开起因、行动、回应和结果"), prompt);
+        assertTrue(prompt.contains("不为场景数量、轮次或通用字数目标制造内容"), prompt);
         // 输出示例必须以场景为权威来源，并带上 schemaVersion=2。
         assertTrue(prompt.contains("\"schemaVersion\":2"), "输出示例必须声明 v2 场景契约：" + prompt);
         assertTrue(prompt.contains("\"scenes\":[{\"id\":\"ch-"), "输出示例必须含 scenes 字段：" + prompt);

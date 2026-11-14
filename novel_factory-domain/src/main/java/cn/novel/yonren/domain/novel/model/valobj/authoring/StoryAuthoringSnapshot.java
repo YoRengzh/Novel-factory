@@ -11,8 +11,15 @@ import java.util.Objects;
 /** 作者工作副本与执行引用共用的不可变版本；不替代正文、摘要或原始 bible。 */
 public record StoryAuthoringSnapshot(int schemaVersion, String revision, String hash, int effectiveFromChapter,
                                      Map<String, String> settingsOverrides, List<Entry> entries,
-                                     String characterDepthMode) {
-    public static final int SCHEMA_VERSION = 1;
+                                     String characterDepthMode,
+                                     cn.novel.yonren.domain.novel.model.valobj.character.CharacterExecutionContext characterExecution) {
+    public static final int SCHEMA_VERSION = 2;
+    public static final int LEGACY_SCHEMA_VERSION = 1;
+
+    public StoryAuthoringSnapshot(int schemaVersion, String revision, String hash, int effectiveFromChapter,
+                                  Map<String, String> settingsOverrides, List<Entry> entries, String characterDepthMode) {
+        this(schemaVersion, revision, hash, effectiveFromChapter, settingsOverrides, entries, characterDepthMode, null);
+    }
 
     public StoryAuthoringSnapshot {
         settingsOverrides = Collections.unmodifiableMap(new LinkedHashMap<>(Objects.requireNonNull(settingsOverrides)));

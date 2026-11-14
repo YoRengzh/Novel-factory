@@ -26,5 +26,17 @@ public final class StoryAuthoringContext {
         if (requested.getStoryAuthoring() != null) {
             StoryAuthoringService.applySettings(requested, requested.getStoryAuthoring());
         }
+        if (pendingStory != null) {
+            requested.setCharacterDepthMode(pendingStory.getCharacterDepthMode());
+            requested.setCharacterDepthSettings(pendingStory.getCharacterDepthSettings());
+            requested.setCharacterDecisionProfiles(pendingStory.getCharacterDecisionProfiles());
+        } else {
+            var characters = repository.readActiveCharacterExecution(storyDir);
+            if (characters != null) {
+                requested.setCharacterDepthMode(characters.settings().mode());
+                requested.setCharacterDepthSettings(characters.settings());
+                requested.setCharacterDecisionProfiles(characters.profiles());
+            }
+        }
     }
 }

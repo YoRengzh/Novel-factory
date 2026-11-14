@@ -1,6 +1,7 @@
 package cn.novel.yonren.domain.novel.service.armory.quality;
 
 import cn.novel.yonren.domain.novel.model.valobj.quality.GateResult;
+import cn.novel.yonren.domain.novel.model.valobj.work.ChapterManuscript;
 
 import cn.novel.yonren.domain.novel.model.entity.ArmoryCommandEntity;
 import cn.novel.yonren.domain.novel.model.entity.AuditResultEntity;
@@ -315,12 +316,14 @@ public class QualityGate {
         List<ChapterIssueEntity> currentBlocking = new java.util.ArrayList<>(mechanicalBlocking);
         int minorCount = 0;
         List<ChapterIssueEntity> semanticMinors = List.of();
+        String semanticFeedbackHash = null;
         int reviseRounds = 0;
         // 修订验证是否"根本没跑成"：为真时 currentBlocking 的语义是
         // 【未验证】而非【确认未修复】——内容侧偏向不变（仍算未通过、不放行未验证的稿），
         // 但上层不得把它记入质量债，观测侧单独计数（见 FixVerification / BatchHealthService）
         boolean auditVerifyDegraded = false;
         if (auditEnabled()) {
+            semanticFeedbackHash = ChapterManuscript.of(chapterContent).hash();
             AuditResultEntity auditResult = chapterAuditService.audit(
                     requestParameter.getStoryVO(), item, chapterContent.getContent(),
                     ledgerPrompt, foreshadowing, styleStat, globalNo, auditGuard);
@@ -332,7 +335,8 @@ public class QualityGate {
         if (currentBlocking.isEmpty()) {
             log.info("第 {} 章审校完成，仅 MINOR（叙事 {} 条 / 文风 {} 条）或不含 BLOCKING 问题，不触发修订",
                     globalNo, minorCount, mechanicalMinor.size());
-            return GateResult.of(List.of(), minorCount, mechanicalMinor, 0, semanticMinors, auditVerifyDegraded);
+            return GateResult.of(List.of(), minorCount, mechanicalMinor, 0, semanticMinors, auditVerifyDegraded)
+                    .withSemanticFeedbackHash(semanticFeedbackHash);
         }
 
         log.warn("第 {} 章审校发现 BLOCKING 问题 {} 条，准备修订", globalNo, currentBlocking.size());
@@ -341,7 +345,8 @@ public class QualityGate {
             log.info("第 {} 章修订未启用，保留原稿", globalNo);
             auditSampleService.record(storyDir, globalNo, item, chapterContent.getContent(),
                     currentBlocking, 0, ledgerPrompt, foreshadowing);
-            return GateResult.of(currentBlocking, minorCount, mechanicalMinor, 0, semanticMinors, auditVerifyDegraded);
+            return GateResult.of(currentBlocking, minorCount, mechanicalMinor, 0, semanticMinors, auditVerifyDegraded)
+                    .withSemanticFeedbackHash(semanticFeedbackHash);
         }
 
         int maxAttempts = Math.max(1, storyProperties.getRevise().getMaxAttempts());
@@ -364,7 +369,8 @@ public class QualityGate {
                         globalNo, attempt, maxAttempts, e);
                 auditSampleService.record(storyDir, globalNo, item, chapterContent.getContent(),
                         currentBlocking, attempt, ledgerPrompt, foreshadowing);
-                return GateResult.of(currentBlocking, minorCount, mechanicalMinor, attempt, semanticMinors, auditVerifyDegraded);
+                return GateResult.of(currentBlocking, minorCount, mechanicalMinor, attempt, semanticMinors, auditVerifyDegraded)
+                    .withSemanticFeedbackHash(semanticFeedbackHash);
             }
 
             if (reviseResult.revisedContent() != null && reviseResult.decision().isAccepted()) {
@@ -440,7 +446,8 @@ public class QualityGate {
                 }
                 if (newBlocking.isEmpty()) {
                     log.info("第 {} 章第 {}/{} 轮复审通过，闭环完成", globalNo, attempt, maxAttempts);
-                    return GateResult.of(List.of(), minorCount, mechanicalMinor, attempt, semanticMinors, auditVerifyDegraded);
+                    return GateResult.of(List.of(), minorCount, mechanicalMinor, attempt, semanticMinors, auditVerifyDegraded)
+                    .withSemanticFeedbackHash(semanticFeedbackHash);
                 }
                 currentBlocking = newBlocking;
                 log.warn("第 {} 章第 {}/{} 轮复审仍发现 BLOCKING 问题 {} 条，继续修订",
@@ -469,7 +476,8 @@ public class QualityGate {
                 globalNo, maxAttempts, currentBlocking.size());
         auditSampleService.record(storyDir, globalNo, item, chapterContent.getContent(),
                 currentBlocking, maxAttempts, ledgerPrompt, foreshadowing);
-        return GateResult.of(currentBlocking, minorCount, mechanicalMinor, maxAttempts, semanticMinors, auditVerifyDegraded);
+        return GateResult.of(currentBlocking, minorCount, mechanicalMinor, maxAttempts, semanticMinors, auditVerifyDegraded)
+                    .withSemanticFeedbackHash(semanticFeedbackHash);
     }
 
     /**

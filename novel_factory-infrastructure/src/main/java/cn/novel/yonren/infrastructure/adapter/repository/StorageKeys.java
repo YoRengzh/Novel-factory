@@ -38,6 +38,8 @@ class StorageKeys {
      * 放在 memory/ 下与摘要同级：它是"这一稿写作依据"的一部分，须随检查点一起还原。
      */
     static final String AUTHORING_CONTEXT_FILE = "authoring-context.json";
+    static final String CHARACTER_EXECUTION_FILE = "character-execution.json";
+    static final String AUTHORING_COMMIT_FILE = ".authoring-commit.json";
     static final String CONSISTENCY_INDEX_FILE = "consistency-index.json";
     static final String QUALITY_DEBT_FILE = "quality-debts.json";
     static final String FORESHADOW_SETTLEMENT_FILE = "foreshadow-settlements.json";

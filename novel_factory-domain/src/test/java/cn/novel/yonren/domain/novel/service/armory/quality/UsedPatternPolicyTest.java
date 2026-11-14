@@ -112,7 +112,8 @@ class UsedPatternPolicyTest {
         assertTrue(block.contains("小胖 ×3"), block);
         assertTrue(block.contains("第1/3/5章"), "要点名到具体章号：" + block);
         assertTrue(block.contains("角色「小胖」"), "达阈值应进重复点名：" + block);
-        assertTrue(block.contains("暂时退出冲突线"), "要给出可执行的处置方式：" + block);
+        assertTrue(block.contains("不强制换对手或让人物退出"), "频次仅用于核对具体重复：" + block);
+        assertFalse(block.contains("必须更换冲突形态"));
         // 无冲突动词的角色不应被计数
         assertFalse(block.contains("角色戊 ×"), "「核对账目」不含冲突动词，不该被计入：" + block);
     }
@@ -145,7 +146,8 @@ class UsedPatternPolicyTest {
 
         assertTrue(block.contains("能力/早慧展示频次"), "应渲染展示频次统计：" + block);
         assertTrue(block.contains("第6章（手指蘸水画圈引人注意）"), "要点名章号与形态：" + block);
-        assertTrue(block.contains("不得再连续安排"), "达阈值应给出处置指令：" + block);
+        assertFalse(block.contains("不得再连续安排"), "统计不能当作改变剧情的指令：" + block);
+        assertTrue(block.contains("次数只是待查线索"));
         assertTrue(block.contains("重复点名"), "告警应进入汇总点名：" + block);
     }
 

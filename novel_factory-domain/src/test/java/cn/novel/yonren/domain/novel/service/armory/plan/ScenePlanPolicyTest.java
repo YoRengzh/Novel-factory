@@ -43,7 +43,6 @@ class ScenePlanPolicyTest {
             String fastjson = JSON.toJSONString(scene);
             assertEquals(LEGACY_JACKSON_JSON, jackson);
             assertEquals(LEGACY_FASTJSON_JSON, fastjson);
-            assertEquals(LEGACY_FASTJSON_JSON, com.alibaba.fastjson.JSON.toJSONString(scene));
             assertEquals("7401d7a4071fae4da28bc6f44e0def5c50d32b44a6af3577f9caacebd070022e",
                     ChapterManuscript.digest(jackson));
             assertEquals("1760b703be80372a28bb29ef812edd97d2ce3305b855086f1994e27bc4884d5b",

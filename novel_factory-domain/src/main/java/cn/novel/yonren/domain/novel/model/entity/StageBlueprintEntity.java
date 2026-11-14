@@ -58,6 +58,8 @@ public class StageBlueprintEntity {
     private String arcGoal;
     // 本阶段里程碑任务（状态型目标，严禁活动配额）
     private List<String> tasks;
+    @com.fasterxml.jackson.annotation.JsonInclude(com.fasterxml.jackson.annotation.JsonInclude.Include.NON_NULL)
+    private List<String> castFocus;
     // 阶段进入护栏：本阶段开始时应已成立的局面事实（事实性陈述），随分段规划 prompt 注入作方向锚
     private List<String> entryConstraints;
     // 阶段退出条件：可核对的达成谓词清单（可观察/可引用/有终止性），阶段末章后逐条核验

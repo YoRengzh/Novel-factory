@@ -255,6 +255,8 @@
                 }
             }
         });
+        if (data.resumeStoryDir) delete data.characterDepthMode;
+        else if (!data.characterDepthMode) data.characterDepthMode = 'OFF';
         // 未勾选金手指时，隐藏字段里的残留值不得发出——否则会写出“未声明却有名字”的脏组合
         if (!hasCheatMechanismInput || !hasCheatMechanismInput.checked) {
             delete data.cheatMechanismName;
@@ -509,6 +511,7 @@
 
     /** 载入某个故事的设定；resolve(true) 表示可以接着提交 */
     function loadResume(storyDirName) {
+        syncGenerateCharacterMode();
         const request = ++resumeRequest;
         const revision = generateFormRevision;
         renderResumeHint('正在读取「' + storyDirName + '」的设定…', null);
@@ -524,7 +527,7 @@
             // 金手指三件套也不走 applyFormValues：checkbox 只设 value 不设 checked，必须显式回填
             const setting = info.setting || {};
             const applied = applyFormValues(setting,
-                    ['chapterCount', 'hasCheatMechanism', 'cheatMechanismName', 'cheatUsageInterval']);
+                    ['chapterCount', 'characterDepthMode', 'hasCheatMechanism', 'cheatMechanismName', 'cheatUsageInterval']);
             if (hasCheatMechanismInput) {
                 hasCheatMechanismInput.checked = Boolean(setting.hasCheatMechanism);
                 const nameInput = form.elements['cheatMechanismName'];
@@ -554,6 +557,16 @@
         });
     }
 
+    function syncGenerateCharacterMode() {
+        const input = document.getElementById('characterDepthMode');
+        const hint = document.getElementById('generate-character-mode-hint');
+        if (!input || !hint) return;
+        const continuing = !!resumeSelect.value;
+        input.disabled = continuing;
+        hint.textContent = continuing
+                ? '续写继承当前书的激活人物模式和档案；此表单不发送模式。需要变更请到书内高级设置预览并保存。'
+                : '新书默认 OFF。APPLY 允许自动建档，可能增加模型调用；因果核验是独立开关。';
+    }
     resumeSelect.addEventListener('change', function () {
         const storyDirName = resumeSelect.value;
         // 切换故事后，上一本的草稿保留项、迟到响应和额外要求都不再适用。
@@ -562,8 +575,10 @@
         if (!storyDirName) {
             renderResumeHint(null);
             setCheatEditingEnabled(true);   // 切回“新建故事”：金手指三件套恢复可编辑
+            syncGenerateCharacterMode();
             return;
         }
+        syncGenerateCharacterMode();
         loadResume(storyDirName);
     });
 

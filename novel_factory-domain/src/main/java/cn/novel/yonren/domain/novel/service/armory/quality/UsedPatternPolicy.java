@@ -66,7 +66,7 @@ public final class UsedPatternPolicy {
         }
 
         StringBuilder sb = new StringBuilder();
-        sb.append("\n\n【已用情节模式·本章必须避开】（以下为最近 ")
+        sb.append("\n\n【已用情节模式·重复待查线索】（以下为最近 ")
                 .append(window.size()).append(" 章已使用的舞台与情节模式）");
 
         // 一、模式指纹：按舞台聚合，重复达到阈值即点名
@@ -143,8 +143,7 @@ public final class UsedPatternPolicy {
                             + seen.size() + " 章作为冲突发起方");
                 }
             }
-            sb.append("\n被点名的角色若再次登场，必须更换冲突形态（争夺对象 / 手段 / 对手 / 结局至少换两项），"
-                    + "或直接让它暂时退出冲突线——同一个角色反复被同一种方式收拾，读者立刻能看出来。");
+            sb.append("\n被点名的角色与冲突形态仅供核对无意义重复；因果必要的连续行动可以保留，不强制换对手或让人物退出。");
         }
 
         // 四、能力/早慧展示频次 补实测）：「主角微动作展示 → 旁人注意/评价」
@@ -168,13 +167,8 @@ public final class UsedPatternPolicy {
             }
             int threshold = abilityShowcaseAlertThreshold(window.size());
             if (showcases.size() >= threshold) {
-                sb.append("\n⚠️ 最近 ").append(window.size()).append(" 章已有 ").append(showcases.size())
-                        .append(" 章安排能力/早慧展示——**接下来不得再连续安排**此类场景：")
-                        .append("「展示时刻」连续出现会模板化，读者第 N 次看到『主角做出微动作 → 旁人惊叹不像孩子』")
-                        .append("就会厌烦。后续章节的推进改由日常细节、人际事件、选择与两难承担；")
-                        .append("早慧的显形依靠观察者**跨章累积**的认知变化（推进单位是他人认知的改变，")
-                        .append("不是主角展示本身）；确需展示，必须换用与上面各章**完全不同**的载体与场景功能，")
-                        .append("且不得再使用「旁人评价不像孩子」这一形态。");
+                sb.append("\n最近 ").append(window.size()).append(" 章已有 ").append(showcases.size())
+                        .append(" 章安排能力展示，次数只是待查线索；核对具体场景是否空转，不据次数强制藏拙、队友高光或失败。");
                 alerts.add("能力/早慧展示在最近 " + window.size() + " 章中已出现 " + showcases.size() + " 次");
             }
         }
@@ -184,19 +178,14 @@ public final class UsedPatternPolicy {
         // 的高光章相隔 9 章，超出正文层 5 章窗口，机制看不到，但读者能看出重复。故额外把**全书**的展示形态汇总点名，让模型知道哪些路数已经用过。
         List<String> allForms = showcaseForms;
         if (!allForms.isEmpty()) {
-            sb.append("\n四之二、全书已用过的能力展示形态（**本次不得复用其中任何一种路数**）：");
+            sb.append("\n四之二、全书已用过的能力展示形态（用于判断具体重复，不构成禁用清单）：");
             for (String form : allForms) {
                 sb.append("\n- ").append(excerpt(form));
             }
-            sb.append("\n⚠️ 以上路数无论隔多少章都算「用过」。下一次展示必须换**路数**而非换载体：")
-                    .append("上面清一色是「主角解题/推导 → 权威震惊或质疑」的话，本次就要换成")
-                    .append("**主角故意藏拙**（明知答案而按错误方向演）、**让队友先出高光**（主角做补位与收尾）、")
-                    .append("或**主角栽个小跟头**（能力之外的领域出糗、被年龄与阅历卡住）——")
-                    .append("这几种都不需要「权威被震惊」，且能同时推进「隐藏实力」这条主线张力。");
+            sb.append("\n重复若仍有新的意义或符合人物习惯可以保留，不为换路数临时制造隐藏实力、队友高光或人物失败。");
         }
 
-        sb.append("\n本段要求：同类情节必须更换舞台、对手、困难类型、解决方式或视角之一；");
-        sb.append("上面点名的舞台若再次使用，必须带来与前几次实质不同的冲突，不得只是换一批人重演同一件事。");
+        sb.append("\n本段按计划与人物因果交付。统计只提示核对重复，不强制更换舞台、解决方式、视角或制造新的冲突。");
         if (!alerts.isEmpty()) {
             sb.append("\n⚠ 重复点名：");
             sb.append(String.join("；", alerts)).append("。");

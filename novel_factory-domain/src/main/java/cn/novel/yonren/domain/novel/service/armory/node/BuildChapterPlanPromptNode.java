@@ -35,6 +35,9 @@ public class BuildChapterPlanPromptNode extends AbstractArmorySupport {
     @Resource
     private RollingOutlineService rollingOutlineService;
 
+    @Resource
+    private cn.novel.yonren.domain.novel.service.armory.character.CharacterStageProfileService characterStageProfileService;
+
     @Override
     public StrategyHandler<ArmoryCommandEntity, DefaultArmoryFactory.DynamicContext, StoryGenerateResultAggregate> get(ArmoryCommandEntity requestParameter, DefaultArmoryFactory.DynamicContext dynamicContext) {
         return callChapterPlanLlmNode;
@@ -47,6 +50,8 @@ public class BuildChapterPlanPromptNode extends AbstractArmorySupport {
         int batchStart = dynamicContext.getChapterOffset() + 1;
         int batchEnd = batchStart + requestParameter.getStoryContextEntity().getChapterCount() - 1;
         List<RollingOutlineService.StageSegment> segments = computeSegments(dynamicContext, batchStart, batchEnd);
+        if (characterStageProfileService != null && !segments.isEmpty()) characterStageProfileService.ensure(
+                requestParameter, dynamicContext, segments.get(0).blueprint(), batchStart);
 
         // 复用蓝图节点已写入的 usedPromptMap（blueprint: 前缀），蓝图与计划的 prompt 一并供复盘
         Map<String, String> usedPromptMap = dynamicContext.getUsedPromptMap() != null

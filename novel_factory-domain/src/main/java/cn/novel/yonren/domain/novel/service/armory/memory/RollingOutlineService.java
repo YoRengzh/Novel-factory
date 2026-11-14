@@ -11,6 +11,7 @@ import cn.novel.yonren.domain.novel.service.armory.plan.StoryPacing;
 import cn.novel.yonren.domain.novel.service.armory.quality.NarrativeProgressionPolicy;
 import cn.novel.yonren.domain.novel.service.armory.quality.UsedPatternPolicy;
 import cn.novel.yonren.types.utils.JsonParseFallback;
+import com.alibaba.fastjson2.JSON;
 import com.fasterxml.jackson.core.json.JsonReadFeature;
 import com.fasterxml.jackson.databind.DeserializationFeature;
 import com.fasterxml.jackson.databind.json.JsonMapper;
@@ -247,7 +248,7 @@ public class RollingOutlineService {
             example.add(new StageBlueprintEntity.MainLineBeat(no,
                     "【从允许的剧情线中选一】第" + no + "章独有的具体选择、局面变化及后续影响（替换占位内容）"));
         }
-        return com.alibaba.fastjson.JSON.toJSONString(example);
+        return JSON.toJSONString(example);
     }
 
     private String mainLineRequirements(int start, int end) {
@@ -1169,7 +1170,7 @@ public class RollingOutlineService {
                 .append(",\"estimatedTotalChapters\":158,\"estimatedRemainingChaptersMin\":120,\"estimatedRemainingChaptersMax\":135")
                 .append(",\"remainingFinaleBeats\":[\"终局节点1\"],\"completedFinaleBeats\":[]")
                 .append(",\"volumeNo\":").append(volume == null ? 1 : volume.getVolumeNo())
-                .append(",\"volumeTitle\":").append(com.alibaba.fastjson.JSON.toJSONString(
+                .append(",\"volumeTitle\":").append(JSON.toJSONString(
                         volume == null ? "无卷" : nullToBlank(volume.getTitle())))
                 .append(",\"arcNo\":1").append(",\"arcGoal\":\"本弧一句话目标（对应卷内弧清单中本弧的 oneLineGoal）\"")
                 .append(",\"stageGoal\":\"阶段目标\",\"tasks\":[\"里程碑1\"],")

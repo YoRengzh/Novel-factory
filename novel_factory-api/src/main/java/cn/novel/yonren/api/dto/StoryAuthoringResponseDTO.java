@@ -7,4 +7,12 @@ import java.util.Map;
 public record StoryAuthoringResponseDTO(Map<String, String> settings, String revision, String basis,
                                         StoryAuthoringSnapshotDTO snapshot, StoryAuthoringSnapshotDTO activeSnapshot,
                                         List<StoryAuthoringSourceDTO> sources, int effectiveFromChapter,
-                                        String previewHash, Boolean saved) { }
+                                        String previewHash, Boolean saved,
+                                        CharacterExecutionContextDTO characterExecution) {
+    public StoryAuthoringResponseDTO(Map<String, String> settings, String revision, String basis,
+                                     StoryAuthoringSnapshotDTO snapshot, StoryAuthoringSnapshotDTO activeSnapshot,
+                                     List<StoryAuthoringSourceDTO> sources, int effectiveFromChapter,
+                                     String previewHash, Boolean saved) {
+        this(settings, revision, basis, snapshot, activeSnapshot, sources, effectiveFromChapter, previewHash, saved, null);
+    }
+}

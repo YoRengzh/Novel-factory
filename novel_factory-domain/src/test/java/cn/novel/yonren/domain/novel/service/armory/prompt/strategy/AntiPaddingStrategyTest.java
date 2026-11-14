@@ -57,7 +57,7 @@ class AntiPaddingStrategyTest {
         assertTrue(content.contains("灌水的定义"), "应含 pacing-control 的灌水定义");
         assertTrue(content.contains("水文的高发形态"), "应含注水形态清单");
         assertTrue(content.contains("注水检测"), "应含 quality-checklist 的注水检测节");
-        assertTrue(content.contains("防注水纪律"));
+        assertTrue(content.contains("不以此追加逐章任务或数量配额"));
     }
 
     @Test

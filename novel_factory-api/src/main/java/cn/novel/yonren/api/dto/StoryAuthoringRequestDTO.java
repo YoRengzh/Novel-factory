@@ -14,6 +14,8 @@ public class StoryAuthoringRequestDTO {
     private Map<String, String> settings;
     private List<StoryAuthoringEntryDTO> entries;
     private String characterDepthMode;
+    private CharacterDepthSettingsDTO characterDepthSettings;
+    private List<CharacterDecisionProfileDTO> characterProfiles;
     private String previewHash;
 
     /**

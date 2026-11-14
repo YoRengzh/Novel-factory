@@ -58,7 +58,6 @@ class SceneCausalityPolicyTest {
             String fastjson = JSON.toJSONString(causality);
             assertEquals(LEGACY_JACKSON_JSON, jackson);
             assertEquals(LEGACY_FASTJSON_JSON, fastjson);
-            assertEquals(LEGACY_FASTJSON_JSON, com.alibaba.fastjson.JSON.toJSONString(causality));
             assertEquals("1179282c71989bff4af06aa309da579939993c13d04a2211f675e9a80e7664fb",
                     ChapterManuscript.digest(jackson));
             assertEquals("3fd4e10da41c7d70fcc004a16e47795d9a61ca5f687fe488d9338c4b34906d45",

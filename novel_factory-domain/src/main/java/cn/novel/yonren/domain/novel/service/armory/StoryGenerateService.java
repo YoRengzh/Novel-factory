@@ -195,6 +195,7 @@ public class StoryGenerateService {
         restoreCharacterProfiles(command, settings);
 
         storyRepository.recoverChapterCommit(storyDir);
+        storyRepository.recoverStoryAuthoringCommit(storyDir);
         restoreAuthoring(command, storyDir);
         List<ChapterSummaryEntity> history = storyRepository.readChapterSummaries(storyDir);
         validateResumeLockStep(resumeStoryDir, history, storyRepository.readChapterNumbers(storyDir));
@@ -286,12 +287,17 @@ public class StoryGenerateService {
             return;
         }
         var active = storyRepository.readActiveStoryAuthoring(storyDir);
-        if (active == null) {
-            return;
+        if (active != null) {
+            command.getStoryContextEntity().setStoryAuthoring(active);
+            cn.novel.yonren.domain.novel.service.armory.authoring.StoryAuthoringService
+                    .applySettings(command.getStoryContextEntity(), active);
         }
-        command.getStoryContextEntity().setStoryAuthoring(active);
-        cn.novel.yonren.domain.novel.service.armory.authoring.StoryAuthoringService
-                .applySettings(command.getStoryContextEntity(), active);
+        var characterExecution = storyRepository.readActiveCharacterExecution(storyDir);
+        if (characterExecution != null) {
+            command.getStoryContextEntity().setCharacterDepthMode(characterExecution.settings().mode());
+            command.getStoryContextEntity().setCharacterDepthSettings(characterExecution.settings());
+            command.getStoryContextEntity().setCharacterDecisionProfiles(characterExecution.profiles());
+        }
     }
 
     /**

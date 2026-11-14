@@ -27,7 +27,7 @@ public class AntiAiToneStrategy implements PromptRuleStrategy, CriticalPromptRul
     private static final String STRUCTURE_SECTION = "## 一、";
 
     private static final String[] WRITER_SECTIONS = {
-            "## 一、", "## 二、", "## 三、", "## 四、", "## 五、", "## 六、", "## 八、"};
+            "## 一、", "## 二、", "## 三、", "## 四、", "## 五、", "## 六、", "## 八、", "## 九、", "## 十、"};
 
     /** 结构子集的作用域提示：说明为何这里只有一小节，避免模型误以为规则缺失 */
     private static final String PLAN_SCOPE_NOTE =

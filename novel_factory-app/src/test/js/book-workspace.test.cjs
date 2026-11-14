@@ -55,11 +55,55 @@ test('维护快照校验 schemaVersion、条目操作与人物深度模式', () 
         settingsOverrides: {}, entries: [], characterDepthMode: null
     };
     assert.doesNotThrow(() => api.readSnapshot(base));
-    assert.throws(() => api.readSnapshot({ ...base, schemaVersion: 2 }), /不完整/);
+    assert.throws(() => api.readSnapshot({ ...base, schemaVersion: 3 }), /不完整/);
+    assert.doesNotThrow(() => api.readSnapshot({ ...base, schemaVersion: 2, characterExecution: null }));
     assert.throws(() => api.readSnapshot({ ...base, characterDepthMode: 'APPLY_ALL' }), /无法识别/);
     assert.throws(() => api.readSnapshot({
         ...base, entries: [{ kind: 'CHARACTER', entityName: '甲', operation: 'UNKNOWN', after: 'x', reason: 'r' }]
     }), /格式无效/);
+});
+
+test('人物执行引用校验版本和完整字段，缺失来源不能当成已建档', () => {
+    const settings = {mode: 'APPLY', contextMaxChars: 4800, feedbackMaxChars: 600, maxNewProfilesPerPass: 4, policyVersion: 'character-depth-v1'};
+    const profile = {characterId: 'character-a', displayName: '甲', locked: false, want: '得到机会', need: '信任同伴',
+        fearAndDefense: null, valuePriorities: null, boundaries: null, independentConcerns: null, decisionPattern: null,
+        source: 'AUTHOR', adoption: 'AUTHOR_CONFIRMED'};
+    const execution = {basisVersion: 2, settings, profiles: {schemaVersion: 1, revision: 'rev-p', hash: 'a'.repeat(64), effectiveFromChapter: 2, profiles: [profile]}};
+    const snapshot = {schemaVersion: 2, revision: 'rev-a', hash: 'b'.repeat(64), effectiveFromChapter: 2,
+        settingsOverrides: {}, entries: [], characterDepthMode: 'APPLY', characterExecution: execution};
+    assert.equal(api.readSnapshot(snapshot).characterExecution.profiles.profiles[0].want, '得到机会');
+    assert.throws(() => api.readSnapshot({...snapshot, characterExecution: {...execution, profiles: {...execution.profiles, revision: ''}}}), /人物/);
+    assert.throws(() => api.readSnapshot({...snapshot, characterExecution: {...execution, settings: {...settings, mode: 'ON'}}}), /模式/);
+});
+
+test('人物卡请求只提交可编辑设计，不自授来源和身份', () => {
+    const cards = api.editableCharacterProfiles([{displayName: '甲', locked: true, want: '找药', need: '接受帮助',
+        source: 'MODEL_DESIGN', adoption: 'AUTO_APPLIED', characterId: '伪身份', unknown: '忽略'}]);
+    assert.equal(cards[0].want, '找药');
+    assert.equal(cards[0].locked, true);
+    for (const key of ['source', 'adoption', 'characterId', 'unknown']) assert.equal(Object.hasOwn(cards[0], key), false);
+    assert.throws(() => api.editableCharacterProfiles([{displayName: '' , want: '找药'}]), /姓名/);
+    assert.throws(() => api.editableCharacterProfiles([{displayName: '甲'}, {displayName: '甲'}]), /同名/);
+});
+
+test('人物卡保存差异可见，不只展示模式变更', () => {
+    const base = {settings: api.readSettings({}), snapshot: null};
+    const changed = {settings: api.readSettings({}), snapshot: {characterDepthMode: 'APPLY', entries: [], characterExecution: {
+        settings: {mode: 'APPLY'}, profiles: {profiles: [{displayName: '甲', want: '找药'}]}}}};
+    const differences = api.previewChanges(base, changed);
+    assert.ok(differences.some(item => item.field === '人物决策卡' && item.after.includes('找药')));
+});
+
+test('自动补卡独立执行引用优先于作者旧工作副本', () => {
+    const settings = {mode: 'APPLY', contextMaxChars: 4800, feedbackMaxChars: 600, maxNewProfilesPerPass: 4, policyVersion: 'character-depth-v1'};
+    const profile = {characterId: 'character-a', displayName: '甲', locked: false, want: '阶段新目标',
+        source: 'MODEL_DESIGN', adoption: 'AUTO_APPLIED'};
+    const execution = {basisVersion: 2, settings, profiles: {schemaVersion: 1, revision: 'rev-new', hash: 'a'.repeat(64), effectiveFromChapter: 6, profiles: [profile]}};
+    const raw = {settings: {}, revision: null, basis: 'b'.repeat(64), snapshot: null, activeSnapshot: null, sources: [], effectiveFromChapter: 6, characterExecution: execution};
+    const view = api.readAuthoring(raw, 'view');
+    assert.equal(api.modeOf(view), 'APPLY');
+    assert.equal(api.characterProfilesOf(view)[0].want, '阶段新目标');
+    assert.ok(api.characterNames([], [], view).includes('甲'));
 });
 
 test('品质问题处置请求体只带作者判断，不携带正文或质量债字段', () => {

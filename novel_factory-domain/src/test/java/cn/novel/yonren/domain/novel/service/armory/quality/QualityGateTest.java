@@ -268,6 +268,32 @@ class QualityGateTest {
     }
 
     @Test
+    void revisionKeepsInitialMinorStatisticsButInvalidatesItsWritingFeedback() {
+        var minor = ChapterIssueEntity.builder().severity("MINOR").dimension("aesthetic")
+                .description("有效对话为0句").build();
+        var original = cn.novel.yonren.domain.novel.model.valobj.work.ChapterManuscript.of(chapterContent);
+        var issues = new java.util.ArrayList<>(blockingResult().getIssues());
+        issues.add(minor);
+        when(chapterAuditService.audit(any(), any(), any(), any(), any(), any(), anyInt(), any()))
+                .thenReturn(AuditResultEntity.builder().issues(issues).build());
+        when(chapterAuditService.verifyFixes(any(), any(), any(), anyList(), any(), any(), anyInt()))
+                .thenReturn(new ChapterAuditService.FixVerification(List.of(), false));
+        when(chapterReviseService.revise(any(), any(), any(), anyList(), any(), any(), any(), anyInt(), any()))
+                .thenReturn(new ChapterReviseService.ReviseResult(
+                        RevisionDecisionEntity.builder().accepted(true).reason("补齐对白").build(),
+                        ChapterContentEntity.builder().chapterNo(1).title("原标题")
+                                .content("“问清楚。”\n“我答应。”\n".repeat(21)).build()));
+        GateResult result = qualityGate.auditAndReviseIfEnabled(command, item, chapterContent, List.of(), styleStat, 1, null);
+        assertEquals(original.hash(), result.semanticFeedbackHash());
+        assertEquals(1, result.minorCount());
+        assertEquals(List.of(minor), result.semanticMinors());
+        assertTrue(result.feedbackMinorsFor(cn.novel.yonren.domain.novel.model.valobj.work.ChapterManuscript.of(chapterContent)).isEmpty());
+        assertEquals(1, result.feedbackMinorsFor(original).size());
+        verify(chapterAuditService, times(1)).audit(any(), any(), any(), any(), any(), any(), anyInt(), any());
+        verify(chapterAuditService, times(1)).verifyFixes(any(), any(), any(), anyList(), any(), any(), anyInt());
+    }
+
+    @Test
     void verifyDegraded_isFlaggedSeparatelyFromUnfixed_andStaysConservative() {
         // 验证"没跑成"必须与"确认未修复"分开——原先两者都走"未修复"，
         // 于是一次网关抖动会被记成质量债，再回灌给写手当作"你上一章犯的错"。

@@ -369,6 +369,17 @@ public interface IStoryRepository {
      * <p>存在但损坏、或作者纠正所引用的来源正文已变化时抛异常：此时继续使用会把
      * 与正文不再匹配的纠正当成事实注入提示词，比停下来更贵。
      */
+    default cn.novel.yonren.domain.novel.model.valobj.character.CharacterExecutionContext readActiveCharacterExecution(Path storyDir)
+            throws Exception { return null; }
+
+    default void writeActiveCharacterExecution(Path storyDir,
+            cn.novel.yonren.domain.novel.model.valobj.character.CharacterExecutionContext execution) throws Exception {
+        throw new UnsupportedOperationException("人物执行引用存储未接入");
+    }
+
+    /** 写操作入口补完维护提交；只读视图不消费恢复日志。 */
+    default void recoverStoryAuthoringCommit(Path storyDir) throws Exception { }
+
     cn.novel.yonren.domain.novel.model.valobj.authoring.StoryAuthoringSnapshot readActiveStoryAuthoring(Path storyDir)
             throws Exception;
 

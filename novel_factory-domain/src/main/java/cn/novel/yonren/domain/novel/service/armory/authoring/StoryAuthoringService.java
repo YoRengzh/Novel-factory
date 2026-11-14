@@ -60,6 +60,11 @@ public final class StoryAuthoringService {
     public static void applySettings(StoryContextEntity target, StoryAuthoringSnapshot active) {
         if (target == null || active == null) return;
         validatePersisted(active);
+        if (active.characterExecution() != null) {
+            target.setCharacterDepthMode(active.characterExecution().settings().mode());
+            target.setCharacterDepthSettings(active.characterExecution().settings());
+            target.setCharacterDecisionProfiles(active.characterExecution().profiles());
+        }
         active.settingsOverrides().forEach((key, value) -> {
             switch (key) {
                 case "novel_title" -> target.setNovel_title(value);
@@ -157,13 +162,33 @@ public final class StoryAuthoringService {
         String mode = patch.characterDepthMode() == null
                 ? current.snapshot() == null ? null : current.snapshot().characterDepthMode()
                 : normalizeDepthMode(patch.characterDepthMode());
-        var unsigned = new StoryAuthoringSnapshot(StoryAuthoringSnapshot.SCHEMA_VERSION, null, null,
-                current.effectiveFromChapter(), settings, entries, mode);
+        var previousExecution = current.characterExecution() != null ? current.characterExecution()
+                : current.snapshot() == null ? null : current.snapshot().characterExecution();
+        if (mode == null && previousExecution != null) mode = previousExecution.settings().mode();
+        var execution = previousExecution;
+        boolean editCharacters = patch.characterDepthSettings() != null || patch.characterProfiles() != null
+                || patch.characterDepthMode() != null;
+        if (editCharacters) {
+            var depthSettings = patch.characterDepthSettings() != null ? patch.characterDepthSettings()
+                    : previousExecution == null
+                    ? cn.novel.yonren.domain.novel.model.valobj.character.CharacterDepthSettings.defaults(mode)
+                    : previousExecution.settings();
+            if (patch.characterDepthMode() != null) depthSettings = new cn.novel.yonren.domain.novel.model.valobj.character.CharacterDepthSettings(
+                    mode, depthSettings.contextMaxChars(), depthSettings.feedbackMaxChars(), depthSettings.maxNewProfilesPerPass(), depthSettings.policyVersion());
+            mode = depthSettings.mode();
+            var profiles = previousExecution == null ? null : previousExecution.profiles();
+            if (patch.characterProfiles() != null) profiles = cn.novel.yonren.domain.novel.service.armory.character.CharacterDecisionProfileService
+                    .adoptAuthor(profiles, patch.characterProfiles(), current.effectiveFromChapter());
+            execution = new cn.novel.yonren.domain.novel.model.valobj.character.CharacterExecutionContext(2, depthSettings, profiles);
+        }
+        int schemaVersion = execution == null ? StoryAuthoringSnapshot.LEGACY_SCHEMA_VERSION : StoryAuthoringSnapshot.SCHEMA_VERSION;
+        var unsigned = new StoryAuthoringSnapshot(schemaVersion, null, null,
+                current.effectiveFromChapter(), settings, entries, mode, execution);
         String hash = contentHash(unsigned);
         String seed = canonical("authoring-preview-v1", current.revision(), current.basis(), freezeHash, hash);
         String revision = UUID.nameUUIDFromBytes(seed.getBytes(StandardCharsets.UTF_8)).toString();
         var candidate = new StoryAuthoringSnapshot(unsigned.schemaVersion(), revision, hash,
-                unsigned.effectiveFromChapter(), settings, entries, mode);
+                unsigned.effectiveFromChapter(), settings, entries, mode, execution);
         validatePersisted(candidate);
         // 同时验证未被覆写的 bible 字段可无歧义合并，不序列化或覆盖原始 bible。
         mergedSettings(bible, candidate);
@@ -320,11 +345,13 @@ public final class StoryAuthoringService {
                 Objects.toString(e.operation(), null), e.before(), e.after(), e.reason(),
                 Objects.toString(e.sourceChapter(), null), e.sourceHash(), e.evidence(),
                 String.valueOf(e.effectiveFromChapter()), Objects.toString(e.status(), null)));
+        if (snapshot.characterExecution() != null) text.append(canonical("character-execution", snapshot.characterExecution().fingerprint()));
         return ChapterManuscript.digest(text.toString());
     }
 
     public static void validatePersisted(StoryAuthoringSnapshot snapshot) {
-        if (snapshot == null || snapshot.schemaVersion() != StoryAuthoringSnapshot.SCHEMA_VERSION
+        if (snapshot == null || (snapshot.schemaVersion() != StoryAuthoringSnapshot.SCHEMA_VERSION
+                && snapshot.schemaVersion() != StoryAuthoringSnapshot.LEGACY_SCHEMA_VERSION)
                 || snapshot.revision() == null || !snapshot.revision().matches(UUID_PATTERN)
                 || snapshot.hash() == null || !snapshot.hash().matches(HASH_PATTERN)
                 || snapshot.effectiveFromChapter() < 1 || snapshot.entries().size() > MAX_ENTRIES) {
@@ -332,6 +359,14 @@ public final class StoryAuthoringService {
         }
         if (!Objects.equals(snapshot.characterDepthMode(), normalizeDepthMode(snapshot.characterDepthMode()))) {
             throw new IllegalArgumentException("作者维护 characterDepthMode 未规范化");
+        }
+        if (snapshot.characterExecution() != null) {
+            if (snapshot.schemaVersion() != StoryAuthoringSnapshot.SCHEMA_VERSION
+                    || !Objects.equals(snapshot.characterDepthMode(), snapshot.characterExecution().settings().mode())) {
+                throw new IllegalArgumentException("人物执行引用与维护模式不一致");
+            }
+            if (snapshot.characterExecution().profiles() != null) cn.novel.yonren.domain.novel.service.armory.character.CharacterDecisionProfileService
+                    .validatePersisted(snapshot.characterExecution().profiles());
         }
         int total = 0;
         for (var field : snapshot.settingsOverrides().entrySet()) {

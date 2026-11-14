@@ -21,6 +21,58 @@
     const positive = value => Number.isInteger(value) && value > 0;
     const own = (value, key) => Object.prototype.hasOwnProperty.call(value, key);
     const copy = value => JSON.parse(JSON.stringify(value));
+    const CHARACTER_FIELDS = [['want', '当前欲望'], ['need', '内在需要'], ['fearAndDefense', '恐惧与防御'],
+        ['valuePriorities', '价值排序'], ['boundaries', '行为底线'], ['independentConcerns', '独立牵挂'], ['decisionPattern', '决策习惯']];
+    const DEPTH_MODES = ['OFF', 'OBSERVE', 'APPLY'];
+
+    function editableCharacterProfiles(profiles) {
+        if (!Array.isArray(profiles)) throw new Error('人物决策卡格式无效。');
+        if (profiles.length > 64) throw new Error('人物数量不能超过64。');
+        const names = new Set();
+        return profiles.map(profile => {
+            if (!object(profile) || !text(profile.displayName).trim()) throw new Error('请填写人物姓名。');
+            const name = profile.displayName.trim();
+            if (names.has(name)) throw new Error('同名人物存在歧义：' + name);
+            names.add(name);
+            const result = {displayName: name, locked: profile.locked === true};
+            CHARACTER_FIELDS.forEach(([key]) => {
+                if (profile[key] != null && typeof profile[key] !== 'string') throw new Error('人物字段不是文本：' + key);
+                if (text(profile[key]).length > 2048) throw new Error('人物字段过长：' + key);
+                result[key] = text(profile[key]);
+            });
+            return result;
+        });
+    }
+    function characterExecutionOf(view) {
+        if (view && own(view, 'characterExecution')) return view.characterExecution;
+        return view && view.snapshot ? view.snapshot.characterExecution : null;
+    }
+    function characterProfilesOf(view) {
+        const execution = characterExecutionOf(view);
+        return execution && execution.profiles ? execution.profiles.profiles : [];
+    }
+    function readCharacterExecution(raw) {
+        if (raw == null) return null;
+        if (!object(raw) || raw.basisVersion !== 2 || !object(raw.settings) || !DEPTH_MODES.includes(raw.settings.mode)) {
+            throw new Error('人物执行模式或版本无法识别，不可保存。');
+        }
+        const settings = raw.settings;
+        if (!Number.isInteger(settings.contextMaxChars) || settings.contextMaxChars < 800 || settings.contextMaxChars > 16000
+                || !Number.isInteger(settings.feedbackMaxChars) || settings.feedbackMaxChars < 0 || settings.feedbackMaxChars > 4000
+                || !Number.isInteger(settings.maxNewProfilesPerPass) || settings.maxNewProfilesPerPass < 1 || settings.maxNewProfilesPerPass > 8
+                || !text(settings.policyVersion)) throw new Error('人物执行预算或策略版本不完整。');
+        if (raw.profiles != null) {
+            const set = raw.profiles;
+            if (!object(set) || set.schemaVersion !== 1 || !text(set.revision) || !/^[a-f0-9]{64}$/.test(text(set.hash))
+                    || !positive(set.effectiveFromChapter)) throw new Error('人物卡缺少可核对版本与生效章。');
+            editableCharacterProfiles(set.profiles);
+            set.profiles.forEach(profile => {
+                if (!text(profile.characterId) || !['AUTHOR', 'MODEL_DESIGN'].includes(profile.source)
+                        || !['AUTHOR_CONFIRMED', 'AUTO_APPLIED', 'DRAFT'].includes(profile.adoption)) throw new Error('人物卡来源不完整。');
+            });
+        }
+        return copy(raw);
+    }
 
     function readSettings(raw) {
         if (!object(raw)) throw new Error('书级设定格式无效，不可保存。');
@@ -36,7 +88,7 @@
 
     function readSnapshot(raw) {
         if (raw == null) return null;
-        if (!object(raw) || raw.schemaVersion !== 1 || !Array.isArray(raw.entries)
+        if (!object(raw) || ![1, 2].includes(raw.schemaVersion) || !Array.isArray(raw.entries)
                 || !object(raw.settingsOverrides) || !text(raw.revision) || !text(raw.hash)) {
             throw new Error('创作维护版本不完整，不可保存。');
         }
@@ -47,9 +99,10 @@
                 throw new Error('维护记录格式无效，不可用空记录替代。');
             }
         });
-        if (raw.characterDepthMode != null && !['OFF', 'OBSERVE', 'APPLY'].includes(raw.characterDepthMode)) {
+        if (raw.characterDepthMode != null && !DEPTH_MODES.includes(raw.characterDepthMode)) {
             throw new Error('书级人物深度模式无法识别，不可保存。');
         }
+        readCharacterExecution(raw.characterExecution);
         return copy(raw);
     }
 
@@ -74,6 +127,7 @@
             return copy(source);
         });
         return {settings, revision: raw.revision, basis: raw.basis, snapshot, activeSnapshot, sources,
+            ...(own(raw, 'characterExecution') ? {characterExecution: readCharacterExecution(raw.characterExecution)} : {}),
             effectiveFromChapter: raw.effectiveFromChapter, previewHash: text(raw.previewHash),
             warnings: Array.isArray(raw.warnings) ? raw.warnings.map(text).filter(Boolean) : []};
     }
@@ -86,11 +140,12 @@
         return (view ? view.sources : []).filter(source => source.kind === kind && (!name || source.entityName === name));
     }
     function modeOf(view) {
-        return view && view.snapshot ? text(view.snapshot.characterDepthMode) : '';
+        const execution = characterExecutionOf(view);
+        return execution ? execution.settings.mode : view && view.snapshot ? text(view.snapshot.characterDepthMode) : '';
     }
     function characterNames(cards, ledger, view) {
         const names = [];
-        (cards || []).forEach(card => { if (text(card.displayName).trim()) names.push(card.displayName.trim()); });
+        (cards || []).concat(characterProfilesOf(view)).forEach(card => { if (text(card.displayName).trim()) names.push(card.displayName.trim()); });
         (ledger || []).forEach(entry => { if (text(entry.name)) names.push(entry.name); });
         sourcesOf(view, 'CHARACTER').forEach(source => names.push(source.entityName));
         entriesOf(view, 'CHARACTER').forEach(entry => names.push(entry.entityName));
@@ -135,6 +190,10 @@
         });
         const oldMode = modeOf(before), newMode = modeOf(after);
         if (oldMode !== newMode) result.push({field: '人物深度模式', before: oldMode || '沿用服务端默认', after: newMode || '沿用服务端默认'});
+        const oldProfiles = characterProfilesOf(before), newProfiles = characterProfilesOf(after);
+        if (JSON.stringify(oldProfiles) !== JSON.stringify(newProfiles)) {
+            result.push({field: '人物决策卡', before: JSON.stringify(oldProfiles, null, 2), after: JSON.stringify(newProfiles, null, 2)});
+        }
         const oldEntries = entriesOf(before), newEntries = entriesOf(after);
         if (JSON.stringify(oldEntries) !== JSON.stringify(newEntries)) {
             result.push({field: '维护记录', before: JSON.stringify(oldEntries, null, 2), after: JSON.stringify(newEntries, null, 2)});
@@ -177,12 +236,12 @@
             tab: 'chapters', authoringTab: 'settings', characterTab: 'basic', selectedCharacter: '', cards: [], ledger: [],
             authoring: null, readState: 'empty', settings: readSettings({}), mode: '', settingsEditing: false, factsEditing: false,
             entryDrafts: {}, preview: null, busy: false, issues: [], issuesRead: false, issueNotes: Object.create(null), issueStatus: Object.create(null), qualityBusy: false,
-            history: Object.create(null), workbench: null};
+            history: Object.create(null), workbench: null, characterDraft: null};
         const settingInputs = {};
         const extraBusy = () => !!(options.isExtraBusy && options.isExtraBusy());
         const busy = () => state.busy || state.qualityBusy || extraBusy();
         const settingsDirty = () => !!state.authoring && SETTING_KEYS.some(key => state.settings[key] !== state.authoring.settings[key]);
-        const dirty = () => settingsDirty() || !!state.preview || (state.authoring && state.mode !== modeOf(state.authoring))
+        const dirty = () => settingsDirty() || !!state.characterDraft || !!state.preview || (state.authoring && state.mode !== modeOf(state.authoring))
             || Object.values(state.entryDrafts).some(draft => draft.dirty)
             || Object.values(state.issueNotes).some(value => value.trim());
         const current = (storyDir, epoch) => state.storyDir === storyDir && state.epoch === epoch;
@@ -207,6 +266,11 @@
                 .forEach(id => { el(id).disabled = locked; });
             el('btn-confirm-book-authoring').disabled = locked || !state.preview;
             el('book-character-depth-mode').disabled = locked || !ready;
+            ['btn-add-character-card', 'btn-save-character-cards', 'btn-reload-character-cards'].forEach(id => { el(id).disabled = locked || !ready; });
+            el('btn-save-character-cards').disabled = locked || !ready || !state.characterDraft;
+            el('btn-draft-character-cards').disabled = true;
+            doc.querySelectorAll('#character-decision-cards input, #character-decision-cards textarea, #character-decision-cards button')
+                .forEach(control => { control.disabled = locked || !ready; });
             Object.values(settingInputs).forEach(input => { input.readOnly = locked || !state.settingsEditing || !ready; });
             el('book-character-facts').readOnly = locked || !ready;
             doc.querySelectorAll('[data-book-tab], [data-authoring-tab], [data-character-tab]').forEach(item => { item.disabled = locked; });
@@ -236,7 +300,7 @@
             state.authoringTab = tab;
             AUTHORING_TABS.forEach(name => el('book-authoring-' + name).classList.toggle('hidden', name !== tab));
             if (state.preview && state.preview.scope !== 'mode') {
-                const groups = {settings: 'settings', facts: 'characters', 'entry:CHARACTER': 'characters', 'entry:ITEM': 'items', 'entry:FACTION': 'factions', 'entry:FORESHADOW': 'foreshadow'};
+                    const groups = {settings: 'settings', facts: 'characters', profiles: 'characters', 'entry:CHARACTER': 'characters', 'entry:ITEM': 'items', 'entry:FACTION': 'factions', 'entry:FORESHADOW': 'foreshadow'};
                 el('book-authoring-preview').classList.toggle('hidden', groups[state.preview.scope] !== tab);
             }
             doc.querySelectorAll('[data-authoring-tab]').forEach(item => {
@@ -380,8 +444,14 @@
             el('btn-edit-book-facts').classList.toggle('hidden', state.factsEditing);
             el('book-character-depth-mode').value = state.mode;
             el('book-character-depth-mode').querySelector('option[value=""]').disabled = !!modeOf(state.authoring);
-            const modeHelp = {OFF: '关闭人物深度，不自动删改人物档案。', OBSERVE: '只观察，不把观察当作事实。', APPLY: '未来生成参考人物决策设计，不改变已发生事实。'};
+            const modeHelp = {OFF: '关闭人物决策设计，不自动删改人物档案。', OBSERVE: '只观察，不把观察当作事实或写作指令。', APPLY: '参考已保存决策卡；为明确核心人物自动建档可能增加模型调用。因果核验是独立开关。'};
             el('character-mode-hint').textContent = modeHelp[state.mode] || '未单独设置，将沿用服务端默认；不可把未知模式当作 OFF 保存。';
+            const execution = characterExecutionOf(state.authoring);
+            el('book-current-mode').textContent = execution
+                ? '保存执行模式 ' + execution.settings.mode + ' · 策略 ' + execution.settings.policyVersion
+                    + (execution.profiles ? ' · 档案 ' + execution.profiles.revision + ' · 第 ' + execution.profiles.effectiveFromChapter + ' 章起' : ' · 无档案')
+                    + '。已启动任务沿冻结版本执行；因果核验状态请单独核对，不由 APPLY 推断。'
+                : '无完整人物执行引用；当前配置／运行模式以服务端为准，不把未建档当成已启用。';
             sync();
         }
         function mountEntry(kind) {
@@ -470,16 +540,75 @@
             });
             if (!container.children.length) container.appendChild(node('p', state.workbench || state.authoring ? '暂无' + KINDS[kind] + '记录。' : '正在读取…', 'empty-hint'));
         }
+        function characterDraft() {
+            if (!state.characterDraft) state.characterDraft = copy(characterProfilesOf(state.authoring));
+            return state.characterDraft;
+        }
+        function renderCharacterCards() {
+            const execution = characterExecutionOf(state.authoring);
+            const profiles = state.characterDraft || characterProfilesOf(state.authoring);
+            const box = el('character-decision-cards'); box.replaceChildren();
+            el('character-profile-meta').textContent = execution
+                ? '人物策略 ' + execution.settings.policyVersion + ' · 模式 ' + execution.settings.mode
+                    + (execution.profiles ? ' · 档案版本 ' + execution.profiles.revision + ' · 第 ' + execution.profiles.effectiveFromChapter + ' 章起生效' : ' · 尚无决策卡，生成时会明确记录降级')
+                : '未建立决策卡执行引用；已有事实和人物状态仍按原链路使用。';
+            if (!profiles.length) box.appendChild(node('p', '暂无决策卡。可手工添加；显式 APPLY 允许为明确核心人物自动建档。', 'empty-hint'));
+            profiles.forEach((profile, index) => {
+                const card = node('article', null, 'character-decision-card');
+                const header = node('div', null, 'character-card-header'); header.appendChild(node('h4', profile.displayName || '新人物'));
+                card.appendChild(header);
+                if (!state.characterDraft) {
+                    card.appendChild(node('p', '来源：' + (text(profile.source) || '未提供') + ' · 采纳：' + (text(profile.adoption) || '未提供')
+                        + ' · ' + (profile.locked ? '已锁定' : '未锁定'), 'character-card-source'));
+                    const fields = node('div', null, 'character-card-fields');
+                    CHARACTER_FIELDS.forEach(([key, label]) => {
+                        const group = node('div'); group.appendChild(node('strong', label)); group.appendChild(node('p', text(profile[key]) || '未设计')); fields.appendChild(group);
+                    });
+                    card.appendChild(fields);
+                    card.appendChild(button('编辑', () => { characterDraft(); touched(); renderCharacterCards(); }));
+                } else {
+                    const fields = node('div', null, 'character-card-fields');
+                    const nameLabel = node('label', '人物姓名'), name = node('input'); name.type = 'text'; name.maxLength = 120;
+                    name.id = 'character-name-' + index; nameLabel.htmlFor = name.id; name.value = text(profile.displayName);
+                    name.addEventListener('input', () => { profile.displayName = name.value; header.querySelector('h4').textContent = name.value || '新人物'; touched(); });
+                    fields.appendChild(nameLabel); fields.appendChild(name);
+                    const wasLocked = characterProfilesOf(state.authoring).some(previous => previous.displayName === profile.displayName && previous.locked === true);
+                    const lockLabel = node('label', '锁定此卡，自动建档不得覆盖'), lock = node('input'); lock.type = 'checkbox'; lock.checked = profile.locked === true;
+                    lockLabel.appendChild(lock); fields.appendChild(lockLabel);
+                    lock.addEventListener('change', () => { profile.locked = lock.checked; touched(); renderCharacterCards(); });
+                    CHARACTER_FIELDS.forEach(([key, label]) => {
+                        const group = node('div'), fieldLabel = node('label', label), input = node('textarea'); input.rows = 3; input.maxLength = 2048;
+                        input.id = 'character-' + index + '-' + key; fieldLabel.htmlFor = input.id; input.value = text(profile[key]);
+                        input.readOnly = wasLocked && profile.locked === true;
+                        input.addEventListener('input', () => { profile[key] = input.value; touched(); });
+                        group.appendChild(fieldLabel); group.appendChild(input); fields.appendChild(group);
+                    });
+                    name.readOnly = wasLocked && profile.locked === true; card.appendChild(fields);
+                    if (wasLocked && profile.locked === true) card.appendChild(node('p', '先解除锁定，再修改或移除这张卡。', 'settings-hint'));
+                    else card.appendChild(button('移除此卡', () => {
+                        if (!ask('移除这张人物决策卡？先预览再保存，不删除正文或人物事实。')) return;
+                        state.characterDraft.splice(index, 1); touched(); renderCharacterCards();
+                    }));
+                }
+                box.appendChild(card);
+            });
+            if (state.characterDraft) box.appendChild(button('取消档案编辑', () => {
+                if (!ask('放弃人物决策卡的未保存修改？')) return;
+                state.characterDraft = null; touched(); renderCharacterCards();
+            }));
+            el('character-save-hint').textContent = '保存前先预览差异；手工保存不调用模型、不切换模式。APPLY 自动建档可能增加调用；人工草稿按钮尚未开放。';
+            sync();
+        }
         function renderAuthoring() {
             const view = state.authoring;
             el('book-authoring-meta').textContent = view ? '维护版本 ' + (view.revision || '未建立') + ' · 生效起点：第 ' + view.effectiveFromChapter
                 + ' 章 · 当前激活版本 ' + (view.activeSnapshot ? view.activeSnapshot.revision : '未建立') + ' · 依据 ' + view.basis : '尚未读取有效创作依据，不可保存';
-            renderSettings(); renderCharacterList(); renderSelectedCharacter();
+            renderSettings(); renderCharacterCards(); renderCharacterList(); renderSelectedCharacter();
             ['ITEM', 'FACTION', 'FORESHADOW'].forEach(kind => { renderEntities(kind); renderRecords(kind, el('book-' + KIND_IDS[kind] + '-records')); });
         }
         async function loadAuthoring(manual) {
             if (!state.storyDir || busy()) return false;
-            if (manual && dirty() && !ask('重新读取会放弃未保存的书级设定、硬事实、模式和维护输入（人物档案与正文不受影响）。继续？')) return false;
+            if (manual && dirty() && !ask('重新读取会放弃未保存的书级设定、硬事实、人物决策卡、模式和维护输入（正文不受影响）。继续？')) return false;
             const storyDir = state.storyDir, epoch = state.epoch, token = ++state.readRequest, version = state.version;
             state.readState = 'loading'; status('正在读取当前书的创作依据…'); sync();
             try {
@@ -488,7 +617,7 @@
                 if (version !== state.version) { state.readState = 'stale'; status('读取期间已有修改，输入未覆盖。请复制保留内容后重新读取合并。', false); return false; }
                 const view = readAuthoring(raw);
                     state.authoring = view;
-                state.settings = copy(view.settings); state.mode = modeOf(view);
+                state.settings = copy(view.settings); state.mode = modeOf(view); state.characterDraft = null;
                 state.readState = 'ready'; state.version++; state.settingsEditing = false; state.factsEditing = false;
                 Object.keys(KINDS).forEach(mountEntry); invalidatePreview(); renderAuthoring();
                 status('已读取当前书。编辑只保留在本页，预览并明确保存后才改变服务器。', true);
@@ -522,7 +651,7 @@
                 box.appendChild(node('p', '服务器生效边界：第 ' + candidate.effectiveFromChapter + ' 章。既有正文和已启动任务冻结依据不改写。'));
                 candidate.warnings.forEach(warning => box.appendChild(node('p', warning, 'verification-warning')));
                 const panel = el('book-authoring-preview');
-                const previewSlots = {settings: 'book-authoring-settings', facts: 'book-character-basic', mode: 'book-run-preview-slot',
+                const previewSlots = {settings: 'book-authoring-settings', facts: 'book-character-basic', profiles: 'book-character-motivation', mode: 'book-run-preview-slot',
                     'entry:CHARACTER': 'book-authoring-characters', 'entry:ITEM': 'book-authoring-items',
                     'entry:FACTION': 'book-authoring-factions', 'entry:FORESHADOW': 'book-authoring-foreshadow'};
                 el(previewSlots[scope]).appendChild(panel);
@@ -549,6 +678,7 @@
                 state.mode = pending.scope === 'mode' ? modeOf(view) : localMode;
                 if (pending.scope === 'settings') state.settingsEditing = false;
                 if (pending.scope === 'facts') state.factsEditing = false;
+                if (pending.scope === 'profiles') state.characterDraft = null;
                 if (pending.scope.startsWith('entry:')) mountEntry(pending.scope.slice(6));
                 state.version++; invalidatePreview(); renderAuthoring();
                 status('已保存并激活维护版本 ' + view.revision + '，从第 ' + view.effectiveFromChapter + ' 章生效。未调用模型，其他未保存输入仍保留。', true);
@@ -633,6 +763,19 @@
         }
         function updateWorkbench(data) {
             state.workbench = data; state.ledger = Array.isArray(data.characters) ? data.characters : [];
+            const observations = el('workbench-character-observation'); observations.replaceChildren();
+            const statuses = {OBSERVED: '已绑定原稿的选择与后果摘录', STALE: '观察依据已过期', NOT_EVALUATED: '没有足够的可核对观察', ERROR: '观察未完成'};
+            (Array.isArray(data.characterObservations) ? data.characterObservations : []).forEach(observation => {
+                const row = node('article', null, 'book-record');
+                row.appendChild(node('h4', '第 ' + observation.chapterNo + ' 章 · ' + (statuses[observation.status] || observation.status)));
+                row.appendChild(node('p', '这不是文学评分或已发生事实；仅对应所列正文与人物卡版本。', 'settings-hint'));
+                (observation.observations || []).forEach(line => row.appendChild(node('p', text(line), 'book-long-text')));
+                row.appendChild(node('p', '正文 ' + text(observation.manuscriptHash) + '\n人物卡 ' + text(observation.profileHash), 'character-card-source'));
+                observations.appendChild(row);
+            });
+            if (!observations.children.length) observations.appendChild(node('p', '暂无可核对的独立人物观察，不等于没有问题。', 'empty-hint'));
+            if (data.causalityPlanMode || data.causalityAuditMode) observations.appendChild(node('p', '因果核验：规划 ' + text(data.causalityPlanMode)
+                    + ' · 审校 ' + text(data.causalityAuditMode) + '；与人物 APPLY 独立。', 'settings-hint'));
             renderCharacterList(); renderSelectedCharacter();
             ['ITEM', 'FACTION', 'FORESHADOW'].forEach(renderEntities);
             const pending = el('book-pending-facts'); pending.replaceChildren();
@@ -647,7 +790,7 @@
             state.epoch++; state.version++; state.readRequest++; state.qualityRequest++; state.historyRequest++;
             Object.assign(state, {storyDir, authoring: null, readState: 'empty', settings: readSettings({}), mode: '',
                 settingsEditing: false, factsEditing: false, selectedCharacter: '', cards: [], ledger: [],
-                issues: [], issuesRead: false, issueNotes: Object.create(null), issueStatus: Object.create(null), qualityBusy: false, busy: false, history: Object.create(null), workbench: null});
+                issues: [], issuesRead: false, issueNotes: Object.create(null), issueStatus: Object.create(null), qualityBusy: false, busy: false, history: Object.create(null), workbench: null, characterDraft: null});
             invalidatePreview(); Object.keys(KINDS).forEach(mountEntry); renderAuthoring(); renderQuality();
             el('workbench-character-observation').textContent = '深度建议待读取；不代表没有问题。';
             el('book-current-mode').textContent = '当前执行模式待读取';
@@ -678,6 +821,16 @@
             const settings = copy(state.authoring.settings); SETTINGS.forEach(pair => { settings[pair[0]] = state.settings[pair[0]]; }); preview({settings}, 'settings');
         });
         el('btn-preview-book-facts').addEventListener('click', () => preview({settings: {...state.authoring.settings, characterProfiles: state.settings.characterProfiles}}, 'facts'));
+        el('btn-add-character-card').addEventListener('click', () => {
+            if (busy() || state.readState !== 'ready') return;
+            characterDraft().push({displayName: '', locked: false}); touched(); selectCharacterTab('motivation'); renderCharacterCards();
+        });
+        el('btn-save-character-cards').addEventListener('click', () => {
+            if (!state.characterDraft || busy()) return;
+            try { preview({characterProfiles: editableCharacterProfiles(state.characterDraft)}, 'profiles'); }
+            catch (err) { status(err.message, false); }
+        });
+        el('btn-reload-character-cards').addEventListener('click', () => loadAuthoring(true));
         el('btn-preview-book-mode').addEventListener('click', () => {
             if (!['OFF', 'OBSERVE', 'APPLY'].includes(state.mode)) { status('请选择明确的模式后再预览。', false); return; }
             preview({characterDepthMode: state.mode}, 'mode');
@@ -695,5 +848,6 @@
     }
 
     return {SETTINGS, SETTING_KEYS, KINDS, TABS, AUTHORING_TABS, readSettings, readAuthoring, readSnapshot, entriesOf, sourcesOf,
-        modeOf, characterNames, mergeEntry, makeEntry, previewChanges, readIssue, qualityActionBody, readQualitySaved, create};
+        modeOf, characterNames, mergeEntry, makeEntry, previewChanges, readIssue, qualityActionBody, readQualitySaved,
+        CHARACTER_FIELDS, editableCharacterProfiles, characterExecutionOf, characterProfilesOf, readCharacterExecution, create};
 }));

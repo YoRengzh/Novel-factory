@@ -2,7 +2,7 @@
 <!--
   CI 专用 Maven settings（仅 GitHub Actions 使用，本地开发仍走 pom.xml 里的阿里云镜像）。
 
-  原因：根 pom 把 repository 指向 http://maven.aliyun.com（国内镜像）。GitHub 托管 runner
+  原因：根 pom 把 repository 指向阿里云 HTTPS 国内镜像。GitHub 托管 runner
   在境外，访问该镜像可能超时或限速，导致拉不到依赖的假失败。这里用 mirrorOf 把**所有**仓库
   请求改走 Maven Central。
 -->

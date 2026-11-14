@@ -8,9 +8,16 @@ import java.util.Map;
 
 /** null 表示保留该部分；空数组显式清空条目，空字符串显式清空非必填设定。 */
 public record StoryAuthoringPatch(String expectedRevision, String expectedBasis, Map<String, String> settings,
-                                  List<StoryAuthoringSnapshot.Entry> entries, String characterDepthMode) {
+                                  List<StoryAuthoringSnapshot.Entry> entries, String characterDepthMode,
+                                  cn.novel.yonren.domain.novel.model.valobj.character.CharacterDepthSettings characterDepthSettings,
+                                  List<cn.novel.yonren.domain.novel.model.valobj.character.CharacterDecisionProfile> characterProfiles) {
+    public StoryAuthoringPatch(String expectedRevision, String expectedBasis, Map<String, String> settings,
+                               List<StoryAuthoringSnapshot.Entry> entries, String characterDepthMode) {
+        this(expectedRevision, expectedBasis, settings, entries, characterDepthMode, null, null);
+    }
     public StoryAuthoringPatch {
         settings = settings == null ? null : Collections.unmodifiableMap(new LinkedHashMap<>(settings));
         entries = entries == null ? null : Collections.unmodifiableList(new ArrayList<>(entries));
+        characterProfiles = characterProfiles == null ? null : Collections.unmodifiableList(new ArrayList<>(characterProfiles));
     }
 }

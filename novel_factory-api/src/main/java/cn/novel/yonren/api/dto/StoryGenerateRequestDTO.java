@@ -47,6 +47,9 @@ public class StoryGenerateRequestDTO {
 
     /** 本批创作要点（导演通道）：自由文本，注入卷/阶段/计划三个规划 prompt 顶部 */
     private String creativeNotes;
+
+    /** 可选人物深度模式；缺省/OFF不新增卡片、上下文或模型调用。 */
+    private String characterDepthMode;
 }
 
 

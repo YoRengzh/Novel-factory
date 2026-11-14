@@ -74,6 +74,13 @@ public class StoryWorkbenchDTO {
     /** 工作台统计指标（字数/账本健康度的聚合数） */
     private WorkbenchMetrics metrics = new WorkbenchMetrics();
 
+    private List<CharacterObservationDTO> characterObservations = new ArrayList<>();
+    private String causalityPlanMode;
+    private String causalityAuditMode;
+
+    public record CharacterObservationDTO(Integer chapterNo, String status, String manuscriptHash, String profileHash,
+                                          List<String> observations) { }
+
     @Data
     public static class ForeshadowDTO {
         /** 伏笔埋设章号 */

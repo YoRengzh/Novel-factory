@@ -52,7 +52,7 @@ public class AntiPaddingStrategy implements PromptRuleStrategy, CriticalPromptRu
             return List.of();
         }
         return List.of(new PromptRule("anti-padding",
-                "写作本章时必须逐条遵守以下防注水纪律：\n\n" + sb,
+                "按场景判断有效内容与冗余，不以此追加逐章任务或数量配额：\n\n" + sb,
                 PromptRule.InjectPosition.USER_TAIL));
     }
 

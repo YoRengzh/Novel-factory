@@ -52,4 +52,11 @@ public class StoryContextEntity {
     @com.fasterxml.jackson.annotation.JsonInclude(com.fasterxml.jackson.annotation.JsonInclude.Include.NON_NULL)
     private cn.novel.yonren.domain.novel.model.valobj.authoring.StoryAuthoringSnapshot storyAuthoring;
 
+    @com.fasterxml.jackson.annotation.JsonInclude(com.fasterxml.jackson.annotation.JsonInclude.Include.NON_NULL)
+    private String characterDepthMode;
+    @com.fasterxml.jackson.annotation.JsonInclude(com.fasterxml.jackson.annotation.JsonInclude.Include.NON_NULL)
+    private cn.novel.yonren.domain.novel.model.valobj.character.CharacterDepthSettings characterDepthSettings;
+    @com.fasterxml.jackson.annotation.JsonInclude(com.fasterxml.jackson.annotation.JsonInclude.Include.NON_NULL)
+    private cn.novel.yonren.domain.novel.model.valobj.character.CharacterDecisionProfileSet characterDecisionProfiles;
+
 }

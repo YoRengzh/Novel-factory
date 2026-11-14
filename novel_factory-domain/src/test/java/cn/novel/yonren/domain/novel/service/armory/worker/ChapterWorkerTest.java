@@ -223,7 +223,7 @@ class ChapterWorkerTest {
         int contract = prompt.indexOf("第 9 章计划：");
         int requirements = prompt.indexOf("\n要求：");
         int continuity = prompt.indexOf("\n1. 严格围绕本章目标和关键事件");
-        int guidance = prompt.indexOf("\n4. 内容密度纪律");
+        int guidance = prompt.indexOf("\n4. 内容有效性");
         int json = prompt.indexOf("请严格按照以下 JSON 格式输出");
 
         assertTrue(facts >= 0, "事实层：全局设定在最前");
@@ -238,7 +238,7 @@ class ChapterWorkerTest {
         assertTrue(prompt.contains("目标：保护软软时暴露一个只有许意见过的动作"));
         assertTrue(prompt.contains("角色：角色癸、软软"));
         assertTrue(prompt.contains("关键事件：事件甲、事件乙"));
-        assertTrue(prompt.contains("结尾悬念：怀疑增加但身份未确认"));
+        assertTrue(prompt.contains("结尾落点：怀疑增加但身份未确认"));
         assertTrue(prompt.contains("\"chapterNo\":9"));
     }
 
@@ -252,7 +252,7 @@ class ChapterWorkerTest {
         String urban = chapterWorker.buildChapterPrompt("都市重生", item, null, 1, contract,
                 StoryContextEntity.builder().theme("都市重生").style("年代成长").build());
         assertTrue(urban.contains("【语言与语域契约】"));
-        assertTrue(urban.contains("年龄、身份、教育、职业"));
+        assertTrue(urban.contains("明确的认知超前、特殊训练或世界设定不能被年龄常识抹平"));
         assertFalse(urban.contains("灵气、阵纹、符箓"), "非 fantasy 题材不得被仙侠词表污染");
 
         String fantasy = chapterWorker.buildChapterPrompt("修仙世界", item, null, 1, contract,

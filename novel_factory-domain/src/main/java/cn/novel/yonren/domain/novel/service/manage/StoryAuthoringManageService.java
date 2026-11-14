@@ -66,6 +66,7 @@ public class StoryAuthoringManageService {
         }
         try {
             Path storyDir = resolveReadOnly(storyDirName);
+            repo(() -> { storyRepository.recoverStoryAuthoringCommit(storyDir); return null; });
             StoryAuthoringPatch patch = patch(request);
             StoryAuthoringView saved = repo(() -> storyRepository.safeApplyStoryAuthoringPreview(
                     storyDir, patch, request.getPreviewHash()));
@@ -106,7 +107,9 @@ public class StoryAuthoringManageService {
                 request.getSettings(),
                 request.getEntries() == null ? null
                         : request.getEntries().stream().map(StoryAuthoringManageService::entry).toList(),
-                request.getCharacterDepthMode());
+                request.getCharacterDepthMode(), depthSettings(request.getCharacterDepthSettings()),
+                request.getCharacterProfiles() == null ? null
+                        : request.getCharacterProfiles().stream().map(StoryAuthoringManageService::profile).toList());
     }
 
     private static StoryAuthoringSnapshot.Entry entry(StoryAuthoringEntryDTO dto) {
@@ -137,7 +140,8 @@ public class StoryAuthoringManageService {
                 view.sources().stream().map(source -> new StoryAuthoringSourceDTO(source.id(),
                         source.kind().name(), source.entityName(), source.currentState(), source.sourceChapter(),
                         source.sourceHash(), source.evidence(), source.verified())).toList(),
-                view.effectiveFromChapter(), previewHash, saved);
+                view.effectiveFromChapter(), previewHash, saved,
+                executionDTO(candidate == null ? view.characterExecution() : candidate.characterExecution()));
     }
 
     private static StoryAuthoringSnapshotDTO snapshot(StoryAuthoringSnapshot snapshot) {
@@ -161,6 +165,61 @@ public class StoryAuthoringManageService {
                     dto.setEffectiveFromChapter(value.effectiveFromChapter());
                     dto.setStatus(value.status() == null ? null : value.status().name());
                     return dto;
-                }).toList(), snapshot.characterDepthMode());
+                }).toList(), snapshot.characterDepthMode(),
+                settingsDTO(snapshot.characterExecution() == null ? null : snapshot.characterExecution().settings()),
+                snapshot.characterExecution() == null || snapshot.characterExecution().profiles() == null ? null
+                        : snapshot.characterExecution().profiles().profiles().stream().map(StoryAuthoringManageService::profileDTO).toList(),
+                executionDTO(snapshot.characterExecution()));
+    }
+
+    private static cn.novel.yonren.domain.novel.model.valobj.character.CharacterDepthSettings depthSettings(
+            cn.novel.yonren.api.dto.CharacterDepthSettingsDTO dto) {
+        if (dto == null) return null;
+        var defaults = cn.novel.yonren.domain.novel.model.valobj.character.CharacterDepthSettings.defaults(dto.getMode());
+        return new cn.novel.yonren.domain.novel.model.valobj.character.CharacterDepthSettings(dto.getMode(),
+                dto.getContextMaxChars() == null ? defaults.contextMaxChars() : dto.getContextMaxChars(),
+                dto.getFeedbackMaxChars() == null ? defaults.feedbackMaxChars() : dto.getFeedbackMaxChars(),
+                dto.getMaxNewProfilesPerPass() == null ? defaults.maxNewProfilesPerPass() : dto.getMaxNewProfilesPerPass(),
+                dto.getPolicyVersion() == null ? defaults.policyVersion() : dto.getPolicyVersion());
+    }
+
+    private static cn.novel.yonren.domain.novel.model.valobj.character.CharacterDecisionProfile profile(
+            cn.novel.yonren.api.dto.CharacterDecisionProfileDTO dto) {
+        if (dto == null) throw new IllegalArgumentException("characterProfiles不能包含null");
+        // 请求里的身份、来源和采纳状态不是授权，永远由adoptAuthor重新绑定。
+        return new cn.novel.yonren.domain.novel.model.valobj.character.CharacterDecisionProfile(dto.getDisplayName(),
+                dto.getLocked(), dto.getWant(), dto.getNeed(), dto.getFearAndDefense(), dto.getValuePriorities(),
+                dto.getBoundaries(), dto.getIndependentConcerns(), dto.getDecisionPattern());
+    }
+
+    private static cn.novel.yonren.api.dto.CharacterDecisionProfileDTO profileDTO(
+            cn.novel.yonren.domain.novel.model.valobj.character.CharacterDecisionProfile value) {
+        var dto = new cn.novel.yonren.api.dto.CharacterDecisionProfileDTO();
+        dto.setCharacterId(value.characterId()); dto.setDisplayName(value.displayName()); dto.setLocked(value.locked());
+        dto.setWant(value.want()); dto.setNeed(value.need()); dto.setFearAndDefense(value.fearAndDefense());
+        dto.setValuePriorities(value.valuePriorities()); dto.setBoundaries(value.boundaries());
+        dto.setIndependentConcerns(value.independentConcerns()); dto.setDecisionPattern(value.decisionPattern());
+        dto.setSource(value.source().name()); dto.setAdoption(value.adoption().name());
+        return dto;
+    }
+
+    private static cn.novel.yonren.api.dto.CharacterDepthSettingsDTO settingsDTO(
+            cn.novel.yonren.domain.novel.model.valobj.character.CharacterDepthSettings value) {
+        if (value == null) return null;
+        var dto = new cn.novel.yonren.api.dto.CharacterDepthSettingsDTO();
+        dto.setMode(value.mode()); dto.setContextMaxChars(value.contextMaxChars());
+        dto.setFeedbackMaxChars(value.feedbackMaxChars()); dto.setMaxNewProfilesPerPass(value.maxNewProfilesPerPass());
+        dto.setPolicyVersion(value.policyVersion());
+        return dto;
+    }
+
+    private static cn.novel.yonren.api.dto.CharacterExecutionContextDTO executionDTO(
+            cn.novel.yonren.domain.novel.model.valobj.character.CharacterExecutionContext value) {
+        if (value == null) return null;
+        var set = value.profiles();
+        return new cn.novel.yonren.api.dto.CharacterExecutionContextDTO(value.basisVersion(), settingsDTO(value.settings()),
+                set == null ? null : new cn.novel.yonren.api.dto.CharacterExecutionContextDTO.ProfileSet(set.schemaVersion(),
+                        set.revision(), set.hash(), set.effectiveFromChapter(),
+                        set.profiles().stream().map(StoryAuthoringManageService::profileDTO).toList()));
     }
 }

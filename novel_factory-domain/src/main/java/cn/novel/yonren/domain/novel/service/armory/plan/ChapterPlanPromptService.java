@@ -125,14 +125,6 @@ public class ChapterPlanPromptService {
                     planStoryContext.getWorldSetting(), planStoryContext.getProtagonist(),
                     planStoryContext.getOutline());
         }
-                // 学段→年龄映射：正文曾把高一写成十二岁（应为十五岁），
-        // 摘要忠实记录了错误值，导致时序锚长期锚在十二岁。此处显式锁定学段对应的年龄，
-        // 覆盖摘要里的错误记录——学段是更可靠的锚点（高一=15岁、高二=16岁、高三=17岁、大学=18岁）。
-        // priority=1（最高，不可截断）：年龄错了会连锁污染后续所有章节，不能被预算裁掉。
-        String stageAgeAnchor = buildStageAgeAnchor(dynamicContext.getStageBlueprint());
-        if (StringUtils.isNotBlank(stageAgeAnchor)) {
-            memoryBlocks.add(0, new PromptBudgetGuard.Block("学段年龄锚", 1, false, stageAgeAnchor));
-        }
         // 实体档案（E1）：规划路径（item=null）注入最久未见的休眠实体——
         // 规划层据此安排"谁重新出场"，避免配角蒸发（正文路径的按章提及过滤见 ChapterWorker）
         memoryBlocks.addAll(chapterMemoryService.buildEntityDossierBlocks(
@@ -152,8 +144,9 @@ public class ChapterPlanPromptService {
         sb.append(promptBudgetGuard.assemblePlanInput(startNo, planBlocks));
         sb.append(StoryAuthoringService.renderGuidance(planStoryContext, startNo,
                 endNo == null ? startNo : endNo));
-        if ("APPLY".equals(StoryAuthoringService.characterDepthMode(planStoryContext))) {
-            sb.append(StoryAuthoringService.renderCharacterDecisions(""));
+        if (cn.novel.yonren.domain.novel.model.valobj.character.CharacterDepthSettings.applies(planStoryContext)) {
+            sb.append(new cn.novel.yonren.domain.novel.service.armory.character.CharacterContextAssembler()
+                    .assemble(planStoryContext, null, startNo).text());
         }
         sb.append("\n\n请先规划完整章节计划，不要生成正文。")
                 .append("\n要求：")
@@ -170,8 +163,8 @@ public class ChapterPlanPromptService {
         }
         sb.append("\n2. chapterNo 从 ").append(startNo).append(" 开始连续递增")
                 .append("\n3. 每章输出 schemaVersion=2 的 scenes 场景计划，并保留章级 goal 与 endingHook；")
-                .append("endingHook 必须是具体的未决点/悬念/引爆引线，")
-                .append("严禁用\"本章结束\"或总结性表述收尾，严禁无钩子结尾")
+                .append("endingHook 写具体的结束落点，可为未决、闭合或余韵；")
+                .append("不以空泛总结代替事件结果，也不为钩子额外制造冲突。")
                 .append(renderWorldLanguageRule(dynamicContext))
                 .append("\n5. 若前情记忆带有【伏笔账·待回收】:标【硬】的条目，本章计划必须逐条显式评估——")
                 .append("若本章场景/人物/地点与该伏笔相关，必须把回收列入该章关键事件并注明来源（如\"回收第N章埋设的XX\"）:")
@@ -184,25 +177,15 @@ public class ChapterPlanPromptService {
                 .append("无需每章都推进任务，严禁为凑任务强行编造事件或提前透支后段高潮")
                 .append("\n7. chapterType 标记章节类型：normal=普通推进章，transition=过渡章（蓄势/整理/关系推进），")
                 .append("climax=高潮章（重大冲突/转折）,finale=全书最终收束章;")
-                .append("transition 章的事件密度可低于常规，但它不是逃避推进的出口——")
-                .append("全段 transition 占比 ≤ 1/3、不得连续超过 2 章，且每章至少包含一处关系/信息/资源的变化")
-                .append("（纯赶路/纯寒暄不算）;")
+                .append("transition 是过渡、消化或关系沉淀，不设占比或连续章数；章节类型按实际内容标记。")
                 .append(lastSegment && blueprint != null && Boolean.TRUE.equals(blueprint.getFinalVolumeDeclared())
                         && ("RESOLUTION".equalsIgnoreCase(blueprint.getStoryPhase())
                         || "EPILOGUE".equalsIgnoreCase(blueprint.getStoryPhase()))
                         ? "只有收官卷的最后一章才标 finale；remainingFinaleBeats 必须在正文中全部完成"
                         : "本段末章不得因批次结束而标 finale；全书至少一个 climax")
-                .append("\n8. 人物供给（防「主角单机」）：每章至少 1 个关键事件")
-                .append("由**非主角角色主动发起或推动**——配角必须有自己的目标、信息或行动逻辑，")
-                .append("不得只作为主角能力的验证器或递道具的；每章至少 1 次**双向角色互动**")
-                .append("（对白/冲突/交易/协作，主角的内心推演与自我总结不算互动）；")
-                .append("代价必须多样化——同一阶段内「物理损伤」类代价不得超过一半，必须穿插情感、关系、信息、机会等非物理代价；")
-                .append("主角不得无代价地独立解决所有问题，每段至少安排一个必须依靠他人（被说服/被救助/被迫合作）才能推进的局面；")
-                .append("**若为双主角或多主角题材，两个主角必须在章节/场景间交替主导**——")
-                .append("不得让一方持续处于被动响应（被救助、被安慰、被怀疑）的位置；")
-                .append("每 2-3 章至少有一章由「另一位主角」发起并推动核心事件。")
-                .append("对白须写成**高频短交锋**（3-5 字一句、一来一回多轮），不要用少数长对白段凑篇幅——")
-                .append("恋爱/智斗/掉马题材的张力来自往返次数，不是单段长度");
+                .append("\n8. 人物行动从已知信息、目标、关系与资源出发，独处、合作、对峙与静场均可成立；")
+                .append("对白和主导角色按实际场景决定，不设句数、句长、轮换或互动配额。")
+                .append("成功的后果按世界规则和准备程度呈现，不为制造代价临时增加伤害、援救或误会。");
         if (ChapterPlanChecks.hasUsableLadder(blueprint)) {
             sb.append("\n8.1 ⚠️ suspenseBeat——**粗档位校验字段**：每章必须回填")
                     .append("「本章结束时核心悬念所处的档位」的**原文**，逐字取自下方【悬念推进锚】的档位表。")
@@ -308,38 +291,11 @@ public class ChapterPlanPromptService {
         if (dynamicContext.getChapterOffset() > 0) {
             sb.append("\n9. 这是续写批次;以上前情记忆即为已有剧情，新章必须无缝承接其人物状态与悬念,严禁另起炉灶或重讲已有剧情");
         }
-        sb.append("\n\n【节奏指令】禁止每一章都安排生死危机，也禁止每一章都换新场景。")
-                .append("两次危机之间必须安排至少 1-2 章的'过渡期'（如整理线索、暗中发育、角色日常交流），")
-                .append("这些章请标 chapterType=transition。transition 与【密度反馈】并不冲突：")
-                .append("它豁免'关键事件 ≥ 3'，但仍须落在已建立的地点里，并带来一处实质变化。");
-        sb.append("\n\n【冲突编排指令】【禁止对称出场】多方势力交锋时，严禁让他们像开会一样同时到达并轮流发言")
-                .append("必须制造信息差和时间差（例如：一方暗中潜伏，一方迟到，一方只派低阶试探），让冲突呈现非对称性和意外感");
         // 事件密度：场景是写手的供给清单。此前按 keyEvents 条数要求，是因为事件就是计划本体；
         // v2 改为场景后，条数配额会与「不设固定场数」直接冲突，因此只保留"每场必须写到场面级"。
         // 供给不足的后果仍然成立：场景写薄了，正文里只会被展开成一句过渡叙述。
-        sb.append("\n\n【场景密度】不设固定场数：一个完整的独处事件或一场长交流都可以承载本章。")
-                .append("**每场必须写到「场面」级**：在场人物 + 起因或分歧 + 落点或结果（如"
-                        + "「甲在人前当众质问乙某事，乙给出承诺但附带一个交换条件，两人不欢而散」），")
-                .append("**禁止**把场景写成「谁做了什么」的一句话")
-                .append("（如「乙承诺处理某事」）——后者在正文里只能被展开成一句过渡叙述。")
-                // 补：去掉时间配额后实测平均字数从 2213 跌到 1246（-44%）。
-                // 模型把"不注水"误读成了"少写"——它不再写过渡，但也把场景内部的展开一并省掉。
-                // 必须明确：**精简的是过渡，不是场景本身**；场景该铺展时仍要铺展。
-                .append("**“不注水”不等于“少写”**：去掉的是无信息过渡（“第二天”“过了几日”），")
-                .append("不是场景本身。每个关键事件仍要**演成一场戏**：")
-                .append("对白至少 2-3 轮有来有回（不是一问一答就结束），")
-                .append("动作要有过程与落点（不是“他做了 X”一句带过），")
-                .append("在场人物的反应要写出来。normal 章有效字数仍应达到 1400 以上，")
-                .append("靠**场景内部的展开**来充实，而不是靠时间过渡来填满。")
-                // timeAdvance 语义 由「交付项」降级为「背景设定」）：
-                // 前几轮把"推进3-7天"改成"自决"，又加了"连续同日上限"，本质都还在把
-                // 时间推进当作每章要验收的任务——模型一旦读到任务就会去凑它，
-                // 凑出来的就是"第二天""过了几日"这类无信息过渡。真正要治的是这件事。
-                .append("timeAdvance 是**选填**的背景说明：本章若都在同一天，留空即可，不必为凑数编日期。")
-                .append("需要跨时间时再写（如“次日清晨”“三日后”），写到哪天就是哪天。")
-                .append("**时间是情节的背景，不是每章的任务**——一个下午能写完的章，就让它停在那天；")
-                .append("不要为了“推进时间”而插入过夜/赶路/季节更替等无信息过渡。")
-                .append("唯一的硬约束：不得与已确立的时间线矛盾（例如主角已上高中，就不能写“小学三年级”）。");
+        sb.append("\n\n【场景完整性】按场景的重要性展开起因、行动、回应和结果，让读者能够理解关键因果。")
+                .append("对白、动作、心理和讲述按需要选用，不为场景数量、轮次或通用字数目标制造内容。");
         sb.append("\n\n【场景编排】scenes 是唯一生成源，不设固定场数、事件条数、对白场数或危机缓冲比例。")
                 .append("一个完整的独处事件或一场长交流都可以承载本章。")
                 .append("每场提供稳定且章内唯一的 id、characters、intention、resistance、entryStates、outcome、function、milestoneRefs、location、time。")
@@ -449,46 +405,11 @@ public class ChapterPlanPromptService {
         StringBuilder rule = new StringBuilder("\n4. 关键事件、目标、结尾悬念必须使用与故事题材、时代、人物身份一致的世界内语言，")
                 .append("不得把作者分析语、学术报告腔或时代之外的技术黑话直接当作剧情事实；")
                 .append("人物用词与判断必须符合其年龄、教育、职业和当前认知边界。");
-        rule.append("若前情记忆含【时序锚】，主角能力展示必须区分两类：")
-                .append("**认知超前**（理解、判断、偏好、策略性拖延、权衡取舍）是否允许超出现阶段，")
-                .append("由故事设定决定——设定允许时不得抹平；")
-                .append("**媒介超前**（肢体动作、语言能力、书写、专注时长、精细操作等表达载体）")
-                .append("必须落在时序锚所记阶段的极限内；超媒介事件一律改写为该阶段内的合法表达")
-                .append("（倾向、注视、趋避、单音节词、被协助完成——以阶段常识为准）。")
-                .append("**注意**：用任何**可被他人解码出具体含义**的载体展示能力（涂鸦画出某题答案结构、")
-                .append("摆物摆出警告、以特定握姿展示训练痕迹、叫出某物名字）——都是能力展示，")
-                .append("不是认知超前，同禁；受限阶段的\"不寻常\"应通过偏好、注视、趋避与观察者的")
-                .append("跨章累积来显形（推进单位是他人认知的变化），而不是能力本身的直接或间接展示。")
-                .append("圣经章节带目标只表示剧情方向，不得据此让主角跨越尚未到达的生理阶段。")
-                .append("**本规则同样约束【必须埋设】注入的排期项**：排期意图与本锚冲突时")
-                .append("（如要求幼龄角色书写文字/数字、独立完成精细操作），改写为该阶段内的合法表达后照常埋设")
-                .append("（保留意图指向与回收章），不得原样照搬——排期项不豁免时序锚。");
-        // 能力展示节奏：锚把"注视/倾向"合法化后，模型立即收敛到
-        // 成本最低的合规模板——连续多章都写成「主角微动作 → 旁人注意 → 不像孩子」。
-        // 合规不等于可以每章来一次；展示的稀缺性本身就是效果的一部分。
-        rule.append("\n【能力展示节奏·硬约束】本段 5 章中，**至多 2 章**可安排主角能力/早慧展示类关键事件；")
-                .append("相邻两个展示章不得同类（动作暗示 / 旁人评价 / 专注偏好必须轮换或间隔空章）；")
-                .append("**严禁**把「旁人注意到主角不寻常 / 不像孩子」写成每章的固定推进单位——")
-                .append("没有展示任务的章，关键事件落在人际、事件、选择与两难上；")
-                .append("早慧的显形走观察者跨章累积的认知变化（一条暗线多个观察者接力），")
-                .append("而不是每章单发一个展示时刻。");
-        // 对话承载规则：计划若全是"内心梳理/制定计划"型独白场景，写手交付的对白句数会明显偏低。
-        // v2 场景契约下该要求落在场景层：intention/resistance/outcome 必须让场景真的能演，
-        // 而不是靠另写一份事件清单凑数。
-        rule.append("\n【对话承载·硬约束】多数场景应由人物当面的对话/冲突/协作承载")
-                .append("（transition 章可只有一场，静场与独处也成立）；")
-                .append("每个这样承载的场景必须写明**谁对谁、围绕什么分歧**（人物写全名，代词不算）——只写「二人交谈」等于没写；")
-                .append("**禁止**整章场景全部由\"内心梳理/制定计划/复盘总结/能力自评\"类独白构成——")
-                .append("独白场景不产生互动，写手只能交付独白章；")
-                .append("相邻两章不得连续独白主导；主角需要\"想明白一件事\"时，")
-                .append("优先让这件事在对峙/合作/教学的**对话中**发生，内心独白只作决策落点不作场景本体。");
-        // 时间衔接规则：计划排"夜里睡熟"而锚/账本仍停在白天时，
-        // 写手照排夜景 → 审计按锚判事实矛盾，补丁无法修复（改时段=重构整章）成质量债。
-        // 与年龄判据同源：锚是时间/年龄的唯一依据，计划层排事件必须先衔接时段。
-        rule.append("\n【时间衔接·硬约束】关键事件必须从上方【时序锚】记载的当前时间自然延展：")
-                .append("排夜间/睡眠/入夜场景而锚尚在白天时，须先安排过夜或明确的时间过渡事件（并在 goal 中注明推进到何时），")
-                .append("或把该事件顺延到后续章节；")
-                .append("严禁在无过渡的情况下让事件时段与锚记载直接冲突——审计将按时序锚判事实矛盾记 BLOCKING。");
+        rule.append("年龄、能力、表达媒介与行动边界以明确设定和已发生事实为依据，不用学段推算固定年龄覆盖事实。")
+                .append("认知超前和特殊训练由本书设定决定，已明确允许时不得抹平。")
+                .append("阶段目标和伏笔排期不能临时赋予尚未具备的能力；冲突时说明可行表达与调整原因。")
+                .append("对白、心理、独处与互动按人物处境和作者视角选择，不规定展示次数或逐章轮换。")
+                .append("时间安排不能与已确立时间线矛盾，确实跨时间时交代衔接，不要求为了推进时间增加事件。");
         if (genre == GenreType.FANTASY) {
             rule.append("玄幻/仙侠题材可使用灵气、阵纹、符箓、灵脉、宗门、长老、法宝等既有设定词，")
                     .append("不得用握手信号、加密信号、波形数据、服务器、协议、分布式节点、灰度、缓存、日志等程序员术语替代世界内概念；")
@@ -743,7 +664,8 @@ public class ChapterPlanPromptService {
                     && item.getPlantChapter() >= startNo && item.getPlantChapter() <= endNo) {
                 mustPlant.add("  - 《" + brief(item.getIntent()) + "》（计划第" + item.getPlantChapter()
                         + "章埋 → 第" + item.getPayoffChapter() + "章收）：本段第 " + item.getPlantChapter()
-                        + " 章必须埋下，**本段不得兑现**");
+                        + " 章必须埋下，" + (item.getPayoffChapter() > endNo
+                        ? "**本段不得兑现**" : "按明确排期在第 " + item.getPayoffChapter() + " 章兑现"));
             } else if (ForeshadowScheduleEntity.STATUS_PLANTED.equals(item.getStatus())) {
                 if (item.getPayoffChapter() >= startNo && item.getPayoffChapter() <= endNo) {
                     mustPay.add("  - 《" + brief(item.getIntent()) + "》（第" + item.getActualPlantChapter()
@@ -770,9 +692,9 @@ public class ChapterPlanPromptService {
 
         sb.append("\n\n【伏笔兑现排期】以下安排来自阶段蓝图的长视野排期，必须落地：");
         if (!mustPlant.isEmpty()) {
-            sb.append("\n■ 本段内**必须埋设**（埋下后本段不得兑现）：");
+            sb.append("\n■ 本段内**必须埋设**：");
             mustPlant.stream().limit(SCHEDULE_INJECTION_LIMIT).forEach(sb::append);
-            sb.append("\n  ⚠️ 这几条是**跨段长线**——埋下就收等于白排期，读者来不及惦记。");
+            sb.append("\n  按各条目的具体回收章执行：本段内到期可兑现，跨段条目本段只埋设。");
         }
         if (!mustPay.isEmpty()) {
             sb.append("\n■ 本段内**必须兑现**：");
