@@ -345,8 +345,9 @@ class QualityGateTest {
         assertEquals(original.hash(), result.semanticFeedbackHash());
         assertEquals(1, result.minorCount());
         assertEquals(List.of(minor), result.semanticMinors());
-        assertTrue(result.feedbackMinorsFor(cn.novel.yonren.domain.novel.model.valobj.work.ChapterManuscript.of(chapterContent)).isEmpty());
-        assertEquals(1, result.feedbackMinorsFor(original).size());
+        assertTrue(GateFeedbackPolicy.feedbackMinorsFor(result,
+                cn.novel.yonren.domain.novel.model.valobj.work.ChapterManuscript.of(chapterContent)).isEmpty());
+        assertEquals(1, GateFeedbackPolicy.feedbackMinorsFor(result, original).size());
         verify(chapterAuditService, times(1)).audit(any(), any(), any(), any(), any(), any(), anyInt(), any());
         verify(chapterAuditService, times(1)).verifyFixes(any(), any(), any(), anyList(), any(), any(), anyInt());
     }

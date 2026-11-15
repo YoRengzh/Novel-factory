@@ -20,7 +20,7 @@ class SemanticFeedbackVersionTest {
     void revisedManuscriptDoesNotReuseInitialFeedbackOrEraseObservations() {
         GateResult checks = GateResult.of(List.of(), 1, List.of(), 1, List.of(issue), false)
                 .withSemanticFeedbackHash(original.hash());
-        assertTrue(checks.feedbackMinorsFor(new ChapterManuscript(1, "标题", "“回来。”\n“好。”")).isEmpty());
+        assertTrue(GateFeedbackPolicy.feedbackMinorsFor(checks, new ChapterManuscript(1, "标题", "“回来。”\n“好。”")).isEmpty());
         assertEquals(List.of(issue), checks.semanticMinors());
         assertEquals(1, checks.minorCount());
         assertEquals(GateResult.PassGrade.REVISED_PASS, checks.grade());
@@ -30,8 +30,8 @@ class SemanticFeedbackVersionTest {
     void unchangedManuscriptRetainsFeedbackRegardlessOfRevisionRound() {
         GateResult checks = GateResult.of(List.of(), 1, List.of(), 2, List.of(issue), false)
                 .withSemanticFeedbackHash(original.hash());
-        assertEquals(List.of(issue), checks.feedbackMinorsFor(original));
-        assertTrue(checks.feedbackMinorsFor(new ChapterManuscript(1, "新标题", original.content())).isEmpty());
+        assertEquals(List.of(issue), GateFeedbackPolicy.feedbackMinorsFor(checks, original));
+        assertTrue(GateFeedbackPolicy.feedbackMinorsFor(checks, new ChapterManuscript(1, "新标题", original.content())).isEmpty());
     }
 
     @Test
@@ -39,7 +39,7 @@ class SemanticFeedbackVersionTest {
         GateResult historical = GateResult.of(List.of(), 1, List.of(), 0, List.of(issue), false);
         GateResult recovered = JSON.parseObject(JSON.toJSONString(historical), GateResult.class);
         assertNull(recovered.semanticFeedbackHash());
-        assertTrue(recovered.feedbackMinorsFor(original).isEmpty());
+        assertTrue(GateFeedbackPolicy.feedbackMinorsFor(recovered, original).isEmpty());
         assertEquals(1, recovered.minorCount());
     }
 
@@ -49,7 +49,7 @@ class SemanticFeedbackVersionTest {
                 .withSemanticFeedbackHash(original.hash());
         GateResult recovered = JSON.parseObject(JSON.toJSONString(checks), GateResult.class);
         assertEquals(original.hash(), recovered.semanticFeedbackHash());
-        assertEquals(1, recovered.feedbackMinorsFor(original).size());
-        assertTrue(recovered.feedbackMinorsFor(new ChapterManuscript(1, "标题", "修订后的正文。")).isEmpty());
+        assertEquals(1, GateFeedbackPolicy.feedbackMinorsFor(recovered, original).size());
+        assertTrue(GateFeedbackPolicy.feedbackMinorsFor(recovered, new ChapterManuscript(1, "标题", "修订后的正文。")).isEmpty());
     }
 }

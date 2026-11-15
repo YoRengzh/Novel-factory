@@ -1,8 +1,6 @@
 package cn.novel.yonren.domain.novel.model.valobj.quality;
 
 import cn.novel.yonren.domain.novel.model.entity.ChapterIssueEntity;
-import cn.novel.yonren.domain.novel.model.valobj.work.ChapterManuscript;
-import cn.novel.yonren.domain.novel.service.armory.quality.EvidenceMatch;
 
 import java.util.List;
 
@@ -36,20 +34,6 @@ public record GateResult(List<ChapterIssueEntity> unresolvedBlocking, PassGrade 
 
     public boolean planAdjustmentRequired() {
         return planAdjustmentReason != null && !planAdjustmentReason.isBlank();
-    }
-
-    /** 首审统计保留；只有同版稿件且原文证据可核对的意见可作为后续写作参考。 */
-    public List<ChapterIssueEntity> feedbackMinorsFor(ChapterManuscript manuscript) {
-        if (manuscript == null || semanticFeedbackHash == null || !semanticFeedbackHash.equals(manuscript.hash())
-                || semanticMinors == null) {
-            return List.of();
-        }
-        String content = EvidenceMatch.normalize(manuscript.content());
-        return semanticMinors.stream()
-                .filter(issue -> issue != null && "MINOR".equalsIgnoreCase(issue.getSeverity())
-                        && issue.getDescription() != null && !issue.getDescription().isBlank()
-                        && EvidenceMatch.contained(issue.getEvidence(), content))
-                .toList();
     }
 
     /** 通过质量分级 */

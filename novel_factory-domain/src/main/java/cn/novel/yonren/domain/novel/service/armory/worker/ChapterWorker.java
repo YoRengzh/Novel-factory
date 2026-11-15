@@ -50,6 +50,7 @@ import cn.novel.yonren.domain.novel.service.armory.candidate.CandidateSampleServ
 import cn.novel.yonren.domain.novel.model.valobj.quality.BatchHealthReport;
 import cn.novel.yonren.domain.novel.service.armory.quality.BatchHealthService;
 import cn.novel.yonren.domain.novel.model.valobj.quality.GateResult;
+import cn.novel.yonren.domain.novel.service.armory.quality.GateFeedbackPolicy;
 import cn.novel.yonren.domain.novel.service.armory.quality.QualityGate;
 import cn.novel.yonren.domain.novel.service.armory.quality.UsedPatternPolicy;
 import cn.novel.yonren.domain.novel.service.job.GenerationJob;
@@ -500,7 +501,7 @@ public class ChapterWorker {
             }
             // 上章审校反馈（P2）：语义 MINOR（人设/审美等）本章起产生行动通道——压缩要点，
             // 下一章 prompt 的「审校反馈」块消费。此前清单被丢弃：审校每章报 7-9 条却无人行动
-            reviewFeedback = renderReviewFeedback(gateResult.feedbackMinorsFor(
+            reviewFeedback = renderReviewFeedback(GateFeedbackPolicy.feedbackMinorsFor(gateResult,
                     cn.novel.yonren.domain.novel.model.valobj.work.ChapterManuscript.of(chapterContent)));
             // 文风指纹库：仅首轮全票通过的章节提取高信息密度句入库（滚动上限 50）
             if (gateResult.grade() == GateResult.PassGrade.CLEAN_PASS) {
