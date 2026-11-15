@@ -838,7 +838,65 @@ class ChapterMemoryServiceTest {
         // 锁定取最近一条记录，置于前缀顶部、剧情摘要之前
         assertTrue(prefix.indexOf("主角境界锁定") < prefix.indexOf("前章剧情摘要"));
         assertTrue(prefix.contains("主角当前真实境界：炼气三层"));
-        assertTrue(prefix.contains("仅当本章计划的关键事件明确包含突破/晋升时才允许变化"));
+        assertTrue(prefix.contains("变化须有本章计划依据和实际过程"));
+        assertFalse(prefix.contains("且变化必须有过程铺垫与代价"));
+    }
+
+    @Test
+    void unknownRealmDoesNotOverwriteConfirmedState() {
+        for (String placeholder : List.of("未知", "未明（正文未明示，本章无突破）", "未提及", "不详", "unknown", "N/A")) {
+            ChapterSummaryEntity confirmed = summary(1, states(state("小陈", "炼气三层")));
+            confirmed.setCultivationRealm("炼气三层");
+            ChapterSummaryEntity omitted = summary(2, states(state("小陈", "未提修为")));
+            omitted.setCultivationRealm(placeholder);
+            List<ChapterSummaryEntity> history = List.of(confirmed, omitted);
+            assertTrue(service.buildMemoryPrefix(history, null, null).contains("主角当前真实境界：炼气三层"), placeholder);
+            assertTrue(service.renderLedgerEdgeState(history).contains("主角境界：炼气三层"), placeholder);
+            assertFalse(service.buildMemoryPrefix(List.of(omitted), null, null).contains("主角境界锁定"), placeholder);
+            assertFalse(service.renderLedgerEdgeState(List.of(omitted)).contains("主角境界："), placeholder);
+        }
+    }
+
+    @Test
+    void compoundRealmPlaceholdersDoNotOverwriteConfirmedState() {
+        for (String placeholder : List.of("境界未知", "未提及境界", "本章未提及境界", "境界未明确",
+                "正文未说明主角当前境界", "真实的境界：未知")) {
+            ChapterSummaryEntity confirmed = summary(1, states(state("小陈", "炼气三层")));
+            confirmed.setCultivationRealm("炼气三层");
+            ChapterSummaryEntity omitted = summary(2, states(state("小陈", "未提修为")));
+            omitted.setCultivationRealm(placeholder);
+            List<ChapterSummaryEntity> history = List.of(confirmed, omitted);
+            assertTrue(service.buildMemoryPrefix(history, null, null).contains("主角当前真实境界：炼气三层"), placeholder);
+            assertTrue(service.renderLedgerEdgeState(history).contains("主角境界：炼气三层"), placeholder);
+        }
+        ChapterSummaryEntity real = summary(1, states(state("小陈", "炼气三层（道瞳能力未知）")));
+        real.setCultivationRealm("炼气三层（道瞳能力未知）");
+        assertTrue(service.buildMemoryPrefix(List.of(real), null, null).contains("道瞳能力未知"),
+                "含未知子句的真实境界不能被误判为占位");
+    }
+
+    @Test
+    void confirmedRealmWithUnknownAbilityIsNotDiscarded() {
+        ChapterSummaryEntity confirmed = summary(1, states(state("小陈", "炼气三层")));
+        confirmed.setCultivationRealm("炼气三层（道瞳能力未知）");
+        assertTrue(service.buildMemoryPrefix(List.of(confirmed), null, null)
+                .contains("主角当前真实境界：炼气三层（道瞳能力未知）"));
+    }
+
+    @Test
+    void futureSchoolStageDoesNotOverrideRecordedAge() {
+        ChapterSummaryEntity current = summary(1, states(state("小陈", "十二岁")));
+        current.setConsistencyFacts(List.of(new ChapterSummaryEntity.ConsistencyFact(
+                "NUMBER", "主角年龄", "十二岁", "小陈", "小陈刚过十二岁生日。")));
+        StageBlueprintEntity blueprint = StageBlueprintEntity.builder()
+                .stageNo(1).startChapter(2).endChapter(10).stageGoal("提前进入高一学习").build();
+        List<PromptBudgetGuard.Block> blocks = service.buildMemoryBlocks(
+                List.of(current), null, null, null, blueprint, null, null, null);
+        String anchor = blockByLabel(blocks, "时序锚").content();
+        assertTrue(anchor.contains("十二岁"));
+        assertFalse(anchor.contains("15"));
+        assertFalse(anchor.contains("优先于上方摘要年龄"));
+        assertTrue(blockByLabel(blocks, "阶段蓝图").content().contains("提前进入高一学习"));
     }
 
     @Test

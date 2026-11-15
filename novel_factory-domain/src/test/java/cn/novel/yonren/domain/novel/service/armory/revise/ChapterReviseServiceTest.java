@@ -9,7 +9,14 @@ import cn.novel.yonren.domain.novel.model.entity.StyleStatEntity;
 import cn.novel.yonren.domain.novel.model.valobj.LlmCall;
 import cn.novel.yonren.domain.novel.model.valobj.StoryVO;
 import cn.novel.yonren.domain.novel.config.StoryProperties;
+import com.alibaba.fastjson2.JSON;
 import cn.novel.yonren.domain.novel.service.armory.memory.StyleStatService;
+import cn.novel.yonren.domain.novel.service.armory.plan.ScenePlanPolicy;
+import cn.novel.yonren.domain.novel.service.armory.prompt.WritingContractPolicy;
+import cn.novel.yonren.domain.novel.model.valobj.plan.FactReference;
+import cn.novel.yonren.domain.novel.model.valobj.plan.ScenePlan;
+import cn.novel.yonren.domain.novel.model.valobj.revise.RewriteContext;
+import cn.novel.yonren.domain.novel.model.valobj.work.ChapterManuscript;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
@@ -58,6 +65,38 @@ class ChapterReviseServiceTest {
     }
 
     @Test
+    void collapsedManuscriptSkipsPatchAndReusesFrozenWriterContext() {
+        service = patchService();
+        String content = "小陈拔剑，事件A发生，事件B也发生。" + "他核对旧信日期，折好信纸放回匣中，决定翌日当面求证。".repeat(45);
+        when(llmGateway.complete(any(), any(LlmCall.class))).thenReturn(JSON.toJSONString(
+                new ChapterContentEntity(1, "测试章", content)));
+        var context = new cn.novel.yonren.domain.novel.model.valobj.revise.RewriteContext(
+                "【冻结人物卡】小陈不愿把信交给陌生人。\n【原始计划】事件A发生，事件B发生。",
+                "【原写手规则】", new cn.novel.yonren.domain.novel.model.valobj.work.ChapterManuscript(1, "测试章", "残稿"));
+        var result = service.revise(storyVO(), planItem(), "残稿", List.of(blockingIssue()), null, null,
+                emptyStyleStat(), 1, null, context);
+        assertTrue(result.decision().isAccepted());
+        ArgumentCaptor<LlmCall> captor = ArgumentCaptor.forClass(LlmCall.class);
+        verify(llmGateway).complete(any(), captor.capture());
+        assertTrue(captor.getValue().getLabel().startsWith("collapse-rewrite"));
+        assertTrue(captor.getValue().getUserPrompt().contains("【冻结人物卡】"));
+        assertTrue(captor.getValue().getUserPrompt().contains("不规定对白句数"));
+        assertEquals("【原写手规则】", captor.getValue().getSystemPrompt());
+    }
+
+    @Test
+    void collapsedRewriteBelowFloorCannotBeAccepted() {
+        service = patchService();
+        when(llmGateway.complete(any(), any(LlmCall.class))).thenReturn("{\"chapterNo\":1,\"title\":\"测试章\",\"content\":\"小陈拔剑，事件A发生，事件B发生。\"}");
+        var context = new cn.novel.yonren.domain.novel.model.valobj.revise.RewriteContext("完整写手计划", null,
+                new cn.novel.yonren.domain.novel.model.valobj.work.ChapterManuscript(1, "测试章", "残稿"));
+        var result = service.revise(storyVO(), planItem(), "残稿", List.of(blockingIssue()), null, null,
+                emptyStyleStat(), 1, null, context);
+        assertFalse(result.decision().isAccepted());
+        assertTrue(result.decision().getReason().contains("800"));
+    }
+
+    @Test
     void revise_acceptsWhenAllGatesPass() {
         String revisedJson = "{\"chapterNo\":1,\"title\":\"测试章\",\"content\":\"小陈拔剑，事件A发生，事件B也发生，结尾呼应钩子。\"}";
         when(llmGateway.complete(any(), any(LlmCall.class))).thenReturn(revisedJson);
@@ -87,18 +126,20 @@ class ChapterReviseServiceTest {
     }
 
     @Test
-    void revise_toleratesSingleKeyEventLoss_forBlockingFix() {
-        // 允许以 ≤1 条关键事件损失换取 BLOCKING 修复——违规现场常与事件场景重叠
-        //（"幼年写下未来年份"本身就是排期项），修复必然改写该场景，一字不差的要求只会造成不可修复的拒绝循环
-        String revisedJson = "{\"chapterNo\":1,\"title\":\"测试章\",\"content\":\"小陈拔剑，事件A发生，随后他收剑环顾，把余下段落补足长度，使修订稿不至于因字数闸被拒，结尾落在事件C上。\"}";
+    void revise_toleratesSingleLexicalCoverageLoss_forExplainedFactCorrection() {
+        // 保留旧容忍线以兼容有依据的事实修正，不把它测试成可任意删除真实事件。
+        String revisedJson = "{\"completed\":true,\"reason\":\"冻结事实未赋予预知能力，删除错误的未来年份断言，保留查验日期的场景功能\","
+                + "\"chapterNo\":1,\"title\":\"测试章\",\"content\":\"小陈拔剑，事件A发生。翻到卷末那张未署日期的旧纸，他仍无法确定来历，只能将疑点记下，留待当面求证。\"}";
         when(llmGateway.complete(any(), any(LlmCall.class))).thenReturn(revisedJson);
+        ChapterPlanItemEntity item = planItem();
+        item.setKeyEvents(List.of("事件A", "小陈预知未来确切年份"));
 
         ChapterReviseService.ReviseResult result = service.revise(
-                storyVO(), planItem(), "原稿正文，小陈拔剑，事件A发生，事件B发生。",
-                List.of(blockingIssue()), null, null, emptyStyleStat(), 1, null);
+                storyVO(), item, "原稿正文，小陈拔剑，事件A发生，小陈预知未来确切年份。",
+                List.of(blockingIssue()), "可信冻结事实：小陈无预知能力", null, emptyStyleStat(), 1, null);
 
         assertTrue(result.decision().isAttempted());
-        assertTrue(result.decision().isAccepted(), "丢失 1 条事件（事件B）应放行——BLOCKING 修复优先");
+        assertTrue(result.decision().isAccepted(), "最多1条词面变化保留兼容，实际事实修正仍须后续语义复核");
     }
 
     @Test
@@ -209,10 +250,8 @@ class ChapterReviseServiceTest {
     }
 
     @Test
-    void revise_promptCarriesMicroActionBlacklistWithCounts() {
-        String revisedJson = "{\"chapterNo\":1,\"title\":\"测试章\",\"content\":\"小陈拔剑，事件A发生，事件B也发生，结尾呼应钩子。\"}";
-        when(llmGateway.complete(any(), any(LlmCall.class))).thenReturn(revisedJson);
-
+    void revise_doesNotAddUnrelatedMicroActionOrMetaphorRewriteTasks() {
+        when(llmGateway.complete(any(), any(LlmCall.class))).thenReturn(REWRITE_JSON);
         String original = "他喉结滚动了一下。她又喉结滚动，再次喉结滚动。他呼吸一滞，随即呼吸一滞。";
         service.revise(storyVO(), planItem(), original,
                 List.of(blockingIssue()), null, null, emptyStyleStat(), 1, null);
@@ -220,16 +259,15 @@ class ChapterReviseServiceTest {
         ArgumentCaptor<LlmCall> captor = ArgumentCaptor.forClass(LlmCall.class);
         verify(llmGateway).complete(any(), captor.capture());
         String prompt = captor.getValue().getUserPrompt();
-
-        assertTrue(prompt.contains("【微动作黑名单】"));
-        assertTrue(prompt.contains("至多 1 次"));
-        assertTrue(prompt.contains("喉结滚动×3"));
-        assertTrue(prompt.contains("呼吸一滞×2"));
-        assertTrue(prompt.contains("替换为更具体的环境描写"));
+        assertTrue(prompt.contains(WritingContractPolicy.renderEditorialScope()));
+        assertTrue(prompt.contains("保留作者原有风格、视角和语气"));
+        assertFalse(prompt.contains("【微动作黑名单】"));
+        assertFalse(prompt.contains("至多 1 次"));
+        assertFalse(prompt.contains("新颖比喻"));
     }
 
     @Test
-    void revise_promptCarriesFatigueBlacklistWithNearLimitWords() {
+    void revise_styleObservationsDoNotOrderWholeChapterWordRemoval() {
         String revisedJson = "{\"chapterNo\":1,\"title\":\"测试章\",\"content\":\"小陈拔剑，事件A发生，事件B也发生，结尾呼应钩子。\"}";
         when(llmGateway.complete(any(), any(LlmCall.class))).thenReturn(revisedJson);
 
@@ -244,10 +282,10 @@ class ChapterReviseServiceTest {
         verify(llmGateway).complete(any(), captor.capture());
         String prompt = captor.getValue().getUserPrompt();
 
-        assertTrue(prompt.contains("【疲劳词禁新增名单】"));
-        assertTrue(prompt.contains("微微"));
-        assertTrue(prompt.contains("全书已累计"));
-        assertTrue(prompt.contains("绝对禁止再出现"));
+        assertTrue(prompt.contains("【风格观测边界】"));
+        assertFalse(prompt.contains("【疲劳词禁新增名单】"));
+        assertFalse(prompt.contains("绝对禁止再出现"));
+        assertTrue(prompt.contains("不据此扩大修订范围"));
     }
 
     @Test
@@ -281,7 +319,14 @@ class ChapterReviseServiceTest {
 
         assertTrue(prompt.contains("【关键事件红线】"));
         assertTrue(prompt.contains("严禁删除、合并或把关键事件降级为一句背景概述"));
-        assertTrue(prompt.contains("采纳闸门会逐条核对关键事件是否仍被正文覆盖，缺失任何一条即拒稿"));
+        assertTrue(prompt.contains("事实修正优先"));
+        assertTrue(prompt.contains("最多 1 条词面覆盖变化"));
+        assertTrue(prompt.contains("不等于允许删除真实事件"));
+        assertTrue(prompt.contains("completed=false"));
+        assertTrue(prompt.contains("计划需调整"));
+        assertFalse(prompt.contains("缺失任何一条即拒稿"));
+        assertFalse(prompt.contains("事件本身必须照常发生"));
+        assertFalse(prompt.contains("一律以账本为准"));
     }
 
     @Test
@@ -301,7 +346,7 @@ class ChapterReviseServiceTest {
     }
 
     @Test
-    void revise_promptCarriesMechanicalEvidenceSection_forAestheticIssues() {
+    void revise_promptScopesAestheticEvidence_withoutInventingMechanicalCertainty() {
         String revisedJson = "{\"chapterNo\":1,\"title\":\"测试章\",\"content\":\"小陈拔剑，事件A发生，事件B也发生，结尾呼应钩子。\"}";
         when(llmGateway.complete(any(), any(LlmCall.class))).thenReturn(revisedJson);
 
@@ -319,9 +364,11 @@ class ChapterReviseServiceTest {
         verify(llmGateway).complete(any(), captor.capture());
         String prompt = captor.getValue().getUserPrompt();
 
-        assertTrue(prompt.contains("【机械扫描确认的文风违规点】"));
+        assertTrue(prompt.contains("【本轮文风问题定位】"));
         assertTrue(prompt.contains("喉结滚动×2、缓缓×3"));
-        assertTrue(prompt.contains("逐处改写"));
+        assertTrue(prompt.contains("只修改 issue 指向且核实成立的局部"));
+        assertFalse(prompt.contains("程序逐字扫描确认"));
+        assertFalse(prompt.contains("删除或替换每一个命中词"));
     }
 
     @Test
@@ -334,7 +381,7 @@ class ChapterReviseServiceTest {
 
         ArgumentCaptor<LlmCall> captor = ArgumentCaptor.forClass(LlmCall.class);
         verify(llmGateway).complete(any(), captor.capture());
-        assertFalse(captor.getValue().getUserPrompt().contains("【机械扫描确认的文风违规点】"));
+        assertFalse(captor.getValue().getUserPrompt().contains("【本轮文风问题定位】"));
     }
 
     // ==================== 定向补丁 ====================
@@ -507,6 +554,129 @@ class ChapterReviseServiceTest {
         assertTrue(prompt.contains("账本内容"));
         // 但不应带整章重写的输出 schema
         assertFalse(prompt.contains("请严格按照以下 JSON 格式输出整章："));
+    }
+
+    @Test
+    void revisionPrompts_keepCompleteSceneContractAndFrozenAuthorContext() {
+        ChapterPlanItemEntity item = planItem();
+        item.setScenes(List.of(new ScenePlan("scene-quiet", List.of("小陈"), "理解旧信", "尚不知来历",
+                List.of(new FactReference("inventory", 3, "frozen-hash", "旧信", "持有", "昨日收到")),
+                "", "消化：独处回想", List.of("milestone-later"), "故居", "夜晚")));
+        String original = PATCH_ORIGINAL + "字".repeat(810);
+        RewriteContext context = new RewriteContext("【作者边界】第一人称，舒缓内省，不追加谈判。",
+                "原作者系统规则", new ChapterManuscript(1, "测试章", original));
+        when(llmGateway.complete(any(), any(LlmCall.class))).thenReturn(PATCH_ONLY_JSON);
+
+        patchService().revise(storyVO(), item, original, List.of(blockingIssue()), "待核实的摘要账本",
+                null, emptyStyleStat(), 1, null, context);
+
+        ArgumentCaptor<LlmCall> captor = ArgumentCaptor.forClass(LlmCall.class);
+        verify(llmGateway).complete(any(), captor.capture());
+        String prompt = captor.getValue().getUserPrompt();
+        assertTrue(prompt.contains(context.writerUserPrompt()));
+        assertEquals(context.writerSystemPrompt(), captor.getValue().getSystemPrompt());
+        assertTrue(prompt.contains(ScenePlanPolicy.render(item.getScenes())));
+        assertTrue(prompt.contains("可信冻结事实"));
+        assertTrue(prompt.contains("不编造取回过程"));
+        assertTrue(prompt.contains("不改写历史稿"));
+        assertTrue(prompt.contains(WritingContractPolicy.renderEditorialScope()));
+        assertFalse(prompt.contains("至多 1 次"));
+    }
+
+    @Test
+    void rewritePrompt_keepsCompleteSceneContract() {
+        ChapterPlanItemEntity item = planItem();
+        item.setScenes(List.of(new ScenePlan("scene-wait", List.of("小陈"), "等信", "",
+                List.of(), "", "余韵：仍未决", List.of("pending"), "旧屋", "清晨")));
+        when(llmGateway.complete(any(), any(LlmCall.class))).thenReturn(REWRITE_JSON);
+        service.revise(storyVO(), item, PATCH_ORIGINAL, List.of(blockingIssue()), null, null,
+                emptyStyleStat(), 1, null);
+        ArgumentCaptor<LlmCall> captor = ArgumentCaptor.forClass(LlmCall.class);
+        verify(llmGateway).complete(any(), captor.capture());
+        assertTrue(captor.getValue().getUserPrompt().contains(ScenePlanPolicy.render(item.getScenes())));
+    }
+
+    @Test
+    void rewriteExplicitlyIncomplete_isRejectedEvenWithValidContent() {
+        String json = "{\"completed\":false,\"reason\":\"冻结事实中人物已死，原计划需调整\","
+                + "\"chapterNo\":1,\"title\":\"拒绝稿\",\"content\":\"小陈拔剑，事件A发生，事件B随后发生，足够长的无效稿。\"}";
+        when(llmGateway.complete(any(), any(LlmCall.class))).thenReturn("```json\n" + json + "\n```");
+        var result = service.revise(storyVO(), planItem(), PATCH_ORIGINAL, List.of(blockingIssue()),
+                null, null, emptyStyleStat(), 1, null);
+        assertFalse(result.decision().isAccepted());
+        assertNull(result.revisedContent());
+        assertTrue(result.decision().getReason().contains("人物已死"));
+        assertTrue(result.decision().getReason().contains("计划需调整"));
+        verify(llmGateway).complete(any(), any(LlmCall.class));
+    }
+
+    @Test
+    void patchExplicitlyIncomplete_doesNotApplyOrFallBackToRewrite() {
+        String json = "{\"completed\":false,\"reason\":\"无证据支持取回物品，计划需调整\","
+                + "\"patches\":[{\"anchor\":\"他坐下了。\",\"replacement\":\"他坐下并凭空取回剑。\"}]}";
+        when(llmGateway.complete(any(), any(LlmCall.class))).thenReturn(json, REWRITE_JSON);
+        var result = patchService().revise(storyVO(), planItem(), PATCH_ORIGINAL, List.of(blockingIssue()),
+                null, null, emptyStyleStat(), 1, null);
+        assertFalse(result.decision().isAccepted());
+        assertNull(result.revisedContent());
+        assertTrue(result.decision().getReason().contains("无证据"));
+        verify(llmGateway).complete(any(), any(LlmCall.class));
+    }
+
+    @Test
+    void collapsedRewriteExplicitlyIncomplete_isRejectedWithoutInventingAbilities() {
+        String json = JSON.toJSONString(java.util.Map.of("completed", false,
+                "reason", "冻结能力只有近距感知，远距传物无依据，计划需调整",
+                "chapterNo", 1, "title", "无效稿", "content", "事件A发生，事件B发生。" + "字".repeat(820)));
+        when(llmGateway.complete(any(), any(LlmCall.class))).thenReturn(json);
+        RewriteContext context = new RewriteContext("冻结能力：仅能近距感知。", "原系统边界",
+                new ChapterManuscript(1, "测试章", "残稿"));
+        var result = patchService().revise(storyVO(), planItem(), "残稿", List.of(blockingIssue()),
+                null, null, emptyStyleStat(), 1, null, context);
+        assertFalse(result.decision().isAccepted());
+        assertNull(result.revisedContent());
+        assertTrue(result.decision().getReason().contains("远距传物无依据"));
+        verify(llmGateway).complete(any(), any(LlmCall.class));
+    }
+
+    @Test
+    void explicitIncompleteWithoutReason_isRejectedNotParsedAsOldSchema() {
+        when(llmGateway.complete(any(), any(LlmCall.class))).thenReturn("{\"completed\":false}");
+        var result = service.revise(storyVO(), planItem(), PATCH_ORIGINAL, List.of(blockingIssue()),
+                null, null, emptyStyleStat(), 1, null);
+        assertFalse(result.decision().isAccepted());
+        assertNull(result.revisedContent());
+        assertTrue(result.decision().getReason().contains("未完成"));
+    }
+
+    @Test
+    void incompleteStatusWithStructuredReason_cannotBeLostDuringContentParsing() {
+        when(llmGateway.complete(any(), any(LlmCall.class))).thenReturn(
+                "{\"completed\":false,\"reason\":{\"conflict\":\"能力无依据\"},"
+                        + "\"chapterNo\":1,\"title\":\"无效稿\",\"content\":\"小陈拔剑，事件A发生，事件B发生，长度足够的无效稿。\"}");
+        var result = service.revise(storyVO(), planItem(), PATCH_ORIGINAL, List.of(blockingIssue()),
+                null, null, emptyStyleStat(), 1, null);
+        assertFalse(result.decision().isAccepted());
+        assertNull(result.revisedContent());
+        assertTrue(result.decision().getReason().contains("能力无依据"));
+    }
+
+    @Test
+    void cancellationAfterPatchCall_doesNotApplyOrFallBack() {
+        java.util.concurrent.atomic.AtomicBoolean cancelled = new java.util.concurrent.atomic.AtomicBoolean();
+        String original = PATCH_ORIGINAL + "字".repeat(810);
+        RewriteContext context = new RewriteContext("冻结作者上下文", "系统边界",
+                new ChapterManuscript(1, "测试章", original), () -> {
+                    if (cancelled.get()) throw new java.util.concurrent.CancellationException("取消本轮");
+                });
+        when(llmGateway.complete(any(), any(LlmCall.class))).thenAnswer(invocation -> {
+            cancelled.set(true);
+            return PATCH_ONLY_JSON;
+        });
+        org.junit.jupiter.api.Assertions.assertThrows(java.util.concurrent.CancellationException.class,
+                () -> patchService().revise(storyVO(), planItem(), original, List.of(blockingIssue()),
+                        null, null, emptyStyleStat(), 1, null, context));
+        verify(llmGateway).complete(any(), any(LlmCall.class));
     }
 
     private ChapterIssueEntity blockingIssue() {

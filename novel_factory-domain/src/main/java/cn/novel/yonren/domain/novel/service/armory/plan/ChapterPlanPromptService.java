@@ -321,6 +321,9 @@ public class ChapterPlanPromptService {
                 .append("无偿可明确写无偿，不擅自补出承诺。")
                 .append("计划不能把不可读改成数据不完整来授予读取能力；能力转变必须先有合理操作与结果，尚未发生的改变不入历史状态。")
                 .append("outcome 只是拟发生结果；独处、犹疑、等待、静场可成立，不要求每场转折或付出代价。")
+                .append("筹划只表达人物的主观判断和待验证前提，不在事前保证对手反应或风险已消失；")
+                .append("重复确认条款只有新增信息或关系作用时保留，资源、期限和责任交代清楚后不再重复结算。")
+                .append("任务失败与后续成果之间须有可理解的补救或转变，不跳过寻找材料未果却直接完成救药这类必要接续。")
                 .append("场景只写交锋内容与落点，不写引号台词原话；纸条/回执这类书面物件上的字除外。");
         // timeAdvance 语义 由「交付项」降级为「背景设定」）：
         // 前几轮把"推进3-7天"改成"自决"，又加了"连续同日上限"，本质都还在把
@@ -357,46 +360,6 @@ public class ChapterPlanPromptService {
         return sb.toString();
     }
 
-    /**
-     * 学段→年龄锚。
-     * 年龄随明确学段对齐，避免正文误写年龄后经摘要长期固化。
-     * 年份推算依赖出生日期与生日，学段能提供独立参照。
-     * 识别不到学段时返回 null，沿用摘要锚，不编造。
-     */
-    private String buildStageAgeAnchor(StageBlueprintEntity blueprint) {
-        String text = blueprint == null ? null : blueprint.getStageGoal();
-        if (StringUtils.isBlank(text)) {
-            return null;
-        }
-        Integer age = stageToAge(text);
-        if (age == null) {
-            return null;
-        }
-        return "【学段年龄锚】主角当前学段对应的年龄为 **" + age + " 岁**"
-                + "（由阶段目标的学段直接确定，优先于摘要里可能记错的年龄值）。\n"
-                + "正文与章计划中涉及年龄的表述必须与此一致；若与【时序锚】的年龄记录冲突，以本锚为准。\n";
-    }
-
-    /** 学段关键词 → 对应起始年龄；识别不到返回 null。按"最长匹配优先"排列避免"高一"被"高中"吞掉。 */
-    private static Integer stageToAge(String text) {
-        String[][] mapping = {
-                {"高三", "17"}, {"高二", "16"}, {"高一", "15"},
-                {"初三", "14"}, {"初二", "13"}, {"初一", "12"},
-                {"六年级", "11"}, {"五年级", "10"}, {"四年级", "9"},
-                {"三年级", "8"}, {"二年级", "7"}, {"一年级", "6"},
-                {"大一", "18"}, {"大二", "19"}, {"大三", "20"}, {"大四", "21"},
-        };
-        for (String[] pair : mapping) {
-            if (text.contains(pair[0])) {
-                return Integer.parseInt(pair[1]);
-            }
-        }
-        if (text.contains("高中")) return 15;
-        if (text.contains("初中")) return 12;
-        if (text.contains("大学")) return 18;
-        return null;
-    }
-
     /** 按题材生成世界语言约束；只有玄幻题材才出现仙侠词表，其他题材保持中性。 */
     private String renderWorldLanguageRule(DefaultArmoryFactory.DynamicContext dynamicContext) {
         StoryContextEntity context = dynamicContext.getStoryContextEntity();
@@ -431,14 +394,10 @@ public class ChapterPlanPromptService {
                         + (s.getKeyEventCount() == null ? "?" : s.getKeyEventCount()) + " 个关键事件）")
                 .toList();
         if (!lowDensity.isEmpty()) {
-            sb.append("\n\n【密度反馈】以下章节剧情供给不足，实际产出偏薄：")
+            sb.append("\n\n【篇幅观测】以下章节低于历史篇幅参考线：")
                     .append(String.join("、", lowDensity))
-                    .append("。本段计划必须提高事件密度：常规章（normal）每章关键事件 ≥ 3 个，")
-                    .append("climax/finale（高潮/收束）章 ≥ 4 个——这两类章信息密度最高，写薄了等于白给；")
-                    .append("且每个事件必须带来冲突、信息或关系的变化；")
-                    .append("若确需留白，请把该章标为 chapterType=transition（密度要求对它豁免），")
-                    .append("但严禁借 transition 之名安排纯赶路/纯寒暄的无变化流程章——")
-                    .append("transition 章仍须至少有一处实质变化。正文长度由事件数量自然撑起，不靠描写注水。");
+                    .append("。仅凭字数不能判定供给不足；核对原有场景的关键过程与结果是否完整。")
+                    .append("若内容已完整，保留其篇幅和静场功能；若确有缺口，补足该缺口，不增加固定事件数、对白或冲突。");
         }
 
         // 对称的另一侧：篇幅超标。判定用参考上沿，且**不豁免过渡章**（理由见方法注释）
@@ -450,29 +409,15 @@ public class ChapterPlanPromptService {
                         + "，仅 " + (s.getKeyEventCount() == null ? "?" : s.getKeyEventCount()) + " 个关键事件）")
                 .toList();
         if (!bloated.isEmpty()) {
-            sb.append("\n\n【注水反馈】以下章节篇幅显著超出参考区间，而关键事件数并未相应增加：")
+            sb.append("\n\n【篇幅观测】以下章节超出历史篇幅参考区间：")
                     .append(String.join("、", bloated))
-                    .append("。多出来的不是料，是被拉长的描写与对白。本段计划必须按此收紧篇幅：")
-                    .append("常规章有效字数宜落在 1400–2600，climax/finale 宜 ≥ 1600（同样靠增加事件达成）；")
-                    .append("推进感靠**增加事件**而不是拉长单场戏；")
-                    .append("过渡章尤其不得因为没事发生就用环境描写与寒暄把篇幅填满——过渡章应当更短。")
-                    .append("同一场景内若只剩反复确认已知状态的对话，请合并或直接跳到下一个事件。");
+                    .append("。字数和事件条数只供观察，不能据此认定注水。")
+                    .append("核对是否有无新阅读功能的复述；必要的长交流、心理、环境和后果消化应保留，")
+                    .append("不为收紧篇幅删掉有效内容，也不靠增加事件满足统计。");
         }
     }
 
-    /**
-     * **对白坍缩反馈**：扫描最近 {@value #DIALOGUE_LOOKBACK} 章的轮次密度，发现
-     * "篇幅够、关键事件也在，但角色不开腔"的章节时注入指令。
-     *
-     * 为什么必须在规划层治：对白塌了的根因往往不在写手——计划把关键事件写成
-     * "谁做了什么"的动作清单时，写手只能交付动作分解。实测某章：4 条关键事件里有 2 条是
-     * 对话承载，**数量合规**，但篇幅最大的那条是纯独白推导，规则只管条数、不管篇幅占比，
-     * 于是全章有效对话仅个位数、轮次密度远低于劣化线（同批其它章成倍高于它）。
-     *
-     * 与 {@link #appendDensityFeedback}（篇幅）、{@link #appendForeshadowSpanFeedback}（伏笔跨度）
-     * 完全同构：机械观测 → 回灌规划 → 治本。过渡章不计入：过渡章本就允许留白，
-     * 计入会逼规划层给留白也塞对话。
-     */
+    /** 对白轮次仅作观测，交付与表达方式由具体场景决定。 */
     static void appendDialogueCollapseFeedback(StringBuilder sb, List<ChapterSummaryEntity> summaries) {
         if (summaries == null || summaries.isEmpty()) {
             return;
@@ -498,16 +443,12 @@ public class ChapterPlanPromptService {
         if (collapsed.isEmpty()) {
             return;
         }
-        sb.append("\n\n【对白坍缩反馈】以下章节篇幅不短、场景也落地了，但**角色不开腔**：")
+        sb.append("\n\n【对白轮次观测】以下章节的对白轮次较少：")
                 .append(String.join("、", collapsed))
-                .append("（健康线 ≥ ").append(String.format("%.1f", line)).append(" 次/千字）。")
-                .append("通篇动作分解与内心推演，读者读到的是一份流程说明，不是一场戏。")
-                .append("\n本段计划必须按此修正：")
-                .append("\n1. **让多数场景由对话承载**——不是占位一场就够，"
-                        + "而是让冲突与分歧在台词里发生；")
-                .append("\n2. 每个对话承载场景必须写清**谁对谁、围绕什么分歧**——"
-                        + "只写「二人交谈」等于没写，写手只能产出寒暄；")
-                .append("\n3. 人物只在动作里出场、不用台词表达意图的场景，改写为一次具体的交锋或谈判。");
+                .append("（历史参考线 ").append(String.format("%.1f", line)).append(" 次/千字）。")
+                .append("此统计不能判定场景无效，不据此增加对白、交锋或人物。")
+                .append("只核对计划承诺的交流是否实际完成；独处、动作、内心推演与静场可以保持少言，")
+                .append("必要交流应交代双方的意图和回应，而非填满轮次。");
     }
 
     static void appendForeshadowSpanFeedback(StringBuilder sb, List<ChapterSummaryEntity> summaries) {

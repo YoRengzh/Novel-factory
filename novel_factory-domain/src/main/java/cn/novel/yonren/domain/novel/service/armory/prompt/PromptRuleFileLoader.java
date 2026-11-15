@@ -56,7 +56,9 @@ public class PromptRuleFileLoader {
             Path userFile = resolveUserFile(relativePath);
             if (userFile != null) {
                 try {
-                    return Files.readString(userFile, StandardCharsets.UTF_8);
+                    String content = Files.readString(userFile, StandardCharsets.UTF_8);
+                    logSource(relativePath, "user-override", content);
+                    return content;
                 } catch (IOException e) {
                     log.warn("用户资产读取失败，回退内置版本：{}（{}）", relativePath, e.getMessage());
                 }
@@ -68,11 +70,26 @@ public class PromptRuleFileLoader {
                 return null;
             }
             try (InputStreamReader reader = new InputStreamReader(resource.getInputStream(), StandardCharsets.UTF_8)) {
-                return FileCopyUtils.copyToString(reader);
+                String content = FileCopyUtils.copyToString(reader);
+                logSource(relativePath, "classpath", content);
+                return content;
             }
         } catch (IOException e) {
             return null;
         }
+    }
+
+    /** 记录实际生效来源与内容指纹；不输出资产全文。 */
+    private static void logSource(String relativePath, String source, String content) {
+        String fingerprint;
+        try {
+            byte[] digest = java.security.MessageDigest.getInstance("SHA-256")
+                    .digest(content.getBytes(StandardCharsets.UTF_8));
+            fingerprint = java.util.HexFormat.of().formatHex(digest, 0, 8);
+        } catch (java.security.NoSuchAlgorithmException e) {
+            fingerprint = "unavailable";
+        }
+        log.info("规则资产生效：{} 来源={} 内容hash前16位={}", relativePath, source, fingerprint);
     }
 
     /**

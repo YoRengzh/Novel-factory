@@ -116,7 +116,7 @@ class DynamicReferenceServiceTest {
 
         List<PromptRule> rules = service.selectAsRules(null, PromptScene.CHAPTER_PLAN, planCtx());
 
-        verify(retriever, never()).retrieve(any(VectorReferenceRetriever.Prepared.class), any(), any());
+        verify(retriever, never()).retrieve(any(VectorReferenceRetriever.Prepared.class), any(), any(), any());
         verify(selector, times(1)).select(any(), any(), any(), anyList());
         assertEquals(1, rules.size());
     }
@@ -322,9 +322,25 @@ class DynamicReferenceServiceTest {
     }
 
     @Test
+    void vectorRetrievalIsLimitedToUsageEligibleSources() {
+        properties.setMode("vector");
+        when(referenceIndexLoader.getIndex()).thenReturn(List.of(
+                entry("chapter-guide"), entry("opening-design"),
+                entry("exemplar-breakthrough")));
+        when(retriever.retrieve(eq(legacyPrepared), any(), any(), any()))
+                .thenReturn(List.of("chapter-guide"));
+
+        service.selectAsRules(null, PromptScene.CHAPTER_CONTENT,
+                PromptContext.builder().theme("玄幻修仙").chapterBrief("整理药园账目").build());
+
+        verify(retriever).retrieve(eq(legacyPrepared), any(), any(),
+                eq(Set.of("chapter-guide", "opening-design")));
+    }
+
+    @Test
     void vectorModeRoutesToRetrieverWithoutLlmCall() {
         properties.setMode("vector");
-        when(retriever.retrieve(any(VectorReferenceRetriever.Prepared.class), any(), any()))
+        when(retriever.retrieve(any(VectorReferenceRetriever.Prepared.class), any(), any(), any()))
                 .thenReturn(List.of("dialogue-writing"));
 
         List<PromptRule> rules = service.selectAsRules(null, PromptScene.CHAPTER_CONTENT, contentCtx(ChapterType.NORMAL));
@@ -337,7 +353,7 @@ class DynamicReferenceServiceTest {
     @Test
     void vectorFailureTerminatesWithoutLlmFallback() {
         properties.setMode("vector");
-        when(retriever.retrieve(any(VectorReferenceRetriever.Prepared.class), any(), any()))
+        when(retriever.retrieve(any(VectorReferenceRetriever.Prepared.class), any(), any(), any()))
                 .thenThrow(new IllegalStateException("qdrant down"));
 
         // 快速失败：向量链路任何失败（欠费/向量库/网络）都终止作业，绝不降级 LLM 选择
@@ -346,7 +362,7 @@ class DynamicReferenceServiceTest {
 
         assertTrue(ex.getInfo().contains("不降级"));
         verify(selector, never()).select(any(), any(), any(), anyList());
-        verify(retriever, times(1)).retrieve(any(VectorReferenceRetriever.Prepared.class), any(), any());
+        verify(retriever, times(1)).retrieve(any(VectorReferenceRetriever.Prepared.class), any(), any(), any());
     }
 
     @Test
@@ -392,7 +408,7 @@ class DynamicReferenceServiceTest {
                 properties, llmRuntimeConfig, null, new ReferenceUsagePolicy(), block);
         assertTrue(service.selectAsRules(null, PromptScene.CHAPTER_CONTENT, contentCtx(ChapterType.NORMAL)).isEmpty());
         verify(block, never()).prepare(any());
-        verify(retriever, never()).retrieve(any(VectorReferenceRetriever.Prepared.class), any(), any());
+        verify(retriever, never()).retrieve(any(VectorReferenceRetriever.Prepared.class), any(), any(), any());
         verify(selector, never()).select(any(), any(), any(), anyList());
     }
 
@@ -405,7 +421,7 @@ class DynamicReferenceServiceTest {
         when(selector.select(any(), any(), any(), anyList())).thenReturn(List.of("dialogue-writing"));
         assertTrue(service.selectAsRules(null, PromptScene.CHAPTER_CONTENT, contentCtx(ChapterType.NORMAL)).isEmpty());
         properties.setMode("vector");
-        when(retriever.retrieve(any(VectorReferenceRetriever.Prepared.class), any(), any())).thenReturn(List.of("dialogue-writing"));
+        when(retriever.retrieve(any(VectorReferenceRetriever.Prepared.class), any(), any(), any())).thenReturn(List.of("dialogue-writing"));
         assertTrue(service.selectAsRules(null, PromptScene.CHAPTER_CONTENT, contentCtx(ChapterType.NORMAL)).isEmpty());
         verify(fileLoader, never()).load("references/dialogue-writing.md");
     }
@@ -414,23 +430,23 @@ class DynamicReferenceServiceTest {
     void legacyCacheIncludesTheFrozenEffectiveEmbeddingVersion() {
         properties.setMode("vector");
         when(legacyPrepared.versionKey()).thenReturn("space-v1", "space-v2", "space-v2");
-        when(retriever.retrieve(eq(legacyPrepared), any(), any())).thenReturn(List.of("dialogue-writing"));
+        when(retriever.retrieve(eq(legacyPrepared), any(), any(), any())).thenReturn(List.of("dialogue-writing"));
         service.selectAsRules(null, PromptScene.CHAPTER_CONTENT, contentCtx(ChapterType.NORMAL));
         service.selectAsRules(null, PromptScene.CHAPTER_CONTENT, contentCtx(ChapterType.NORMAL));
         service.selectAsRules(null, PromptScene.CHAPTER_CONTENT, contentCtx(ChapterType.NORMAL));
         verify(retriever, times(3)).prepare(any());
-        verify(retriever, times(2)).retrieve(eq(legacyPrepared), any(), any());
+        verify(retriever, times(2)).retrieve(eq(legacyPrepared), any(), any(), any());
     }
 
     @Test
     void cachedLegacySelectionCannotHideAnEmbeddingSpaceChange() {
         properties.setMode("vector");
-        when(retriever.retrieve(eq(legacyPrepared), any(), any())).thenReturn(List.of("dialogue-writing"));
+        when(retriever.retrieve(eq(legacyPrepared), any(), any(), any())).thenReturn(List.of("dialogue-writing"));
         service.selectAsRules(null, PromptScene.CHAPTER_CONTENT, contentCtx(ChapterType.NORMAL));
         when(retriever.prepare(any())).thenThrow(new IllegalStateException("空间已变化，请显式重建"));
         assertThrows(AppException.class,
                 () -> service.selectAsRules(null, PromptScene.CHAPTER_CONTENT, contentCtx(ChapterType.NORMAL)));
-        verify(retriever, times(1)).retrieve(eq(legacyPrepared), any(), any());
+        verify(retriever, times(1)).retrieve(eq(legacyPrepared), any(), any(), any());
     }
 
     @Test

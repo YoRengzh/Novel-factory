@@ -9,18 +9,14 @@ import lombok.NoArgsConstructor;
 
 import java.util.List;
 
-/**
- * 章节场景节拍表：介于"章节计划"与"正文"之间的轻量中间层。
- * 正文生成的自由度从"整章即兴"压缩为"逐拍扩写"——模型不再自己虚构填充物，
- * AI 味与注水的重要诱因（规划供给不足 + 硬性字数要求）随之消解。
- */
+/** 章节计划与正文之间的场景组织建议。 */
 @Data
 @Builder
 @NoArgsConstructor
 @AllArgsConstructor
 public class ChapterBeatsEntity {
 
-    /** 节拍列表（3-5 个，按叙事顺序） */
+    /** 按叙事顺序排列的节拍 */
     private List<Beat> beats;
 
     @Data
@@ -34,14 +30,9 @@ public class ChapterBeatsEntity {
         private List<String> characters;
         /** 本拍核心冲突/动作 */
         private String conflict;
-        /**
-         * 本拍由谁对谁开口、说了什么（一句话交锋要点或关键台词）；本拍无对白时留空。
-         *
-         * 只有 conflict 时，节拍可以仅描述动作而缺少人物互动。
-         * 对白单独成为节拍表的显式供给，让写手能落实已规划的发言与回应。
-         */
-        private String dialogue;
-        /** 本拍必须产生的信息增量（新信息/状态变化/关系变化） */
+        /** 本拍是否需要展开计划中已有的人物交流。 */
+        private Boolean exchange;
+        /** 本拍已有的信息或状态变化，可留空 */
         private String infoGain;
         /** 篇幅占比提示（如 "20%"） */
         private String weight;

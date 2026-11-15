@@ -13,7 +13,8 @@ import static org.junit.jupiter.api.Assertions.*;
 class SemanticFeedbackVersionTest {
     private final ChapterManuscript original = new ChapterManuscript(1, "标题", "原稿没有对白。");
     private final ChapterIssueEntity issue = ChapterIssueEntity.builder()
-            .severity("MINOR").dimension("aesthetic").description("有效对话为0句").build();
+            .severity("MINOR").dimension("aesthetic").evidence("原稿没有对白")
+            .description("有效对话为0句").build();
 
     @Test
     void revisedManuscriptDoesNotReuseInitialFeedbackOrEraseObservations() {

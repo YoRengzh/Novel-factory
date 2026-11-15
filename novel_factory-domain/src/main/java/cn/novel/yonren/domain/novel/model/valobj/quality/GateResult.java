@@ -2,6 +2,7 @@ package cn.novel.yonren.domain.novel.model.valobj.quality;
 
 import cn.novel.yonren.domain.novel.model.entity.ChapterIssueEntity;
 import cn.novel.yonren.domain.novel.model.valobj.work.ChapterManuscript;
+import cn.novel.yonren.domain.novel.service.armory.quality.EvidenceMatch;
 
 import java.util.List;
 
@@ -10,24 +11,45 @@ public record GateResult(List<ChapterIssueEntity> unresolvedBlocking, PassGrade 
                          int minorCount, List<ChapterIssueEntity> mechanicalMinor, int reviseRounds,
                          List<ChapterIssueEntity> semanticMinors, boolean auditVerifyDegraded,
                          @com.fasterxml.jackson.annotation.JsonInclude(com.fasterxml.jackson.annotation.JsonInclude.Include.NON_NULL)
-                         String semanticFeedbackHash) {
+                         String semanticFeedbackHash,
+                         @com.fasterxml.jackson.annotation.JsonInclude(com.fasterxml.jackson.annotation.JsonInclude.Include.NON_NULL)
+                         String planAdjustmentReason) {
 
     public GateResult(List<ChapterIssueEntity> unresolvedBlocking, PassGrade grade,
                       int minorCount, List<ChapterIssueEntity> mechanicalMinor, int reviseRounds,
-                      List<ChapterIssueEntity> semanticMinors, boolean auditVerifyDegraded) {
+                      List<ChapterIssueEntity> semanticMinors, boolean auditVerifyDegraded,
+                      String semanticFeedbackHash) {
         this(unresolvedBlocking, grade, minorCount, mechanicalMinor, reviseRounds,
-                semanticMinors, auditVerifyDegraded, null);
+                semanticMinors, auditVerifyDegraded, semanticFeedbackHash, null);
     }
 
     public GateResult withSemanticFeedbackHash(String hash) {
         return new GateResult(unresolvedBlocking, grade, minorCount, mechanicalMinor, reviseRounds,
-                semanticMinors, auditVerifyDegraded, hash);
+                semanticMinors, auditVerifyDegraded, hash, planAdjustmentReason);
     }
 
-    /** 首审统计保留；只有同版稿件的意见可作为后续写作反馈。 */
+    /** 计划与可信事实冲突：保留当前稿并停止无效重试，等待调整计划，而不是伪装成普通质量债。 */
+    public GateResult withPlanAdjustmentRequired(String reason) {
+        return new GateResult(unresolvedBlocking, grade, minorCount, mechanicalMinor, reviseRounds,
+                semanticMinors, auditVerifyDegraded, semanticFeedbackHash, reason);
+    }
+
+    public boolean planAdjustmentRequired() {
+        return planAdjustmentReason != null && !planAdjustmentReason.isBlank();
+    }
+
+    /** 首审统计保留；只有同版稿件且原文证据可核对的意见可作为后续写作参考。 */
     public List<ChapterIssueEntity> feedbackMinorsFor(ChapterManuscript manuscript) {
-        return manuscript != null && semanticFeedbackHash != null && semanticFeedbackHash.equals(manuscript.hash())
-                ? semanticMinors : List.of();
+        if (manuscript == null || semanticFeedbackHash == null || !semanticFeedbackHash.equals(manuscript.hash())
+                || semanticMinors == null) {
+            return List.of();
+        }
+        String content = EvidenceMatch.normalize(manuscript.content());
+        return semanticMinors.stream()
+                .filter(issue -> issue != null && "MINOR".equalsIgnoreCase(issue.getSeverity())
+                        && issue.getDescription() != null && !issue.getDescription().isBlank()
+                        && EvidenceMatch.contained(issue.getEvidence(), content))
+                .toList();
     }
 
     /** 通过质量分级 */
@@ -81,7 +103,7 @@ public record GateResult(List<ChapterIssueEntity> unresolvedBlocking, PassGrade 
         }
         return new GateResult(debt ? unresolvedBlocking : List.of(), grade, minorCount,
                 mechanicalMinor == null ? List.of() : mechanicalMinor, reviseRounds,
-                semanticMinors == null ? List.of() : semanticMinors, auditVerifyDegraded);
+                semanticMinors == null ? List.of() : semanticMinors, auditVerifyDegraded, null);
     }
 
 

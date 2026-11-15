@@ -118,7 +118,7 @@ class ParagraphDensityAuditServiceTest {
     }
 
     @Test
-    void promptCarriesIncrementalCriteriaAndSafetyRules() {
+    void promptCarriesEditorialScopeAndSafetyRules() {
         enable();
         stub("{\"patches\":[]}");
 
@@ -128,8 +128,9 @@ class ParagraphDensityAuditServiceTest {
         verify(llmGateway).complete(any(), captor.capture());
         String prompt = captor.getValue().getUserPrompt();
 
-        assertTrue(prompt.contains("没有带来任何信息增量"), "必须给出信息增量的判定标准");
-        assertTrue(prompt.contains("信息增量指"), "必须说明什么算增量（否则模型会把有变化的段落也改掉）");
+        assertTrue(prompt.contains("重复且没有当前阅读功能"), "只处理重复且损失功能的段落");
+        assertTrue(prompt.contains("心理、讲述、等待、环境、余韵和后果消化都可以独立承担阅读功能"));
+        assertTrue(prompt.contains("不能仅因不改变外部状态而删除"));
         assertTrue(prompt.contains("不要改变剧情走向") && prompt.contains("不要新增情节"),
                 "改写必须限定在挤水，不得改剧情");
         assertTrue(prompt.contains("anchor 必须逐字来自正文"), "必须强调锚点逐字性");

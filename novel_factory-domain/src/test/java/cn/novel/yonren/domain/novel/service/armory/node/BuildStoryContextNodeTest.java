@@ -66,6 +66,19 @@ class BuildStoryContextNodeTest {
     }
 
     @Test
+    void globalCharacterFactsSurviveChapterGoalWindowing() throws Exception {
+        ArmoryCommandEntity command = commandWith("周秀兰：主角母亲，姓名为既定事实。");
+        command.getStoryContextEntity().setChapterGoal(
+                "第一卷（1-20章）：1-3章：开篇入学；4-20章：结识朋友||"
+                        + "第二卷（306-374章）：306-374章：周秀兰处理远期家业危机");
+        DefaultArmoryFactory.DynamicContext ctx = new DefaultArmoryFactory.DynamicContext();
+        node.doApply(command, ctx);
+        assertTrue(ctx.getStoryContext().contains("周秀兰：主角母亲，姓名为既定事实。"));
+        assertTrue(ctx.getStoryContext().contains("开篇入学"));
+        assertFalse(ctx.getStoryContext().contains("远期家业危机"));
+    }
+
+    @Test
     @DisplayName("未声明（老故事）：整行不出现——不能给模型一个空栏去猜")
     void omitsCharacterProfileLineWhenBlank() throws Exception {
         DefaultArmoryFactory.DynamicContext ctx = new DefaultArmoryFactory.DynamicContext();

@@ -47,6 +47,14 @@ public class ChapterSummaryEntity {
     private String manuscriptHash;
     @com.fasterxml.jackson.annotation.JsonInclude(com.fasterxml.jackson.annotation.JsonInclude.Include.NON_NULL)
     private cn.novel.yonren.domain.novel.model.valobj.character.CharacterDepthReview characterDepthReview;
+    @com.fasterxml.jackson.annotation.JsonInclude(com.fasterxml.jackson.annotation.JsonInclude.Include.NON_NULL)
+    private String characterDesignMode;
+    @com.fasterxml.jackson.annotation.JsonInclude(com.fasterxml.jackson.annotation.JsonInclude.Include.NON_NULL)
+    private String characterDesignRevision;
+    @com.fasterxml.jackson.annotation.JsonInclude(com.fasterxml.jackson.annotation.JsonInclude.Include.NON_NULL)
+    private Integer characterProfilesInjected;
+    @com.fasterxml.jackson.annotation.JsonInclude(com.fasterxml.jackson.annotation.JsonInclude.Include.NON_NULL)
+    private Integer characterFieldsInjected;
     // 本章状态发生变化（或首次出现）的关键物品（法宝/金手指等）
     private List<StateEntry> itemStates;
     // 本章状态发生变化（或首次出现）的势力/组织

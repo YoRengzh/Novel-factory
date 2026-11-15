@@ -121,7 +121,10 @@ public class DynamicReferenceService {
             // 快速失败：向量链路任何失败（欠费/鉴权/向量库/网络）都终止作业，不降级 LLM 选择——
             // llm 选择质量明显差于向量检索，静默降级会让作业在低质量注入下跑完
             try {
-                selected = vectorReferenceRetriever.retrieve(legacyPrepared, scene, ctx);
+                // 只让通过场景/用途/章节任务资格的来源参与 topK 竞争，避免过滤后名额空耗。
+                selected = vectorReferenceRetriever.retrieve(legacyPrepared, scene, ctx,
+                        sceneIndex.stream().map(ReferenceIndexEntry::getFileName)
+                                .collect(Collectors.toUnmodifiableSet()));
             } catch (Exception e) {
                 throw new AppException(ResponseCode.UN_ERROR.getCode(),
                         "动态资料向量检索失败，不降级 LLM 选择，作业终止：" + e.getMessage(), e);

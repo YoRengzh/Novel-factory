@@ -179,6 +179,28 @@ class StoryJobServiceTest {
     }
 
     @Test
+    void planAdjustmentRequired_preservesReasonAndSkipsAutoContinue() throws Exception {
+        String storyDir = "20260903-story-0001";
+        when(runPlanService.enabled()).thenReturn(true);
+        when(storyRepository.resolveStoryDirectory(storyDir)).thenReturn(Path.of(storyDir));
+        when(storyGenerateService.generate(any(), any(), any())).thenAnswer(inv -> {
+            GenerationJob running = inv.getArgument(1);
+            running.requirePlanAdjustment(1, 3, storyDir, "冻结事实中没有药签");
+            return StoryGenerateResultAggregate.builder().storyDirName(storyDir).build();
+        });
+
+        GenerationJob job = storyJobService.submit(ArmoryCommandEntity.builder().build());
+        awaitTerminal(job);
+        executor.submit(() -> {}).get(5, TimeUnit.SECONDS);
+
+        assertEquals(cn.novel.yonren.types.enums.JobStatus.FAILED, job.getStatus());
+        assertEquals(GenerationJob.PLAN_ADJUSTMENT_REQUIRED, job.getCurrentStage());
+        assertEquals("第 1 章计划需调整：冻结事实中没有药签", job.getErrorMessage());
+        verify(storyRepository, org.mockito.Mockito.atLeastOnce()).writeJobStatus(eq(Path.of(storyDir)), eq(job));
+        verify(runPlanService, never()).enabled();
+    }
+
+    @Test
     void generateFailure_doesNotAutoContinue() throws Exception {
         // 失败绝不续批：同一错误再犯一遍只会更贵，且会把失败掩盖成"一直在跑"
         when(runPlanService.enabled()).thenReturn(true);

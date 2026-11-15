@@ -393,6 +393,9 @@ public class StoryManageService {
         dto.setQualityDebts(toQualityDebtDTO(debts));
         var execution = repo(() -> storyRepository.readActiveCharacterExecution(storyDir));
         for (var summary : summaries) {
+            if (summary.getCharacterDesignMode() != null) dto.getCharacterApplications().add(
+                    new StoryWorkbenchDTO.CharacterApplicationDTO(summary.getChapterNo(), summary.getCharacterDesignMode(),
+                            summary.getCharacterDesignRevision(), summary.getCharacterProfilesInjected(), summary.getCharacterFieldsInjected()));
             var review = summary.getCharacterDepthReview();
             if (review == null) continue;
             var current = repo(() -> storyRepository.readChapter(storyDir, summary.getChapterNo()));

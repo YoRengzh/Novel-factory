@@ -81,7 +81,7 @@ public class LlmInvokeService {
 
         // 动态规则装配：确定性策略 + skill 式动态资料选择
         List<PromptRule> rules = new ArrayList<>(promptBuilder.collectRules(scene, ctx));
-        rules.addAll(dynamicReferenceService.selectAsRules(module, scene, ctx));
+        rules.addAll(withoutAlreadyInjected(rules, dynamicReferenceService.selectAsRules(module, scene, ctx)));
 
         String systemText = joinPosition(rules, PromptRule.InjectPosition.SYSTEM);
         String userTail = joinPosition(rules, PromptRule.InjectPosition.USER_TAIL);
@@ -150,6 +150,54 @@ public class LlmInvokeService {
             sb.append("【").append(rule.getName()).append("】\n").append(rule.getContent());
         }
         return sb.toString();
+    }
+
+    /**
+     * 固定资料已覆盖同一资源时，丢弃没有新增内容的动态副本。
+     *
+     * 只在动态内容整体包含于已注入的固定规则时跳过；固定资料只抽了小节、
+     * 动态副本仍含其他有效内容时保留，避免按文件名模糊去重误删。
+     */
+    private static List<PromptRule> withoutAlreadyInjected(List<PromptRule> fixed, List<PromptRule> dynamic) {
+        if (fixed == null || fixed.isEmpty() || dynamic == null || dynamic.isEmpty()) {
+            return dynamic == null ? List.of() : dynamic;
+        }
+        String fixedText = fixed.stream().filter(java.util.Objects::nonNull)
+                .map(PromptRule::getContent).filter(java.util.Objects::nonNull)
+                .map(LlmInvokeService::normalizeForOverlap)
+                .collect(java.util.stream.Collectors.joining("\n"));
+        if (fixedText.isEmpty()) {
+            return dynamic;
+        }
+        List<PromptRule> kept = new ArrayList<>();
+        for (PromptRule rule : dynamic) {
+            if (rule == null || rule.getContent() == null) {
+                continue;
+            }
+            String referenceBody = referenceBody(rule.getContent());
+            String body = normalizeForOverlap(referenceBody);
+            if (!body.isEmpty() && fixedText.contains(body)) {
+                log.debug("动态资料与已注入固定资料内容相同，跳过：{}", rule.getName());
+                continue;
+            }
+            kept.add(rule);
+        }
+        return kept;
+    }
+
+    /**
+     * 块检索会在正文外附加“参考摘录”通知与来源标签；去重针对被引用的资料正文，
+     * 不要求整个包装串也出现在固定资料里，否则同一资料的块副本永远不会被识别。
+     */
+    private static String referenceBody(String content) {
+        String body = content;
+        String notice = cn.novel.yonren.domain.novel.service.armory.prompt.reference.ReferenceBlockPackager.REFERENCE_NOTICE;
+        if (body.startsWith(notice)) body = body.substring(notice.length());
+        return body.replaceAll("(?m)^【[^】\\r\\n]+】\\s*$", "");
+    }
+
+    private static String normalizeForOverlap(String text) {
+        return text == null ? "" : text.replaceAll("\\s+", "");
     }
 
 }

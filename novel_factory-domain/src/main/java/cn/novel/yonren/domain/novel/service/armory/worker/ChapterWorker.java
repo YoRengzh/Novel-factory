@@ -384,9 +384,11 @@ public class ChapterWorker {
             String userPrompt = buildChapterPrompt(dynamicContext.getStoryContext(), item, fullPrefix, globalNo,
                     contract, storyContext);
             String depthMode = cn.novel.yonren.domain.novel.model.valobj.character.CharacterDepthSettings.mode(storyContext);
+            List<String> visibleCharacterFields = List.of();
             if ("APPLY".equals(depthMode)) {
                 var characterContext = new cn.novel.yonren.domain.novel.service.armory.character.CharacterContextAssembler()
                         .assemble(storyContext, item.getCharacters(), globalNo);
+                visibleCharacterFields = characterContext.visibleFieldIds();
                 userPrompt += characterContext.text();
                 userPrompt += cn.novel.yonren.domain.novel.service.armory.memory.CharacterDepthFeedbackProjector
                         .renderFeedback(storyContext, summaries);
@@ -430,12 +432,25 @@ public class ChapterWorker {
             chapterContents.add(chapterContent);
 
             // ===== 审校 → 修订（若启用）→ 复审闭环（四期）；未修复的 BLOCKING 问题记为质量债，随下一章记忆回灌 =====
+            Map<String, String> usedWriterPrompts = dynamicContext.getUsedPromptMap();
+            var writerContext = new cn.novel.yonren.domain.novel.model.valobj.revise.RewriteContext(
+                    usedWriterPrompts == null ? userPrompt : StringUtils.defaultIfBlank(
+                            usedWriterPrompts.get("chapter-" + globalNo + ":user"), userPrompt),
+                    usedWriterPrompts == null ? null : usedWriterPrompts.get("chapter-" + globalNo + ":system"),
+                    cn.novel.yonren.domain.novel.model.valobj.work.ChapterManuscript.of(chapterContent),
+                    () -> {
+                        if (job != null && (job.isCancelRequested() || job.isBudgetExceeded())) {
+                            throw new java.util.concurrent.CancellationException("章节修订已取消或触发预算停止");
+                        }
+                    });
             GateResult gateResult = qualityGate.auditAndReviseIfEnabled(
-                    requestParameter, item, chapterContent, summaries, styleStat, globalNo, storyDir);
+                    requestParameter, item, chapterContent, summaries, styleStat, globalNo, storyDir, writerContext);
             // 候选选优（六期）：低置信通过（MINOR 残留/修订过）时第二模型族重写候选，
             // 机械排序 + 异模型评审二选一；挑战者复审不过自动回退原稿，未启用时原样返回
-            gateResult = chapterCandidateService.challenge(requestParameter, item, ctx, userPrompt,
-                    chapterContent, gateResult, summaries, styleStat, globalNo, storyDir);
+            if (!gateResult.planAdjustmentRequired()) {
+                gateResult = chapterCandidateService.challenge(requestParameter, item, ctx, userPrompt,
+                        chapterContent, gateResult, summaries, styleStat, globalNo, storyDir);
+            }
             // 写手样本（训练数据水龙头）：完整最终 prompt 取自 usedPromptMap 的 chapter-N:user/system
             // （LlmInvokeService 已存含规则尾注的版本），正文取过完审校/修订/盲评的最终采纳稿；
             // 失败案例由 audit-runtime-samples.jsonl 单独留痕，此处只记"任务→合格范文"
@@ -449,6 +464,13 @@ public class ChapterWorker {
                         chapterContent, gateResult, mode.getLabel());
             }
             List<ChapterIssueEntity> unresolvedIssues = gateResult.unresolvedBlocking();
+            // 计划与可信事实冲突：不是写作缺陷，不能当普通质量债继续推进后续章节。
+            // 当前章按原稿提交、此前章节均保留，作业停在可调整计划的位置。
+            boolean planAdjustmentRequired = gateResult.planAdjustmentRequired();
+            if (planAdjustmentRequired) {
+                log.warn("第 {} 章暂停：计划与可信事实冲突，保留当前稿等待调整计划：{}",
+                        globalNo, gateResult.planAdjustmentReason());
+            }
             // 验证式自动核销：以本章审校结论验证旧债，须在记入本章新债之前
             if (qualityGate.auditEnabled()) {
                 qualityDebtService.settle(qualityDebts, unresolvedIssues);
@@ -568,6 +590,14 @@ public class ChapterWorker {
             // 否则编辑或重生成之后会把旧稿的人物状态当成当前事实。
             var manuscript = cn.novel.yonren.domain.novel.model.valobj.work.ChapterManuscript.of(chapterContent);
             summary.setManuscriptHash(manuscript.hash());
+            if (!"OFF".equals(depthMode)) {
+                summary.setCharacterDesignMode(depthMode);
+                summary.setCharacterDesignRevision(storyContext.getCharacterDecisionProfiles() == null
+                        ? null : storyContext.getCharacterDecisionProfiles().revision());
+                summary.setCharacterFieldsInjected(visibleCharacterFields.size());
+                summary.setCharacterProfilesInjected((int) visibleCharacterFields.stream()
+                        .map(field -> field.substring(0, field.lastIndexOf(':'))).distinct().count());
+            }
             // 证据与身份由代码重算：模型给的人物、事项、取值、证据保留，characterId/factId/effectId/
             // 章号/哈希一律以本地正文为准。定位不到证据或状态迁移非法的条目转 pending，不进权威状态。
             cn.novel.yonren.domain.novel.service.armory.memory.CharacterStateProjector.bind(
@@ -675,6 +705,18 @@ public class ChapterWorker {
                     item.getChapterType() == null ? "normal" : item.getChapterType().getCode(),
                     summaries.size());
             idx++;
+
+            if (planAdjustmentRequired) {
+                if (job != null) {
+                    job.requirePlanAdjustment(globalNo, offset + totalChapters,
+                            storyDir == null ? null : storyDir.getFileName().toString(),
+                            gateResult.planAdjustmentReason());
+                    persistJobStatus(dynamicContext);
+                }
+                log.warn("第 {} 章后停止本批：计划需调整，已保留当前稿与检查点（{}）",
+                        globalNo, gateResult.planAdjustmentReason());
+                break;
+            }
 
             // 完结门禁 → 终局审查三态：通过=正常收官；不通过且有头寸=拒绝完结、写回末卷返工；
             // 不通过且预算/头寸耗尽=强制收官（overallPass 仍 false，不伪称通过）。
@@ -1269,11 +1311,17 @@ public class ChapterWorker {
             ArmoryCommandEntity requestParameter, ChapterPlanItemEntity item,
             PromptContext ctx, String userPrompt, int globalNo, Map<String, String> usedPromptMap) {
         String lastRaw = null;
+        String bestRescued = null;
         for (int attempt = 1; attempt <= 2; attempt++) {
             try {
                 String raw = llmInvokeService.invoke(
                         requestParameter.getStoryVO(), PromptScene.CHAPTER_CONTENT, ctx, userPrompt, usedPromptMap);
                 lastRaw = raw;
+                for (String candidate : JsonRepair.extractStringFields(raw, "content")) {
+                    if (bestRescued == null || cn.novel.yonren.domain.novel.service.armory.quality.ChapterLengthPolicy
+                            .effectiveCharacterCount(candidate) > cn.novel.yonren.domain.novel.service.armory.quality.ChapterLengthPolicy
+                            .effectiveCharacterCount(bestRescued)) bestRescued = candidate;
+                }
 
                 ChapterContentEntity chapter = tryConvertChapter(raw);
                 if (chapter == null) {
@@ -1285,6 +1333,12 @@ public class ChapterWorker {
                 // 解析"成功"但正文为空 = 实际失败（重复 content 键取到后一个空串的典型形态）：
                 // 不能直接返回，否则后续校验/落盘会拿到空稿；交由下一级降级接住
                 if (chapter != null && StringUtils.isNotBlank(chapter.getContent())) {
+                    if (bestRescued != null && cn.novel.yonren.domain.novel.service.armory.quality.ChapterLengthPolicy
+                            .effectiveCharacterCount(bestRescued) > cn.novel.yonren.domain.novel.service.armory.quality.ChapterLengthPolicy
+                            .effectiveCharacterCount(chapter.getContent())) {
+                        chapter.setContent(bestRescued);
+                        chapter.setTitle(cn.novel.yonren.types.utils.ChapterTitleNormalizer.normalize(item.getTitle()));
+                    }
                     // 正文实体以全局章节号为准（落盘文件名/续写衔接均依赖），不信任模型输出的编号
                     chapter.setChapterNo(globalNo);
                     return chapter;
@@ -1299,9 +1353,8 @@ public class ChapterWorker {
             }
         }
 
-        // 抢救：取**首个非空** content——重复键时 JSON 库会取到后一个空串，
-        // 但按出现顺序扫能拿回前面那段真正文（否则一条本可救回的稿子会被判死）
-        String content = JsonRepair.extractStringField(lastRaw, "content", true);
+        // 跨重试保留最长的根对象正文，短JSON或空的重复键不能覆盖此前完整正文。
+        String content = bestRescued;
         if (StringUtils.isNotBlank(content)) {
             log.warn("第 {} 章正文解析失败，已抢救正文主体（标题取自章节计划）", globalNo);
             return ChapterContentEntity.builder()
@@ -1331,15 +1384,13 @@ public class ChapterWorker {
     /** 节拍前情上下文取最近几章（只取摘要，避免把整段记忆前缀塞进每章一次的节拍调用） */
     private static final int BEATS_CONTEXT_CHAPTERS = 2;
 
-    /** 节拍不可用时的兜底骨架：只保证因果链成立，不锁死场景数与篇幅 */
+    /** 节拍不可用时沿用场景契约，不追加冲突、代价或章尾任务。 */
     private static final String FALLBACK_SKELETON = """
 
-            【本章兜底骨架】节拍表不可用，请按以下因果链组织本章，不要写成流水账：
-            开场：从一个正在发生的动作进入；
-            对抗：角色的目标受到具体阻碍；
-            转折：获得新信息，或付出代价；
-            选择：视角人物必须做一个有成本的决定；
-            结尾：该决定带来新的未决问题，并落在「结尾悬念」上。""";
+            【本章兜底骨架】节拍表不可用，直接按已有场景契约与事实组织本章：
+            交代读者理解本章所需的起因、行动、回应和后果；独处、等待、心理与环境可以承担阅读功能。
+            不强制场数、对白、转折或有成本的决定；没有外部冲突的场景不另造阻碍。
+            结尾完成原计划的具体落点，允许闭合或余韵，不新增未决问题或悬念。""";
 
     /** 契约不完整时的强约束：先把这一章写成立，不允许自行扩张 */
     private static final String RECOVERY_CONSTRAINTS = """
@@ -1489,7 +1540,7 @@ public class ChapterWorker {
                 .append("\n5. 核心能力机制按读者理解与计划需要说明，既有原理无需无效复述，不设全篇解释次数。")
                 .append("\n6. 同类操作按实际差异与重要性选择详略，不按次数强制轮换角度、困难或情绪。")
                 .append("\n7. 心理叙述、情绪直述和旁白可服务视角与作者风格，不设句数上限；重要事件不能靠空泛总结代替过程。")
-                .append("\n8. 正文为纯文本，禁止使用任何 Markdown 标记：不得用星号加粗或强调（包括 * 与 **）、不得用井号标题、横线列表、下划线；人物的心理活动、系统面板/提示、技能名称、注入脑海的旁白一律用自然语言直接叙述，靠上下文呈现层次，不得用任何符号包裹或高亮；严禁在正文中出现章节编号（如\"第30章\"\"第十二章\"）或\"本章/上一章/下一章\"等作者层面的元信息。回忆过往事件时，必须用时间/地点/事件指代，绝对不能用章节编号：错误示例\"第12章他在阵眼核心发现的\"→正确写法\"十二天前在阵眼核心发现的\"；错误示例\"第28章袭击事件后\"→正确写法\"上次遇袭之后\"；错误示例\"第6章那个模糊的感知\"→正确写法\"之前那次模糊的感知\"。唯一例外——角色说出口的对白必须用中文双引号“”包裹：上述禁令只针对 Markdown 标记与作者层面元信息，绝不适用于对白；严禁为了遵守纯文本要求而丢弃对白引号。不要输出解释。")
+                .append("\n8. 正文为纯文本，禁止使用任何 Markdown 标记：不得用星号加粗或强调（包括 * 与 **）、不得用井号标题、横线列表、下划线；人物的心理活动、系统面板/提示、技能名称、注入脑海的旁白一律用自然语言直接叙述，靠上下文呈现层次，不得用任何符号包裹或高亮；严禁在正文中出现章节编号（如\"第30章\"\"第十二章\"）或\"本章/上一章/下一章\"等作者层面的元信息。回忆过往事件时，必须用时间/地点/事件指代，绝对不能用章节编号：错误示例\"第12章他在阵眼核心发现的\"→正确写法\"十二天前在阵眼核心发现的\"；错误示例\"第28章袭击事件后\"→正确写法\"上次遇袭之后\"；错误示例\"第6章那个模糊的感知\"→正确写法\"之前那次模糊的感知\"。角色说出口的对白使用作者约定的合法成对引号，未指定时用中文双引号“”；上述禁令只针对 Markdown 标记与作者层面元信息，绝不适用于对白；严禁为了遵守纯文本要求而丢弃对白引号。不要输出解释。")
                 .append("\n9. 结尾呼应 endingHook 的具体指向，未决、闭合或余韵均合法；不强制悬念或画面动作，不为制造钩子另起冲突。")
                 .append(renderRegisterGuidance(storyContext))
                 .append("\n11. 检查无意义的情节复用，但因果上必要的同类解法可以再次使用，不要求每章换解法、增加对手或伤害。")
@@ -1499,19 +1550,9 @@ public class ChapterWorker {
         return sb.toString();
     }
 
-    /** 题材/时代/人物语域契约：中性规则常驻，仙侠词表只对 fantasy 生效。 */
+    /** 正文、审校与修订使用相同的语域口径。 */
     private String renderRegisterGuidance(StoryContextEntity context) {
-        GenreType genre = GenreType.match(context == null ? null : context.getTheme(),
-                context == null ? null : context.getStyle());
-        StringBuilder rule = new StringBuilder("\n10. 【语言与语域契约】客观叙述、人物对话和内心判断必须符合故事时代与世界设定；")
-                .append("人物措辞符合身份、已知信息与作者风格；明确的认知超前、特殊训练或世界设定不能被年龄常识抹平。")
-                .append("复杂判断可用内心、对白、讲述或行动表达，不统一改成物件与短促口语。");
-        if (genre == GenreType.FANTASY) {
-            rule.append("玄幻/仙侠题材描述世界、动作、对话与环境时，优先使用设定内已有词汇（如灵气、阵纹、符箓、灵脉、宗门、长老、法宝）；")
-                    .append("握手信号、加密信号、波形数据、服务器、协议、分布式节点、灰度、缓存、日志等程序员术语不得充当客观世界名词，")
-                    .append("除非角色设定明确支持，且只作短促心理类比、点到即止。");
-        }
-        return rule.toString();
+        return "\n10. " + cn.novel.yonren.domain.novel.service.armory.prompt.WritingContractPolicy.renderRegister(context);
     }
 
     private void persistJobStatus(DefaultArmoryFactory.DynamicContext dynamicContext) {
@@ -1557,16 +1598,14 @@ public class ChapterWorker {
         return UsedPatternPolicy.render(summaries, chapterNo, UsedPatternPolicy.BODY_LOOKBACK);
     }
 
-    /**
-     * 上章审校反馈渲染（P2）：语义 MINOR 压缩为 ≤3 条要点供下一章 prompt 回灌；空返回 null
-     * （装配器过滤空白块）。只挑人设/审美类读者可感问题——一致性/伏笔类问题有各自的账本通道
-     */
+    /** 上章同版且有证据的审校意见：按完整条目回灌，避免截断适用条件后变成强制任务。 */
     static String renderReviewFeedback(List<ChapterIssueEntity> semanticMinors) {
         if (semanticMinors == null || semanticMinors.isEmpty()) {
             return null;
         }
         List<ChapterIssueEntity> readable = semanticMinors.stream()
-                .filter(i -> i != null && StringUtils.isNotBlank(i.getDescription())
+                .filter(i -> i != null && "MINOR".equalsIgnoreCase(i.getSeverity())
+                        && StringUtils.isNotBlank(i.getDescription()) && StringUtils.isNotBlank(i.getEvidence())
                         && ("character".equalsIgnoreCase(i.getDimension())
                         || "aesthetic".equalsIgnoreCase(i.getDimension())
                         || "pacing".equalsIgnoreCase(i.getDimension())))
@@ -1575,12 +1614,20 @@ public class ChapterWorker {
         if (readable.isEmpty()) {
             return null;
         }
-        StringBuilder sb = new StringBuilder("【上章审校反馈】以下问题在上一章已被审校指出（读者已可见），"
-                + "本章必须避免同类问题、并在同类场景中给出相反的写法：");
+        StringBuilder sb = new StringBuilder("【上章审校反馈·参考】以下意见有上章原文依据，不代表本章存在同样问题。"
+                + "先核对本章契约、人物信息与场景功能，只在相同问题确实重现时参考；"
+                + "不为纠正上章而增加事件、对白、代价或改变作者风格。引文存在不等于审美判断必然成立。");
+        int appended = 0;
         for (ChapterIssueEntity issue : readable) {
-            sb.append("\n- [").append(StringUtils.defaultString(issue.getDimension())).append("] ")
-                    .append(StringUtils.abbreviate(issue.getDescription(), 80));
+            String entry = "\n- [" + issue.getDimension() + "] " + issue.getDescription()
+                    + "\n  上章原文：" + issue.getEvidence()
+                    + (StringUtils.isBlank(issue.getSuggestion()) ? "" : "\n  可选建议：" + issue.getSuggestion());
+            if (sb.length() + entry.length() > 2400) {
+                continue;
+            }
+            sb.append(entry);
+            appended++;
         }
-        return sb.toString();
+        return appended == 0 ? null : sb.toString();
     }
 }

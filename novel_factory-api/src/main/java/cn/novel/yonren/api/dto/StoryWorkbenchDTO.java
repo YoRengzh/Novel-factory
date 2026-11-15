@@ -75,6 +75,9 @@ public class StoryWorkbenchDTO {
     private WorkbenchMetrics metrics = new WorkbenchMetrics();
 
     private List<CharacterObservationDTO> characterObservations = new ArrayList<>();
+    private List<CharacterApplicationDTO> characterApplications = new ArrayList<>();
+    public record CharacterApplicationDTO(Integer chapterNo, String mode, String revision,
+                                          Integer profilesInjected, Integer fieldsInjected) { }
     private String causalityPlanMode;
     private String causalityAuditMode;
 

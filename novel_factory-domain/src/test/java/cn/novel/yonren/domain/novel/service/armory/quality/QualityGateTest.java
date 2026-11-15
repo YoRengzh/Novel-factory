@@ -10,6 +10,9 @@ import cn.novel.yonren.domain.novel.model.entity.ChapterPlanItemEntity;
 import cn.novel.yonren.domain.novel.model.entity.ChapterSummaryEntity;
 import cn.novel.yonren.domain.novel.model.entity.RevisionDecisionEntity;
 import cn.novel.yonren.domain.novel.model.entity.StyleStatEntity;
+import cn.novel.yonren.domain.novel.model.entity.StoryContextEntity;
+import cn.novel.yonren.domain.novel.service.armory.prompt.WritingContractPolicy;
+import org.mockito.ArgumentCaptor;
 import cn.novel.yonren.domain.novel.config.StoryProperties;
 import cn.novel.yonren.domain.novel.service.armory.audit.AuditSampleService;
 import cn.novel.yonren.domain.novel.service.armory.audit.ChapterAuditService;
@@ -242,6 +245,61 @@ class QualityGateTest {
     }
 
     @Test
+    void planIntegrityCandidateUnfixed_rollsBackAcceptedRevisionAndStopsRetry() {
+        revise.setMaxAttempts(3);
+        when(chapterAuditService.audit(any(), any(), any(), any(), any(), any(), anyInt(), any()))
+                .thenReturn(blockingResult());
+        when(chapterAuditService.verifyFixes(any(), any(), any(), anyList(), any(), any(), anyInt(), any(), anyList()))
+                .thenAnswer(inv -> {
+                    // 真实服务会把候选合成 plan-integrity 条目再送复核；mock 直接返回未修复结论。
+                    List<ChapterIssueEntity> unfixed = new java.util.ArrayList<>();
+                    for (String candidate : (List<String>) inv.getArgument(8)) {
+                        unfixed.add(ChapterIssueEntity.builder()
+                                .dimension(ChapterAuditService.PLAN_INTEGRITY_DIMENSION)
+                                .severity("BLOCKING").evidence(candidate).build());
+                    }
+                    return new ChapterAuditService.FixVerification(unfixed, false);
+                });
+        when(chapterReviseService.revise(any(), any(), any(), anyList(), any(), any(), any(), anyInt(), any()))
+                .thenReturn(new ChapterReviseService.ReviseResult(
+                        RevisionDecisionEntity.builder().attempted(true).accepted(true)
+                                .reason("修订完成")
+                                .reviewCandidates(List.of("主角交出药签"))
+                                .build(),
+                        ChapterContentEntity.builder().chapterNo(1).title("删改章").content("修订正文").build()));
+
+        GateResult result =
+                qualityGate.auditAndReviseIfEnabled(command, item, chapterContent, List.of(), styleStat, 1, null);
+
+        assertEquals("原文", chapterContent.getContent(), "计划事件未获复核时不得保留修订稿");
+        assertTrue(!result.unresolvedBlocking().isEmpty());
+        assertEquals(1, result.reviseRounds());
+        verify(chapterReviseService, times(1)).revise(any(), any(), any(), anyList(), any(), any(), any(), anyInt(), any());
+    }
+
+    @Test
+    void planAdjustmentRequired_keepsOriginalAndDoesNotRetry() {
+        revise.setMaxAttempts(3);
+        when(chapterAuditService.audit(any(), any(), any(), any(), any(), any(), anyInt(), any()))
+                .thenReturn(blockingResult());
+        when(chapterReviseService.revise(any(), any(), any(), anyList(), any(), any(), any(), anyInt(), any()))
+                .thenReturn(new ChapterReviseService.ReviseResult(
+                        RevisionDecisionEntity.builder().attempted(true).accepted(false)
+                                .planAdjustmentRequired(true)
+                                .reason("冻结事实中没有取回药签，计划需调整")
+                                .build(), null));
+
+        GateResult result =
+                qualityGate.auditAndReviseIfEnabled(command, item, chapterContent, List.of(), styleStat, 1, null);
+
+        assertEquals("原文", chapterContent.getContent());
+        assertTrue(result.planAdjustmentRequired());
+        assertTrue(result.planAdjustmentReason().contains("计划需调整"));
+        assertEquals(1, result.reviseRounds(), "计划冲突不应伪装成多轮普通失败");
+        verify(chapterReviseService, times(1)).revise(any(), any(), any(), anyList(), any(), any(), any(), anyInt(), any());
+    }
+
+    @Test
     void blocking_reviseAccepted_reAuditClean_replacesContent_returnsRevisedPass() {
         // A3 复审验证化：复审=verifyFixes 逐条验证（空列表=全部已修复），不再是第二次全章 audit
         when(chapterAuditService.audit(any(), any(), any(), any(), any(), any(), anyInt(), any()))
@@ -270,7 +328,7 @@ class QualityGateTest {
     @Test
     void revisionKeepsInitialMinorStatisticsButInvalidatesItsWritingFeedback() {
         var minor = ChapterIssueEntity.builder().severity("MINOR").dimension("aesthetic")
-                .description("有效对话为0句").build();
+                .description("原文在此重复说明同一事实").evidence("原文").build();
         var original = cn.novel.yonren.domain.novel.model.valobj.work.ChapterManuscript.of(chapterContent);
         var issues = new java.util.ArrayList<>(blockingResult().getIssues());
         issues.add(minor);
@@ -554,6 +612,33 @@ class QualityGateTest {
     }
 
     @Test
+    void registerContract_sharedWithWriter_andPreservesAuthorScopeInAuditAndRevision() {
+        StoryContextEntity context = StoryContextEntity.builder().theme("玄幻")
+                .style("细腻思辨，允许完整内心讲述").perspective("第三人称限知")
+                .tone("沉静克制").build();
+        command.setStoryContextEntity(context);
+        when(chapterAuditService.audit(any(), any(), any(), any(), any(), any(), anyInt(), any()))
+                .thenReturn(blockingResult());
+        when(chapterReviseService.revise(any(), any(), any(), anyList(), any(), any(), any(), anyInt(), any()))
+                .thenReturn(new ChapterReviseService.ReviseResult(
+                        RevisionDecisionEntity.builder().accepted(false).reason("待核实事实").build(), null));
+        revise.setMaxAttempts(1);
+
+        qualityGate.auditAndReviseIfEnabled(command, item, chapterContent, List.of(), styleStat, 1, null);
+
+        ArgumentCaptor<String> auditGuard = ArgumentCaptor.forClass(String.class);
+        ArgumentCaptor<String> revisionContext = ArgumentCaptor.forClass(String.class);
+        verify(chapterAuditService).audit(any(), any(), any(), any(), any(), any(), anyInt(), auditGuard.capture());
+        verify(chapterReviseService).revise(any(), any(), any(), anyList(), any(), revisionContext.capture(), any(), anyInt(), any());
+        for (String prompt : List.of(auditGuard.getValue(), revisionContext.getValue())) {
+            assertTrue(prompt.contains("【语言与时代语域检查】"), "保留旧标题兼容");
+            assertTrue(prompt.contains(WritingContractPolicy.renderRegister(context)));
+            assertTrue(prompt.contains(WritingContractPolicy.renderEditorialScope()));
+            assertFalse(prompt.contains("修订时必须改写为角色可观察的动作、物件、生活经验和口语"));
+        }
+    }
+
+    @Test
     void lowPlanCoverage_injectsAdherenceHintIntoAuditGuard() {
         // 大纲偏离检测：覆盖率 < 60% 时给审校注入加审预警（不直接 BLOCKING）
         item.setKeyEvents(List.of("小陈在藏经阁偶得上古残卷", "陆瑶察觉宗门长老的异动"));
@@ -607,11 +692,9 @@ class QualityGateTest {
         assertTrue(result.unresolvedBlocking().isEmpty());
     }
 
-    /**
-     * 未声明对话场景时，轮次坍缩记入 MINOR 债并回灌规划，不能只输出 WARN。
-     */
+    /** 无声明的低对白只是观测，不据此新增对白任务或判断不成戏。 */
     @Test
-    void dialogueDensityCollapse_isRecordedAsMinorDebt() {
+    void dialogueDensityCollapse_isObservationWithoutQuotaOrDramaticVerdict() {
         audit.setEnabled(false);
         // 有效字只数中文/字母/数字（不含标点），故这里堆够 800 才能进入坍缩判定
         StringBuilder longText = new StringBuilder("他把信纸摊开，折好，塞进信封，指腹把折痕压平。");
@@ -625,10 +708,16 @@ class QualityGateTest {
         GateResult result = qualityGate.auditAndReviseIfEnabled(
                 command, item, chapterContent, List.of(), styleStat, 96, null);
 
-        assertTrue(result.mechanicalMinor().stream()
-                        .anyMatch(i -> i.getDescription() != null
-                                && i.getDescription().contains("对白轮次坍缩")),
-                "对白轮次坍缩必须记 MINOR 债，否则信号被丢掉：" + result.mechanicalMinor());
+        assertTrue(result.unresolvedBlocking().isEmpty());
+        ChapterIssueEntity observation = result.mechanicalMinor().stream()
+                .filter(i -> i.getDescription() != null && i.getDescription().contains("对白轮次观测"))
+                .findFirst().orElseThrow();
+        assertEquals("MINOR", observation.getSeverity());
+        assertTrue(observation.getSuggestion().contains("不要求补量"));
+        assertFalse(observation.getSuggestion().contains("≥2"));
+        assertFalse(observation.getSuggestion().contains("交锋"));
+        assertFalse(observation.getDescription().contains("不是戏"));
+        verify(chapterReviseService, never()).revise(any(), any(), any(), anyList(), any(), any(), any(), anyInt(), any());
     }
 
     /** 反向：对白密度正常时不得误报（宁可漏报不误伤，与 DialogueRatioPolicy 其它检测同款） */
@@ -646,17 +735,13 @@ class QualityGateTest {
 
         assertTrue(result.mechanicalMinor().stream()
                         .noneMatch(i -> i.getDescription() != null
-                                && i.getDescription().contains("对白轮次坍缩")),
+                                && i.getDescription().contains("对白轮次观测")),
                 "对白密度正常时不应记债：" + result.mechanicalMinor());
     }
 
-    /**
-     * 正文级对话承载对账：计划声明了 dialogueScenes 的章，密度坍缩从 MINOR
-     * 升级 BLOCKING——规划层已承诺对话承载，正文开不了腔是写手违约，必须进修订闭环；
-     * 缺失的场景台词作为修订靶点随建议下发。
-     */
+    /** 词面缺失只能提示语义核验，不是场景遗漏的事实裁决。 */
     @Test
-    void declaredDialogueScenes_densityCollapse_escalatesToBlocking() {
+    void declaredDialogueScenes_lexicalMissing_doesNotBecomeBlocking() {
         audit.setEnabled(false);
         revise.setEnabled(false);
         item.setDialogueScenes(List.of(
@@ -673,18 +758,19 @@ class QualityGateTest {
         GateResult result = qualityGate.auditAndReviseIfEnabled(
                 command, item, chapterContent, List.of(), styleStat, 110, null);
 
-        assertEquals(1, result.unresolvedBlocking().size(), "密度坍缩+台词缺失应升级 BLOCKING");
-        ChapterIssueEntity blocking = result.unresolvedBlocking().get(0);
-        assertEquals("BLOCKING", blocking.getSeverity());
-        assertTrue(blocking.getDescription().contains("对话承载违约"),
-                "描述应点明这是计划承诺的违约：" + blocking.getDescription());
-        assertTrue(blocking.getSuggestion().contains("角色乙"),
-                "缺失场景应作为修订靶点列出：" + blocking.getSuggestion());
+        assertTrue(result.unresolvedBlocking().isEmpty(), "低密度加词面未命中也不能证明场景缺失");
+        ChapterIssueEntity observation = result.mechanicalMinor().stream()
+                .filter(i -> i.getDescription() != null && i.getDescription().contains("对白轮次观测"))
+                .findFirst().orElseThrow();
+        assertTrue(observation.getEvidence().contains("词面未匹配 1 条"));
+        assertTrue(observation.getSuggestion().contains("语义核验"));
+        assertFalse(observation.getSuggestion().contains("必须补回"));
+        verify(chapterReviseService, never()).revise(any(), any(), any(), anyList(), any(), any(), any(), anyInt(), any());
     }
 
-    /** 声明台词全部已落地但轮次仍坍缩：照升 BLOCKING，但建议改为"扩写成交锋"而非"补回台词" */
+    /** 已兑现的短对白不能只因轮次少而被强制扩写。 */
     @Test
-    void declaredDialogueScenes_allDelivered_stillCollapsed_suggestsExtending() {
+    void declaredDialogueScenes_allDelivered_lowDensity_doesNotRequireExtending() {
         audit.setEnabled(false);
         revise.setEnabled(false);
         item.setDialogueScenes(List.of(
@@ -701,12 +787,35 @@ class QualityGateTest {
         GateResult result = qualityGate.auditAndReviseIfEnabled(
                 command, item, chapterContent, List.of(), styleStat, 110, null);
 
-        assertEquals(1, result.unresolvedBlocking().size());
-        assertTrue(result.unresolvedBlocking().get(0).getSuggestion().contains("扩写成有来有回的交锋"),
-                "台词都在时应要求扩写而不是补台词：" + result.unresolvedBlocking().get(0).getSuggestion());
+        assertTrue(result.unresolvedBlocking().isEmpty());
+        assertTrue(result.mechanicalMinor().stream().noneMatch(i -> i.getSuggestion() != null
+                && (i.getSuggestion().contains("扩写成有来有回") || i.getSuggestion().contains("必须补回"))));
+        verify(chapterReviseService, never()).revise(any(), any(), any(), anyList(), any(), any(), any(), anyInt(), any());
     }
 
-    /** 声明了对话场景、密度也健康（写手等价改写/加戏）→ 不得误报：对账只惩罚"开不了腔" */
+    @Test
+    void dialogueLexicalMismatch_canBeEquivalentWithoutBlocking() {
+        audit.setEnabled(true);
+        item.setDialogueScenes(List.of("甲：“今日在此等候，勿去别处。”"));
+        StringBuilder content = new StringBuilder();
+        for (int i = 0; i < 40; i++) {
+            content.append("天边的暮色沿墙缓慢落下，屋里的人想起旧日来信，重新读到第")
+                    .append(i).append("行便停住。\n");
+        }
+        content.append("甲说：“这一天都别离开这里。”");
+        chapterContent.setContent(content.toString());
+        assertEquals(1, DialoguePresencePolicy.missingScenes(item.getDialogueScenes(), content.toString()).size(),
+                "等价改写刻意不命中词面规则");
+        when(chapterAuditService.audit(any(), any(), any(), any(), any(), any(), anyInt(), any()))
+                .thenReturn(AuditResultEntity.builder().issues(List.of()).build());
+
+        GateResult result = qualityGate.auditAndReviseIfEnabled(command, item, chapterContent, List.of(), styleStat, 1, null);
+        assertTrue(result.unresolvedBlocking().isEmpty());
+        verify(chapterAuditService).audit(any(), any(), any(), any(), any(), any(), anyInt(), any());
+        verify(chapterReviseService, never()).revise(any(), any(), any(), anyList(), any(), any(), any(), anyInt(), any());
+    }
+
+    /** 声明了对话场景、密度也健康（写手等价改写/加戏）→ 不得误报：密度不作事件裁决 */
     @Test
     void declaredDialogueScenes_healthyDensity_noDebt() {
         audit.setEnabled(false);
@@ -724,7 +833,7 @@ class QualityGateTest {
                 "密度健康时台词改写不应升级：" + result.unresolvedBlocking());
         assertTrue(result.mechanicalMinor().stream()
                         .noneMatch(i -> i.getDescription() != null
-                                && i.getDescription().contains("对白轮次坍缩")));
+                                && i.getDescription().contains("对白轮次观测")));
     }
 
     /** 过渡章豁免对声明场景同样生效：过渡章本就该短，不因声明了对话而升级 */
@@ -746,44 +855,45 @@ class QualityGateTest {
         assertTrue(result.unresolvedBlocking().isEmpty());
         assertTrue(result.mechanicalMinor().stream()
                         .noneMatch(i -> i.getDescription() != null
-                                && i.getDescription().contains("对白轮次坍缩")),
+                                && i.getDescription().contains("对白轮次观测")),
                 "过渡章豁免优先于声明升级：" + result.mechanicalMinor());
     }
 
-    /** 修订闭环：BLOCKING 升级后修订补回对话，采纳后机械重扫（含密度重算）即闭环，不落失败样本 */
+    /** 真正缺失由已有语义审校确认；修订兑现后，低轮次观测不能阻止闭环。 */
     @Test
-    void declaredScenesBlocking_repairAddsDialogue_closesLoop() {
-        audit.setEnabled(false);
+    void semanticallyMissingDialogue_repairClosesLoopDespiteLowDensity() {
+        audit.setEnabled(true);
         revise.setEnabled(true);
         revise.setMaxAttempts(1);
         item.setDialogueScenes(List.of("角色乙：「嗯。」"));
-        StringBuilder collapsed = new StringBuilder("他把信纸摊开，折好，塞进信封，指腹把折痕压平。");
+        StringBuilder original = new StringBuilder();
         for (int i = 0; i < 50; i++) {
-            collapsed.append("桌面上只剩习题册和一张报名表复印件，红章露出半截。");
+            original.append("桌面上只剩习题册和一张报名表复印件，红章露出半截，页角写着第")
+                    .append(i).append("行批注。\n");
         }
-        collapsed.append("「既然记着，这个也记上。」");
-        chapterContent.setContent(collapsed.toString());
-
-        StringBuilder repaired = new StringBuilder();
-        for (int i = 0; i < 40; i++) {
-            // 句中加序号：只为凑篇幅，避免撞“章内整句重复”（修订重扫现在也会跑这项检查）
-            repaired.append("桌面上只剩习题册和一张报名表复印件，红章露出半截，页角写着第")
-                    .append(i).append("行批注。");
-        }
-        for (int i = 0; i < 20; i++) {
-            repaired.append("「嗯。」「知道。」「先放着吧。」");
-        }
+        original.append("「既然记着，这个也记上。」");
+        chapterContent.setContent(original.toString());
+        String repaired = original + "\n「嗯。」";
+        when(chapterAuditService.audit(any(), any(), any(), any(), any(), any(), anyInt(), any()))
+                .thenReturn(AuditResultEntity.builder().issues(List.of(ChapterIssueEntity.builder()
+                        .dimension("plan-adherence").severity("BLOCKING")
+                        .description("场景要求乙明确接受任务，但正文没有其回应或接受结果")
+                        .evidence("甲提出任务后直接离开，乙未回应").build())).build());
+        when(chapterAuditService.verifyFixes(any(), any(), any(), anyList(), any(), any(), anyInt()))
+                .thenReturn(new ChapterAuditService.FixVerification(List.of(), false));
         when(chapterReviseService.revise(any(), any(), any(), anyList(), any(), any(), any(), anyInt(), any()))
                 .thenReturn(new ChapterReviseService.ReviseResult(
-                        RevisionDecisionEntity.builder().accepted(true).reason("补回声明台词").build(),
-                        ChapterContentEntity.builder().chapterNo(1).title("原标题")
-                                .content(repaired.toString()).build()));
+                        RevisionDecisionEntity.builder().accepted(true).reason("补回任务接受结果").build(),
+                        ChapterContentEntity.builder().chapterNo(1).content(repaired).build()));
 
         GateResult result = qualityGate.auditAndReviseIfEnabled(
                 command, item, chapterContent, List.of(), styleStat, 110, null);
 
-        assertTrue(result.unresolvedBlocking().isEmpty(),
-                "修订把对话补进正文后应机械闭环：" + result.unresolvedBlocking());
+        assertTrue(result.unresolvedBlocking().isEmpty());
+        assertEquals(repaired, chapterContent.getContent());
+        assertEquals("原标题", chapterContent.getTitle());
+        verify(chapterAuditService).verifyFixes(any(), any(), any(), anyList(), any(), any(), anyInt());
+        verify(chapterReviseService).revise(any(), any(), any(), anyList(), any(), any(), any(), anyInt(), any());
         verify(auditSampleService, never()).record(any(), anyInt(), any(), anyString(), anyList(), anyInt(), any(), anyString());
     }
 

@@ -56,12 +56,12 @@ class ChapterBeatsServiceTest {
     }
 
     @Test
-    void buildBeats_tooFewBeats_returnsNull() {
+    void buildBeats_singleQuietBeat_isValid() {
         when(llmGateway.complete(any(), any(LlmCall.class))).thenReturn(
                 "{\"beats\":[{\"location\":\"冰室\",\"characters\":[\"主角乙\"],"
-                        + "\"conflict\":\"逼宫\",\"infoGain\":\"出土\",\"weight\":\"100%\"}]}");
+                        + "\"conflict\":\"独自等待\",\"infoGain\":\"\",\"weight\":\"100%\"}]}");
 
-        assertNull(service.buildBeats(storyVO(), item(), 5, "【前情】上一章结尾"), "少于下限节拍数应降级");
+        assertNotNull(service.buildBeats(storyVO(), item(), 5, "【前情】上一章结尾"), "单一安静场景不应强制拆成多拍");
     }
 
     @Test
@@ -117,8 +117,8 @@ class ChapterBeatsServiceTest {
         String prompt = service.renderBeatsPrompt(beats);
 
         assertTrue(prompt.contains("信息增量：角色壬获得可复核的行为线索"));
-        assertTrue(prompt.contains("本拍未声明信息增量"), "无状态变化的拍必须被标注为可合并");
-        assertTrue(prompt.contains("严禁原地扩写"));
+        assertTrue(prompt.contains("阅读功能：按原场景的等待、消化或余韵处理"), "安静拍不得被要求并入或制造增量");
+        assertFalse(prompt.contains("严禁原地扩写"));
     }
 
     private StoryVO storyVO() {
@@ -173,26 +173,32 @@ class ChapterBeatsServiceTest {
         assertEquals("考场", beats.getBeats().get(0).getLocation());
     }
 
-    /** 节拍 prompt 必须把 dialogue 写进 JSON 示例——字段不进示例就等于不存在（本项目已有此教训） */
     @Test
-    void buildBeats_promptDeclaresDialogueInSchema() {
+    void buildBeats_promptRequestsExchangeFlagAndNoDialogue() {
         when(llmGateway.complete(any(), any(LlmCall.class))).thenReturn(
-                "{\"beats\":[{\"location\":\"冰室\",\"characters\":[\"主角乙\"],\"conflict\":\"逼宫\","
-                        + "\"dialogue\":\"「让开。」\",\"infoGain\":\"出土\",\"weight\":\"40%\"},"
-                        + "{\"location\":\"洞口\",\"characters\":[\"主角乙\"],\"conflict\":\"拦截\","
-                        + "\"dialogue\":\"\",\"infoGain\":\"第一剑\",\"weight\":\"60%\"}]}");
+                "{\"beats\":[{\"location\":\"药圃\",\"conflict\":\"争取复壮期限\","
+                        + "\"exchange\":true,\"infoGain\":\"取得三日复壮期限\"}]}");
         org.mockito.ArgumentCaptor<LlmCall> captor = org.mockito.ArgumentCaptor.forClass(LlmCall.class);
 
-        ChapterBeatsEntity beats = service.buildBeats(storyVO(), item(), 5, "【前情】上一章结尾");
+        ChapterBeatsEntity beats = service.buildBeats(storyVO(), item(), 5, null);
 
         org.mockito.Mockito.verify(llmGateway).complete(any(), captor.capture());
         String sent = captor.getValue().getUserPrompt();
-        assertTrue(sent.contains("\"dialogue\""), "JSON 示例必须含 dialogue：" + sent);
-        assertTrue(sent.contains("对白供给"), "必须写明对白供给的要求：" + sent);
+        assertTrue(sent.contains("\"exchange\""));
+        assertTrue(sent.contains("任何字段都不得写对白原句"));
+        assertFalse(sent.contains("\"dialogue\""));
         assertNotNull(beats);
-        assertTrue(ChapterBeatsService.hasDialogue(beats.getBeats().get(0)));
-        assertFalse(ChapterBeatsService.hasDialogue(beats.getBeats().get(1)),
-                "留空字符串表示本拍无对白");
+        assertTrue(service.renderBeatsPrompt(beats).contains("交流任务：按场景契约展开已有的交流目的、必要信息和回应"));
+    }
+
+    @Test
+    void buildBeats_legacyDialogueWithFalseClaimFallsBackToWritingWithoutBeats() {
+        when(llmGateway.complete(any(), any(LlmCall.class))).thenReturn(
+                "{\"beats\":[{\"location\":\"药圃\",\"exchange\":true,"
+                        + "\"dialogue\":\"你拿后山石缝里的灰去养兰根，还想说是偶然辨出药性？\","
+                        + "\"infoGain\":\"取灰养兰\"}]}");
+
+        assertNull(service.buildBeats(storyVO(), item(), 1, "苏尘尚未取过后山灰。"));
     }
 
     /**
@@ -205,7 +211,7 @@ class ChapterBeatsServiceTest {
         ChapterBeatsEntity beats = ChapterBeatsEntity.builder()
                 .beats(List.of(
                         new ChapterBeatsEntity.Beat("房间", List.of("主角甲"), "取出信纸",
-                                "「明天寄。」", "准备回信", "50%"),
+                                true, "准备回信", "50%"),
                         new ChapterBeatsEntity.Beat("邮局", List.of("主角甲"), "投递", null, "信已寄出", "50%")))
                 .build();
 
@@ -220,12 +226,10 @@ class ChapterBeatsServiceTest {
     }
 
     /**
-     * 全章零对白拍 → 在 prompt 侧补一条硬要求（根因在节拍生成侧，这里只兜底告知）。
-     *
-     * 节拍未提供对白时，逐拍扩写可能形成全章动作分解，因此需要显式对白兜底。
+     * 全章零对白拍：安静场景合法，不得为统计另造人物开口或谈判。
      */
     @Test
-    void renderBeatsPrompt_allSilentBeats_addsDialogueFallback() {
+    void renderBeatsPrompt_allSilentBeats_doesNotForceDialogue() {
         ChapterBeatsEntity beats = ChapterBeatsEntity.builder()
                 .beats(List.of(
                         new ChapterBeatsEntity.Beat("房间", List.of("主角甲"), "取出信纸", null, "准备回信", "50%"),
@@ -234,26 +238,9 @@ class ChapterBeatsServiceTest {
 
         String prompt = service.renderBeatsPrompt(beats);
 
-        assertTrue(prompt.contains("对白承载·兜底"), prompt);
-        assertTrue(prompt.contains("至少安排 1 场由对白承载的关键事件"), prompt);
+        assertFalse(prompt.contains("对白承载·兜底"), prompt);
+        assertFalse(prompt.contains("至少安排 1 场由对白承载"), prompt);
+        assertTrue(prompt.contains("节拍只展开本章场景契约"));
     }
 
-    /**
-     * 对白是节拍表的显式供给项：有对白的拍要渲染出来，没有的拍要标注——* 只给"冲突/动作"时，"他把信折好塞进信封"是合法的一拍，写手据此就能交出一整章动作分解。
-     */
-    @Test
-    void renderBeatsPrompt_rendersDialogueAndMarksSilentBeats() {
-        ChapterBeatsEntity beats = ChapterBeatsEntity.builder()
-                .beats(List.of(
-                        new ChapterBeatsEntity.Beat("邮局", List.of("主角甲", "角色丁"), "买邮票",
-                                "「这回她能看到草稿纸？」", "确认通信范式", "50%"),
-                        new ChapterBeatsEntity.Beat("家中", List.of("主角甲"), "整理信件", null, "信件归位", "50%")))
-                .build();
-
-        String prompt = service.renderBeatsPrompt(beats);
-
-        assertTrue(prompt.contains("对白：「这回她能看到草稿纸？」"), prompt);
-        assertTrue(prompt.contains("对白：（本拍无对白）"), "无对白的拍必须被标注：" + prompt);
-        assertFalse(prompt.contains("对白承载·兜底"), "有对白拍时不应触发全章兜底提示：" + prompt);
-    }
 }

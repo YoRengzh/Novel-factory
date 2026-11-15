@@ -79,17 +79,47 @@ class ChapterAuditServiceTest {
 
         String with = service.buildPrompt(item, "正文", null, null, null, 26,
                 "【时序锚】角色丙年龄：十一个月（第16章摘要记录）。");
-        assertTrue(with.contains("能力与阶段边界"), "有时序锚时必须要求审校查阶段越界");
-        assertTrue(with.contains("认知超前"), "必须写明认知超前不算越界（是否允许由设定决定）");
-        // 二轮收紧：重跑版把"直接写字"绕道成"涂鸦=答案/摆物=警告/观察者附会"，
-        // 判据必须点名这两类间接展示变体，否则审校抓不住
-        assertTrue(with.contains("间接展示变体"), "必须点名间接展示变体按事实矛盾处理");
-        assertTrue(with.contains("可被他人在事后解读出具体含义"), "必须禁止可解读载体的信息传递");
-        assertTrue(with.contains("单次"), "必须禁止观察者单次观察就坐实角色掌握具体知识");
+        assertTrue(with.contains("能力与阶段边界"), "有时序锚时必须要求审校查能力边界");
+        assertTrue(with.contains("本书明确允许的认知超前、特殊能力与表达媒介必须保留"),
+                "已建立的认知超前和特殊能力不能被年龄常识抹平");
+        assertTrue(with.contains("本书未建立的新能力或新媒介不能临场发明"));
+        assertTrue(with.contains("不规定必须观察几次"), "确认按证据，不设固定观察次数");
+        assertFalse(with.contains("可被他人在事后解读出具体含义"), "不得按载体形式一刀切禁展示");
+        assertFalse(with.contains("多次重复"), "不得规定固定确认套路");
 
         String without = service.buildPrompt(item, "正文", null, null, null, 26, null);
         assertFalse(without.contains("能力与阶段边界"), "无锚时不输出该判据");
         assertTrue(without.contains("年龄/能力越界归入第 1 类"), "BLOCKING 归类说明常驻（条件满足时才适用）");
+    }
+
+    @Test
+    void revisionVerificationChecksNewFactConflictsAgainstOriginalContextInTheSameCall() {
+        when(llmGateway.complete(any(), any(LlmCall.class))).thenReturn("{\"verdicts\":[{\"index\":1,\"fixed\":true}],"
+                + "\"continuityChecked\":true,\"introducedConflicts\":[{\"description\":\"已交出的药签无依据重现\","
+                + "\"evidence\":\"他从袖里取出已交出的药签\"}]}");
+        var context = new cn.novel.yonren.domain.novel.model.valobj.revise.RewriteContext("药签已经交给执事", null,
+                new cn.novel.yonren.domain.novel.model.valobj.work.ChapterManuscript(1, "标题", "他把药签交给执事。"));
+        var target = ChapterIssueEntity.builder().dimension("continuity").severity("BLOCKING").description("事件未交付").build();
+        var result = service.verifyFixes(storyVO(), planItem(), "他从袖里取出已交出的药签。", List.of(target), null, null, 1, context);
+        assertFalse(result.degraded());
+        assertEquals(1, result.unfixed().size());
+        assertEquals("BLOCKING", result.unfixed().get(0).getSeverity());
+        assertTrue(result.unfixed().get(0).getDescription().contains("药签"));
+        org.mockito.ArgumentCaptor<LlmCall> call = org.mockito.ArgumentCaptor.forClass(LlmCall.class);
+        org.mockito.Mockito.verify(llmGateway, org.mockito.Mockito.times(1)).complete(any(), call.capture());
+        assertTrue(call.getValue().getUserPrompt().contains("修订影响范围连续性核对"));
+        assertTrue(call.getValue().getUserPrompt().contains("药签已经交给执事"));
+    }
+
+    @Test
+    void missingContinuityCoverageDoesNotMasqueradeAsRevisionPass() {
+        when(llmGateway.complete(any(), any(LlmCall.class))).thenReturn("{\"verdicts\":[{\"index\":1,\"fixed\":true}]}");
+        var context = new cn.novel.yonren.domain.novel.model.valobj.revise.RewriteContext("冻结事实", null,
+                new cn.novel.yonren.domain.novel.model.valobj.work.ChapterManuscript(1, "标题", "原稿"));
+        var target = ChapterIssueEntity.builder().severity("BLOCKING").description("缺少关键事件").build();
+        var result = service.verifyFixes(storyVO(), planItem(), "修订稿", List.of(target), null, null, 1, context);
+        assertTrue(result.degraded());
+        assertEquals(List.of(target), result.unfixed());
     }
 
     @Test

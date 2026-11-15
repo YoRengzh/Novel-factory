@@ -764,6 +764,15 @@
         function updateWorkbench(data) {
             state.workbench = data; state.ledger = Array.isArray(data.characters) ? data.characters : [];
             const observations = el('workbench-character-observation'); observations.replaceChildren();
+            (Array.isArray(data.characterApplications) ? data.characterApplications : []).forEach(application => {
+                const row = node('article', null, 'book-record');
+                row.appendChild(node('h4', '第 ' + application.chapterNo + ' 章 · 人物设计 ' + text(application.mode)));
+                row.appendChild(node('p', '实际注入 ' + (application.profilesInjected || 0) + ' 张卡 / '
+                        + (application.fieldsInjected || 0) + ' 个字段 · 版本 ' + (text(application.revision) || '无有效卡'), 'character-card-source'));
+                if (application.mode === 'APPLY' && !application.profilesInjected) row.appendChild(
+                        node('p', '本章未实际应用人物卡，不能仅凭 APPLY 开关当作人物设计已生效。', 'verification-warning'));
+                observations.appendChild(row);
+            });
             const statuses = {OBSERVED: '已绑定原稿的选择与后果摘录', STALE: '观察依据已过期', NOT_EVALUATED: '没有足够的可核对观察', ERROR: '观察未完成'};
             (Array.isArray(data.characterObservations) ? data.characterObservations : []).forEach(observation => {
                 const row = node('article', null, 'book-record');

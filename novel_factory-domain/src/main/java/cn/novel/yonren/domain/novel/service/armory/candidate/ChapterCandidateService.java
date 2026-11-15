@@ -162,8 +162,10 @@ public class ChapterCandidateService {
                     .content(chapterContent.getContent()).build();
             chapterContent.setTitle(best.getTitle());
             chapterContent.setContent(best.getContent());
+            var challengerContext = new cn.novel.yonren.domain.novel.model.valobj.revise.RewriteContext(
+                    userPrompt, null, cn.novel.yonren.domain.novel.model.valobj.work.ChapterManuscript.of(chapterContent));
             GateResult challengerGate = qualityGate.auditAndReviseIfEnabled(
-                    requestParameter, item, chapterContent, summaries, styleStat, globalNo, storyDir);
+                    requestParameter, item, chapterContent, summaries, styleStat, globalNo, storyDir, challengerContext);
             if (!challengerGate.unresolvedBlocking().isEmpty()) {
                 chapterContent.setTitle(incumbentSnapshot.getTitle());
                 chapterContent.setContent(incumbentSnapshot.getContent());

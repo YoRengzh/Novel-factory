@@ -152,6 +152,9 @@ public class StoryJobService {
     private void finishJob(ArmoryCommandEntity command, GenerationJob job, StoryGenerateResultAggregate result) {
         if (job.isCancelRequested()) {
             job.markCancelled();
+        } else if (GenerationJob.PLAN_ADJUSTMENT_REQUIRED.equals(job.getCurrentStage())) {
+            job.markFailed(job.getErrorMessage());
+            log.warn("作业 {} 等待调整计划：{}", job.getJobId(), job.getErrorMessage());
         } else if (job.isBudgetExceeded()) {
             // 预算熔断：正常停止而非失败——已完成章节均已落盘，终态按完结处理（缺口可 resume 补齐）
             job.markCompleted(result == null ? null : result.getStoryDirName());

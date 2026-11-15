@@ -39,6 +39,9 @@ import java.util.stream.Collectors;
 @RequiredArgsConstructor
 public class ChapterAuditService {
 
+    /** 修订后计划事件完整性的复核维度；与旧 BLOCKING 分开，避免位置错配和误归因。 */
+    public static final String PLAN_INTEGRITY_DIMENSION = "plan-integrity";
+
     private static final BeanOutputConverter<AuditResultEntity> CONVERTER =
             new BeanOutputConverter<>(AuditResultEntity.class,
                     JsonMapper.builder().enable(JsonReadFeature.ALLOW_UNESCAPED_CONTROL_CHARS).build());
@@ -135,35 +138,31 @@ public class ChapterAuditService {
         sb.append("你是小说流水线审校员。阅读本章正文，从以下七个维度发现问题，只输出结构化 issue 列表。")
                 .append("\n七维度：consistency（设定一致性）、character（人设一致性）、pacing（节奏平衡）、")
                 .append("continuity（叙事连贯）、foreshadow（伏笔健康）、hook（钩子质量）、aesthetic（审美品质）。")
-                .append("\n\n人物与代价对照（2026-09-16 补，机械层测不了语义，靠你逐项检查）：")
-                .append("\n- character：配角是否沦为工具人——只等主角触发、没有独立目标/反应/自身判断；")
-                .append("主角是否无代价地独立解决一切（没有需要被说服/救助/合作的局面）")
-                .append("\n- character/pacing：本章代价是否单一——全程只有物理损伤而无情感、关系、信息、机会代价")
-                .append("\n- aesthetic：内心独白/自我推演是否挤压了实际互动场景（独白只在产生新决策时保留）")
-                .append("\n- pacing（身份隐藏类题材）：近暴露点是否过密——身份/秘密的「差点被发现」每章超过 1 个即为过密，")
-                .append("会把「还没掉马」的长程张力提前耗光；这类题材的资产正是拉锯本身")
-                .append("\n- character：主角是否持续被动响应（无独立主动目标，只被他人/事件推着走）");
+                .append("\n\n").append(cn.novel.yonren.domain.novel.service.armory.prompt.WritingContractPolicy.renderEditorialScope())
+                .append("\n- character：配角是否只作信息转述工具、没有可信诉求；判断依据是其立场、信息与行动是否自洽，")
+                .append("不是要求每章必须出现合作、被说服或救助局面。")
+                .append("\n- character/pacing：人物选择是否有已知动机与后果支撑；代价类型按本书事件实际发生，")
+                .append("不要求每章出现多种代价，也不把顺利成功判为缺陷。")
+                .append("\n- aesthetic：心理、讲述与互动是否服务当前场景；不规定独白句数或必须以决策收尾。")
+                .append("\n- pacing：暴露、揭示和悬念密度是否服务作者计划；不设每章暴露点数量上限。")
+                .append("\n- character：主角是否与既定目标一致地行动；允许被动观察、等待与消化，")
+                .append("只在人物无理由地失去既有目标或判断时才记问题。");
         // 年龄/能力边界需语义审校：时序锚由 guard 带进来，
         // 无锚时不输出该判据（避免让模型去猜一个不存在的锚）。
         if (StringUtils.isNotBlank(guard) && guard.contains("【时序锚】")) {
-            sb.append("\n- character【能力与阶段边界·对照上方时序锚，必查】：主角在本章展示的能力若超出锚记录的阶段")
-                    .append("极限——动作、语言、书写、专注时长、精细操作，凡超出该阶段生理/状态常识的——按\"事实矛盾\"记 BLOCKING；")
-                    .append("认知超前（理解、判断、偏好、策略性拖延）不算越界（是否允许由故事设定决定），")
-                    .append("只判\"媒介\"（表达载体）是否越过阶段极限。")
-                    .append("以下两类**间接展示变体同样按事实矛盾记 BLOCKING**：")
-                    .append("① 主角用任何**可被他人在事后解读出具体含义**的载体传递信息——涂鸦、摆物、敲击、")
-                    .append("手势、节奏、器物位置都算（如画出某题答案、摆出警告、以特定动作\"认出\"某物）")
-                    .append("——载体换了，能力展示的本质没变；")
-                    .append("② 观察者在**单次**观察后就从该角色行为中**确认**其掌握了具体知识或具体意图")
-                    .append("（\"他算出了这道题\"\"他在警告我们\"\"他认出了那件事物\"）——允许\"觉得不寻常\"，")
-                    .append("禁止当章坐实为具体结论；解读指向具体知识/事件时，须建立在多次重复之上且保留不确定口吻，否则越界。")
+            sb.append("\n- character【能力与阶段边界·对照上方时序锚，必查】：动作、语言、书写、专注时长与精细操作")
+                    .append("须符合本书已建立的年龄、伤势、训练与特殊能力。")
+                    .append("本书明确允许的认知超前、特殊能力与表达媒介必须保留，不用年龄常识抹平；")
+                    .append("本书未建立的新能力或新媒介不能临场发明来解题。")
+                    .append("他人从行动、物证或交流中得出结论需要足够证据，但不规定必须观察几次，")
+                    .append("也不要求固定的“留意→起疑→试探”顺序。")
                     // 时序锚是年龄数值的唯一依据：判罚必须逐字引用锚原文，
                     // 不得推算或使用锚中未记录的年龄，以免把合法行为误判为违规。
                     .append("**年龄数值的唯一依据是上方【时序锚】原文**：判罚涉及年龄时必须逐字引用锚中写明的数字，")
                     .append("严禁推算、改写或使用锚中不存在的年龄值（锚记\"四岁\"时，\"一岁半\"\"三岁\"等一律无效）；")
                     .append("若认为锚本身与近章剧情/账本冲突，按 MINOR 提示核对，不得按臆测的年龄记 BLOCKING；")
                     .append("同理，时间点判定也只以上方时序锚与近章摘要记载的时点为准，禁止臆造未记载的时间。")
- .append("时间线一致性 口径）：**不再验收“时间是否推进到位”**——")
+                    .append("时间线一致性口径：**不再验收“时间是否推进到位”**——")
                     .append("本章不跨时间、全程同一天，或连续多章同一天，都属正常，**不得**以")
                     .append("“无时间流逝痕迹”“未写过渡”记违规；")
                     .append("只查**时间线是否自相矛盾**：正文若出现与【时序锚】或近章摘要已确立时点")
@@ -181,6 +180,10 @@ public class ChapterAuditService {
                 .append("\n关键事件：").append(joinList(item.getKeyEvents()))
                 .append("\n结尾悬念：").append(nullToBlank(item.getEndingHook()))
                 .append("\n章节类型：").append(item.getChapterType() == null ? "normal" : item.getChapterType().getCode());
+        if (item.getScenes() != null && !item.getScenes().isEmpty()) {
+            sb.append("\n\n").append(
+                    cn.novel.yonren.domain.novel.service.armory.plan.ScenePlanPolicy.render(item.getScenes()));
+        }
 
         if (StringUtils.isNotBlank(ledgerPrompt)) {
             sb.append("\n\n【当前账本】\n").append(ledgerPrompt);
@@ -237,19 +240,20 @@ public class ChapterAuditService {
                 .append("不合格=正文\"她第一次踏入北境\"而前文已两次写她驻守北境 → BLOCKING(C1)");
         sb.append("\ncharacter（人设一致性）")
                 .append("\n- H1 人设越线：角色言行与既定身份/性格/能力边界冲突且无情节支撑")
-                .append("\n- H2 工具人：有名字的配角整章只响应主角，无独立目标/反应/自身判断")
-                .append("\n- H3 主角单机：主角无代价地独立解决全部问题，全章无一个必须依靠他人的局面")
-                .append("\n- H4 被动主角：主角整章只被事件或他人推动，无主动目标")
+                .append("\n- H2 工具人：有名字的配角只作信息转述，没有可信的自身立场、反应或判断")
+                .append("\n- H3 主角单机：不成立。允许独立解决、顺利成功或整章独处；只查是否有事实/因果依据")
+                .append("\n- H4 被动主角：主角无理由地失去既有目标或判断；单纯的观察、等待、消化不算")
                 .append("\n  样例：通过=配角为自身立场主动隐瞒关键情报；")
                 .append("边界=配角仅露面一次、反应符合立场但无主动动作 → MINOR(H2)；")
-                .append("不合格=主角被围杀整章只等待救援、无任何自救尝试 → MINOR(H4)（强）");
+                .append("不合格=主角无任何依据地放弃既定目标并原地等待 → MINOR(H4)（强）");
         sb.append("\npacing（节奏平衡）")
-                .append("\n- P1 过渡缺失：紧接上一章生死危机，本章无整理/缓冲段落（对照计划 chapterType）")
-                .append("\n- P2 暴露点过密（身份隐藏类）：本章\"差点被发现\"超过 1 次")
-                .append("\n- P3 代价单一：本章全部代价都是物理损伤，无情感/关系/信息/机会类")
+                .append("\n- P1 过渡/缓冲缺失：只有紧接上一章生死危机、本章确有需要整理或消化时才核查；")
+                .append("计划本身要求持续行动、或已有对白/内省消化时不算缺失")
+                .append("\n- P2 暴露点密度：仅记录，不设每章次数上限；是否服务作者计划由场景功能判断")
+                .append("\n- P3 代价分布：仅记录；不要求每章出现多种代价，也不把顺利成功判为缺陷")
                 .append("\n  样例：通过=危机后有一段整理线索的静场；")
-                .append("边界=全程紧绷但保留一段缓冲对话 → MINOR(P1)；")
-                .append("不合格=连续第 3 章以死战开篇且无任何缓冲 → MINOR(P1)（强）");
+                .append("边界=计划明确连续行动、但段间有短暂反应 → 不记 P1；")
+                .append("不合格=连续多章以死战开篇且没有任何消化，也与计划功能不符 → MINOR(P1)");
         sb.append("\ncontinuity（叙事连贯）")
                 .append("\n- N1 场景跳变：时间/地点切换无过渡句，相邻段落无法建立时空连续性")
                 .append("\n- N2 动作断裂：上一拍\"拔剑\"下一拍\"收剑入鞘\"，中间的交锋过程缺失")
@@ -267,21 +271,23 @@ public class ChapterAuditService {
                 .append("不合格=第N章伏笔在本章对话中被一句闲谈无意揭穿 → MINOR(F1)（强）");
         sb.append("\nhook（钩子质量）")
                 .append("\n- K1 结尾冲突/未触及：正文结尾与计划结尾悬念明显冲突或完全未触及 → BLOCKING")
-                .append("\n- K2 总结式收尾：结尾停在感悟/总结/金句，而非画面或动作")
-                .append("\n- K3 钩子弱化：有未决点但力度不足（\"他想了很久\"\"一切尚未结束\"式）")
+                .append("\n- K2 总结式收尾：结尾只重复已知结论或空泛拔高，且与计划落点无关；")
+                .append("计划本就要求闭合、感悟或余韵时不因此记问题")
+                .append("\n- K3 钩子弱化：计划要求未决点，但正文没有把它交付清楚；落在心理活动本身不算弱化")
                 .append("\n  样例：通过=结尾停在\"信使的手按上了城门的铁环\"；")
-                .append("边界=结尾有未决点但落在心理活动上 → MINOR(K3)；")
-                .append("不合格=结尾\"从此，他踏上了新的旅程\"式总结 → MINOR(K2)（强）");
+                .append("边界=计划要求未决、正文以心理疑问收束且信息完整 → 不记 K3；")
+                .append("不合格=结尾\"从此，他踏上了新的旅程\"式空泛总结，且计划要求具体落点 → MINOR(K2)（强）");
         sb.append("\naesthetic（审美品质）")
                 .append("\n- A1 定义旁白：\"这不是X，而是Y\"式定义句及其排比")
-                .append("\n- A2 情绪直述：用\"感到愤怒/悲伤/震惊\"命名情绪，而非动作呈现")
-                .append("\n- A3 独白挤压：连续超过 3 句内心独白且不产生新决策或新信息")
-                .append("\n- A4 术语/说教密度：连续 2 句以上的设定原理复述、现代术语堆砌或说明书口吻讲机制")
-                .append("（对照【当前账本】机制条目：金手指机制全篇至多 2 次原理描述，重复解释即命中）")
+                .append("\n- A2 情绪标签空转：只反复命名情绪、不提供人物处境或判断的段落；")
+                .append("有场景依据的情绪直述、内心判断和讲述可以保留")
+                .append("\n- A3 独白挤压：连续独白只重复已知结论且不服务当前场景；不按句数或是否产生决策定罪")
+                .append("\n- A4 术语/说教密度：与当前场景无关的设定原理复述、现代术语堆砌或说明书口吻；")
+                .append("读者首次理解所需、或人物当下正在教学/解释时不算命中")
                 .append("\n  样例：通过=\"他攥紧刀柄，指节泛白\"以动作呈现愤怒；")
-                .append("边界=1-2 句情绪命名但紧接动作补救 → MINOR(A2)；")
+                .append("边界=1-2 句情绪命名但有处境支撑 → 不记 A2；")
                 .append("不合格=连续 5 句\"他感到恐惧，恐惧中带着愤怒，愤怒之下是委屈\" → MINOR(A3)；")
-                .append("说明书腔复述金手指原理 → MINOR(A4)（强）");
+                .append("与当前场景无关的机制说明书腔 → MINOR(A4)（强）");
         sb.append("\n扫描纪律：逐维度对照编号检查后再输出；同一现象命中多条编号时取最具体的一条；宁漏勿滥。");
         sb.append("\n\nseverity 判定标准（必须严格遵守，宁可漏报不可错报）：");
         appendSeverityStandards(sb);
@@ -308,9 +314,9 @@ public class ChapterAuditService {
                 .append("钩子有呼应但力度或明确度不足 = MINOR，不算未呼应；")
                 .append("\"-虽不算硬矛盾，但……\"式的观察一律 = MINOR。")
                 .append("\n- 数量锚点：BLOCKING 通常为 0~1 条；判不准时一律降为 MINOR。")
-                .append("\n- 年龄/能力越界归入第 1 类\"事实矛盾\"（不是新的第五类）：当【时序锚】明确了主角年龄/阶段，")
-                .append("而正文让他展示超出该阶段生理/状态极限的表达（动作、语言、书写、专注时长），")
-                .append("或用可被他人在事后解码出具体含义的载体间接传递信息时，都是与既成事实直接冲突，记 BLOCKING；认知超前不算。");
+                .append("\n- 年龄/能力越界归入第 1 类\"事实矛盾\"（不是新的第五类）：当【时序锚】或作者设定明确了")
+                .append("年龄、伤势、训练与特殊能力边界，而正文让它表现出本书未建立的媒介、能力或知识时，")
+                .append("才是与既成事实直接冲突，记 BLOCKING；本书明确允许的认知超前、特殊能力与表达媒介必须保留。");
     }
 
     /**
@@ -361,6 +367,13 @@ public class ChapterAuditService {
     /** 修订验证输出：verdicts 与传入的 BLOCKING 列表按 index（1 起）对齐 */
     public static class FixCheckOutput {
         private List<FixVerdict> verdicts;
+        private Boolean continuityChecked;
+        private List<ChapterIssueEntity> introducedConflicts;
+
+        public Boolean getContinuityChecked() { return continuityChecked; }
+        public void setContinuityChecked(Boolean value) { continuityChecked = value; }
+        public List<ChapterIssueEntity> getIntroducedConflicts() { return introducedConflicts; }
+        public void setIntroducedConflicts(List<ChapterIssueEntity> value) { introducedConflicts = value; }
 
         public List<FixVerdict> getVerdicts() {
             return verdicts;
@@ -417,14 +430,50 @@ public class ChapterAuditService {
                                        String ledgerPrompt,
                                        StyleStatEntity styleStat,
                                        int globalNo) {
+        return verifyFixes(storyVO, item, revisedContent, blocking, ledgerPrompt, styleStat, globalNo, null, List.of());
+    }
+
+    public FixVerification verifyFixes(StoryVO storyVO, ChapterPlanItemEntity item, String revisedContent,
+                                       List<ChapterIssueEntity> blocking, String ledgerPrompt, StyleStatEntity styleStat,
+                                       int globalNo, cn.novel.yonren.domain.novel.model.valobj.revise.RewriteContext writerContext) {
+        return verifyFixes(storyVO, item, revisedContent, blocking, ledgerPrompt, styleStat, globalNo, writerContext, List.of());
+    }
+
+    public FixVerification verifyFixes(StoryVO storyVO, ChapterPlanItemEntity item, String revisedContent,
+                                       List<ChapterIssueEntity> blocking, String ledgerPrompt, StyleStatEntity styleStat,
+                                       int globalNo, cn.novel.yonren.domain.novel.model.valobj.revise.RewriteContext writerContext,
+                                       List<String> reviewCandidates) {
+        List<String> candidates = reviewCandidates == null
+                ? List.of() : reviewCandidates.stream().filter(StringUtils::isNotBlank).toList();
+        // 无计划完整性候选时保持原调用形态（既有注入点与测试桩不受影响）。
+        if (candidates.isEmpty()) {
+            return verifyFixesInternal(storyVO, item, revisedContent, blocking, ledgerPrompt, styleStat, globalNo,
+                    writerContext);
+        }
+        List<ChapterIssueEntity> checks = new ArrayList<>(blocking == null ? List.of() : blocking);
+        for (String event : candidates) {
+            checks.add(ChapterIssueEntity.builder().dimension(PLAN_INTEGRITY_DIMENSION).severity("BLOCKING")
+                    .description("修订后计划事件完整性：该事件被保留，或有事实依据地修正而不是被直接删除：" + event)
+                    .evidence(event).build());
+        }
+        var verificationContext = writerContext != null ? writerContext
+                : new cn.novel.yonren.domain.novel.model.valobj.revise.RewriteContext(null, null, null);
+        return verifyFixesInternal(storyVO, item, revisedContent, checks, ledgerPrompt, styleStat, globalNo,
+                verificationContext);
+    }
+
+    private FixVerification verifyFixesInternal(StoryVO storyVO, ChapterPlanItemEntity item, String revisedContent,
+                                       List<ChapterIssueEntity> blocking, String ledgerPrompt, StyleStatEntity styleStat,
+                                       int globalNo, cn.novel.yonren.domain.novel.model.valobj.revise.RewriteContext writerContext) {
         if (blocking == null || blocking.isEmpty()) {
             return FixVerification.verified(List.of());
         }
         for (int attempt = 1; attempt <= 2; attempt++) {
+            if (writerContext != null) writerContext.checkCancellation();
             try {
                 // 温度/模型由 scene-models 的 audit 场景配置驱动（与首审同一模型族）
                 String raw = llmGateway.complete(storyVO.getModule(), LlmCall.builder()
-                        .userPrompt(buildFixVerifyPrompt(blocking, revisedContent, ledgerPrompt, item))
+                        .userPrompt(buildFixVerifyPrompt(blocking, revisedContent, ledgerPrompt, item, writerContext))
                         .label("audit-verify-第" + globalNo + "章")
                         .scene(ModelScene.CHAPTER_AUDIT)
                         .build());
@@ -435,14 +484,33 @@ public class ChapterAuditService {
                         log.info("修订验证经解析降级修复后成功，chapterNo: {}", globalNo);
                     }
                 }
+                if (writerContext != null) writerContext.checkCancellation();
                 if (output != null && output.getVerdicts() != null) {
                     List<ChapterIssueEntity> unfixed = resolveUnfixed(blocking, output.getVerdicts(), revisedContent, globalNo);
+                    if (writerContext != null) {
+                        if (!Boolean.TRUE.equals(output.getContinuityChecked()) || output.getIntroducedConflicts() == null) {
+                            log.warn("第 {} 章修订新增连续性核对缺失，不当作验证通过", globalNo);
+                            continue;
+                        }
+                        for (ChapterIssueEntity conflict : output.getIntroducedConflicts()) {
+                            if (conflict == null || !StringUtils.isNotBlank(conflict.getEvidence())
+                                    || !StringUtils.isNotBlank(conflict.getDescription())
+                                    || !EvidenceMatch.contained(conflict.getEvidence(), EvidenceMatch.normalize(revisedContent))) {
+                                return new FixVerification(new ArrayList<>(blocking), true);
+                            }
+                            conflict.setDimension("continuity");
+                            conflict.setSeverity("BLOCKING");
+                            unfixed.add(conflict);
+                        }
+                    }
                     log.info("修订验证完成，chapterNo: {}, 待验证 {} 条，未修复 {} 条",
                             globalNo, blocking.size(), unfixed.size());
                     return FixVerification.verified(unfixed);
                 }
                 log.warn("修订验证第 {}/2 次输出无法解析，chapterNo: {}", attempt, globalNo);
             } catch (Exception e) {
+                cn.novel.yonren.domain.novel.service.armory.llm.LlmLocalRejectionException.rethrowIfPresent(e);
+                if (writerContext != null) writerContext.checkCancellation();
                 log.warn("修订验证第 {}/2 次尝试异常，chapterNo: {}", attempt, globalNo, e);
             }
         }
@@ -488,7 +556,8 @@ public class ChapterAuditService {
     }
 
     private String buildFixVerifyPrompt(List<ChapterIssueEntity> blocking, String revisedContent,
-                                        String ledgerPrompt, ChapterPlanItemEntity item) {
+                                        String ledgerPrompt, ChapterPlanItemEntity item,
+                                        cn.novel.yonren.domain.novel.model.valobj.revise.RewriteContext writerContext) {
         StringBuilder sb = new StringBuilder();
         sb.append("你是审校复核员。修订稿声称已修复以下 ").append(blocking.size())
                 .append(" 条 BLOCKING 问题。逐条核对修订稿，判定每条是否已修复。");
@@ -503,13 +572,29 @@ public class ChapterAuditService {
         sb.append("\n\n判定口径：")
                 .append("\n- fixed=true：修订稿中该问题已不再成立（事实已改正/关键事件已补足/结尾悬念已呼应/视角已收拢）。修复不需要证据；拿不准一律 false。")
                 .append("\n- fixed=false：问题仍然成立或只被部分修复。此时 evidence 必须逐字摘自修订稿中问题仍然存在的位置（≤80 字，中间省略用……）。")
-                .append("\n- 只验证列出的条目，不要检查其他内容，不要新增问题，不要改变条目顺序。")
+                .append(writerContext == null
+                        ? "\n- 只验证列出的条目，不新增问题，不改变条目顺序。"
+                        : "\n- 列出条目逐项验证；额外只核对修订直接引入的连续性冲突，放在 introducedConflicts，不改原条目顺序。")
                 .append("\n\n【本章计划】")
                 .append("\n目标：").append(nullToBlank(item.getGoal()))
                 .append("\n关键事件：").append(joinList(item.getKeyEvents()))
                 .append("\n结尾悬念：").append(nullToBlank(item.getEndingHook()));
         if (StringUtils.isNotBlank(ledgerPrompt)) {
             sb.append("\n\n【当前账本】\n").append(ledgerPrompt);
+        }
+        if (writerContext != null) {
+            sb.append("\n【修订影响范围连续性核对】只核对修订涉及的时间、位置、物品身份与去向、承诺履行和保密状态，")
+                    .append("以及这些改动前后的直接衔接，不做文风或全章重新评审。不以引文存在证明因果成立。")
+                    .append("新增冲突须是明确的事实矛盾并引用修订稿连续原文；不是短句、少对白或没有代价。")
+                    .append("\n【计划完整性核验】标记为“修订后计划事件完整性”的条目，只有事件仍以不同措辞交付、")
+                    .append("或依据冻结事实作了合法修正才可判 fixed；直接删除、只留片段或拿不准均判 false。");
+            if (StringUtils.isNotBlank(writerContext.writerUserPrompt())) {
+                sb.append("\n【冻结写作依据】\n").append(writerContext.writerUserPrompt());
+            }
+            if (writerContext.original() != null) {
+                sb.append("\n【修订前版本】\n").append(writerContext.original().content());
+            }
+            sb.append("\n输出 continuityChecked=true，并提供 introducedConflicts 数组；没有新增冲突显式输出[]，不能省略。");
         }
         sb.append("\n\n【修订稿】\n").append(revisedContent)
                 .append("\n\n请严格按照以下 JSON 格式输出：\n").append(FIX_CONVERTER.getFormat());

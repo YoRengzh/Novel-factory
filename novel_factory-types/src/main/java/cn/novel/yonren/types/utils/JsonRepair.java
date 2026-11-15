@@ -219,6 +219,49 @@ public final class JsonRepair {
         return null;
     }
 
+    /** 抢救根对象中的同名字符串值；嵌套示例与字符串里的伪键不参与正文候选。 */
+    public static java.util.List<String> extractStringFields(String raw, String fieldName) {
+        String text = repair(raw);
+        if (text == null || fieldName == null || fieldName.isBlank()) return java.util.List.of();
+        java.util.List<String> values = new java.util.ArrayList<>();
+        int depth = 0;
+        for (int i = 0; i < text.length(); i++) {
+            char c = text.charAt(i);
+            if (c == '{' || c == '[') depth++;
+            else if (c == '}' || c == ']') depth--;
+            else if (c == '"') {
+                int end = closingQuote(text, i + 1);
+                if (end < 0) break;
+                String token = scanStringBody(text, i + 1);
+                int colon = nextNonWhitespace(text, end + 1);
+                if (depth == 1 && fieldName.equals(token) && colon >= 0 && text.charAt(colon) == ':') {
+                    int start = nextNonWhitespace(text, colon + 1);
+                    if (start >= 0 && text.charAt(start) == '"') {
+                        int valueEnd = closingQuote(text, start + 1);
+                        if (valueEnd < 0) break;
+                        String value = scanStringBody(text, start + 1);
+                        if (value != null && !value.isBlank()) values.add(value);
+                        i = valueEnd;
+                        continue;
+                    }
+                }
+                i = end;
+            }
+        }
+        return java.util.List.copyOf(values);
+    }
+
+    private static int closingQuote(String text, int from) {
+        boolean escaped = false;
+        for (int i = from; i < text.length(); i++) {
+            char c = text.charAt(i);
+            if (escaped) escaped = false;
+            else if (c == '\\') escaped = true;
+            else if (c == '"') return i;
+        }
+        return -1;
+    }
+
     /** 自 from 起首个非空白字符下标；无则 -1 */
     private static int nextNonWhitespace(String text, int from) {
         for (int i = Math.max(0, from); i < text.length(); i++) {

@@ -124,6 +124,10 @@ public class ReferenceUsagePolicy {
         if (scene == null || !metadata.scenes().contains(scene)) {
             return false;
         }
+        // 章节任务适配：专用范例必须能对上本章要点，未知任务不强行注入。
+        if (!matchesChapterBrief(metadata.chapterKeywords(), ctx)) {
+            return false;
+        }
         Set<Purpose> purposes = switch (scene) {
             case SETTING_DRAFT -> Set.of(Purpose.SETTING_DESIGN, Purpose.STYLE_GUIDANCE);
             case CHAPTER_PLAN, STAGE_BLUEPRINT, VOLUME_BLUEPRINT ->
@@ -156,6 +160,34 @@ public class ReferenceUsagePolicy {
         }
         return matches(metadata.themeKeywords(), ctx == null ? null : ctx.getTheme())
                 && matches(metadata.styleKeywords(), ctx == null ? null : ctx.getStyle());
+    }
+
+    /** 章节任务关键词：无约束时放行；有约束时必须能从本章要点中找到对应任务，否定表述不算命中。 */
+    private static boolean matchesChapterBrief(Set<String> keywords, PromptContext ctx) {
+        if (keywords.isEmpty()) {
+            return true;
+        }
+        String brief = ctx == null ? null : ctx.getChapterBrief();
+        if (brief == null || brief.isBlank()) {
+            return false;
+        }
+        String normalized = brief.toLowerCase(Locale.ROOT);
+        return keywords.stream().map(s -> s.toLowerCase(Locale.ROOT)).anyMatch(keyword -> {
+            int index = normalized.indexOf(keyword);
+            while (index >= 0) {
+                if (!isNegated(normalized, index)) return true;
+                index = normalized.indexOf(keyword, index + keyword.length());
+            }
+            return false;
+        });
+    }
+
+    /** “暂不突破”“无法冲关”“未破境”等否定任务不得视为该章包含对应写作任务。 */
+    private static boolean isNegated(String text, int keywordIndex) {
+        int start = Math.max(0, keywordIndex - 8);
+        String prefix = text.substring(start, keywordIndex);
+        return java.util.regex.Pattern.compile("(?:不|未|暂不|无法|不能|不需|不必|避免|放弃|并未|尚未|没有|无需|不需要|暂缓|先不)\\s*$")
+                .matcher(prefix).find();
     }
 
     private static boolean matches(Set<String> keywords, String text) {
@@ -240,7 +272,8 @@ public class ReferenceUsagePolicy {
                 inherited(object, "genres", parent == null ? Set.of() : parent.genres()),
                 inherited(object, "themeKeywords", parent == null ? Set.of() : parent.themeKeywords()),
                 inherited(object, "styleKeywords", parent == null ? Set.of() : parent.styleKeywords()),
-                inherited(object, "targetFields", parent == null ? Set.of() : parent.targetFields()));
+                inherited(object, "targetFields", parent == null ? Set.of() : parent.targetFields()),
+                inherited(object, "chapterKeywords", parent == null ? Set.of() : parent.chapterKeywords()));
     }
 
     private static Set<String> inherited(JSONObject object, String key, Set<String> parent) {
@@ -291,7 +324,7 @@ public class ReferenceUsagePolicy {
 
     private record Metadata(String group, Set<PromptScene> scenes, Set<Purpose> purposes, Set<MaterialType> types,
                             Set<String> genres, Set<String> themeKeywords, Set<String> styleKeywords,
-                            Set<String> targetFields) {
+                            Set<String> targetFields, Set<String> chapterKeywords) {
     }
 
     private record Section(Set<String> headingContains, Metadata metadata) {

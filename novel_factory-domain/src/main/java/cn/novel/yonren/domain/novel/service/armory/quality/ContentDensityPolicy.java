@@ -7,7 +7,7 @@ public final class ContentDensityPolicy {
 
     private ContentDensityPolicy() { }
 
-    /** 每章最低有效对话句数（基于番茄/起点热门小说调研数据：对话占比30%-40%，2000字约25句） */
+    /** 历史统计参考线，不能作为每章写作或修订配额。 */
     public static final int MIN_DIALOGUE_COUNT = 25;
 
     /**
@@ -38,17 +38,10 @@ public final class ContentDensityPolicy {
         return count;
     }
 
-    /**
-     * 渲染内容密度不足的审校预警（WARN 语义，供审校 prompt 注入，不直接 BLOCKING）。
-     * 对话数量达标时返回 null。
-     */
+    /** 兼容历史调用，只报告词面计数，不生成补量要求或质量结论。 */
     public static String renderLowDensityHint(int dialogueCount) {
         if (dialogueCount >= MIN_DIALOGUE_COUNT) return null;
-        int deficit = MIN_DIALOGUE_COUNT - dialogueCount;
-        return "【内容密度预警】本章有效对话仅 " + dialogueCount + " 句，低于最低要求 "
-                + MIN_DIALOGUE_COUNT + " 句（缺口 " + deficit + " 句）。"
-                + "审校时重点检查：对话是否推进情节/揭示人物/制造冲突？"
-                + "是否存在大段叙述替代角色对话？修订时应通过增加角色间对话交锋来补足，"
-                + "严禁通过增加环境描写或心理独白来凑字数。";
+        return "【对白数量观测】本章引号片段计数 " + Math.max(0, dialogueCount)
+                + "；仅为词面统计，不据此判断事件缺失、要求增加对白或触发修订。";
     }
 }

@@ -1,0 +1,142 @@
+<mxfile host="app.diagrams.net" agent="ZCode" version="24.7.8">
+  <diagram id="node-chain-full" name="小说装配节点链（含服务）">
+    <mxGraphModel dx="800" dy="1200" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="600" pageHeight="2320" math="0" shadow="0">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+
+        <!-- ===== 主链节点 ===== -->
+        <mxCell id="start" value="开始 · StoryGenerateService 发起装配" style="ellipse;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=12;" vertex="1" parent="1">
+          <mxGeometry x="90" y="40" width="420" height="36" as="geometry" />
+        </mxCell>
+
+        <mxCell id="n1" value="&lt;div style=&quot;font-weight:bold&quot;&gt;① RootNode · 规则树根节点&lt;/div&gt;&lt;div style=&quot;font-size:11px;color:#555555&quot;&gt;路由入口（进入规则树）&lt;/div&gt;" style="rounded=1;whiteSpace=wrap;html=1;arcSize=8;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=12;" vertex="1" parent="1">
+          <mxGeometry x="90" y="110" width="420" height="56" as="geometry" />
+        </mxCell>
+
+        <mxCell id="n2" value="&lt;div style=&quot;font-weight:bold&quot;&gt;② ValidateUserInputNode · 输入校验&lt;/div&gt;&lt;div style=&quot;font-size:11px;color:#555555&quot;&gt;必填字段与章数校验（缺失 → NULL_EXCEPTION）&lt;/div&gt;" style="rounded=1;whiteSpace=wrap;html=1;arcSize=8;fillColor=#ffe6cc;strokeColor=#d79b00;fontSize=12;" vertex="1" parent="1">
+          <mxGeometry x="90" y="200" width="420" height="56" as="geometry" />
+        </mxCell>
+
+        <mxCell id="n3" value="&lt;div style=&quot;font-weight:bold&quot;&gt;③ BuildStoryContextNode · 故事上下文&lt;/div&gt;&lt;div style=&quot;font-size:11px;color:#555555&quot;&gt;组装故事圣经：标题/类型/世界观/视角/基调/主人公&lt;/div&gt;&lt;div style=&quot;font-size:11px;color:#555555&quot;&gt;人物档案与续写全局总章数一并渲染&lt;/div&gt;" style="rounded=1;whiteSpace=wrap;html=1;arcSize=8;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=12;" vertex="1" parent="1">
+          <mxGeometry x="90" y="290" width="420" height="70" as="geometry" />
+        </mxCell>
+
+        <mxCell id="n4" value="&lt;div style=&quot;font-weight:bold&quot;&gt;④ EnsureCharacterDecisionProfilesNode · 人物决策档案&lt;/div&gt;&lt;div style=&quot;font-size:11px;color:#555555&quot;&gt;CharacterProfilePlanningService.ensure&lt;/div&gt;&lt;div style=&quot;font-size:11px;color:#555555&quot;&gt;└ CharacterDecisionDesignService（决策档案设计）&lt;/div&gt;&lt;div style=&quot;font-size:11px;color:#555555&quot;&gt;└ IStoryRepository（档案读写）&lt;/div&gt;" style="rounded=1;whiteSpace=wrap;html=1;arcSize=8;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=12;" vertex="1" parent="1">
+          <mxGeometry x="90" y="394" width="420" height="87" as="geometry" />
+        </mxCell>
+
+        <mxCell id="n5" value="&lt;div style=&quot;font-weight:bold&quot;&gt;⑤ BuildVolumeBlueprintNode · 卷蓝图（全书长期锚）&lt;/div&gt;&lt;div style=&quot;font-size:11px;color:#555555&quot;&gt;RollingOutlineService（卷窗口判断 / 卷 Prompt / 链式生成）&lt;/div&gt;&lt;div style=&quot;font-size:11px;color:#555555&quot;&gt;LlmInvokeService（卷蓝图调用）&lt;/div&gt;&lt;div style=&quot;font-size:11px;color:#555555&quot;&gt;StoryMemoryService（retrieveDirections 方向检索）&lt;/div&gt;" style="rounded=1;whiteSpace=wrap;html=1;arcSize=8;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=12;" vertex="1" parent="1">
+          <mxGeometry x="90" y="515" width="420" height="87" as="geometry" />
+        </mxCell>
+
+        <mxCell id="n6" value="&lt;div style=&quot;font-weight:bold&quot;&gt;⑥ BuildStageBlueprintNode · 阶段蓝图（滚动大纲）&lt;/div&gt;&lt;div style=&quot;font-size:11px;color:#555555&quot;&gt;RollingOutlineService（阶段窗口 / 链式生成，失败重试一次）&lt;/div&gt;&lt;div style=&quot;font-size:11px;color:#555555&quot;&gt;LlmInvokeService · ChapterMemoryService&lt;/div&gt;&lt;div style=&quot;font-size:11px;color:#555555&quot;&gt;StageExitReviewService（阶段出口裁决）&lt;/div&gt;&lt;div style=&quot;font-size:11px;color:#555555&quot;&gt;ForeshadowSettlementService（伏笔结算）&lt;/div&gt;&lt;div style=&quot;font-size:11px;color:#555555&quot;&gt;ForeshadowScheduleService（DONE → 回写排期 PAID）&lt;/div&gt;&lt;div style=&quot;font-size:11px;color:#555555&quot;&gt;IStoryRepository（蓝图持久化）&lt;/div&gt;" style="rounded=1;whiteSpace=wrap;html=1;arcSize=8;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=12;" vertex="1" parent="1">
+          <mxGeometry x="90" y="636" width="420" height="136" as="geometry" />
+        </mxCell>
+
+        <mxCell id="n7" value="&lt;div style=&quot;font-weight:bold&quot;&gt;⑦ BuildChapterPlanPromptNode · 章节计划 Prompt&lt;/div&gt;&lt;div style=&quot;font-size:11px;color:#555555&quot;&gt;ChapterPlanPromptService（buildPlanPrompt）&lt;/div&gt;&lt;div style=&quot;font-size:11px;color:#555555&quot;&gt;RollingOutlineService.segmentBatch（惰性分段）&lt;/div&gt;&lt;div style=&quot;font-size:11px;color:#555555&quot;&gt;CharacterStageProfileService.ensure（人物阶段档案）&lt;/div&gt;" style="rounded=1;whiteSpace=wrap;html=1;arcSize=8;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=12;" vertex="1" parent="1">
+          <mxGeometry x="90" y="806" width="420" height="87" as="geometry" />
+        </mxCell>
+
+        <mxCell id="n8" value="&lt;div style=&quot;font-weight:bold&quot;&gt;⑧ CallChapterPlanLlmNode · 调用规划 LLM&lt;/div&gt;&lt;div style=&quot;font-size:11px;color:#555555&quot;&gt;ChapterPlanSegmentPlanner（规划执行闭环）&lt;/div&gt;&lt;div style=&quot;font-size:11px;color:#555555&quot;&gt;└ PlanBranchService（分支推演）&lt;/div&gt;&lt;div style=&quot;font-size:11px;color:#555555&quot;&gt;└ PlanCausalityReviewService（计划因果核验）&lt;/div&gt;&lt;div style=&quot;font-size:11px;color:#555555&quot;&gt;└ LlmInvokeService（三级降级 / 反馈重规划）&lt;/div&gt;&lt;div style=&quot;font-size:11px;color:#555555&quot;&gt;ChapterMemoryService（对话承载闸门名册）&lt;/div&gt;" style="rounded=1;whiteSpace=wrap;html=1;arcSize=8;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=12;" vertex="1" parent="1">
+          <mxGeometry x="90" y="927" width="420" height="119" as="geometry" />
+        </mxCell>
+
+        <mxCell id="n9" value="&lt;div style=&quot;font-weight:bold&quot;&gt;⑨ ParseChapterPlanNode · 解析章节计划&lt;/div&gt;&lt;div style=&quot;font-size:11px;color:#555555&quot;&gt;ChapterPlanChecks.parseLenient（纵深兜底解析）&lt;/div&gt;&lt;div style=&quot;font-size:11px;color:#555555&quot;&gt;ChapterType 归一化 · normalizeChapterNumbers（编号平移）&lt;/div&gt;&lt;div style=&quot;font-size:11px;color:#555555&quot;&gt;ScenePlanPolicy（v2 场景契约派生视图刷新）&lt;/div&gt;" style="rounded=1;whiteSpace=wrap;html=1;arcSize=8;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=12;" vertex="1" parent="1">
+          <mxGeometry x="90" y="1080" width="420" height="87" as="geometry" />
+        </mxCell>
+
+        <mxCell id="n10" value="&lt;div style=&quot;font-weight:bold&quot;&gt;⑩ ValidateChapterPlanNode · 校验章节计划&lt;/div&gt;&lt;div style=&quot;font-size:11px;color:#555555&quot;&gt;ChapterPlanChecks.validateSegmentStructure&lt;/div&gt;&lt;div style=&quot;font-size:11px;color:#555555&quot;&gt;（结构 / 章数 / 起点编号，失败抛异常）&lt;/div&gt;" style="rounded=1;whiteSpace=wrap;html=1;arcSize=8;fillColor=#ffe6cc;strokeColor=#d79b00;fontSize=12;" vertex="1" parent="1">
+          <mxGeometry x="90" y="1201" width="420" height="70" as="geometry" />
+        </mxCell>
+
+        <mxCell id="n11" value="&lt;div style=&quot;font-weight:bold&quot;&gt;⑪ GenerateChapterContentNode · 逐章生成正文&lt;/div&gt;&lt;div style=&quot;font-size:11px;color:#555555&quot;&gt;委托 ChapterWorker.generateAll（子流程见下方）&lt;/div&gt;" style="rounded=1;whiteSpace=wrap;html=1;arcSize=8;fillColor=#e1d5e7;strokeColor=#9673a6;fontSize=12;" vertex="1" parent="1">
+          <mxGeometry x="90" y="1305" width="420" height="53" as="geometry" />
+        </mxCell>
+
+        <mxCell id="n12" value="&lt;div style=&quot;font-weight:bold&quot;&gt;⑫ PersistChapterPlanNode · 持久化&lt;/div&gt;&lt;div style=&quot;font-size:11px;color:#555555&quot;&gt;IStoryRepository（章节计划与产物落库）&lt;/div&gt;" style="rounded=1;whiteSpace=wrap;html=1;arcSize=8;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=12;" vertex="1" parent="1">
+          <mxGeometry x="90" y="1392" width="420" height="53" as="geometry" />
+        </mxCell>
+
+        <mxCell id="end" value="&lt;div style=&quot;font-weight:bold&quot;&gt;终态 · defaultStrategyHandler&lt;/div&gt;&lt;div style=&quot;font-size:11px;color:#555555&quot;&gt;返回 StoryGenerateResultAggregate&lt;/div&gt;" style="ellipse;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=12;" vertex="1" parent="1">
+          <mxGeometry x="90" y="1479" width="420" height="48" as="geometry" />
+        </mxCell>
+
+        <mxCell id="fail" value="&lt;div style=&quot;font-weight:bold&quot;&gt;异常终止&lt;/div&gt;&lt;div style=&quot;font-size:11px;color:#555555&quot;&gt;校验不通过 · 抛出异常&lt;/div&gt;" style="rounded=1;whiteSpace=wrap;html=1;arcSize=8;fillColor=#f8cecc;strokeColor=#b85450;fontSize=12;" vertex="1" parent="1">
+          <mxGeometry x="8" y="1560" width="170" height="48" as="geometry" />
+        </mxCell>
+
+        <!-- ===== ChapterWorker 子流程 ===== -->
+        <mxCell id="worker" value="ChapterWorker · 逐章循环&lt;div style=&quot;font-size:11px;font-weight:normal;color:#555555&quot;&gt;GenerateChapterContentNode 内部&lt;/div&gt;" style="rounded=1;whiteSpace=wrap;html=1;verticalAlign=top;align=left;spacingLeft=12;spacingTop=6;fillColor=#f5f5f5;strokeColor=#666666;dashed=1;fontSize=12;fontStyle=1" vertex="1" parent="1">
+          <mxGeometry x="70" y="1650" width="480" height="566" as="geometry" />
+        </mxCell>
+
+        <mxCell id="w1" value="&lt;div style=&quot;font-weight:bold&quot;&gt;记忆组装&lt;/div&gt;&lt;div style=&quot;font-size:11px;color:#555555&quot;&gt;滚动大纲 · 故事记忆 · 章节记忆 · 节拍 · 人物阶段档案&lt;/div&gt;" style="rounded=1;whiteSpace=wrap;html=1;arcSize=8;fillColor=#ffffff;strokeColor=#9673a6;fontSize=12;" vertex="1" parent="worker">
+          <mxGeometry x="36" y="44" width="408" height="44" as="geometry" />
+        </mxCell>
+        <mxCell id="w2" value="&lt;div style=&quot;font-weight:bold&quot;&gt;LLM 生成正文草稿&lt;/div&gt;&lt;div style=&quot;font-size:11px;color:#555555&quot;&gt;LlmInvokeService · WriterSampleService（范文检索）&lt;/div&gt;" style="rounded=1;whiteSpace=wrap;html=1;arcSize=8;fillColor=#ffffff;strokeColor=#9673a6;fontSize=12;" vertex="1" parent="worker">
+          <mxGeometry x="36" y="98" width="408" height="44" as="geometry" />
+        </mxCell>
+        <mxCell id="w3" value="&lt;div style=&quot;font-weight:bold&quot;&gt;段落密度审校与改写&lt;/div&gt;&lt;div style=&quot;font-size:11px;color:#555555&quot;&gt;ParagraphDensityAuditService&lt;/div&gt;" style="rounded=1;whiteSpace=wrap;html=1;arcSize=8;fillColor=#ffffff;strokeColor=#9673a6;fontSize=12;" vertex="1" parent="worker">
+          <mxGeometry x="36" y="152" width="408" height="44" as="geometry" />
+        </mxCell>
+        <mxCell id="w4" value="&lt;div style=&quot;font-weight:bold&quot;&gt;质量门审校修订&lt;/div&gt;&lt;div style=&quot;font-size:11px;color:#555555&quot;&gt;QualityGate · QualityReviewService · 四级降级&lt;/div&gt;" style="rounded=1;whiteSpace=wrap;html=1;arcSize=8;fillColor=#ffffff;strokeColor=#9673a6;fontSize=12;" vertex="1" parent="worker">
+          <mxGeometry x="36" y="206" width="408" height="44" as="geometry" />
+        </mxCell>
+        <mxCell id="w5" value="&lt;div style=&quot;font-weight:bold&quot;&gt;章节摘要与统计&lt;/div&gt;&lt;div style=&quot;font-size:11px;color:#555555&quot;&gt;ChapterSummaryService · StyleStatService · ConsistencyIndexService&lt;/div&gt;" style="rounded=1;whiteSpace=wrap;html=1;arcSize=8;fillColor=#ffffff;strokeColor=#9673a6;fontSize=12;" vertex="1" parent="worker">
+          <mxGeometry x="36" y="260" width="408" height="44" as="geometry" />
+        </mxCell>
+        <mxCell id="w6" value="&lt;div style=&quot;font-weight:bold&quot;&gt;台账裁决&lt;/div&gt;&lt;div style=&quot;font-size:11px;color:#555555&quot;&gt;LedgerAdjudicateService&lt;/div&gt;" style="rounded=1;whiteSpace=wrap;html=1;arcSize=8;fillColor=#ffffff;strokeColor=#9673a6;fontSize=12;" vertex="1" parent="worker">
+          <mxGeometry x="36" y="314" width="408" height="44" as="geometry" />
+        </mxCell>
+        <mxCell id="w7" value="&lt;div style=&quot;font-weight:bold&quot;&gt;伏笔结算与排期&lt;/div&gt;&lt;div style=&quot;font-size:11px;color:#555555&quot;&gt;ForeshadowSettlementService · ForeshadowScheduleService&lt;/div&gt;" style="rounded=1;whiteSpace=wrap;html=1;arcSize=8;fillColor=#ffffff;strokeColor=#9673a6;fontSize=12;" vertex="1" parent="worker">
+          <mxGeometry x="36" y="368" width="408" height="44" as="geometry" />
+        </mxCell>
+        <mxCell id="w8" value="&lt;div style=&quot;font-weight:bold&quot;&gt;结局审计 · FinaleReview&lt;/div&gt;&lt;div style=&quot;font-size:11px;color:#555555&quot;&gt;不通过且返工额度未满（MAX_FINALE_REWORK）→ 返工扩写&lt;/div&gt;" style="rounded=1;whiteSpace=wrap;html=1;arcSize=8;fillColor=#ffffff;strokeColor=#9673a6;fontSize=12;" vertex="1" parent="worker">
+          <mxGeometry x="36" y="422" width="408" height="44" as="geometry" />
+        </mxCell>
+        <mxCell id="wMore" value="其余支撑服务（预算 / 健康 / 收尾 / 留痕）&lt;br&gt;BatchHealthService · QualityDebtService · StageReportService&lt;br&gt;StageExitReviewService · CandidateSampleService&lt;br&gt;PromptBudgetGuard · MechanicalEventRecorder&lt;br&gt;CheckpointService · ChapterCandidateService" style="text;html=1;align=center;verticalAlign=top;fontSize=11;fontColor=#555555;" vertex="1" parent="worker">
+          <mxGeometry x="36" y="486" width="408" height="80" as="geometry" />
+        </mxCell>
+
+        <!-- ===== 主链连线 ===== -->
+        <mxCell id="e0" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;fontSize=11;" edge="1" parent="1" source="start" target="n1"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="e1" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;fontSize=11;" edge="1" parent="1" source="n1" target="n2"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="e2" value="校验通过" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;fontSize=11;" edge="1" parent="1" source="n2" target="n3"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="ef1" value="校验失败" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;fontSize=11;strokeColor=#b85450;fontColor=#b85450;exitX=0;exitY=0.5;entryX=0.22;entryY=0;" edge="1" parent="1" source="n2" target="fail"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="e3" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;fontSize=11;" edge="1" parent="1" source="n3" target="n4"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="e4" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;fontSize=11;" edge="1" parent="1" source="n4" target="n5"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="e5" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;fontSize=11;" edge="1" parent="1" source="n5" target="n6"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="e6" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;fontSize=11;" edge="1" parent="1" source="n6" target="n7"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="e7" value="分段 prompts" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;fontSize=11;" edge="1" parent="1" source="n7" target="n8"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="e8" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;fontSize=11;" edge="1" parent="1" source="n8" target="n9"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="e9" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;fontSize=11;" edge="1" parent="1" source="n9" target="n10"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="e10" value="校验通过" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;fontSize=11;" edge="1" parent="1" source="n10" target="n11"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="ef2" value="校验失败" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;fontSize=11;strokeColor=#b85450;fontColor=#b85450;exitX=0;exitY=0.5;entryX=0.07;entryY=0;" edge="1" parent="1" source="n10" target="fail"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="e11" value="全部章节完成" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;fontSize=11;" edge="1" parent="1" source="n11" target="n12"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="e12" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;fontSize=11;" edge="1" parent="1" source="n12" target="end"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="delegate" value="委托" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;fontSize=11;dashed=1;strokeColor=#666666;fontColor=#666666;exitX=1;exitY=0.5;entryX=0.99;entryY=0;" edge="1" parent="1" source="n11" target="worker"><mxGeometry relative="1" as="geometry" /></mxCell>
+
+        <!-- ===== 子流程连线 ===== -->
+        <mxCell id="we1" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;fontSize=11;" edge="1" parent="worker" source="w1" target="w2"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="we2" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;fontSize=11;" edge="1" parent="worker" source="w2" target="w3"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="we3" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;fontSize=11;" edge="1" parent="worker" source="w3" target="w4"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="we4" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;fontSize=11;" edge="1" parent="worker" source="w4" target="w5"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="we5" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;fontSize=11;" edge="1" parent="worker" source="w5" target="w6"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="we6" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;fontSize=11;" edge="1" parent="worker" source="w6" target="w7"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="we7" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;fontSize=11;" edge="1" parent="worker" source="w7" target="w8"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="lw1" value="修订重写" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;fontSize=11;dashed=1;strokeColor=#9673a6;fontColor=#9673a6;exitX=0;exitY=0.5;entryX=0;entryY=0.5;" edge="1" parent="worker" source="w4" target="w2"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="lw2" value="返工扩写" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;fontSize=11;dashed=1;strokeColor=#b85450;fontColor=#b85450;exitX=1;exitY=0.5;entryX=1;entryY=0.5;" edge="1" parent="worker" source="w8" target="w2"><mxGeometry relative="1" as="geometry" /></mxCell>
+
+        <!-- ===== 图例 ===== -->
+        <mxCell id="lg1" value="校验节点" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffe6cc;strokeColor=#d79b00;fontSize=10;" vertex="1" parent="1"><mxGeometry x="36" y="2260" width="82" height="26" as="geometry" /></mxCell>
+        <mxCell id="lg2" value="上下文/蓝图" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=10;" vertex="1" parent="1"><mxGeometry x="124" y="2260" width="82" height="26" as="geometry" /></mxCell>
+        <mxCell id="lg3" value="计划链路" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=10;" vertex="1" parent="1"><mxGeometry x="212" y="2260" width="82" height="26" as="geometry" /></mxCell>
+        <mxCell id="lg4" value="正文生成" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;fontSize=10;" vertex="1" parent="1"><mxGeometry x="300" y="2260" width="82" height="26" as="geometry" /></mxCell>
+        <mxCell id="lg5" value="持久化/终态" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=10;" vertex="1" parent="1"><mxGeometry x="388" y="2260" width="82" height="26" as="geometry" /></mxCell>
+        <mxCell id="lg6" value="异常终止" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;fontSize=10;" vertex="1" parent="1"><mxGeometry x="476" y="2260" width="82" height="26" as="geometry" /></mxCell>
+
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>

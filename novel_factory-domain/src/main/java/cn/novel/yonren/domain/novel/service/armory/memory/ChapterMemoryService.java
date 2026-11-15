@@ -403,8 +403,8 @@ public class ChapterMemoryService {
         String realm = latestCultivationRealm(ordered);
         if (realm != null) {
             head.append("【主角境界锁定】主角当前真实境界：").append(realm)
-                    .append("。此为系统强制设定，严禁在正文中擅自提升、降低或改变；")
-                    .append("仅当本章计划的关键事件明确包含突破/晋升时才允许变化，且变化必须有过程铺垫与代价。\n\n");
+                    .append("。这是最近已确认的境界记录，后章未提及不表示其失效。")
+                    .append("变化须有本章计划依据和实际过程；仅有未来目标不代表已经突破，代价按本书机制处理。\n\n");
         }
         blocks.add(section("境界锁定", MEMORY_PRIORITY_REALM_LOCK, false, head));
 
@@ -412,14 +412,9 @@ public class ChapterMemoryService {
         // 无年龄事实时整块不加入，不编造也不留空标签占位。
         String timeAnchor = ConsistencyIndexService.renderTimeAnchor(ordered);
         if (StringUtils.isNotBlank(timeAnchor)) {
-            // 时间锚只防倒退，不强制每章流逝；timeAdvance 是可选背景说明，不是配额。
-            // 学段年龄与摘要年龄冲突时，按明确的阶段学段进行覆盖。
-            String stageAge = stageAgeOverride(stageBlueprint);
-            String ageLine = StringUtils.isNotBlank(stageAge)
-                    ? "\n【学段年龄·以此为准】主角当前学段对应 **" + stageAge + " 岁**"
-                            + "（由阶段目标的学段直接确定，优先于上方摘要年龄；若两者冲突，以本值为准）。\n"
-                    : "";
-            String locked = timeAnchor + ageLine + "\n【时间锚·只防倒退】年龄/故事时间以上述值为准，"
+            // 阶段学段是目标，不覆盖已有年龄事实；时间推进同样不是逐章配额。
+            String locked = timeAnchor + "\n【时间锚·只防倒退】年龄/故事时间以上述已确认事实为准，"
+                    + "阶段目标中的学段不代表当前年龄，不能据此改写年龄事实。"
                     + "**禁止写回已确立时点之前**；向前推进随剧情自然发生，本章不跨时间也完全合法。\n"
                     + (StringUtils.isNotBlank(timeAdvance)
                             ? "【本章时间说明】本章时间跨到：" + timeAdvance
@@ -1355,37 +1350,6 @@ public class ChapterMemoryService {
      * 规划/核验层的审计说明不应扩大写手前缀；只渲染可执行缺口。
      * 这与 {@link #renderForeshadowing} 的"写手视图无元信息"是同一条纪律。
      */
-    /**
- * 学段→年龄覆盖 。与 {@code ChapterPlanPromptService#stageToAge} 同口径。
-     *
-     * 摘要里的年龄事实由模型从正文抄出，正文写错就一路错下去。学段（高一=15岁、初二=13岁）
-     * 与生日是否已过无关，也不受正文年份写错的影响，是比摘要年龄更可靠的锚点。
-     *
-     * @return 年龄字符串（如 "15"）；学段识别不到时返回 null（不编造，沿用摘要锚）
-     */
-    private String stageAgeOverride(StageBlueprintEntity blueprint) {
-        String text = blueprint == null ? null : blueprint.getStageGoal();
-        if (StringUtils.isBlank(text)) {
-            return null;
-        }
-        String[][] mapping = {
-                {"高三", "17"}, {"高二", "16"}, {"高一", "15"},
-                {"初三", "14"}, {"初二", "13"}, {"初一", "12"},
-                {"六年级", "11"}, {"五年级", "10"}, {"四年级", "9"},
-                {"三年级", "8"}, {"二年级", "7"}, {"一年级", "6"},
-                {"大一", "18"}, {"大二", "19"}, {"大三", "20"}, {"大四", "21"},
-        };
-        for (String[] pair : mapping) {
-            if (text.contains(pair[0])) {
-                return pair[1];
-            }
-        }
-        if (text.contains("高中")) return "15";
-        if (text.contains("初中")) return "12";
-        if (text.contains("大学")) return "18";
-        return null;
-    }
-
     private void renderStageBlueprint(StringBuilder sb, StageBlueprintEntity blueprint) {
         if (blueprint == null) {
             return;
@@ -1728,12 +1692,25 @@ public class ChapterMemoryService {
     }
 
     /**
-     * 主角当前境界：取最近一条记录了 cultivationRealm 的摘要（后章覆盖前章）
+     * 明确的未记录占位可附说明，也能是“境界未知”“本章未提及境界”这类复合形态；
+     * 不能用含有“未知”的任意字符串覆盖真实境界。
      */
+    private static final java.util.regex.Pattern UNKNOWN_REALM = java.util.regex.Pattern.compile(
+            "(?i)^(?:(?:主角)?(?:当前)?(?:真实)?(?:境界|cultivation\\s*realm)\\s*[：:]?\\s*)?"
+                    + "(?:本章|该章|此章)?(?:正文)?(?:未|没有|未予|未作)?(?:提及|说明|明示|记录|交代|给出|明确)"
+                    + "(?:到|过)?(?:主角)?(?:的)?(?:当前)?(?:真实)?(?:境界|修为)?"
+                    + "(?:\\s*[（(][^）)]*[）)])?[。.!！]?"
+                    + "|^(?:(?:主角)?(?:当前)?(?:真实)?的?(?:境界|修为)\\s*[：:]?\\s*)?"
+                    + "(?:未知|未明|未提及|未说明|未明示|未记录|不详|不明确|不清楚|unknown|unspecified|not\\s+(?:mentioned|specified)|n/?a|null)"
+                    + "(?:\\s*[（(][^）)]*[）)])?[。.!！]?$"
+    );
+
+    /** 主角境界沿最近确认值继承；缺省和未知不表示境界变化。 */
     private String latestCultivationRealm(List<ChapterSummaryEntity> ordered) {
         for (int i = ordered.size() - 1; i >= 0; i--) {
-            if (StringUtils.isNotBlank(ordered.get(i).getCultivationRealm())) {
-                return ordered.get(i).getCultivationRealm().trim();
+            String realm = ordered.get(i).getCultivationRealm();
+            if (StringUtils.isNotBlank(realm) && !UNKNOWN_REALM.matcher(realm.trim()).matches()) {
+                return realm.trim();
             }
         }
         return null;

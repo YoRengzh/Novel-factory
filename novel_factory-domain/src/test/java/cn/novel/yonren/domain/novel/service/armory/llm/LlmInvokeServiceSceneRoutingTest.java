@@ -65,6 +65,40 @@ class LlmInvokeServiceSceneRoutingTest {
     }
 
     @Test
+    void duplicateDynamicCopyIsSkippedButPartialFixedSectionKeepsRemainder() {
+        PromptBuilder promptBuilder = mock(PromptBuilder.class);
+        LlmGateway gateway = mock(LlmGateway.class);
+        DynamicReferenceService references = mock(DynamicReferenceService.class);
+        when(promptBuilder.collectRules(any(), any())).thenReturn(List.of(
+                new cn.novel.yonren.domain.novel.model.valobj.prompt.PromptRule(
+                        "anti-padding", "完整章节：删掉重复的判断。", PromptRulePosition.SYSTEM)));
+        when(references.selectAsRules(any(), any(), any())).thenReturn(List.of(
+                new cn.novel.yonren.domain.novel.model.valobj.prompt.PromptRule(
+                        "ref-anti-padding", "完整章节：删掉重复的判断。", PromptRulePosition.USER_TAIL),
+                new cn.novel.yonren.domain.novel.model.valobj.prompt.PromptRule(
+                        "ref-longer", "完整章节：删掉重复的判断。\n另一节：保留有阅读功能的心理描写。", PromptRulePosition.USER_TAIL)));
+        when(gateway.complete(any(), any())).thenReturn("{}");
+
+        new LlmInvokeService(promptBuilder, gateway, references).invoke(new StoryVO(),
+                PromptScene.SETTING_DRAFT, PromptContext.builder().theme("都市").build(), "业务prompt", null);
+
+        ArgumentCaptor<LlmCall> captor = ArgumentCaptor.forClass(LlmCall.class);
+        verify(gateway).complete(any(), captor.capture());
+        String sent = captor.getValue().getUserPrompt();
+        org.junit.jupiter.api.Assertions.assertFalse(sent.contains("【ref-anti-padding】"),
+                "与固定资料完全相同的动态副本不得重复注入");
+        org.junit.jupiter.api.Assertions.assertTrue(sent.contains("【ref-longer】"),
+                "含新增小节的动态资料不能按文件名误删");
+    }
+
+    private static final class PromptRulePosition {
+        static final cn.novel.yonren.domain.novel.model.valobj.prompt.PromptRule.InjectPosition SYSTEM =
+                cn.novel.yonren.domain.novel.model.valobj.prompt.PromptRule.InjectPosition.SYSTEM;
+        static final cn.novel.yonren.domain.novel.model.valobj.prompt.PromptRule.InjectPosition USER_TAIL =
+                cn.novel.yonren.domain.novel.model.valobj.prompt.PromptRule.InjectPosition.USER_TAIL;
+    }
+
+    @Test
     void settingDraftRoutesToItsOwnSceneModel() {
         PromptBuilder promptBuilder = mock(PromptBuilder.class);
         LlmGateway gateway = mock(LlmGateway.class);

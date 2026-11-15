@@ -68,11 +68,24 @@ public class VectorReferenceRetriever {
 
     /** 使用查缓存前已冻结的会话；检索/资料批次不重新解析接入配置。 */
     public List<String> retrieve(Prepared prepared, PromptScene scene, PromptContext ctx) {
+        return retrieve(prepared, scene, ctx, null);
+    }
+
+    /**
+     * 限定候选来源的检索：资格过滤必须在 topK 名额竞争之前完成，
+     * 否则前几名不合格的资料被丢弃后，后面的合格资料不会递补。
+     */
+    public List<String> retrieve(Prepared prepared, PromptScene scene, PromptContext ctx, Set<String> candidates) {
         Objects.requireNonNull(prepared, "prepared reference retrieval");
         if (prepared.allowedSources.isEmpty()) {
             return List.of();
         }
         Set<String> allowed = prepared.allowedSources;
+        if (candidates != null) {
+            allowed = allowed.stream().filter(candidates::contains)
+                    .collect(java.util.stream.Collectors.toUnmodifiableSet());
+            if (allowed.isEmpty()) return List.of();
+        }
         EmbeddingGateway.EmbeddingSession session = prepared.session;
         List<float[]> vectors = session.embed(List.of(buildQueryText(scene, ctx)));
         if (vectors == null || vectors.size() != 1) {

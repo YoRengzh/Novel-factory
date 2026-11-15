@@ -22,6 +22,8 @@ import java.util.concurrent.ConcurrentHashMap;
 @NoArgsConstructor
 public class GenerationJob {
 
+    public static final String PLAN_ADJUSTMENT_REQUIRED = "PLAN_ADJUSTMENT_REQUIRED";
+
     private String jobId;
 
     private volatile JobStatus status;
@@ -146,6 +148,12 @@ public class GenerationJob {
         }
         finishedAtMs = System.currentTimeMillis();
         status = JobStatus.COMPLETED;
+    }
+
+    /** 记录章节循环暂停原因，作业终态由编排层在落盘后设置。 */
+    public synchronized void requirePlanAdjustment(int chapterNo, int plannedTotal, String storyDirName, String reason) {
+        updateProgress(PLAN_ADJUSTMENT_REQUIRED, chapterNo, plannedTotal, storyDirName);
+        this.errorMessage = "第 " + chapterNo + " 章计划需调整：" + reason;
     }
 
     public synchronized void markFailed(String errorMessage) {

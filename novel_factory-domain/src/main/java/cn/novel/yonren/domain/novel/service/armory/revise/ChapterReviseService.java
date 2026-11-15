@@ -12,7 +12,11 @@ import cn.novel.yonren.domain.novel.config.StoryProperties;
 import cn.novel.yonren.types.enums.ModelScene;
 import cn.novel.yonren.domain.novel.service.armory.memory.StyleStatService;
 import cn.novel.yonren.domain.novel.service.armory.quality.PatchIntegrityPolicy;
-import cn.novel.yonren.domain.novel.service.armory.quality.PlanAdherencePolicy;
+import cn.novel.yonren.domain.novel.service.armory.plan.ScenePlanPolicy;
+import cn.novel.yonren.domain.novel.service.armory.prompt.WritingContractPolicy;
+import cn.novel.yonren.domain.novel.service.armory.quality.ChapterLengthPolicy;
+import cn.novel.yonren.domain.novel.model.valobj.revise.RewriteContext;
+import cn.novel.yonren.domain.novel.service.armory.llm.LlmLocalRejectionException;
 import cn.novel.yonren.types.utils.JsonParseFallback;
 import com.alibaba.fastjson2.JSON;
 import com.fasterxml.jackson.core.json.JsonReadFeature;
@@ -42,7 +46,14 @@ public class ChapterReviseService {
 
     private static final BeanOutputConverter<ChapterContentEntity> CONVERTER =
             new BeanOutputConverter<>(ChapterContentEntity.class,
-                    JsonMapper.builder().enable(JsonReadFeature.ALLOW_UNESCAPED_CONTROL_CHARS).build());
+                    JsonMapper.builder().enable(JsonReadFeature.ALLOW_UNESCAPED_CONTROL_CHARS)
+                            .disable(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES).build());
+
+    /** 先解析完成状态，再解析正文/补丁，避免 JSON 降级解析把明确拒绝吞成可采纳稿。 */
+    private static final BeanOutputConverter<CompletionStatus> STATUS_CONVERTER =
+            new BeanOutputConverter<>(CompletionStatus.class,
+                    JsonMapper.builder().enable(JsonReadFeature.ALLOW_UNESCAPED_CONTROL_CHARS)
+                            .disable(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES).build());
 
     /**
      * 定向补丁输出 schema。关闭"未知字段即失败"：补丁 JSON 极小，
@@ -58,9 +69,8 @@ public class ChapterReviseService {
     private static final double MIN_LENGTH_RATIO = 0.8;
 
     /**
-     * 修订轮允许丢失的关键事件条数上限：BLOCKING 违规可能与关键事件场景重叠，
-     * 修复事实或时序矛盾时可能需要改写该场景。
-     * 允许丢 1 条换取硬伤修复；丢 ≥2 条说明修订在跑偏，仍然拒绝。
+     * 兼容事实硬伤修正造成的词面覆盖变化，阈值不证明真实事件可被删除。
+     * 最多容忍 1 条供后续语义复核；真实未完成须通过 completed=false 返回拒绝。
      */
     private static final int REVISE_ALLOWED_EVENT_LOSS = 1;
 
@@ -70,7 +80,7 @@ public class ChapterReviseService {
                     + "\n修订原则："
                     + "\n1. 只修 issue 指向的问题；"
                     + "\n2. 未被 issue 覆盖的段落保持原样；"
-                    + "\n3. 输出与正文同 schema 的整章 JSON。";
+                    + "\n3. 输出整章 JSON；不能同时满足可信事实与本次计划时，按完成状态规则明确拒绝。";
 
 
     private static final String TASK_HEADER_PATCH =
@@ -84,16 +94,16 @@ public class ChapterReviseService {
                     + "\n4. 只有当问题**确实无法用局部改动收敛**（例如需要重排整章结构、事件顺序整体错乱）时，"
                     + "才输出 {\"patches\":[]} 表示放弃。"
                     + "\n\n【补丁的典型形态（示例）】"
-                    + "\n问题：账本记录某物落进了石缝，本章开场却直接拿在手里，缺少取回的过渡描写"
-                    + "\n正确做法：anchor = 该物首次出现的那一句原文；replacement = 同一句 + 补上的过渡描写"
+                    + "\n问题：正文首次持有某物，但可信上下文已明确记录取回，只漏了本章衔接"
+                    + "\n正确做法：anchor = 该物首次出现的那一句原文；replacement = 同一句 + 有事实依据的衔接"
+                    + "\n若无证据支持取回，不能编造取回过程；先核对能力、地点与物品状态，无法兼容则明确拒绝。"
                     + "\n错误做法：在 replacement 里重写整段甚至整章——那已经不是定向补丁了。";
 
-    /** 套话式微动作黑名单：单章每条至多 1 次；跨章累计超频由风格账疲劳词兜底（同源词表） */
-    private static final List<String> MICRO_ACTION_WATCHLIST = List.of(
-            "喉结滚动", "喉结滑动", "声音压低", "压低声音", "呼吸一滞", "呼吸一顿",
-            "瞳孔骤缩", "瞳孔微缩", "身体一僵", "身形一滞");
-    /** 微动作单章限额：超过即视为高频，修订时点名替换 */
-    private static final int MICRO_ACTION_CHAPTER_LIMIT = 1;
+    private static final String COMPLETION_RULE =
+            "【完成状态】完成修订时可返回 completed=true；reason 说明有事实依据的修正，不把猜测当证据。"
+                    + "若计划与可信冻结事实无法同时满足，返回 completed=false（未完成/拒绝），reason 指明冲突、依据及计划需调整；"
+                    + "事实不足时指出缺失证据，不编造新能力、物品、材料或既成事件。"
+                    + "completed=false 的正文或补丁均不采纳，也不靠扩大重写范围强行完成；不改写历史稿、不自动调整计划。";
 
     private final LlmGateway llmGateway;
     private final StyleStatService styleStatService;
@@ -122,6 +132,14 @@ public class ChapterReviseService {
                                StyleStatEntity styleStat,
                                int globalNo,
                                String previousRejectionReason) {
+        return revise(storyVO, item, originalContent, blockingIssues, ledgerPrompt, foreshadowing,
+                styleStat, globalNo, previousRejectionReason, null);
+    }
+
+    public ReviseResult revise(StoryVO storyVO, ChapterPlanItemEntity item, String originalContent,
+                               List<ChapterIssueEntity> blockingIssues, String ledgerPrompt, String foreshadowing,
+                               StyleStatEntity styleStat, int globalNo, String previousRejectionReason,
+                               RewriteContext writerContext) {
         if (blockingIssues == null || blockingIssues.isEmpty()) {
             return new ReviseResult(
                     RevisionDecisionEntity.builder()
@@ -132,33 +150,45 @@ public class ChapterReviseService {
                     null);
         }
 
+        if (writerContext != null) {
+            writerContext.checkCancellation();
+            if (ChapterLengthPolicy.isCollapsed(originalContent)) {
+                return collapseRewrite(storyVO, item, originalContent, blockingIssues, ledgerPrompt, foreshadowing,
+                        styleStat, globalNo, previousRejectionReason, writerContext);
+            }
+        }
         try {
             // 定向补丁优先：BLOCKING 若能靠"改一句"收敛，就不该付整章重写的代价——
             // 整章重写会把**所有未被问题命中的段落**也一并重出，文风回退风险与修复范围完全不成比例。
-            // 未采用不是异常（模型判定不是局部问题 / 锚点不唯一 / 补丁不过闸门），一律安静回退到整章重写
+            // 空补丁/锚点失败/未过闸门可回退；明确未完成或计划冲突则直接拒绝，不扩大任务范围。
             if (patchEnabled()) {
                 PatchOutcome patch = tryPatch(storyVO, item, originalContent, blockingIssues,
-                        ledgerPrompt, foreshadowing, styleStat, globalNo, previousRejectionReason);
+                        ledgerPrompt, foreshadowing, styleStat, globalNo, previousRejectionReason, writerContext);
                 if (patch.applied()) {
                     log.info("第 {} 章定向补丁已采纳（只改局部，其余正文逐字保留）", globalNo);
-                    return new ReviseResult(
-                            RevisionDecisionEntity.builder()
-                                    .attempted(true)
-                                    .accepted(true)
-                                    .reason("定向补丁通过采纳闸门")
-                                    .build(),
-                            patchedEntity(patch.content()));
+            return new ReviseResult(
+                    RevisionDecisionEntity.builder()
+                            .attempted(true)
+                            .accepted(true)
+                            .reason("定向补丁通过采纳闸门，计划完整性待复核")
+                            .reviewCandidates(missingEvents(originalContent, patch.content(), item))
+                            .build(),
+                    patchedEntity(patch.content()));
                 }
                 log.info("第 {} 章定向补丁未采用（{}），回退整章重写", globalNo, patch.failureReason());
             }
 
             // maxTokens/temperature 不再硬编码，由 scene-models 的 revise 场景配置驱动
+            if (writerContext != null) writerContext.checkCancellation();
             String raw = llmGateway.complete(storyVO.getModule(), LlmCall.builder()
+                    .systemPrompt(writerContext == null ? null : writerContext.writerSystemPrompt())
                     .userPrompt(buildPrompt(item, originalContent, blockingIssues, ledgerPrompt,
-                            foreshadowing, styleStat, globalNo, previousRejectionReason))
+                            foreshadowing, styleStat, globalNo, previousRejectionReason, false, writerContext))
                     .label("revise-第" + globalNo + "章")
                     .scene(ModelScene.CHAPTER_REVISE)
                     .build());
+            if (writerContext != null) writerContext.checkCancellation();
+            rejectIfIncomplete(raw);
 
             ChapterContentEntity revised = tryConvert(raw);
             if (revised != null) {
@@ -187,13 +217,83 @@ public class ChapterReviseService {
                     RevisionDecisionEntity.builder()
                             .attempted(true)
                             .accepted(true)
-                            .reason("修订稿通过采纳闸门")
+                            .reason("修订稿通过采纳闸门，计划完整性待复核")
+                            .reviewCandidates(missingEvents(originalContent, revised.getContent(), item))
                             .build(),
                     revised);
+        } catch (IncompleteRevision refusal) {
+            return new ReviseResult(buildPlanAdjustmentRejected(refusal.getMessage()), null);
         } catch (Exception e) {
+            LlmLocalRejectionException.rethrowIfPresent(e);
+            if (writerContext != null) writerContext.checkCancellation();
+            if (e instanceof java.util.concurrent.CancellationException cancellation) throw cancellation;
             log.warn("章节修订异常，chapterNo: {}", globalNo, e);
             return new ReviseResult(buildRejected("修订异常：" + e.getMessage()), null);
         }
+    }
+
+    private ReviseResult collapseRewrite(StoryVO storyVO, ChapterPlanItemEntity item, String originalContent,
+                                          List<ChapterIssueEntity> blockingIssues, String ledgerPrompt, String foreshadowing,
+                                          StyleStatEntity styleStat, int globalNo, String previousRejectionReason,
+                                          RewriteContext writerContext) {
+        if (StringUtils.isBlank(writerContext.writerUserPrompt())) {
+            return new ReviseResult(buildRejected("坍缩重写缺少原始写作上下文"), null);
+        }
+        writerContext.checkCancellation();
+        String prompt = writerContext.writerUserPrompt()
+                + "\n\n【坍缩稿完整重写】此前正文未形成完整场景，不能用局部补丁补凑。按上面的原始计划、事实和人物卡重新写成完整正文。"
+                + "不规定对白句数、句长或轮次，保留必要心理、环境与解释，不重复确认已经成立的条件。"
+                + "不要从残稿反推历史；能力、物品、地点、承诺和保密状态必须与原始上下文一致。"
+                + "保留作者原有风格、视角和语气，事实修正优先，不把不成立的计划圆成新能力。"
+                + "\n" + WritingContractPolicy.renderEditorialScope()
+                + ScenePlanPolicy.render(item.getScenes())
+                + "\n" + COMPLETION_RULE
+                + "\n待修问题：" + JSON.toJSONString(blockingIssues)
+                + (StringUtils.isBlank(previousRejectionReason) ? "" : "\n上一轮未采纳原因：" + previousRejectionReason)
+                + "\n只输出JSON：完成时{\"completed\":true,\"chapterNo\":" + globalNo + ",\"title\":\"章节标题\",\"content\":\"完整正文\"}"
+                + "；不能完成时{\"completed\":false,\"reason\":\"冲突及依据，计划需调整\"}";
+        try {
+            String raw = llmGateway.complete(storyVO.getModule(), LlmCall.builder()
+                    .systemPrompt(writerContext.writerSystemPrompt()).userPrompt(prompt)
+                    .label("collapse-rewrite-第" + globalNo + "章").scene(ModelScene.CHAPTER_REVISE).build());
+            writerContext.checkCancellation();
+            rejectIfIncomplete(raw);
+            ChapterContentEntity revised = JsonParseFallback.parse(raw, this::tryConvert);
+            if (revised == null || StringUtils.isBlank(revised.getContent())) {
+                return new ReviseResult(buildRejected("坍缩重写未产出可解析的正文"), null);
+            }
+            revised.setChapterNo(globalNo);
+            revised.setTitle(cn.novel.yonren.types.utils.ChapterTitleNormalizer.normalize(revised.getTitle()));
+            if (ChapterLengthPolicy.isCollapsed(revised.getContent())) {
+                return new ReviseResult(buildRejected("坍缩重写仍低于 " + ChapterLengthPolicy.COLLAPSE_FLOOR_CHARACTERS + " 有效字"), null);
+            }
+            var events = item.getKeyEvents();
+            if (events != null) {
+                var missing = PatchIntegrityPolicy.lostEvents(String.join("\n", events), revised.getContent(), events);
+                if (!missing.isEmpty()) return new ReviseResult(buildRejected("坍缩重写缺失计划事件：" + String.join("；", missing)), null);
+            }
+            return new ReviseResult(RevisionDecisionEntity.builder().attempted(true).accepted(true)
+                    .reviewCandidates(missingEvents(originalContent, revised.getContent(), item))
+                    .reason("完整重写通过篇幅与计划预检，仍需修订复核").build(), revised);
+        } catch (IncompleteRevision refusal) {
+            return new ReviseResult(buildPlanAdjustmentRejected(refusal.getMessage()), null);
+        } catch (RuntimeException failure) {
+            LlmLocalRejectionException.rethrowIfPresent(failure);
+            writerContext.checkCancellation();
+            if (isAuthorizationFailure(failure)) throw failure;
+            return new ReviseResult(buildRejected("坍缩重写调用或处理失败：" + failure.getClass().getSimpleName()), null);
+        }
+    }
+
+    private static boolean isAuthorizationFailure(Throwable failure) {
+        for (Throwable cause = failure; cause != null; cause = cause.getCause()) {
+            if (cause instanceof org.springframework.web.client.RestClientResponseException http
+                    && (http.getStatusCode().value() == 401 || http.getStatusCode().value() == 403)) return true;
+            String text = java.util.Objects.toString(cause.getMessage(), "").toLowerCase(java.util.Locale.ROOT);
+            if (text.contains("unauthorized") || text.contains("invalid_api_key") || text.contains("认证失败")
+                    || text.matches("(?s).*\\b(?:401|403)\\b.*")) return true;
+        }
+        return false;
     }
 
     // ==================== 定向补丁 ====================
@@ -218,18 +318,27 @@ public class ChapterReviseService {
                                   String foreshadowing,
                                   StyleStatEntity styleStat,
                                   int globalNo,
-                                  String previousRejectionReason) {
+                                  String previousRejectionReason,
+                                  RewriteContext writerContext) {
         String raw;
+        if (writerContext != null) writerContext.checkCancellation();
         try {
             raw = llmGateway.complete(storyVO.getModule(), LlmCall.builder()
+                    .systemPrompt(writerContext == null ? null : writerContext.writerSystemPrompt())
                     .userPrompt(buildPrompt(item, originalContent, blockingIssues, ledgerPrompt,
-                            foreshadowing, styleStat, globalNo, previousRejectionReason, true))
+                            foreshadowing, styleStat, globalNo, previousRejectionReason, true, writerContext))
                     .label("patch-第" + globalNo + "章")
                     .scene(ModelScene.CHAPTER_REVISE)
                     .build());
         } catch (Exception e) {
+            LlmLocalRejectionException.rethrowIfPresent(e);
+            if (writerContext != null) writerContext.checkCancellation();
+            if (e instanceof java.util.concurrent.CancellationException cancellation) throw cancellation;
             return new PatchOutcome(null, "补丁调用异常：" + e.getMessage());
         }
+        if (writerContext != null) writerContext.checkCancellation();
+        // 位于解析降级之外：completed=false 不可被当成坏补丁再触发整章重写。
+        rejectIfIncomplete(raw);
 
         PatchPlan plan = JsonParseFallback.parse(raw, PATCH_CONVERTER::convert);
         if (plan == null || plan.getPatches() == null || plan.getPatches().isEmpty()) {
@@ -335,18 +444,6 @@ public class ChapterReviseService {
         }
     }
 
-    private String buildPrompt(ChapterPlanItemEntity item,
-                               String originalContent,
-                               List<ChapterIssueEntity> blockingIssues,
-                               String ledgerPrompt,
-                               String foreshadowing,
-                               StyleStatEntity styleStat,
-                               int globalNo,
-                               String previousRejectionReason) {
-        return buildPrompt(item, originalContent, blockingIssues, ledgerPrompt, foreshadowing,
-                styleStat, globalNo, previousRejectionReason, false);
-    }
-
     /**
      * 组装修订 prompt：两种形态只差**任务头**与**输出 schema**，中段的业务上下文完全共用
      * （章节计划、关键事件红线、账本、伏笔、待修问题、机械违规点），避免两处各写一份而漂移
@@ -361,35 +458,45 @@ public class ChapterReviseService {
                                StyleStatEntity styleStat,
                                int globalNo,
                                String previousRejectionReason,
-                               boolean patchMode) {
+                               boolean patchMode,
+                               RewriteContext writerContext) {
         StringBuilder sb = new StringBuilder();
+        if (writerContext != null && StringUtils.isNotBlank(writerContext.writerUserPrompt())) {
+            sb.append("【冻结的原始写作上下文】仅作为作者范围与事实基线；本轮交付以下方修订任务和完成状态规则为准。\n")
+                    .append(writerContext.writerUserPrompt()).append("\n\n");
+        }
         sb.append(patchMode ? TASK_HEADER_PATCH : TASK_HEADER_REWRITE)
-                // 一致性裁决规则：治"账本 vs 正文"类债的修订横跳——改写方向唯一（以账本为准）
-                .append("\n【一致性裁决规则】对\"与账本/前文事实矛盾\"类问题（位置、持有物、修为、人物状态）：")
-                .append("一律以账本为准改写正文，使正文向账本对齐；位置/持有物变化必须补写过渡描写；")
-                .append("严禁为迁就剧情走向而改写或无视账本事实。")
-                .append(buildMicroActionBlacklist(originalContent));
+                .append("\n").append(WritingContractPolicy.renderEditorialScope())
+                .append("\n保留作者原有风格、视角和语气，不把未命中的心理、讲述、等待或环境段落统一改成动作与口语。")
+                .append("\n【一致性裁决规则】可信冻结事实与作者明确设定优先；账本、摘要和 issue 是待核对的依据，不天然绝对正确。")
+                .append("事实修正优先：位置、持有物、修为与人物状态的变化须有已知事实或当前场景中可成立的因果支持；")
+                .append("不编造取回过程、异地转移、能力升级或历史承诺来迁就账本及计划。")
+                .append("若证据不足或冲突无法在原范围内消解，按完成状态规则拒绝，不改写历史稿。")
+                .append("\n").append(COMPLETION_RULE);
         // 上一轮反馈：采纳闸门的具体拒绝原因（如疲劳词超频/缺关键事件）回传给次轮修订，避免盲改
         if (StringUtils.isNotBlank(previousRejectionReason)) {
             sb.append("\n【上一轮修订反馈】上一轮修订稿因以下原因被采纳闸门拒绝，本次必须避免引入同样问题：\n")
                     .append(previousRejectionReason);
         }
-        // 疲劳词禁新增名单：与采纳闸门同源词表 + 跨章累计逼近阈值点名，让模型看见红线
+        // 风格统计是告知，不把无关微动作或疲劳词变成本轮全章清洗任务。
         if (styleStat != null) {
-            sb.append("\n").append(styleStatService.renderReviseFatigueBlacklist(styleStat));
+            sb.append("\n【风格观测边界】风格统计仅供已定位修订处参考，不据此扩大修订范围；")
+                    .append("未列为本轮 BLOCKING 的表达保持原样，不为了换词而补写环境、心理或比喻。");
         }
         sb.append("\n\n【本章计划】")
                 .append("\n标题：").append(nullToBlank(item.getTitle()))
                 .append("\n目标：").append(nullToBlank(item.getGoal()))
                 .append("\n关键事件：").append(joinList(item.getKeyEvents()))
                 .append("\n结尾悬念：").append(nullToBlank(item.getEndingHook()))
-                .append("\n章节类型：").append(item.getChapterType() == null ? "normal" : item.getChapterType().getCode());
-        // 关键事件红线：修订必须保留计划骨架，禁止为修文风/修矛盾而删事件（采纳闸门事后拦截 + 此处事前约束，双保险）
+                .append("\n章节类型：").append(item.getChapterType() == null ? "normal" : item.getChapterType().getCode())
+                .append(ScenePlanPolicy.render(item.getScenes()));
+        // 守住真实场景完整性，但不把词面预检说成事实裁决，不能为计划伪造能力或历史。
         if (item.getKeyEvents() != null && !item.getKeyEvents().isEmpty()) {
-            sb.append("\n\n【关键事件红线】关键事件是本章剧情骨架，修订稿必须完整保留每一条关键事件在正文中的落点：")
-                    .append("\n1. 严禁删除、合并或把关键事件降级为一句背景概述；")
-                    .append("\n2. 若问题恰好发生在关键事件内部（如事件动作与账本矛盾），只能在事件内部修正具体描写，事件本身必须照常发生；")
-                    .append("\n3. 采纳闸门会逐条核对关键事件是否仍被正文覆盖，缺失任何一条即拒稿。");
+            sb.append("\n\n【关键事件红线】可信事实成立的关键事件与场景结果必须保留：")
+                    .append("\n1. 严禁删除、合并或把关键事件降级为一句背景概述，以回避真实剧情交付；")
+                    .append("\n2. 事实修正优先；事件内部表述可有依据地修正，但若事件本身与可信冻结事实冲突，不能强写发生，应返回 completed=false 并说明计划需调整；")
+                    .append("\n3. 机械采纳预检兼容硬伤修正造成的最多 1 条词面覆盖变化，不等于允许删除真实事件；")
+                    .append("有依据的修正应在 reason 中说明，真实未完成或无法证明成立时返回未完成/拒绝，不采纳其稿件。其余场景、人物边界与结果不变。");
         }
 
         if (StringUtils.isNotBlank(ledgerPrompt)) {
@@ -408,30 +515,31 @@ public class ChapterReviseService {
                     .append("\n   suggestion：").append(nullToBlank(issue.getSuggestion()))
                     .append("\n");
         }
-        // 机械扫描命中的文风违规点：evidence 是逐字定位清单（"词条×次数"），必须逐处改写，不接受"整体润色"
-        List<String> mechanicalEvidence = blockingIssues.stream()
+        // aesthetic 也可能来自语义审校；有 evidence 不等于程序已确认每一词都违规。
+        List<String> aestheticEvidence = blockingIssues.stream()
                 .filter(i -> "aesthetic".equalsIgnoreCase(i.getDimension()))
                 .map(ChapterIssueEntity::getEvidence)
                 .filter(StringUtils::isNotBlank)
                 .collect(Collectors.toList());
-        if (!mechanicalEvidence.isEmpty()) {
-            sb.append("\n【机械扫描确认的文风违规点】以下命中位置由程序逐字扫描确认（非模型判断），必须逐处改写、不得遗漏：\n");
-            for (String evidence : mechanicalEvidence) {
+        if (!aestheticEvidence.isEmpty()) {
+            sb.append("\n【本轮文风问题定位】以下 evidence 只用于核对本轮问题，须结合正文、作者契约与 issue 描述判断：\n");
+            for (String evidence : aestheticEvidence) {
                 sb.append("- ").append(evidence).append("\n");
             }
-            sb.append("改写口径：删除或替换每一个命中词，不得仅调整语序或在原词前后加修饰；未命中段落保持原样。");
+            sb.append("只修改 issue 指向且核实成立的局部；未命中段落保持原样，不把 evidence 当作全章禁词表或追加润色任务。");
         }
 
         sb.append("\n\n【原稿全文】\n").append(originalContent);
         if (patchMode) {
             sb.append("\n\n请严格按照以下 JSON 格式输出补丁（只输出这一个 JSON，不要附带解释文字）：")
-                    .append("\n{\"patches\":[{\"anchor\":\"原稿中逐字存在且唯一的片段\",\"replacement\":\"替换后的文本\"}]}")
-                    .append("\n若要放弃补丁，输出 {\"patches\":[]}。")
+                    .append("\n{\"completed\":true,\"reason\":\"修正依据\",\"patches\":[{\"anchor\":\"原稿中逐字存在且唯一的片段\",\"replacement\":\"替换后的文本\"}]}")
+                    .append("\n仅因非局部问题放弃补丁时，输出 {\"patches\":[]}；计划不成立或证据不足时，输出 {\"completed\":false,\"reason\":\"冲突及依据，计划需调整\"}。")
                     .append("\n再次提醒：anchor 会被程序逐字索引，改一个字就套不上，整份补丁会被直接丢弃。");
         } else {
             sb.append("\n\n请严格按照以下 JSON 格式输出整章：")
-                    .append("\n{\"chapterNo\":").append(globalNo)
-                    .append(",\"title\":\"章节标题\",\"content\":\"章节正文\"}");
+                    .append("\n{\"completed\":true,\"reason\":\"修正依据\",\"chapterNo\":").append(globalNo)
+                    .append(",\"title\":\"章节标题\",\"content\":\"章节正文\"}")
+                    .append("\n不能完成时只输出 {\"completed\":false,\"reason\":\"冲突及依据，计划需调整\"}，不输出伪造的完成稿。");
         }
 
         return sb.toString();
@@ -477,7 +585,8 @@ public class ChapterReviseService {
                 return "修订稿缺失关键事件：" + String.join("；", missing);
             }
             if (!missing.isEmpty()) {
-                log.info("第 {} 章修订丢失 {} 条关键事件，放行（BLOCKING 修复优先，修订验证与下章规划兜底）：{}",
+                log.info("第 {} 章修订有 {} 条关键事件词面覆盖变化，按既有硬伤修正容忍线交后续语义复核；"
+                                + "不代表真实事件允许删除：{}",
                         globalNo, missing.size(), StringUtils.abbreviate(missing.get(0), 60));
             }
         }
@@ -485,37 +594,34 @@ public class ChapterReviseService {
         return null;
     }
 
-    /**
-     * 微动作黑名单节：逐条统计原稿中套话式微动作的出现次数，超频条目点名并责令替换。
-     * 修订遵循最小化原则，因此只要求替换超频处，其余段落不动
-     */
-    private String buildMicroActionBlacklist(String originalContent) {
-        StringBuilder sb = new StringBuilder("\n\n【微动作黑名单】套话式微动作（如喉结滚动、呼吸一滞、瞳孔骤缩）可偶尔使用但严禁高频，单章每条至多 1 次：");
-        String normalized = StringUtils.trimToEmpty(originalContent);
-        List<String> overused = new ArrayList<>();
-        for (String phrase : MICRO_ACTION_WATCHLIST) {
-            int count = countOccurrences(normalized, phrase);
-            if (count > MICRO_ACTION_CHAPTER_LIMIT) {
-                overused.add(phrase + "×" + count);
-            }
-        }
-        if (overused.isEmpty()) {
-            sb.append("原稿未超频，修订时同样不得新增此类套话");
-        } else {
-            sb.append("原稿超频：").append(String.join("、", overused))
-                    .append("——将超频处替换为更具体的环境描写、心理活动或新颖比喻，其余段落保持原样");
-        }
-        return sb.toString();
+    /** 仅本服务消费的可选状态，不扩展持久化正文或公共修订结果 schema。 */
+    @Data
+    private static class CompletionStatus {
+        private Boolean completed;
+        // 状态先行：reason 即使被模型写成结构化值，也不能导致 completed=false 解析失败后放行正文。
+        private Object reason;
     }
 
-    private int countOccurrences(String text, String phrase) {
-        int count = 0;
-        int idx = 0;
-        while ((idx = text.indexOf(phrase, idx)) >= 0) {
-            count++;
-            idx += phrase.length();
+    private static class IncompleteRevision extends RuntimeException {
+        private IncompleteRevision(String reason) {
+            super(reason);
         }
-        return count;
+    }
+
+    private static List<String> missingEvents(String originalContent, String revisedContent,
+                                               ChapterPlanItemEntity item) {
+        List<String> events = item == null ? List.of() : item.getKeyEvents();
+        if (events == null || events.isEmpty()) return List.of();
+        return PatchIntegrityPolicy.lostEvents(originalContent, revisedContent, events);
+    }
+
+    private static void rejectIfIncomplete(String raw) {
+        CompletionStatus status = JsonParseFallback.parse(raw, STATUS_CONVERTER::convert);
+        if (status != null && Boolean.FALSE.equals(status.getCompleted())) {
+            throw new IncompleteRevision("修订未完成/拒绝：" + StringUtils.defaultIfBlank(
+                    java.util.Objects.toString(status.getReason(), null),
+                    "未提供冲突依据，需核实事实与计划；计划需调整后再处理"));
+        }
     }
 
     private StyleStatEntity deepCopy(StyleStatEntity stat) {
@@ -524,6 +630,11 @@ public class ChapterReviseService {
         } catch (Exception e) {
             return null;
         }
+    }
+
+    private RevisionDecisionEntity buildPlanAdjustmentRejected(String reason) {
+        return RevisionDecisionEntity.builder().attempted(true).accepted(false)
+                .planAdjustmentRequired(true).reason(reason).build();
     }
 
     private RevisionDecisionEntity buildRejected(String reason) {

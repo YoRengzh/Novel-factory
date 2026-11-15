@@ -372,13 +372,12 @@ class ChapterPlanPromptServiceTest {
         ChapterPlanPromptService.appendDensityFeedback(sb, summaries);
 
         String text = sb.toString();
-        assertTrue(text.contains("【密度反馈】"));
+        assertTrue(text.contains("【篇幅观测】"));
         assertTrue(text.contains("第4章（实际 1100 有效字 / 2 个关键事件）"));
-        assertTrue(text.contains("关键事件 ≥ 3"));
-        assertTrue(text.contains("≥ 4 个"), "climax/finale 事件下沿必须高于常规章（高潮章写薄了等于白给）");
-        // 与节奏指令对齐：留白须标 transition，但不得借它逃避推进
-        assertTrue(text.contains("chapterType=transition"));
-        assertTrue(text.contains("transition 章仍须至少有一处实质变化"));
+        assertTrue(text.contains("仅凭字数不能判定供给不足"));
+        assertFalse(text.contains("关键事件 ≥ 3"));
+        assertFalse(text.contains("≥ 4 个"));
+        assertTrue(text.contains("保留其篇幅和静场功能"));
     }
 
     @Test
@@ -935,10 +934,11 @@ class ChapterPlanPromptServiceTest {
         ChapterPlanPromptService.appendDialogueCollapseFeedback(sb, summaries);
 
         String text = sb.toString();
-        assertTrue(text.contains("【对白坍缩反馈】"), text);
-        assertTrue(text.contains("第95章"), "必须点名崩掉的章号：" + text);
-        assertTrue(text.contains("4.4"), "必须给出实测密度供规划层定位：" + text);
-        assertTrue(text.contains("让多数场景由对话承载"), text);
+        assertTrue(text.contains("【对白轮次观测】"), text);
+        assertTrue(text.contains("第95章"), "保留观测章号：" + text);
+        assertTrue(text.contains("4.4"), "保留实测密度：" + text);
+        assertTrue(text.contains("不据此增加对白、交锋或人物"), text);
+        assertFalse(text.contains("让多数场景由对话承载"), text);
     }
 
     /** 反向：对白密度健康时不注入（欠采样与健康态都不唠叨，否则模型会当噪声忽略） */

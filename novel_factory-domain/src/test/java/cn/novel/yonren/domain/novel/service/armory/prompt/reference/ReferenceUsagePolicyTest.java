@@ -24,6 +24,24 @@ class ReferenceUsagePolicyTest {
     private final PromptContext fantasy = PromptContext.builder().theme("玄幻修仙").build();
 
     @Test
+    void breakthroughExemplarRequiresMatchingChapterTask() {
+        PromptContext extraction = PromptContext.builder().theme("玄幻修仙")
+                .chapterBrief("苏尘用道瞳辨出残株年份，去丹房换药。").build();
+        PromptContext breakthrough = PromptContext.builder().theme("玄幻修仙")
+                .chapterBrief("苏尘在旧关隘前尝试破境，行功冲关。").build();
+        assertFalse(policy.allowsDocument("exemplar-breakthrough", PromptScene.CHAPTER_CONTENT, extraction));
+        assertTrue(policy.allowsDocument("exemplar-breakthrough", PromptScene.CHAPTER_CONTENT, breakthrough));
+        assertFalse(policy.allowsDocument("exemplar-breakthrough", PromptScene.CHAPTER_CONTENT,
+                PromptContext.builder().theme("玄幻修仙").build()), "未知章节任务不得强行注入专用范例");
+        assertTrue(policy.allowsDocument("exemplar-dialogue", PromptScene.CHAPTER_CONTENT, extraction),
+                "非突破专用范例不受此限制");
+        PromptContext deferred = PromptContext.builder().theme("玄幻修仙")
+                .chapterBrief("本章暂不突破，先整理药园账目。").build();
+        assertFalse(policy.allowsDocument("exemplar-breakthrough", PromptScene.CHAPTER_CONTENT, deferred),
+                "否定任务不得命中突破范例");
+    }
+
+    @Test
     void unknownAssetsAndNullSceneAreDenied() {
         assertFalse(policy.allowsDocument(null, PromptScene.SETTING_DRAFT, fantasy));
         assertFalse(policy.allowsDocument("unregistered-new-doc", PromptScene.CHAPTER_CONTENT, fantasy));
@@ -53,10 +71,13 @@ class ReferenceUsagePolicyTest {
 
     @Test
     void proseExamplesStayInExpressionScenesAndGenrePrinciplesRemainAvailable() {
+        PromptContext breakthrough = PromptContext.builder().theme("玄幻修仙")
+                .chapterBrief("主角尝试破境冲关。").build();
         for (String id : List.of("exemplar-battle", "exemplar-breakthrough", "exemplar-dialogue", "exemplar-emotion")) {
-            assertFalse(policy.allowsDocument(id, PromptScene.SETTING_DRAFT, fantasy));
-            assertFalse(policy.allowsDocument(id, PromptScene.CHAPTER_PLAN, fantasy));
-            assertTrue(policy.allowsDocument(id, PromptScene.CHAPTER_CONTENT, fantasy));
+            PromptContext expressionContext = "exemplar-breakthrough".equals(id) ? breakthrough : fantasy;
+            assertFalse(policy.allowsDocument(id, PromptScene.SETTING_DRAFT, expressionContext));
+            assertFalse(policy.allowsDocument(id, PromptScene.CHAPTER_PLAN, expressionContext));
+            assertTrue(policy.allowsDocument(id, PromptScene.CHAPTER_CONTENT, expressionContext));
         }
         for (PromptScene scene : PromptScene.values()) {
             boolean expression = Set.of(PromptScene.CHAPTER_CONTENT, PromptScene.CHAPTER_REVISE,

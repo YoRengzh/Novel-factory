@@ -2,6 +2,7 @@ package cn.novel.yonren.domain.novel.service.armory.quality;
 
 import cn.novel.yonren.domain.novel.model.valobj.quality.GateResult;
 import cn.novel.yonren.domain.novel.model.valobj.work.ChapterManuscript;
+import cn.novel.yonren.domain.novel.model.valobj.revise.RewriteContext;
 
 import cn.novel.yonren.domain.novel.model.entity.ArmoryCommandEntity;
 import cn.novel.yonren.domain.novel.model.entity.AuditResultEntity;
@@ -18,7 +19,7 @@ import cn.novel.yonren.domain.novel.service.armory.memory.ChapterMemoryService;
 import cn.novel.yonren.domain.novel.service.armory.memory.ConsistencyIndexService;
 import cn.novel.yonren.domain.novel.service.armory.memory.StyleStatService;
 import cn.novel.yonren.domain.novel.service.armory.revise.ChapterReviseService;
-import cn.novel.yonren.types.enums.GenreType;
+import cn.novel.yonren.domain.novel.service.armory.prompt.WritingContractPolicy;
 import jakarta.annotation.Resource;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.lang3.StringUtils;
@@ -71,10 +72,8 @@ public class QualityGate {
      * 六期扩展：伏笔保密边界（禁泄关键词机械兜底 + 审校判变相泄露）、大纲偏离检测
      * （关键事件覆盖率过低时给审校注入加审预警），并通过 GateResult 暴露通过质量分级
      * （低置信通过供候选选优触发、CLEAN_PASS 供文风指纹库入库）。
-     * 七期扩展：内容密度检测（有效对话句数<25时给审校注入加审预警，WARN 语义不直接 BLOCKING）。
-     * 八期扩展：正文级对话承载对账——计划声明了 dialogueScenes 的章，轮次密度坍缩从 MINOR
-     * 升级 BLOCKING 进修订闭环（计划承诺的对话被写成动作/沉默是写手违约），缺失场景由
-     * {@link DialoguePresencePolicy} 识别并作为修订靶点下发，修订采纳后机械重扫闭环。
+     * 七期扩展：对白数量/轮次密度仅观测，不作为数量准入或补稿要求。
+     * 场景兑现由既有计划与语义审校核验，词面未命中不直接证明违约。
      * 九期扩展：篇幅坍缩硬底线——有效字低于
      * {@link ChapterLengthPolicy#COLLAPSE_FLOOR_CHARACTERS} 的"提纲式废稿"记 BLOCKING；
      * 且**修订稿也要重新过线**：首审告警发生在重写前，不能代表重写后的篇幅仍然合格。
@@ -89,6 +88,14 @@ public class QualityGate {
                                               StyleStatEntity styleStat,
                                               int globalNo,
                                               Path storyDir) {
+        return auditAndReviseIfEnabled(requestParameter, item, chapterContent, summaries, styleStat, globalNo, storyDir, null);
+    }
+
+    public GateResult auditAndReviseIfEnabled(ArmoryCommandEntity requestParameter, ChapterPlanItemEntity item,
+                                              ChapterContentEntity chapterContent, List<ChapterSummaryEntity> summaries,
+                                              StyleStatEntity styleStat, int globalNo, Path storyDir,
+                                              RewriteContext writerContext) {
+        if (writerContext != null) writerContext.checkCancellation();
         // 段落结构兜底：整章若没有换行，应在任何按行统计之前重排，
         // 否则对白行占比会被误算为 1.0，段落密度审校也无法定位段落。
         // ratioOf = 含引号行/非空行，整章仅 1 行且含引号 ⇒ 恒 1.0。
@@ -131,9 +138,8 @@ public class QualityGate {
             collapsed.setDescription("篇幅坍缩：本章有效字 " + effective + " 低于硬底线 "
                     + ChapterLengthPolicy.COLLAPSE_FLOOR_CHARACTERS + "，已塌成提纲——场景没有铺展、"
                     + "对白与动作被压成概述。这不是'写得短'，是这一稿根本不成篇，必须返工重写。");
-            collapsed.setSuggestion("按计划的关键事件逐条铺展成场面：每个事件至少给出一处可观察的场景、"
-                    + "两轮以上有来有回的对话、以及人物的动作与反应；不要靠环境描写或心理独白凑字数。"
-                    + "不要压缩既有情节，只把被概述掉的过程写出来。");
+            collapsed.setSuggestion("按本章原始写作上下文与完整场景计划重写，交代关键行动、必要交流及后果。"
+                    + "不规定对白句数、句长或轮次，不从残稿反推计划，不为达到篇幅而重复确认条款。");
             lengthIssues = List.of(collapsed);
         }
         // 上沿同口径告警：关键事件数量不变而篇幅显著增加时，可能存在信息密度下降。
@@ -167,13 +173,9 @@ public class QualityGate {
         // 大纲偏离检测（机械预检）：关键事件词面覆盖率过低时给审校注入加审预警（WARN 语义，不直接 BLOCKING）
         String adherenceHint = chapterContent == null ? null
                 : PlanAdherencePolicy.renderLowCoverageHint(item.getKeyEvents(), chapterContent.getContent());
-        // 内容密度检测（机械预检）：有效对话句数<25时给审校注入加审预警（WARN 语义，不直接 BLOCKING）
+        // 对白数量仅作观测，不进审稿条件或修订指令。
         int dialogueCount = chapterContent == null ? 0 : ContentDensityPolicy.countDialogue(chapterContent.getContent());
-        String densityHint = ContentDensityPolicy.renderLowDensityHint(dialogueCount);
-        if (dialogueCount < ContentDensityPolicy.MIN_DIALOGUE_COUNT) {
-            log.warn("第 {} 章内容密度预警：有效对话仅 {} 句，低于最低要求 {} 句", globalNo,
-                    dialogueCount, ContentDensityPolicy.MIN_DIALOGUE_COUNT);
-        }
+        log.info("第 {} 章对白数量观测：{}（不作为数量准入或补稿要求）", globalNo, dialogueCount);
         // 章节编号元信息泄露检测（机械预检）：正文中出现"第X章""本章/上一章"等作者层面元信息时给审校注入加审预警
         // 同时 StyleViolationPolicy.check 会将其标记为 BLOCKING issue 进入修订闭环，双重保险
         String chapterRefEvidence = chapterContent == null ? null
@@ -252,11 +254,10 @@ public class QualityGate {
                     quoteStyleIssues.stream().map(ChapterIssueEntity::getEvidence).toList());
         }
         mechanicalIssues.addAll(quoteStyleIssues);
-        // 对白轮次坍缩检测（机械，P1）：篇幅与事件落地不等于人物互动充分。
-        // 与格式检查分工：本项检测轮次密度，落成质量债后可回灌规划与下一章。
+        // 对白轮次仅观测，不以低密度推断场景质量或强制补对白。
         List<ChapterIssueEntity> densityCollapse = dialogueDensityCollapse(item, chapterContent, summaries);
         if (!densityCollapse.isEmpty()) {
-            log.warn("第 {} 章对白轮次坍缩：{}", globalNo,
+            log.info("第 {} 章对白轮次观测：{}", globalNo,
                     densityCollapse.stream().map(ChapterIssueEntity::getDescription).toList());
         }
         mechanicalIssues.addAll(densityCollapse);
@@ -307,7 +308,7 @@ public class QualityGate {
             }
         }
         String auditGuard = joinBlocks(
-                joinBlocks(joinBlocks(joinBlocks(secrecyGuard.promptBlock(), adherenceHint), densityHint), chapterRefHint),
+                joinBlocks(joinBlocks(secrecyGuard.promptBlock(), adherenceHint), chapterRefHint),
                 joinBlocks(joinBlocks(registerContract, timeAnchor), characterProfileHint(requestParameter)));
         // 修订输入保留禁泄清单与语域契约（防修订环节修好事实、却引入时代错位或人物失语）
         String reviseForeshadowing = joinBlocks(joinBlocks(foreshadowing, secrecyGuard.promptBlock()), registerContract);
@@ -322,6 +323,7 @@ public class QualityGate {
         // 【未验证】而非【确认未修复】——内容侧偏向不变（仍算未通过、不放行未验证的稿），
         // 但上层不得把它记入质量债，观测侧单独计数（见 FixVerification / BatchHealthService）
         boolean auditVerifyDegraded = false;
+        String planAdjustmentReason = null;
         if (auditEnabled()) {
             semanticFeedbackHash = ChapterManuscript.of(chapterContent).hash();
             AuditResultEntity auditResult = chapterAuditService.audit(
@@ -359,11 +361,16 @@ public class QualityGate {
             reviseRounds = attempt;
             ChapterReviseService.ReviseResult reviseResult;
             try {
-                reviseResult = chapterReviseService.revise(
+                reviseResult = writerContext == null ? chapterReviseService.revise(
                         requestParameter.getStoryVO(), item, chapterContent.getContent(),
+                        currentBlocking, ledgerPrompt, reviseForeshadowing, styleStat, globalNo, previousRejectionReason)
+                        : chapterReviseService.revise(requestParameter.getStoryVO(), item, chapterContent.getContent(),
                         currentBlocking, ledgerPrompt, reviseForeshadowing, styleStat, globalNo,
-                        previousRejectionReason);
+                        previousRejectionReason, writerContext);
+                if (writerContext != null) writerContext.checkCancellation();
             } catch (Exception e) {
+                cn.novel.yonren.domain.novel.service.armory.llm.LlmLocalRejectionException.rethrowIfPresent(e);
+                if (writerContext != null) writerContext.checkCancellation();
                 // 修订失败保留审校结论：BLOCKING 记为质量债，随后续章节记忆回灌
                 log.warn("第 {} 章第 {}/{} 轮修订流程异常，保留当前稿并将 BLOCKING 问题记为质量债",
                         globalNo, attempt, maxAttempts, e);
@@ -373,8 +380,18 @@ public class QualityGate {
                     .withSemanticFeedbackHash(semanticFeedbackHash);
             }
 
+            if (reviseResult.decision().isPlanAdjustmentRequired()) {
+                // 计划与可信事实冲突：不再用同一计划重试，保留当前稿并记录待调整原因。
+                planAdjustmentReason = reviseResult.decision().getReason();
+                log.warn("第 {} 章修订暂停：计划与可信事实冲突，保留当前稿等待调整计划：{}",
+                        globalNo, planAdjustmentReason);
+                break;
+            }
+
             if (reviseResult.revisedContent() != null && reviseResult.decision().isAccepted()) {
                 ChapterContentEntity revised = reviseResult.revisedContent();
+                String contentBeforeRevision = chapterContent.getContent();
+                String titleBeforeRevision = chapterContent.getTitle();
                 // 标题非空才覆盖：定向补丁刻意不带标题（它只动正文局部），
                 // 无条件赋值会把原本完好的标题清成 null
                 if (StringUtils.isNotBlank(revised.getTitle())) {
@@ -399,8 +416,7 @@ public class QualityGate {
                 if (StringUtils.isNotBlank(chapterContent.getTitle())) {
                     rescan.addAll(ChapterTitlePolicy.check(chapterContent.getTitle(), summaries));
                 }
-                // 对白轮次坍缩重算：声明了对话场景的章它是 BLOCKING——修订真的把
-                // 对话补进正文即机械闭环；未声明的章是 MINOR。降档项以最终稿重算，口径与上面一致
+                // 最终稿重算对白观测，不因低密度或词面差异制造新的 BLOCKING。
                 rescan.addAll(dialogueDensityCollapse(item, chapterContent, summaries));
                 // 重复类硬伤重算：整章重写是“以现有 BLOCKING 为靶点”的，可能**新引入**重复台词/
                 // 重复整句；verifyFixes 只验证旧问题是否修好，不重算这两项的话，
@@ -421,8 +437,8 @@ public class QualityGate {
                     stillCollapsed.setDescription("篇幅坍缩（修订稿仍未达标）：有效字 " + effective
                             + " 低于硬底线 " + ChapterLengthPolicy.COLLAPSE_FLOOR_CHARACTERS
                             + "，仍是提纲形态。修订必须把被概述掉的过程铺展开，而不是在短稿上做局部替换。");
-                    stillCollapsed.setSuggestion("按计划关键事件逐条铺展成场面：每个事件至少一处可观察场景、"
-                            + "两轮以上有来有回的对话、人物的动作与反应；不要靠环境描写或心理独白凑字数。");
+                    stillCollapsed.setSuggestion("依据完整计划与冻结事实重写关键过程，不规定对白句数或轮次；"
+                            + "保留有效心理与环境，避免用重复确认充篇幅。");
                     rescan.add(stillCollapsed);
                     log.warn("第 {} 章第 {}/{} 轮修订稿篇幅仍坍缩：有效字 {} 低于硬底线 {}，继续修订",
                             globalNo, attempt, maxAttempts, effective,
@@ -431,18 +447,47 @@ public class QualityGate {
                 // 降档项以最终稿重扫结果为准：修订可能清掉或改变文风问题，留旧版记录会误导观测层
                 mechanicalMinor = nonBlockingOf(rescan);
                 List<ChapterIssueEntity> newBlocking = new java.util.ArrayList<>(blockingOf(rescan));
+                List<ChapterIssueEntity> blockingBeforeRound = new java.util.ArrayList<>(currentBlocking);
+                boolean planCandidateUnfixed = false;
                 if (auditEnabled()) {
                     // A3 复审验证化（docs/enhancement-plan.md）：复审不再全章重审——开放任务方差大，
                     // 二轮翻案即"修订拉锯"；改为逐条验证上一轮 BLOCKING 是否已修复（未确认已修复=仍未修复）。
                     // 机械门禁重扫（上方 rescan）照旧兜住修订稿新引入的硬伤。
                     // 观测口径变化：叙事 MINOR 计数保留首审值——验证任务不做全章扫描，不产出新 MINOR
-                    ChapterAuditService.FixVerification verification = chapterAuditService.verifyFixes(
-                            requestParameter.getStoryVO(), item, chapterContent.getContent(),
-                            currentBlocking, ledgerPrompt, styleStat, globalNo);
+                    // 没有计划完整性候选时走原调用形态，保持既有复验入口不变。
+                    List<String> candidates = reviseResult.decision() == null
+                            ? List.of() : reviseResult.decision().getReviewCandidates();
+                    boolean hasCandidates = candidates != null && !candidates.isEmpty();
+                    ChapterAuditService.FixVerification verification = !hasCandidates
+                            ? (writerContext == null ? chapterAuditService.verifyFixes(
+                                    requestParameter.getStoryVO(), item, chapterContent.getContent(),
+                                    currentBlocking, ledgerPrompt, styleStat, globalNo)
+                                    : chapterAuditService.verifyFixes(requestParameter.getStoryVO(), item,
+                                    chapterContent.getContent(), currentBlocking, ledgerPrompt, styleStat, globalNo,
+                                    writerContext))
+                            : chapterAuditService.verifyFixes(requestParameter.getStoryVO(), item,
+                                    chapterContent.getContent(), currentBlocking, ledgerPrompt, styleStat, globalNo,
+                                    writerContext, candidates);
                     // 验证没跑成 ≠ 没修好：照旧保守对待（unfixed 原样带回），但标记为【未验证】，
                     // 由上层决定不落债、观测侧单独计数
                     auditVerifyDegraded = verification.degraded();
-                    newBlocking.addAll(verification.unfixed());
+                    // 完整性候选独立维度：只看它自己的复核结论，不按返回位置推断、不混入旧 BLOCKING。
+                    for (ChapterIssueEntity issue : verification.unfixed()) {
+                        if (ChapterAuditService.PLAN_INTEGRITY_DIMENSION.equals(issue.getDimension())) {
+                            planCandidateUnfixed = true;
+                        } else {
+                            newBlocking.add(issue);
+                        }
+                    }
+                }
+                // 完整性候选未通过：修订稿改了原稿，但仍有计划事件未获复核确认，回退本次采纳。
+                // 必须放在“全部修好即通过”之前——旧 BLOCKING 全清但事件被删，同样不能闭环。
+                if (planCandidateUnfixed) {
+                    chapterContent.setContent(contentBeforeRevision);
+                    chapterContent.setTitle(titleBeforeRevision);
+                    currentBlocking = blockingBeforeRound;
+                    log.warn("第 {} 章第 {}/{} 轮修订未通过计划完整性复核，回退本次采纳", globalNo, attempt, maxAttempts);
+                    break;
                 }
                 if (newBlocking.isEmpty()) {
                     log.info("第 {} 章第 {}/{} 轮复审通过，闭环完成", globalNo, attempt, maxAttempts);
@@ -473,11 +518,13 @@ public class QualityGate {
 
         log.warn("第 {} 章修订 {} 轮后仍有 BLOCKING 问题 {} 条（结论交由上层处置：主路径记为质量债，"
                         + "候选挑战者路径会连同候选稿一起回退丢弃）",
-                globalNo, maxAttempts, currentBlocking.size());
+                globalNo, reviseRounds, currentBlocking.size());
         auditSampleService.record(storyDir, globalNo, item, chapterContent.getContent(),
-                currentBlocking, maxAttempts, ledgerPrompt, foreshadowing);
-        return GateResult.of(currentBlocking, minorCount, mechanicalMinor, maxAttempts, semanticMinors, auditVerifyDegraded)
-                    .withSemanticFeedbackHash(semanticFeedbackHash);
+                currentBlocking, reviseRounds, ledgerPrompt, foreshadowing);
+        GateResult result = GateResult.of(currentBlocking, minorCount, mechanicalMinor, reviseRounds,
+                        semanticMinors, auditVerifyDegraded)
+                .withSemanticFeedbackHash(semanticFeedbackHash);
+        return planAdjustmentReason == null ? result : result.withPlanAdjustmentRequired(planAdjustmentReason);
     }
 
     /**
@@ -525,20 +572,11 @@ public class QualityGate {
         return curly * 2 > total;
     }
 
-    /** 审校与修订共用的语域检查契约；只给 fantasy 附加仙侠词表，其他题材保持中性。 */
+    /** 与写手同源的作者语域/编辑范围；旧检查标题保留给已有提示词定位。 */
     private static String renderRegisterContract(ArmoryCommandEntity request) {
-        if (request == null || request.getStoryContextEntity() == null) {
-            return null;
-        }
-        var context = request.getStoryContextEntity();
-        GenreType genre = GenreType.match(context.getTheme(), context.getStyle());
-        StringBuilder contract = new StringBuilder("【语言与时代语域检查】检查叙述和对白是否符合故事时代、世界设定及人物的年龄、身份、教育、职业与认知边界；")
-                .append("把无来源的学术报告腔、管理总结腔、互联网黑话、时代错位技术词或儿童不可能掌握的成熟抽象表达列为 aesthetic/character 问题。")
-                .append("修订时必须改写为角色可观察的动作、物件、生活经验和口语，不得只替换同义词。");
-        if (genre == GenreType.FANTASY) {
-            contract.append("本题材为玄幻/仙侠：客观世界优先使用既有设定词；程序员术语只能在角色设定明确支持时作短促心理类比，不得充当世界事实。");
-        }
-        return contract.toString();
+        StoryContextEntity context = request == null ? null : request.getStoryContextEntity();
+        return "【语言与时代语域检查】\n" + WritingContractPolicy.renderRegister(context)
+                + "\n" + WritingContractPolicy.renderEditorialScope();
     }
 
     /** 拼接机械预警块（忽略空段，非空段以空行分隔）；全空返回 null */
@@ -668,22 +706,10 @@ public class QualityGate {
     }
 
     /**
-     * 对白轮次坍缩（机械，P1）：轮次密度低于题材劣化线时记一条问题——严重度按「计划是否
-     * 声明过对话承载」分流：
-     *
-     *
-     *   · 声明了 dialogueScenes：规划层已经承诺"这些事件以对话承载"（对话承载闸门
-     *       放行），正文仍开不了腔就是写手违约——记 BLOCKING 进修订闭环，缺失清单由
-     *       {@link DialoguePresencePolicy#missingScenes} 识别并作为修订靶点下发。
-     *   · 未声明：根因在规划层没给料，照旧记 MINOR 落债回灌。
-     *
-     *
-     * 三处必须同源：体检的 {@code dialogueCollapseShare}、规划层的【对白坍缩反馈】、
-     * 这里的质量债，都用 {@link DialogueRatioPolicy#densityDegraded} 这同一根线。口径一旦分叉，
-     * 就会出现体检、记债与规划反馈相互不一致的分裂。
-     *
-     * 过渡章豁免、短样本豁免（与 {@code DialogueRatioPolicy} 的其它检测同款：宁可漏报不误伤）。
-     * 题材取自摘要的机械字段 storyGenre，与体检口径一致。
+     * 对白轮次仅作机械观测，不用密度证明戏剧性或场景遗漏。
+     * 声明台词的词面未匹配也可能是等价表达，不能升级 BLOCKING 或自动下发补量指令；
+     * 真正遗漏继续由既有场景/计划语义审校及修订复核处理。
+     * 题材阈值、过渡章与短样本豁免保留，便于与统计口径对照。
      */
     private static List<ChapterIssueEntity> dialogueDensityCollapse(ChapterPlanItemEntity item,
                                                                    ChapterContentEntity chapterContent,
@@ -711,53 +737,20 @@ public class QualityGate {
             return List.of();
         }
         List<String> declaredScenes = item.getDialogueScenes();
-        boolean carriagePromised = declaredScenes != null && !declaredScenes.isEmpty();
+        List<String> missing = DialoguePresencePolicy.missingScenes(declaredScenes, content);
         ChapterIssueEntity issue = new ChapterIssueEntity();
         issue.setDimension("aesthetic");
-        if (carriagePromised) {
-            List<String> missing = DialoguePresencePolicy.missingScenes(declaredScenes, content);
-            issue.setSeverity("BLOCKING");
-            issue.setEvidence(String.format(
-                    "全章 %d 有效字，对白轮次 %d 次，密度 %.1f 次/千字；计划声明对话场景 %d 条，台词未落进正文 %d 条",
-                    effectiveChars, utterances, density, declaredScenes.size(), missing.size()));
-            issue.setDescription(String.format(
-                    "对白轮次坍缩（对话承载违约）：计划已声明 %d 条对话承载场景（对话承载闸门放行的承诺），"
-                            + "正文轮次密度仍只有 %.1f 次/千字，低于劣化线 %.1f（健康线 %.1f）——"
-                            + "写手把承诺的对话写成了动作、神态或沉默。计划层闸门只校验声明存在，"
-                            + "管不到正文兑现，此处即「声明→正文」的机械对账。",
-                    declaredScenes.size(), density, line, DialogueRatioPolicy.densityOk(genre)));
-            issue.setSuggestion(restorationSuggestion(declaredScenes, missing));
-        } else {
-            issue.setSeverity("MINOR");
-            issue.setEvidence(String.format("全章 %d 有效字，对白轮次 %d 次，密度 %.1f 次/千字", effectiveChars, utterances, density));
-            issue.setDescription(String.format("对白轮次坍缩：轮次密度 %.1f 次/千字，低于劣化线 %.1f"
-                    + "（健康线 %.1f）。篇幅与事件可能都够，但角色几乎不开腔——通篇动作分解与内心推演，"
-                    + "读者读到的是一份流程说明而不是戏。", density, line,
-                    DialogueRatioPolicy.densityOk(genre)));
-            issue.setSuggestion("规划层把「对话承载事件」提到 ≥2 条，并写明谁对谁、围绕什么分歧；"
-                    + "节拍表的 dialogue 供给要写出具体交锋，不要只给动作分解。"
-                    + "正文层不要靠增加环境描写或心理独白凑篇幅。");
-        }
+        issue.setSeverity("MINOR");
+        issue.setEvidence(String.format("全章 %d 有效字，对白轮次 %d 次，密度 %.1f 次/千字；声明台词词面未匹配 %d 条",
+                effectiveChars, utterances, density, missing.size()));
+        issue.setDescription(String.format("对白轮次观测：密度 %.1f 次/千字，低于题材参考线 %.1f。"
+                + "仅记录表达分布，不据此判定场景缺失、人物失语或不成戏；心理、讲述、等待与后果消化同样可以承载场景。",
+                density, line));
+        issue.setSuggestion("仅作观测，不要求补量，不新增对白、谈判或事件任务。"
+                + "声明台词的词面未匹配不是事实裁决；如怀疑真正遗漏，应结合完整场景计划、既有 presence/plan-adherence 线索做语义核验，"
+                + "只有确认未兑现的场景内容才按原作者范围修复，已兑现的简短交流不扩写。"
+                + (missing.isEmpty() ? "" : "词面待核验声明：" + String.join("；", missing)));
         return List.of(issue);
-    }
-
-    /**
-     * 修订靶点（BLOCKING 档专用）：缺失场景逐条列出（允许等价改写，不得整场改成动作或沉默）；
-     * 声明台词全部已落地时改为要求把场景扩写成有来有回的交锋——此时坍缩的根因是声明本身太薄
-     * （两句短语撑不起一场戏），补对话仍是对的修法，但不能怪写手丢了台词。
-     */
-    private static String restorationSuggestion(List<String> declaredScenes, List<String> missing) {
-        StringBuilder sb = new StringBuilder("把计划声明的对话场景落成引号对白：只补对话与必要的动作衔接，其余正文不要改动。");
-        if (missing.isEmpty()) {
-            sb.append("声明的台词均已在正文，但轮次总量仍不足——把这些场景扩写成有来有回的交锋，不要靠环境描写或心理独白凑数。");
-            return sb.toString();
-        }
-        sb.append("以下场景的台词未在正文出现，必须补回（允许等价改写，不得只改成动作或神态）：");
-        for (int i = 0; i < missing.size(); i++) {
-            String scene = missing.get(i);
-            sb.append('\n').append(i + 1).append(". ").append(scene.length() <= 60 ? scene : scene.substring(0, 60) + "…");
-        }
-        return sb.toString();
     }
 
     /**

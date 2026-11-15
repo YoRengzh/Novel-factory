@@ -229,12 +229,12 @@ class ConsistencyIndexServiceTest {
         assertTrue(anchor.contains("正月某日下午"), "取最新时间点");
         assertTrue(anchor.contains("角色丙年龄：十一个月"));
         assertTrue(anchor.contains("第16章摘要记录"), "必须标注年龄来源章，供按故事时间推算");
-        assertTrue(anchor.contains("认知可以超前"), "认知/媒介两分法必须写进锚里");
-        assertTrue(anchor.contains("媒介不能超前"));
-        // 通用化的间接展示禁令与解读纪律：载体换了本质没变，解读须累积且留不确定
-        assertTrue(anchor.contains("可被他人在事后解读出具体含义"), "可解码载体＝能力展示，必须同禁");
-        assertTrue(anchor.contains("单次观察"), "观察者不得从单次观察就坐实具体知识");
-        assertTrue(anchor.contains("多次重复"), "解读须建立在多次重复之上");
+        assertTrue(anchor.contains("本书明确允许的认知超前"), "设定允许的认知超前必须保留");
+        assertTrue(anchor.contains("特殊能力与表达媒介必须保留"));
+        assertTrue(anchor.contains("本书未建立的新能力、新媒介不能临场发明"));
+        assertTrue(anchor.contains("不规定必须观察几次"), "确认不设固定观察次数");
+        assertFalse(anchor.contains("可被他人在事后解读出具体含义"), "不得按载体形式一刀切禁展示");
+        assertFalse(anchor.contains("多次重复"), "不得规定固定确认套路");
     }
 
     @Test
@@ -257,8 +257,8 @@ class ConsistencyIndexServiceTest {
         assertTrue(anchor.contains("【时序锚】"));
         assertTrue(anchor.contains("角色丙起始年龄：4岁"), "人名取自主人公字段头部");
         assertTrue(anchor.contains("来自故事设定"));
-        assertTrue(anchor.contains("认知可以超前"), "必须共用摘要锚的硬约束正文");
-        assertTrue(anchor.contains("媒介不能超前"));
+        assertTrue(anchor.contains("本书明确允许的认知超前"), "必须共用摘要锚的硬约束正文");
+        assertTrue(anchor.contains("特殊能力与表达媒介必须保留"));
     }
 
     @Test

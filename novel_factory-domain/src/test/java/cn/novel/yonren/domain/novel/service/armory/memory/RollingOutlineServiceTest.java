@@ -857,7 +857,8 @@ class RollingOutlineServiceTest {
 
         assertTrue(prompt.contains("【时序锚】"), "无摘要时必须用设定兜底锚：" + prompt);
         assertTrue(prompt.contains("4岁"), prompt);
-        assertTrue(prompt.contains("不得要求主角做出超出其阶段极限的可观察动作"), prompt);
+        assertTrue(prompt.contains("不得要求主角完成本书设定之外的动作"), prompt);
+        assertFalse(prompt.contains("至多 2 条"), "不得给能力展示设条数配额：" + prompt);
     }
 
     /** 逐条格式校验：任一不合格即整表退回（半张表比没有更危险——打标会大面积漏配） */

@@ -1,0 +1,212 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 600 2300" width="600" font-family="'Segoe UI','Microsoft YaHei','PingFang SC',sans-serif" role="img" aria-label="小说装配节点链服务级流程图">
+  <title>小说装配节点链（含服务）</title>
+  <desc>规则树节点链与各节点内部服务依赖：输入校验、故事上下文、人物决策档案、卷蓝图、阶段蓝图、章节计划 Prompt、规划 LLM 调用、计划解析与校验、逐章正文生成、持久化，直至终态；两个校验节点失败即异常终止；ChapterWorker 子流程含记忆组装、正文草稿、密度审校、质量门、摘要统计、台账、伏笔与结局审计。</desc>
+  <defs>
+    <marker id="mMain" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0L10,5L0,10z" fill="#4d4d4d"/></marker>
+    <marker id="mRed" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0L10,5L0,10z" fill="#b85450"/></marker>
+    <marker id="mPurple" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0L10,5L0,10z" fill="#9673a6"/></marker>
+  </defs>
+  <style>
+    .nd { stroke-width:1.2; }
+    .c-blue   { fill:#dae8fc; stroke:#6c8ebf; }
+    .c-orange { fill:#ffe6cc; stroke:#d79b00; }
+    .c-yellow { fill:#fff2cc; stroke:#d6b656; }
+    .c-purple { fill:#e1d5e7; stroke:#9673a6; }
+    .c-green  { fill:#d5e8d4; stroke:#82b366; }
+    .c-red    { fill:#f8cecc; stroke:#b85450; }
+    .c-inner  { fill:#ffffff; stroke:#9673a6; }
+    .c-box    { fill:#f5f5f5; stroke:#666666; stroke-dasharray:5 4; }
+    .t-name { fill:#333333; font-weight:600; font-size:12px; }
+    .t-desc { fill:#555555; font-size:12px; }
+    .t-red  { fill:#b85450; font-size:12px; }
+    .lbl { fill:#666666; font-size:12px; }
+    .edge { fill:none; stroke:#4d4d4d; stroke-width:1.5; }
+    .edge-red { stroke:#b85450; }
+    .edge-purple { stroke:#9673a6; stroke-dasharray:5 4; }
+    .edge-dash { stroke-dasharray:5 4; }
+    .lg { fill:#555555; font-size:11px; }
+  </style>
+
+  <rect x="0" y="0" width="600" height="2300" fill="#ffffff"/>
+  <text x="300" y="20" text-anchor="middle" font-size="13" font-weight="600" fill="#333333">小说装配节点链 · RootNode → 终态</text>
+
+  <!-- ===== 主链连线 ===== -->
+  <path class="edge" d="M300,76 V106" marker-end="url(#mMain)"/>
+  <path class="edge" d="M300,166 V196" marker-end="url(#mMain)"/>
+  <path class="edge" d="M300,256 V286" marker-end="url(#mMain)"/>
+  <text class="lbl" x="308" y="275">校验通过</text>
+  <path class="edge" d="M300,360 V390" marker-end="url(#mMain)"/>
+  <path class="edge" d="M300,481 V511" marker-end="url(#mMain)"/>
+  <path class="edge" d="M300,602 V632" marker-end="url(#mMain)"/>
+  <path class="edge" d="M300,772 V802" marker-end="url(#mMain)"/>
+  <path class="edge" d="M300,893 V923" marker-end="url(#mMain)"/>
+  <text class="lbl" x="308" y="912">分段 prompts</text>
+  <path class="edge" d="M300,1046 V1076" marker-end="url(#mMain)"/>
+  <path class="edge" d="M300,1167 V1197" marker-end="url(#mMain)"/>
+  <path class="edge" d="M300,1271 V1301" marker-end="url(#mMain)"/>
+  <text class="lbl" x="308" y="1290">校验通过</text>
+  <path class="edge" d="M300,1358 V1388" marker-end="url(#mMain)"/>
+  <text class="lbl" x="308" y="1377">全部章节完成</text>
+  <path class="edge" d="M300,1445 V1475" marker-end="url(#mMain)"/>
+
+  <!-- 失败分支 -->
+  <path class="edge edge-red" d="M90,228 H45 V1556" marker-end="url(#mRed)"/>
+  <text class="t-red" x="53" y="236">校验失败</text>
+  <path class="edge edge-red" d="M90,1236 H20 V1556" marker-end="url(#mRed)"/>
+  <text class="t-red" x="28" y="1244">校验失败</text>
+
+  <!-- 委托 -->
+  <path class="edge edge-dash" d="M510,1331 H545 V1646" marker-end="url(#mMain)"/>
+  <text class="lbl" x="545" y="1500" text-anchor="middle">委托</text>
+
+  <!-- ===== 节点 ===== -->
+  <ellipse class="nd c-green" cx="300" cy="58" rx="210" ry="18"/>
+  <text class="t-name" x="300" y="63" text-anchor="middle">开始 · StoryGenerateService 发起装配</text>
+
+  <rect class="nd c-blue" x="90" y="110" width="420" height="56" rx="8"/>
+  <text class="t-name" x="300" y="128" text-anchor="middle">① RootNode · 规则树根节点</text>
+  <text class="t-desc" x="300" y="150" text-anchor="middle">路由入口（进入规则树）</text>
+
+  <rect class="nd c-orange" x="90" y="200" width="420" height="56" rx="8"/>
+  <text class="t-name" x="300" y="218" text-anchor="middle">② ValidateUserInputNode · 输入校验</text>
+  <text class="t-desc" x="300" y="240" text-anchor="middle">必填字段与章数校验（缺失 → NULL_EXCEPTION）</text>
+
+  <rect class="nd c-blue" x="90" y="290" width="420" height="70" rx="8"/>
+  <text class="t-name" x="300" y="308" text-anchor="middle">③ BuildStoryContextNode · 故事上下文</text>
+  <text class="t-desc" x="300" y="326" text-anchor="middle">组装故事圣经：标题/类型/世界观/视角/基调/主人公</text>
+  <text class="t-desc" x="300" y="343" text-anchor="middle">人物档案与续写全局总章数一并渲染</text>
+
+  <rect class="nd c-blue" x="90" y="394" width="420" height="87" rx="8"/>
+  <text class="t-name" x="300" y="412" text-anchor="middle">④ EnsureCharacterDecisionProfilesNode · 人物决策档案</text>
+  <text class="t-desc" x="300" y="430" text-anchor="middle">CharacterProfilePlanningService.ensure</text>
+  <text class="t-desc" x="300" y="447" text-anchor="middle">└ CharacterDecisionDesignService（决策档案设计）</text>
+  <text class="t-desc" x="300" y="464" text-anchor="middle">└ IStoryRepository（档案读写）</text>
+
+  <rect class="nd c-blue" x="90" y="515" width="420" height="87" rx="8"/>
+  <text class="t-name" x="300" y="533" text-anchor="middle">⑤ BuildVolumeBlueprintNode · 卷蓝图（全书长期锚）</text>
+  <text class="t-desc" x="300" y="551" text-anchor="middle">RollingOutlineService（卷窗口判断 / 卷 Prompt / 链式生成）</text>
+  <text class="t-desc" x="300" y="568" text-anchor="middle">LlmInvokeService（卷蓝图调用）</text>
+  <text class="t-desc" x="300" y="585" text-anchor="middle">StoryMemoryService（retrieveDirections 方向检索）</text>
+
+  <rect class="nd c-blue" x="90" y="636" width="420" height="136" rx="8"/>
+  <text class="t-name" x="300" y="654" text-anchor="middle">⑥ BuildStageBlueprintNode · 阶段蓝图（滚动大纲）</text>
+  <text class="t-desc" x="300" y="672" text-anchor="middle">RollingOutlineService（阶段窗口 / 链式生成，失败重试一次）</text>
+  <text class="t-desc" x="300" y="689" text-anchor="middle">LlmInvokeService · ChapterMemoryService</text>
+  <text class="t-desc" x="300" y="706" text-anchor="middle">StageExitReviewService（阶段出口裁决）</text>
+  <text class="t-desc" x="300" y="723" text-anchor="middle">ForeshadowSettlementService（伏笔结算）</text>
+  <text class="t-desc" x="300" y="740" text-anchor="middle">ForeshadowScheduleService（DONE → 回写排期 PAID）</text>
+  <text class="t-desc" x="300" y="757" text-anchor="middle">IStoryRepository（蓝图持久化）</text>
+
+  <rect class="nd c-yellow" x="90" y="806" width="420" height="87" rx="8"/>
+  <text class="t-name" x="300" y="824" text-anchor="middle">⑦ BuildChapterPlanPromptNode · 章节计划 Prompt</text>
+  <text class="t-desc" x="300" y="842" text-anchor="middle">ChapterPlanPromptService（buildPlanPrompt）</text>
+  <text class="t-desc" x="300" y="859" text-anchor="middle">RollingOutlineService.segmentBatch（惰性分段）</text>
+  <text class="t-desc" x="300" y="876" text-anchor="middle">CharacterStageProfileService.ensure（人物阶段档案）</text>
+
+  <rect class="nd c-yellow" x="90" y="927" width="420" height="119" rx="8"/>
+  <text class="t-name" x="300" y="945" text-anchor="middle">⑧ CallChapterPlanLlmNode · 调用规划 LLM</text>
+  <text class="t-desc" x="300" y="963" text-anchor="middle">ChapterPlanSegmentPlanner（规划执行闭环）</text>
+  <text class="t-desc" x="300" y="980" text-anchor="middle">└ PlanBranchService（分支推演）</text>
+  <text class="t-desc" x="300" y="997" text-anchor="middle">└ PlanCausalityReviewService（计划因果核验）</text>
+  <text class="t-desc" x="300" y="1014" text-anchor="middle">└ LlmInvokeService（三级降级 / 反馈重规划）</text>
+  <text class="t-desc" x="300" y="1031" text-anchor="middle">ChapterMemoryService（对话承载闸门名册）</text>
+
+  <rect class="nd c-yellow" x="90" y="1080" width="420" height="87" rx="8"/>
+  <text class="t-name" x="300" y="1098" text-anchor="middle">⑨ ParseChapterPlanNode · 解析章节计划</text>
+  <text class="t-desc" x="300" y="1116" text-anchor="middle">ChapterPlanChecks.parseLenient（纵深兜底解析）</text>
+  <text class="t-desc" x="300" y="1133" text-anchor="middle">ChapterType 归一化 · normalizeChapterNumbers（编号平移）</text>
+  <text class="t-desc" x="300" y="1150" text-anchor="middle">ScenePlanPolicy（v2 场景契约派生视图刷新）</text>
+
+  <rect class="nd c-orange" x="90" y="1201" width="420" height="70" rx="8"/>
+  <text class="t-name" x="300" y="1219" text-anchor="middle">⑩ ValidateChapterPlanNode · 校验章节计划</text>
+  <text class="t-desc" x="300" y="1237" text-anchor="middle">ChapterPlanChecks.validateSegmentStructure</text>
+  <text class="t-desc" x="300" y="1254" text-anchor="middle">（结构 / 章数 / 起点编号，失败抛异常）</text>
+
+  <rect class="nd c-purple" x="90" y="1305" width="420" height="53" rx="8"/>
+  <text class="t-name" x="300" y="1323" text-anchor="middle">⑪ GenerateChapterContentNode · 逐章生成正文</text>
+  <text class="t-desc" x="300" y="1341" text-anchor="middle">委托 ChapterWorker.generateAll（子流程见下方）</text>
+
+  <rect class="nd c-green" x="90" y="1392" width="420" height="53" rx="8"/>
+  <text class="t-name" x="300" y="1410" text-anchor="middle">⑫ PersistChapterPlanNode · 持久化</text>
+  <text class="t-desc" x="300" y="1428" text-anchor="middle">IStoryRepository（章节计划与产物落库）</text>
+
+  <ellipse class="nd c-green" cx="300" cy="1503" rx="210" ry="24"/>
+  <text class="t-name" x="300" y="1498" text-anchor="middle">终态 · defaultStrategyHandler</text>
+  <text class="t-desc" x="300" y="1514" text-anchor="middle">返回 StoryGenerateResultAggregate</text>
+
+  <rect class="nd c-red" x="8" y="1560" width="170" height="48" rx="8"/>
+  <text class="t-name" x="93" y="1580" text-anchor="middle">异常终止</text>
+  <text class="t-desc" x="93" y="1597" text-anchor="middle">校验不通过 · 抛出异常</text>
+
+  <!-- ===== ChapterWorker 子流程 ===== -->
+  <rect class="nd c-box" x="70" y="1650" width="480" height="566" rx="10"/>
+  <text class="t-name" x="82" y="1672">ChapterWorker · 逐章循环</text>
+  <text class="t-desc" x="82" y="1687">GenerateChapterContentNode 内部</text>
+
+  <rect class="nd c-inner" x="106" y="1694" width="408" height="44" rx="7"/>
+  <text class="t-name" x="310" y="1710" text-anchor="middle">记忆组装</text>
+  <text class="t-desc" x="310" y="1725" text-anchor="middle">滚动大纲 · 故事记忆 · 章节记忆 · 节拍 · 人物阶段档案</text>
+
+  <rect class="nd c-inner" x="106" y="1748" width="408" height="44" rx="7"/>
+  <text class="t-name" x="310" y="1764" text-anchor="middle">LLM 生成正文草稿</text>
+  <text class="t-desc" x="310" y="1779" text-anchor="middle">LlmInvokeService · WriterSampleService（范文检索）</text>
+
+  <rect class="nd c-inner" x="106" y="1802" width="408" height="44" rx="7"/>
+  <text class="t-name" x="310" y="1818" text-anchor="middle">段落密度审校与改写</text>
+  <text class="t-desc" x="310" y="1833" text-anchor="middle">ParagraphDensityAuditService</text>
+
+  <rect class="nd c-inner" x="106" y="1856" width="408" height="44" rx="7"/>
+  <text class="t-name" x="310" y="1872" text-anchor="middle">质量门审校修订</text>
+  <text class="t-desc" x="310" y="1887" text-anchor="middle">QualityGate · QualityReviewService · 四级降级</text>
+
+  <rect class="nd c-inner" x="106" y="1910" width="408" height="44" rx="7"/>
+  <text class="t-name" x="310" y="1926" text-anchor="middle">章节摘要与统计</text>
+  <text class="t-desc" x="310" y="1941" text-anchor="middle">ChapterSummaryService · StyleStatService · ConsistencyIndexService</text>
+
+  <rect class="nd c-inner" x="106" y="1964" width="408" height="44" rx="7"/>
+  <text class="t-name" x="310" y="1980" text-anchor="middle">台账裁决</text>
+  <text class="t-desc" x="310" y="1995" text-anchor="middle">LedgerAdjudicateService</text>
+
+  <rect class="nd c-inner" x="106" y="2018" width="408" height="44" rx="7"/>
+  <text class="t-name" x="310" y="2034" text-anchor="middle">伏笔结算与排期</text>
+  <text class="t-desc" x="310" y="2049" text-anchor="middle">ForeshadowSettlementService · ForeshadowScheduleService</text>
+
+  <rect class="nd c-inner" x="106" y="2072" width="408" height="44" rx="7"/>
+  <text class="t-name" x="310" y="2088" text-anchor="middle">结局审计 · FinaleReview</text>
+  <text class="t-desc" x="310" y="2103" text-anchor="middle">不通过且返工额度未满（MAX_FINALE_REWORK）→ 返工扩写</text>
+
+  <text class="t-desc" x="310" y="2140" text-anchor="middle">其余支撑服务（预算 / 健康 / 收尾 / 留痕）</text>
+  <text class="t-desc" x="310" y="2156" text-anchor="middle" font-size="11">BatchHealthService · QualityDebtService · StageReportService</text>
+  <text class="t-desc" x="310" y="2172" text-anchor="middle" font-size="11">StageExitReviewService · CandidateSampleService</text>
+  <text class="t-desc" x="310" y="2188" text-anchor="middle" font-size="11">PromptBudgetGuard · MechanicalEventRecorder</text>
+  <text class="t-desc" x="310" y="2204" text-anchor="middle" font-size="11">CheckpointService · ChapterCandidateService</text>
+
+  <path class="edge" d="M310,1738 V1744" marker-end="url(#mMain)"/>
+  <path class="edge" d="M310,1792 V1798" marker-end="url(#mMain)"/>
+  <path class="edge" d="M310,1846 V1852" marker-end="url(#mMain)"/>
+  <path class="edge" d="M310,1900 V1906" marker-end="url(#mMain)"/>
+  <path class="edge" d="M310,1954 V1960" marker-end="url(#mMain)"/>
+  <path class="edge" d="M310,2008 V2014" marker-end="url(#mMain)"/>
+  <path class="edge" d="M310,2062 V2068" marker-end="url(#mMain)"/>
+
+  <path class="edge edge-purple" d="M106,1878 H88 V1770 H101" marker-end="url(#mPurple)"/>
+  <text class="lbl" x="88" y="1828" text-anchor="middle">修订</text>
+  <path class="edge edge-red edge-dash" d="M514,2094 H532 V1770 H519" marker-end="url(#mRed)"/>
+  <text class="t-red" x="532" y="1930" text-anchor="middle">返工</text>
+
+  <!-- ===== 图例 ===== -->
+  <rect x="40" y="2240" width="12" height="12" rx="2" fill="#ffe6cc" stroke="#d79b00"/>
+  <text class="lg" x="58" y="2250">校验节点</text>
+  <rect x="170" y="2240" width="12" height="12" rx="2" fill="#dae8fc" stroke="#6c8ebf"/>
+  <text class="lg" x="188" y="2250">上下文 · 蓝图</text>
+  <rect x="300" y="2240" width="12" height="12" rx="2" fill="#fff2cc" stroke="#d6b656"/>
+  <text class="lg" x="318" y="2250">计划链路</text>
+  <rect x="430" y="2240" width="12" height="12" rx="2" fill="#e1d5e7" stroke="#9673a6"/>
+  <text class="lg" x="448" y="2250">正文生成</text>
+  <rect x="40" y="2264" width="12" height="12" rx="2" fill="#d5e8d4" stroke="#82b366"/>
+  <text class="lg" x="58" y="2274">持久化 · 终态</text>
+  <rect x="170" y="2264" width="12" height="12" rx="2" fill="#f8cecc" stroke="#b85450"/>
+  <text class="lg" x="188" y="2274">异常终止</text>
+  <rect x="300" y="2264" width="12" height="12" rx="2" fill="#f5f5f5" stroke="#666666" stroke-dasharray="3 2"/>
+  <text class="lg" x="318" y="2274">ChapterWorker 子流程</text>
+</svg>

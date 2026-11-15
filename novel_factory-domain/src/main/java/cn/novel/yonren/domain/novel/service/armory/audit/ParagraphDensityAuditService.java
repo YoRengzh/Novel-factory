@@ -152,24 +152,24 @@ public class ParagraphDensityAuditService {
 
     private String buildPrompt(ChapterPlanItemEntity item, String content, int maxPatches) {
         StringBuilder sb = new StringBuilder();
-        sb.append("你是小说编辑，只做一件事：找出**没有带来任何信息增量**的段落，并给出局部改写。")
-                .append("\n\n【判定标准】段落满足以下任一条，即为无信息增量（应挤掉或并入相邻段落）：")
-                .append("\n- 只是重复前文已经建立过的紧张感、情绪或结论；")
-                .append("\n- 只是原地循环同一种情绪（反复写\"他很愤怒/他很痛苦\"，却没有新动作或新变化）；")
-                .append("\n- 只是环境或心理铺陈，不改变任何状态。")
-                // 注水是抽象重复已知状态，不等于描写情绪。
-                // 必须区分重复评价与具体呈现情感的段落，后者属于人物塑造。
-                .append("\n  ⚠️ 但**具体呈现情感**的段落不算无信息增量：靠动作、停顿、沉默、器物或对白"
-                        + "把情绪与关系变化演出来的段落（如话说到一半把碗放下、伸手又收回去），"
-                        + "是人物塑造的一部分，**一律不要动**。")
-                .append("\n\n有信息增量的段落**一律不要动**——信息增量指：新信息进入读者视野、角色目标变化、")
-                .append("关系或信任变化、资源或位置变化、风险上升或下降、角色做出不可撤销的选择。")
+        sb.append("你是小说编辑，只做一件事：找出重复且没有当前阅读功能的段落，并给出局部改写。")
+                .append("\n\n【判定标准】只有同时满足“内容重复或空转”且“删改后不损失当前场景功能”时才处理：")
+                .append("\n- 反复陈述前文已经建立、且没有带来新理解的情绪、结论或处境；")
+                .append("\n- 同一情绪、判断或动作在原地循环，既不推进人物关系，也不改变读者理解；")
+                .append("\n- 环境、心理或概述段落只是填充篇幅，删去后不损失空间定位、氛围、人物状态或后果消化。")
+                .append("\n\n").append(cn.novel.yonren.domain.novel.service.armory.prompt.WritingContractPolicy.renderEditorialScope())
+                .append("\n心理、讲述、等待、环境、余韵和后果消化都可以独立承担阅读功能，不能仅因不改变外部状态而删除。")
+                .append("人物塑造、情绪呈现与具体处境有关的段落一律不要动。")
                 .append("\n\n【本章契约】")
                 .append("\n目标：").append(StringUtils.defaultString(item == null ? null : item.getGoal()))
                 .append("\n关键事件：").append(item == null || item.getKeyEvents() == null
                         ? "" : String.join("、", item.getKeyEvents()))
-                .append("\n结尾落点：").append(StringUtils.defaultString(item == null ? null : item.getEndingHook()))
-                .append("\n\n【输出要求】")
+                .append("\n结尾落点：").append(StringUtils.defaultString(item == null ? null : item.getEndingHook()));
+        if (item != null && item.getScenes() != null && !item.getScenes().isEmpty()) {
+            sb.append("\n").append(
+                    cn.novel.yonren.domain.novel.service.armory.plan.ScenePlanPolicy.render(item.getScenes()));
+        }
+        sb.append("\n\n【输出要求】")
                 .append("\n- 每个问题段落输出**一条补丁**：anchor 为该段落在正文中**逐字存在且唯一**的一段原文")
                 .append("（建议取该段开头 30-60 字），replacement 为改写后的段落；")
                 .append("\n- 改写要**保留必要信息**，把水分挤掉即可，不要改变剧情走向、不要新增情节；")

@@ -196,7 +196,7 @@ class ChapterCandidateServiceTest {
             boolean challengerIsA = posC > posA && posC < posB;
             return "{\"winner\":\"" + (challengerIsA ? "A" : "B") + "\",\"reason\":\"重试后判定\"}";
         });
-        when(qualityGate.auditAndReviseIfEnabled(any(), any(), any(), anyList(), any(), anyInt(), any()))
+        when(qualityGate.auditAndReviseIfEnabled(any(), any(), any(), anyList(), any(), anyInt(), any(), any()))
                 .thenReturn(GateResult.of(List.of(), 0, 0));
 
         GateResult result = serviceWithProperties().challenge(command, item, PromptContext.builder().build(),
@@ -204,7 +204,7 @@ class ChapterCandidateServiceTest {
 
         assertEquals(GateResult.PassGrade.CLEAN_PASS, result.grade());
         assertEquals("挑战稿", chapterContent.getTitle());
-        verify(qualityGate).auditAndReviseIfEnabled(any(), any(), any(), anyList(), any(), anyInt(), any());
+        verify(qualityGate).auditAndReviseIfEnabled(any(), any(), any(), anyList(), any(), anyInt(), any(), any());
     }
 
     @Test
@@ -222,7 +222,7 @@ class ChapterCandidateServiceTest {
             boolean challengerIsA = posC > posA && posC < posB;
             return "{\"winner\":\"" + (challengerIsA ? "A" : "B") + "\",\"reason\":\"文风更干净\"}";
         });
-        when(qualityGate.auditAndReviseIfEnabled(any(), any(), any(), anyList(), any(), anyInt(), any()))
+        when(qualityGate.auditAndReviseIfEnabled(any(), any(), any(), anyList(), any(), anyInt(), any(), any()))
                 .thenReturn(GateResult.of(List.of(), 0, 1));
 
         GateResult result = serviceWithProperties().challenge(command, item, PromptContext.builder().build(),
@@ -247,7 +247,7 @@ class ChapterCandidateServiceTest {
             boolean challengerIsA = posC > posA && posC < posB;
             return "{\"winner\":\"" + (challengerIsA ? "A" : "B") + "\",\"reason\":\"更紧凑\"}";
         });
-        when(qualityGate.auditAndReviseIfEnabled(any(), any(), any(), anyList(), any(), anyInt(), any()))
+        when(qualityGate.auditAndReviseIfEnabled(any(), any(), any(), anyList(), any(), anyInt(), any(), any()))
                 .thenReturn(GateResult.of(List.of(
                         cn.novel.yonren.domain.novel.model.entity.ChapterIssueEntity.builder()
                                 .severity("BLOCKING").description("复审爆雷").build()), 0, 1));

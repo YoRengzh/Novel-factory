@@ -171,7 +171,7 @@ class ChapterWorkerTest {
         when(storyMemoryService.retrieveWithOutcome(any(), any(), any(), any(), any()))
                 .thenReturn(StoryMemoryService.RecallOutcome.of(List.of()));
         when(qualityGate.auditEnabled()).thenReturn(false);
-        when(qualityGate.auditAndReviseIfEnabled(any(), any(), any(), anyList(), any(), anyInt(), any()))
+        when(qualityGate.auditAndReviseIfEnabled(any(), any(), any(), anyList(), any(), anyInt(), any(), any()))
                 .thenReturn(GateResult.of(List.of(), 0, 0));
         when(chapterCandidateService.challenge(any(), any(), any(), anyString(), any(), any(), anyList(), any(), anyInt(), any()))
                 .thenAnswer(inv -> inv.getArgument(5));
@@ -315,6 +315,29 @@ class ChapterWorkerTest {
         // 接线校验：每章完成后必须叫一次全书质量评分（"每 N 章评一次"的门禁在服务内部，
         // worker 侧只管逐章调用）。此处只验调用次数与参数形状，评分内容由 QualityReviewServiceTest 覆盖。
         verify(qualityReviewService, times(2)).reviewWindow(any(), any(), any(), anyInt());
+    }
+
+    @Test
+    void generateAll_planAdjustmentRequired_stopsAfterCurrentChapterAndKeepsCommit() throws Exception {
+        // 计划与事实冲突不是写作缺陷：当前章照常提交，但不继续消耗后续章节。
+        when(qualityGate.auditEnabled()).thenReturn(true);
+        when(qualityGate.auditAndReviseIfEnabled(any(), any(), any(), anyList(), any(), anyInt(), any(), any()))
+                .thenAnswer(inv -> GateResult.of(List.of(), 0, 0)
+                        .withPlanAdjustmentRequired("冻结事实中没有药签"));
+        GenerationJob job = new GenerationJob("job-plan-conflict");
+        DefaultArmoryFactory.DynamicContext ctx = context(job);
+
+        chapterWorker.generateAll(command(), ctx);
+
+        assertEquals(1, ctx.getChapterContents().size(), "计划需调整时应停在当前章，不再生成下一章");
+        assertEquals(GenerationJob.PLAN_ADJUSTMENT_REQUIRED, job.getCurrentStage());
+        assertEquals(1, job.getCurrentChapter());
+        assertEquals(2, job.getTotalChapters());
+        assertTrue(job.getErrorMessage().contains("冻结事实中没有药签"));
+        verify(chapterCandidateService, never()).challenge(
+                any(), any(), any(), anyString(), any(), any(), anyList(), any(), anyInt(), any());
+        verify(llmInvokeService, times(1)).invoke(any(), any(), any(), anyString(), anyMap());
+        verify(storyRepository, times(1)).commitChapter(eq(STORY_DIR), any(), any(ChapterCommitState.class));
     }
 
     @Test
@@ -471,7 +494,7 @@ class ChapterWorkerTest {
     @Test
     void generateAll_unresolvedLengthIssueNoLongerRejects_persistsAndRecordsDebt() throws Exception {
         // 字数不足不再拒收（拒收只会逼模型注水）：章节正常落盘，未闭环问题记为质量债
-        when(qualityGate.auditAndReviseIfEnabled(any(), any(), any(), anyList(), any(), anyInt(), any()))
+        when(qualityGate.auditAndReviseIfEnabled(any(), any(), any(), anyList(), any(), anyInt(), any(), any()))
                 .thenReturn(GateResult.of(List.of(ChapterIssueEntity.builder().dimension("length").severity("BLOCKING").build()), 0, 0));
         DefaultArmoryFactory.DynamicContext ctx = context(null);
 
@@ -482,9 +505,23 @@ class ChapterWorkerTest {
     }
 
     @Test
+    void repeatedContentKeyCannotReplaceCompleteBodyWithAShortFragment() {
+        String complete = "苏尘核对药签，确认根须完好后把青纹兰送到丹房。".repeat(55);
+        String raw = "{\"chapterNo\":1,\"title\":\"原题\",\"content\":"
+                + com.alibaba.fastjson2.JSON.toJSONString(complete) + ",\"content\":\"短片段\"}";
+        when(llmInvokeService.invoke(any(), any(), any(), anyString(), anyMap())).thenReturn(raw);
+        ChapterPlanItemEntity item = ChapterPlanItemEntity.builder().chapterNo(1).title("计划标题").build();
+        var chapter = org.springframework.test.util.ReflectionTestUtils.<cn.novel.yonren.domain.novel.model.entity.ChapterContentEntity>invokeMethod(
+                chapterWorker, "generateChapterWithFallback", command(), item,
+                cn.novel.yonren.domain.novel.model.valobj.prompt.PromptContext.builder().build(), "计划", 1, new HashMap<String, String>());
+        assertEquals(complete, chapter.getContent());
+        assertEquals("计划标题", chapter.getTitle());
+    }
+
+    @Test
     void generateAll_recordsDensitySignalsOnSummary() throws Exception {
         // 密度信号机械入账：摘要携带 validChars/keyEventCount，供规划层判断供给是否太稀
-        when(qualityGate.auditAndReviseIfEnabled(any(), any(), any(), anyList(), any(), anyInt(), any()))
+        when(qualityGate.auditAndReviseIfEnabled(any(), any(), any(), anyList(), any(), anyInt(), any(), any()))
                 .thenReturn(GateResult.of(List.of(), 0, 0));
         when(chapterSummaryService.summarize(any(), any(), anyString(), anyInt(), anyString(), anyList(), any()))
                 .thenAnswer(inv -> ChapterSummaryEntity.builder()
@@ -506,7 +543,7 @@ class ChapterWorkerTest {
     @Test
     void generateAll_bindsManuscriptHashAndRejectsUnlocatableCharacterEvidence() throws Exception {
         // 人物状态增量必须绑定到具体正文版本；定位不到证据的条目转 pending，不进权威状态。
-        when(qualityGate.auditAndReviseIfEnabled(any(), any(), any(), anyList(), any(), anyInt(), any()))
+        when(qualityGate.auditAndReviseIfEnabled(any(), any(), any(), anyList(), any(), anyInt(), any(), any()))
                 .thenReturn(GateResult.of(List.of(), 0, 0));
         when(chapterSummaryService.summarize(any(), any(), anyString(), anyInt(), anyString(), anyList(), any()))
                 .thenAnswer(inv -> ChapterSummaryEntity.builder()
@@ -536,7 +573,7 @@ class ChapterWorkerTest {
     void generateAll_mechanicalStyleMinor_isRecordedAsDebt() throws Exception {
         // 严重度分层的配套要求：降档后的文风 MINOR 不触发修订、不触发候选、不计入 grade，
         // 但必须落质量债——否则「降档」等于把问题直接丢掉，观测层与规划层回灌都拿不到信号
-        when(qualityGate.auditAndReviseIfEnabled(any(), any(), any(), anyList(), any(), anyInt(), any()))
+        when(qualityGate.auditAndReviseIfEnabled(any(), any(), any(), anyList(), any(), anyInt(), any(), any()))
                 .thenReturn(GateResult.of(List.of(), 0,
                         List.of(ChapterIssueEntity.builder()
                                 .dimension("aesthetic").severity("MINOR")
@@ -654,13 +691,31 @@ class ChapterWorkerTest {
                 issue("character", "配角沦为工具人"),
                 issue("aesthetic", "定义旁白连用"),
                 issue("pacing", "节奏偏快"));
+        minors.forEach(item -> item.setEvidence("他把药签交给执事。"));
         String feedback = ChapterWorker.renderReviewFeedback(minors);
 
         assertNotNull(feedback);
         assertTrue(feedback.contains("审校反馈"));
         assertTrue(feedback.contains("工具人"));
+        assertTrue(feedback.contains("他把药签交给执事。"));
+        assertFalse(feedback.contains("相反的写法"));
         assertFalse(feedback.contains("设定甲"), "一致性类问题走账本通道，不进反馈块");
         assertNull(ChapterWorker.renderReviewFeedback(List.of()));
+        assertNull(ChapterWorker.renderReviewFeedback(List.of(issue("pacing", "无证据判断"))));
+    }
+
+    @Test
+    void reviewFeedbackKeepsConditionsAndSuggestionIntact() {
+        String description = "此处连续确认同一个条件。".repeat(12)
+                + "但如果本章是在向第三人核实，新一轮询问可以保留。";
+        ChapterIssueEntity advice = issue("pacing", description);
+        advice.setEvidence("三日之内交回药签。");
+        advice.setSuggestion("只在没有新增阅读功能时压缩；不要修改已有事实。");
+        String feedback = ChapterWorker.renderReviewFeedback(List.of(advice));
+        assertTrue(feedback.contains(description), "不能截断后半段适用条件");
+        assertTrue(feedback.contains(advice.getSuggestion()));
+        assertTrue(feedback.contains("本章契约"));
+        assertFalse(feedback.contains("必须避免同类问题"));
     }
 
     private ChapterIssueEntity issue(String dimension, String description) {

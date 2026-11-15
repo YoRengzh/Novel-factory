@@ -38,8 +38,7 @@ public class CharacterDecisionDesignService {
             } catch (RuntimeException failure) {
                 LlmLocalRejectionException.rethrowIfPresent(failure);
                 ensureRunning(context);
-                String message = java.util.Objects.toString(failure.getMessage(), "");
-                if (message.contains("401") || message.contains("403") || message.toLowerCase().contains("unauthorized")) throw failure;
+                if (mustPropagate(failure)) throw failure;
                 return new Result(List.of(), "DESIGN_CALL_FAILED:" + failure.getClass().getSimpleName());
             }
             ensureRunning(context);
@@ -51,14 +50,35 @@ public class CharacterDecisionDesignService {
                 var profiles = object == null ? null : object.getList("profiles", CharacterDecisionProfile.class);
                 if (profiles == null) throw new IllegalArgumentException("缺少profiles数组");
                 var drafts = CharacterDecisionProfileService.draft(profiles);
-                if (drafts.stream().anyMatch(profile -> !names.contains(profile.displayName()))) throw new IllegalArgumentException("输出含未授权姓名");
-                return new Result(drafts, drafts.isEmpty() ? "DESIGN_EMPTY" : "DESIGNED");
+                if (drafts.isEmpty() || drafts.stream().anyMatch(profile -> !names.contains(profile.displayName())
+                        || CharacterDecisionProfileService.fieldEntries(profile).isEmpty())) {
+                    throw new IllegalArgumentException("未生成授权人物的有效设计字段");
+                }
+                return new Result(drafts, "DESIGNED");
             } catch (RuntimeException malformed) {
                 if (attempt == 1) return new Result(List.of(), "DESIGN_FORMAT_FAILED");
                 prompt += "\n上一输出格式不符合契约；只重输出所列姓名的profiles JSON，不增加其他人物或元数据。";
             }
         }
         return new Result(List.of(), "DESIGN_FALLBACK");
+    }
+
+    private static boolean mustPropagate(Throwable failure) {
+        java.util.Set<Throwable> seen = java.util.Collections.newSetFromMap(new java.util.IdentityHashMap<>());
+        for (Throwable cause = failure; cause != null && seen.size() < 32 && seen.add(cause); cause = cause.getCause()) {
+            if (cause instanceof java.util.concurrent.CancellationException) return true;
+            if (cause instanceof InterruptedException) {
+                Thread.currentThread().interrupt();
+                return true;
+            }
+            if (cause instanceof org.springframework.web.client.RestClientResponseException http
+                    && (http.getStatusCode().value() == 401 || http.getStatusCode().value() == 403)) return true;
+            String message = java.util.Objects.toString(cause.getMessage(), "").toLowerCase(java.util.Locale.ROOT);
+            if (message.matches("(?s).*\\b(?:401|403)\\b.*") || message.contains("unauthorized")
+                    || message.contains("forbidden") || message.contains("invalid_api_key")
+                    || message.contains("认证失败") || message.contains("鉴权")) return true;
+        }
+        return Thread.currentThread().isInterrupted();
     }
 
     static void ensureRunning(DefaultArmoryFactory.DynamicContext context) {

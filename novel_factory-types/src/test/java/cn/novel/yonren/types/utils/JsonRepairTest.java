@@ -11,6 +11,13 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 class JsonRepairTest {
 
     @Test
+    void rootContentCandidatesIgnoreNestedExamplesAndRetainDuplicateLongBody() {
+        String raw = "{\"example\":{\"content\":\"嵌套示例\"},\"content\":\"完整正文\",\"note\":\"字符串中的\\\"content\\\":\\\"伪正文\\\"\",\"content\":\"短\"}";
+        assertEquals(java.util.List.of("完整正文", "短"), JsonRepair.extractStringFields(raw, "content"));
+        assertEquals(java.util.List.of(), JsonRepair.extractStringFields("{\"note\":\"无正文\"}", "content"));
+    }
+
+    @Test
     void repair_removesDanglingCommaInObject() {
         // 第 5 章实测故障模式
         String bad = "{\"a\":\"值\",\"b\":\"重伤\",}";
