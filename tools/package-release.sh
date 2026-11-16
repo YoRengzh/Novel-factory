@@ -9,7 +9,7 @@ set -e
 cd "$(dirname "$0")/.."
 
 # ---- 版本号：与 git tag 保持一致，发版时改这里 ----
-VERSION=v1.3.1
+VERSION=v1.4.2
 DIST="dist/$VERSION"
 ZIP="dist/novel-factory-$VERSION.zip"
 
