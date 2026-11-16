@@ -9,10 +9,15 @@ import cn.novel.yonren.domain.novel.model.entity.StyleStatEntity;
 import cn.novel.yonren.domain.novel.model.valobj.LlmCall;
 import cn.novel.yonren.domain.novel.model.valobj.StoryVO;
 import cn.novel.yonren.domain.novel.config.StoryProperties;
+import cn.novel.yonren.domain.novel.config.StoryProperties.CausalityProperties.Mode;
 import cn.novel.yonren.domain.novel.service.armory.llm.LlmInvokeService;
+import cn.novel.yonren.domain.novel.service.armory.llm.LlmLocalRejectionException;
 import cn.novel.yonren.domain.novel.model.valobj.prompt.PromptContext;
 import cn.novel.yonren.domain.novel.service.armory.quality.ChapterLengthPolicy;
+import cn.novel.yonren.domain.novel.model.valobj.quality.DeliveryReview;
 import cn.novel.yonren.domain.novel.model.valobj.quality.GateResult;
+import cn.novel.yonren.domain.novel.model.valobj.work.ChapterManuscript;
+import cn.novel.yonren.domain.novel.service.armory.quality.DeliveryReviewPolicy;
 import cn.novel.yonren.domain.novel.service.armory.quality.QualityGate;
 import cn.novel.yonren.domain.novel.service.armory.quality.StyleViolationPolicy;
 import cn.novel.yonren.types.enums.ModelScene;
@@ -32,6 +37,7 @@ import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.CancellationException;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -43,7 +49,8 @@ import java.util.concurrent.ThreadLocalRandom;
  * （ModelScene.CHAPTER_JUDGE，scene-models.chapter-judge 可配独立 base-url/api-key）
  * 重写 N 稿候选，机械排序淘汰后由第二模型族盲评二选一。
  * 挑战者胜出后必须重跑质量门复审（挑战者尚未过审校，直接采纳会旁路闸门）：
- * 复审出现未修复 BLOCKING 即回退原稿——守住"闸门拒绝率不升"。
+ * 未验证、计划待调整或仍有质量债时回退原稿；交付严格模式另须同稿同计划的 PASS。
+ * 原稿未验证时不发起候选调用；已确认的问题只能按既有等级开关显式启用救场。
  * 评审防偏置：A/B 顺序随机盲评、明令"只评文风与事件覆盖，不评长短详略"；
  * 第二族 API 未配置/调用异常一律 fail-soft 保留原稿
  */
@@ -90,9 +97,10 @@ public class ChapterCandidateService {
     }
 
     /**
-     * 低置信通过的候选选优入口：未启用/非低置信通过时原样返回 incumbentGate；
+     * 低置信通过的候选选优入口：未启用/未验证/非低置信通过时原样返回 incumbentGate；
      * 挑战者胜出且通过质量门复审时原地替换 chapterContent 并返回新 GateResult，
-     * 复审不过（质量债）回退原稿。全程 fail-soft：任何异常保留原稿
+     * 严格模式还须交付报告绑定最终稿与当前计划并为 PASS。
+     * 未采纳时由 finally 恢复原稿，返回原 GateResult（含全部审校与交付元数据）。
      *
      * @param ctx        正文生成时的装配上下文（候选复用同一 userPrompt 与规则注入）
      * @param userPrompt 已装配完成的正文 prompt（含记忆前缀/节拍/规则）
@@ -108,12 +116,30 @@ public class ChapterCandidateService {
                                 int globalNo,
                                 Path storyDir) {
         StoryProperties.CandidateProperties props = storyProperties.getCandidate();
-        if (props == null || !props.isEnabled() || !triggered(incumbentGate, props)) {
+        if (props == null || !props.isEnabled() || chapterContent == null || !triggered(incumbentGate, props)) {
             return incumbentGate;
         }
-        log.info("第 {} 章低置信通过（{}，MINOR {} 条/修订 {} 轮），启动候选选优",
-                globalNo, incumbentGate.grade(), incumbentGate.minorCount(), incumbentGate.reviseRounds());
+        // 不重建 GateResult：未采纳时必须保留原稿对应的全部结论、反馈指纹与交付报告。
+        ChapterContentEntity incumbentSnapshot = ChapterContentEntity.builder()
+                .chapterNo(chapterContent.getChapterNo()).title(chapterContent.getTitle())
+                .content(chapterContent.getContent()).build();
+        boolean adopted = false;
         try {
+            Mode deliveryMode = DeliveryReviewPolicy.mode(storyProperties);
+            if (deliveryMode != Mode.OFF) {
+                DeliveryReview incumbentReview = DeliveryReviewPolicy.ensureBound(
+                        incumbentGate.deliveryReview(), item, ChapterManuscript.of(chapterContent),
+                        deliveryMode == Mode.ENFORCE);
+                // 旧稿/旧计划的报告也属于未验证，不能靠候选调用“修复”基础设施或身份问题。
+                // 已确认 ISSUE 不在此一概拦截：DEBT 的显式开关仍允许一次同计划救场。
+                if (incumbentReview.unknown()
+                        || (incumbentReview.blocksCommit() && !props.isTriggerOnDebt())) {
+                    log.info("第 {} 章原稿交付结论未验证或未启用 DEBT 候选，跳过候选选优", globalNo);
+                    return incumbentGate;
+                }
+            }
+            log.info("第 {} 章低置信通过（{}，MINOR {} 条/修订 {} 轮），启动候选选优",
+                    globalNo, incumbentGate.grade(), incumbentGate.minorCount(), incumbentGate.reviseRounds());
             int n = Math.max(1, props.getMaxCandidates());
             // 重写沿用正文 prompt 会系统性缩水（实测 27 次机械拒绝的平均字数为原稿的 78%，
             // 其中 7 次跌破 0.6 缩水线）——模型把"重写"理解成"精简"。原稿已达标，
@@ -156,36 +182,70 @@ public class ChapterCandidateService {
             }
             JudgeVerdict verdict = attempt.verdict();
             // 挑战者胜出：原地替换 + 质量门复审（挑战者尚未过审校，直接采纳等于旁路闸门）
-            // 替换前快照原稿：采纳分支的样本必须保留败者全文（复盘要的是"输的那稿"）
-            ChapterContentEntity incumbentSnapshot = ChapterContentEntity.builder()
-                    .chapterNo(globalNo).title(chapterContent.getTitle())
-                    .content(chapterContent.getContent()).build();
             chapterContent.setTitle(best.getTitle());
             chapterContent.setContent(best.getContent());
             var challengerContext = new cn.novel.yonren.domain.novel.model.valobj.revise.RewriteContext(
-                    userPrompt, null, cn.novel.yonren.domain.novel.model.valobj.work.ChapterManuscript.of(chapterContent));
+                    userPrompt, null, ChapterManuscript.of(chapterContent));
             GateResult challengerGate = qualityGate.auditAndReviseIfEnabled(
                     requestParameter, item, chapterContent, summaries, styleStat, globalNo, storyDir, challengerContext);
-            if (!challengerGate.unresolvedBlocking().isEmpty()) {
-                chapterContent.setTitle(incumbentSnapshot.getTitle());
-                chapterContent.setContent(incumbentSnapshot.getContent());
-                log.warn("第 {} 章挑战者复审出现未修复 BLOCKING（{} 条），回退原稿；"
-                                + "该结论属于**已废弃的候选稿**，不记为本章质量债（采纳的是原稿，原稿无此问题）",
-                        globalNo, challengerGate.unresolvedBlocking().size());
+            if (!verifiedPass(challengerGate)) {
+                log.warn("第 {} 章挑战者复审未获可信通过（grade={}），回退原稿与原审校结论；"
+                                + "废弃候选的结论不记为原稿质量债",
+                        globalNo, challengerGate == null ? null : challengerGate.grade());
                 candidateSampleService.record(storyDir, globalNo, incumbentGate.grade().name(),
-                        "challenger-debt-reverted", chapterContent, best, "challenger", verdict.reason(), null);
+                        "challenger-debt-reverted", incumbentSnapshot, best, "challenger", verdict.reason(), null);
                 return incumbentGate;
+            }
+            if (deliveryMode != Mode.OFF) {
+                // QualityGate 可能修订挑战者，必须核对复审后的最终稿，而不是生成时的 best。
+                DeliveryReview challengerReview = DeliveryReviewPolicy.ensureBound(
+                        challengerGate.deliveryReview(), item, ChapterManuscript.of(chapterContent),
+                        deliveryMode == Mode.ENFORCE);
+                if (challengerReview.unknown() || challengerReview.blocksCommit()
+                        || (deliveryMode == Mode.ENFORCE && !challengerReview.passed())) {
+                    log.warn("第 {} 章挑战者交付验收未通过（{}），回退原稿与原审校结论",
+                            globalNo, challengerReview.status());
+                    candidateSampleService.record(storyDir, globalNo, incumbentGate.grade().name(),
+                            "challenger-delivery-reverted", incumbentSnapshot, best,
+                            "challenger", verdict.reason(), null);
+                    return incumbentGate;
+                }
+                challengerGate = challengerGate.withDeliveryReview(challengerReview);
             }
             log.info("第 {} 章挑战者胜出并复审通过（grade {}），采纳候选稿。评审理由：{}",
                     globalNo, challengerGate.grade(), verdict.reason());
             candidateSampleService.record(storyDir, globalNo, incumbentGate.grade().name(),
                     "challenger-adopted", incumbentSnapshot, best, "challenger", verdict.reason(), null);
+            adopted = true;
             return challengerGate;
         } catch (Exception e) {
+            rethrowControlSignal(e);
             log.warn("第 {} 章候选选优流程异常，保留原稿（fail-soft）", globalNo, e);
             candidateSampleService.record(storyDir, globalNo, incumbentGate.grade().name(),
-                    "error", chapterContent, null, null, StringUtils.abbreviate(e.getMessage(), 200), null);
+                    "error", incumbentSnapshot, null, null, StringUtils.abbreviate(e.getMessage(), 200), null);
             return incumbentGate;
+        } finally {
+            if (!adopted) {
+                chapterContent.setChapterNo(incumbentSnapshot.getChapterNo());
+                chapterContent.setTitle(incumbentSnapshot.getTitle());
+                chapterContent.setContent(incumbentSnapshot.getContent());
+            }
+        }
+    }
+
+    /** 复审取消/本地确定性拒绝须向上传递；finally 仍恢复原稿，不能将停机信号伪装成候选降级。 */
+    private static void rethrowControlSignal(Throwable failure) {
+        LlmLocalRejectionException.rethrowIfPresent(failure);
+        Throwable cause = failure;
+        for (int depth = 0; cause != null && depth < 64; depth++, cause = cause.getCause()) {
+            if (cause instanceof CancellationException cancellation) throw cancellation;
+            if (cause instanceof InterruptedException) {
+                Thread.currentThread().interrupt();
+                CancellationException cancellation = new CancellationException("候选复审已中断");
+                cancellation.initCause(cause);
+                throw cancellation;
+            }
+            if (cause.getCause() == cause) break;
         }
     }
 
@@ -197,6 +257,10 @@ public class ChapterCandidateService {
      * 因此保留分等级配置，让用户在评估采纳收益与模型费用后显式开启。
      */
     private boolean triggered(GateResult gate, StoryProperties.CandidateProperties props) {
+        if (gate == null || gate.grade() == null || gate.auditVerifyDegraded() || gate.planAdjustmentRequired()
+                || (gate.deliveryReview() != null && gate.deliveryReview().unknown())) {
+            return false;
+        }
         return switch (gate.grade()) {
             // "有 MINOR" 不等于"值得整章重写"——条数无判别力（实测两批中位数均 6），故默认关闭
             case MINOR_RESIDUE -> props.isTriggerOnMinorResidue()
@@ -204,7 +268,23 @@ public class ChapterCandidateService {
             case REVISED_PASS -> props.isTriggerOnRevisedPass();
             // 修订耗尽仍不收敛：实测 3 次触发 0 次采纳（挑战者同一份计划下撞同一堵墙），默认关闭
             case DEBT -> props.isTriggerOnDebt();
-            case CLEAN_PASS -> false;
+            case CLEAN_PASS, UNVERIFIED -> false;
+        };
+    }
+
+    /** BLOCKING 为空不代表已验证通过；未验证、计划待调整或严格交付失败都不能采纳。 */
+    private boolean verifiedPass(GateResult gate) {
+        if (gate == null || gate.grade() == null || gate.auditVerifyDegraded() || gate.planAdjustmentRequired()
+                || gate.unresolvedBlocking() == null || !gate.unresolvedBlocking().isEmpty()) {
+            return false;
+        }
+        DeliveryReview review = gate.deliveryReview();
+        if (review != null && (review.unknown() || review.blocksCommit())) {
+            return false;
+        }
+        return switch (gate.grade()) {
+            case CLEAN_PASS, MINOR_RESIDUE, REVISED_PASS -> true;
+            case DEBT, UNVERIFIED -> false;
         };
     }
 

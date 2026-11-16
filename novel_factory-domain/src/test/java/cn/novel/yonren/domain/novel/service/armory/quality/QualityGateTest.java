@@ -1,6 +1,10 @@
 package cn.novel.yonren.domain.novel.service.armory.quality;
 
 import cn.novel.yonren.domain.novel.model.valobj.quality.GateResult;
+import cn.novel.yonren.domain.novel.model.valobj.quality.DeliveryReview;
+import cn.novel.yonren.domain.novel.model.valobj.plan.CausalVerdict;
+import cn.novel.yonren.domain.novel.model.valobj.work.ChapterManuscript;
+import cn.novel.yonren.domain.novel.config.StoryProperties.CausalityProperties.Mode;
 
 import cn.novel.yonren.domain.novel.model.entity.ArmoryCommandEntity;
 import cn.novel.yonren.domain.novel.model.entity.AuditResultEntity;
@@ -103,6 +107,202 @@ class QualityGateTest {
         return AuditResultEntity.builder()
                 .issues(List.of(ChapterIssueEntity.builder().severity("BLOCKING").description("连续性断裂").build()))
                 .build();
+    }
+
+    @Test
+    void enforcedDeliveryIssueWithFullLexicalCoverageCannotUseEmptyIssuesAsPass() {
+        enableDelivery(Mode.ENFORCE);
+        revise.setEnabled(false);
+        item.setKeyEvents(List.of("交付药签"));
+        chapterContent.setContent("交付药签已经完成。");
+        stubDeliveryAudit(CausalVerdict.Status.ISSUE);
+
+        GateResult result = qualityGate.auditAndReviseIfEnabled(command, item, chapterContent, List.of(), styleStat, 1, null);
+
+        assertEquals(1.0, PlanAdherencePolicy.coverage(item.getKeyEvents(), chapterContent.getContent()));
+        assertEquals(GateResult.PassGrade.DEBT, result.grade());
+        assertTrue(result.deliveryReview().blocksCommit());
+        assertTrue(result.unresolvedBlocking().stream().anyMatch(DeliveryReviewPolicy::isDeliveryIssue));
+    }
+
+    @Test
+    void unknownDeliveryDoesNotTriggerBlindRevisionEvenWithOtherBlocking() {
+        enableDelivery(Mode.ENFORCE);
+        item.setKeyEvents(List.of("交付药签"));
+        when(chapterAuditService.audit(any(), any(), any(), any(), any(), any(), anyInt(), any(), any()))
+                .thenAnswer(inv -> {
+                    var result = blockingResult();
+                    result.setDeliveryReview(DeliveryReviewPolicy.unavailable(inv.getArgument(8), "核验结果漏项"));
+                    return result;
+                });
+        GateResult result = qualityGate.auditAndReviseIfEnabled(command, item, chapterContent, List.of(), styleStat, 1, null);
+
+        assertEquals(GateResult.PassGrade.UNVERIFIED, result.grade());
+        assertTrue(result.deliveryReview().blocksCommit());
+        verify(chapterReviseService, never()).revise(any(), any(), any(), anyList(), any(), any(), any(), anyInt(), any());
+    }
+
+    @Test
+    void observedDeliveryIssueIsRetainedWithoutDrivingRewrite() {
+        enableDelivery(Mode.OBSERVE);
+        item.setKeyEvents(List.of("交付药签"));
+        chapterContent.setContent("交付药签已经完成。");
+        stubDeliveryAudit(CausalVerdict.Status.ISSUE);
+
+        GateResult result = qualityGate.auditAndReviseIfEnabled(command, item, chapterContent, List.of(), styleStat, 1, null);
+
+        assertEquals(DeliveryReview.Status.ISSUE, result.deliveryReview().status());
+        assertFalse(result.deliveryReview().blocksCommit());
+        assertTrue(result.unresolvedBlocking().isEmpty());
+        verify(chapterReviseService, never()).revise(any(), any(), any(), anyList(), any(), any(), any(), anyInt(), any());
+    }
+
+    @Test
+    void deliveryIsRecheckedOnRevisedVersionRatherThanClearedByFixedTrue() {
+        enableDelivery(Mode.ENFORCE);
+        revise.setMaxAttempts(1);
+        item.setKeyEvents(List.of("交付药签"));
+        chapterContent.setContent("交付药签已经完成。");
+        stubDeliveryAudit(CausalVerdict.Status.ISSUE);
+        when(chapterReviseService.revise(any(), any(), any(), anyList(), any(), any(), any(), anyInt(), any()))
+                .thenReturn(new ChapterReviseService.ReviseResult(RevisionDecisionEntity.builder().accepted(true)
+                        .reason("修好").build(), ChapterContentEntity.builder().chapterNo(1).title("修订标题")
+                        .content("交付药签已经顺利完成。").build()));
+        when(chapterAuditService.verifyFixes(any(), any(), any(), anyList(), any(), any(), anyInt(), any(), anyList(), any()))
+                .thenAnswer(inv -> new ChapterAuditService.FixVerification(List.of(), false,
+                        deliveryReport(inv.getArgument(9), CausalVerdict.Status.ISSUE)));
+
+        GateResult result = qualityGate.auditAndReviseIfEnabled(command, item, chapterContent, List.of(), styleStat, 1, null);
+
+        assertEquals(GateResult.PassGrade.DEBT, result.grade());
+        assertTrue(result.deliveryReview().blocksCommit());
+        assertEquals(ChapterManuscript.of(chapterContent).hash(),
+                result.deliveryReview().manuscriptHash());
+        assertTrue(result.unresolvedBlocking().stream().anyMatch(DeliveryReviewPolicy::isDeliveryIssue));
+    }
+
+    @Test
+    void deliveryRepairPassClosesWithoutASecondFullAudit() {
+        enableDelivery(Mode.ENFORCE);
+        item.setKeyEvents(List.of("交付药签"));
+        chapterContent.setContent("交付药签已经完成。");
+        stubDeliveryAudit(CausalVerdict.Status.ISSUE);
+        when(chapterReviseService.revise(any(), any(), any(), anyList(), any(), any(), any(), anyInt(), any()))
+                .thenReturn(new ChapterReviseService.ReviseResult(RevisionDecisionEntity.builder().accepted(true)
+                        .reason("补齐交接").build(), ChapterContentEntity.builder().chapterNo(1).title("回执")
+                        .content("凭条递过柜台，药师验过印鉴，将回执交回。").build()));
+        when(chapterAuditService.verifyFixes(any(), any(), any(), anyList(), any(), any(), anyInt(), any(), anyList(), any()))
+                .thenAnswer(inv -> new ChapterAuditService.FixVerification(List.of(), false,
+                        deliveryReport(inv.getArgument(9), CausalVerdict.Status.PASS)));
+
+        GateResult result = qualityGate.auditAndReviseIfEnabled(command, item, chapterContent, List.of(), styleStat, 1, null);
+
+        assertEquals(GateResult.PassGrade.REVISED_PASS, result.grade());
+        assertTrue(result.deliveryReview().passed());
+        assertTrue(result.unresolvedBlocking().isEmpty());
+        verify(chapterAuditService, times(1)).audit(any(), any(), any(), any(), any(), any(), anyInt(), any(), any());
+        verify(chapterAuditService, times(1)).verifyFixes(any(), any(), any(), anyList(), any(), any(), anyInt(), any(), anyList(), any());
+    }
+
+    @Test
+    void deliveryVerificationUnknownStopsRetryAndCannotMasqueradeAsRevisedPass() {
+        enableDelivery(Mode.ENFORCE);
+        revise.setMaxAttempts(3);
+        item.setKeyEvents(List.of("交付药签"));
+        chapterContent.setContent("交付药签已经完成。");
+        stubDeliveryAudit(CausalVerdict.Status.ISSUE);
+        when(chapterReviseService.revise(any(), any(), any(), anyList(), any(), any(), any(), anyInt(), any()))
+                .thenReturn(new ChapterReviseService.ReviseResult(RevisionDecisionEntity.builder().accepted(true)
+                        .reason("补齐交接").build(), ChapterContentEntity.builder().chapterNo(1).title("回执")
+                        .content("药师验过印鉴，递回凭条。").build()));
+        when(chapterAuditService.verifyFixes(any(), any(), any(), anyList(), any(), any(), anyInt(), any(), anyList(), any()))
+                .thenAnswer(inv -> new ChapterAuditService.FixVerification(List.of(), true,
+                        DeliveryReviewPolicy.unavailable(inv.getArgument(9), "核验不可用")));
+
+        GateResult result = qualityGate.auditAndReviseIfEnabled(command, item, chapterContent, List.of(), styleStat, 1, null);
+
+        assertEquals(GateResult.PassGrade.UNVERIFIED, result.grade());
+        assertTrue(result.auditVerifyDegraded());
+        assertEquals(1, result.reviseRounds());
+        verify(chapterReviseService, times(1)).revise(any(), any(), any(), anyList(), any(), any(), any(), anyInt(), any());
+        assertEquals(ChapterManuscript.of(chapterContent).hash(),
+                result.deliveryReview().manuscriptHash());
+    }
+
+    @Test
+    void candidateRollbackRestoresOriginalDeliveryReportAndMechanicalState() {
+        enableDelivery(Mode.ENFORCE);
+        item.setKeyEvents(List.of("交付药签"));
+        chapterContent.setContent("交付药签，拿到回执。");
+        var original = ChapterManuscript.of(chapterContent);
+        when(chapterAuditService.audit(any(), any(), any(), any(), any(), any(), anyInt(), any(), any()))
+                .thenAnswer(inv -> {
+                    var result = blockingResult();
+                    result.setDeliveryReview(deliveryReport(inv.getArgument(8),
+                            CausalVerdict.Status.PASS));
+                    return result;
+                });
+        when(chapterReviseService.revise(any(), any(), any(), anyList(), any(), any(), any(), anyInt(), any()))
+                .thenReturn(new ChapterReviseService.ReviseResult(RevisionDecisionEntity.builder().accepted(true)
+                        .reason("修改").reviewCandidates(List.of("交付药签")).build(),
+                        ChapterContentEntity.builder().chapterNo(1).title("新标题").content("只剩几句结果。").build()));
+        when(chapterAuditService.verifyFixes(any(), any(), any(), anyList(), any(), any(), anyInt(), any(), anyList(), any()))
+                .thenAnswer(inv -> new ChapterAuditService.FixVerification(List.of(ChapterIssueEntity.builder()
+                        .dimension(ChapterAuditService.PLAN_INTEGRITY_DIMENSION).severity("BLOCKING").build()), false,
+                        deliveryReport(inv.getArgument(9), CausalVerdict.Status.ISSUE)));
+
+        GateResult result = qualityGate.auditAndReviseIfEnabled(command, item, chapterContent, List.of(), styleStat, 1, null);
+
+        assertEquals(original, ChapterManuscript.of(chapterContent));
+        assertTrue(result.deliveryReview().passed());
+        assertEquals(original.hash(), result.deliveryReview().manuscriptHash());
+        assertTrue(result.mechanicalMinor().isEmpty());
+    }
+
+    @Test
+    void deliveryPlanConflictCannotReusePreviousPassOrBecomeFailureTrainingSample() {
+        enableDelivery(Mode.ENFORCE);
+        item.setKeyEvents(List.of("交付药签"));
+        chapterContent.setContent("交付药签，拿到回执。");
+        when(chapterAuditService.audit(any(), any(), any(), any(), any(), any(), anyInt(), any(), any()))
+                .thenAnswer(inv -> {
+                    var result = blockingResult();
+                    result.setDeliveryReview(deliveryReport(inv.getArgument(8), CausalVerdict.Status.PASS));
+                    return result;
+                });
+        when(chapterReviseService.revise(any(), any(), any(), anyList(), any(), any(), any(), anyInt(), any()))
+                .thenReturn(new ChapterReviseService.ReviseResult(RevisionDecisionEntity.builder().accepted(false)
+                        .planAdjustmentRequired(true).reason("药签属于另一人，计划与冻结事实冲突").build(), null));
+
+        GateResult result = qualityGate.auditAndReviseIfEnabled(command, item, chapterContent, List.of(), styleStat, 1, null);
+
+        assertTrue(result.planAdjustmentRequired());
+        assertEquals(GateResult.PassGrade.UNVERIFIED, result.grade());
+        assertTrue(result.deliveryReview().blocksCommit());
+        verify(auditSampleService, never()).record(any(), anyInt(), any(), anyString(), anyList(), anyInt(), any(), anyString());
+    }
+
+    private void enableDelivery(Mode mode) {
+        var causality = new StoryProperties.CausalityProperties();
+        causality.setAuditMode(mode);
+        when(storyProperties.getCausality()).thenReturn(causality);
+    }
+
+    private void stubDeliveryAudit(CausalVerdict.Status status) {
+        when(chapterAuditService.audit(any(), any(), any(), any(), any(), any(), anyInt(), any(), any()))
+                .thenAnswer(inv -> AuditResultEntity.builder().issues(List.of())
+                        .deliveryReview(deliveryReport(inv.getArgument(8), status)).build());
+    }
+
+    private DeliveryReview deliveryReport(
+            DeliveryReviewPolicy.Request request, CausalVerdict.Status status) {
+        var failure = status == CausalVerdict.Status.ISSUE
+                ? CausalVerdict.FailureType.RESULT_WITHOUT_CAUSE : null;
+        var check = new CausalVerdict(null, status,
+                request.manuscript().content(), null, "核对交接行动与回执结果", status ==
+                CausalVerdict.Status.ISSUE ? "补齐必要交接" : null,
+                failure, null, null, null, null, "event:1", "keyEvents[0]", "交付药签");
+        return DeliveryReviewPolicy.consume(request, List.of(check));
     }
 
     @Test
@@ -329,7 +529,7 @@ class QualityGateTest {
     void revisionKeepsInitialMinorStatisticsButInvalidatesItsWritingFeedback() {
         var minor = ChapterIssueEntity.builder().severity("MINOR").dimension("aesthetic")
                 .description("原文在此重复说明同一事实").evidence("原文").build();
-        var original = cn.novel.yonren.domain.novel.model.valobj.work.ChapterManuscript.of(chapterContent);
+        var original = ChapterManuscript.of(chapterContent);
         var issues = new java.util.ArrayList<>(blockingResult().getIssues());
         issues.add(minor);
         when(chapterAuditService.audit(any(), any(), any(), any(), any(), any(), anyInt(), any()))
@@ -346,7 +546,7 @@ class QualityGateTest {
         assertEquals(1, result.minorCount());
         assertEquals(List.of(minor), result.semanticMinors());
         assertTrue(GateFeedbackPolicy.feedbackMinorsFor(result,
-                cn.novel.yonren.domain.novel.model.valobj.work.ChapterManuscript.of(chapterContent)).isEmpty());
+                ChapterManuscript.of(chapterContent)).isEmpty());
         assertEquals(1, GateFeedbackPolicy.feedbackMinorsFor(result, original).size());
         verify(chapterAuditService, times(1)).audit(any(), any(), any(), any(), any(), any(), anyInt(), any());
         verify(chapterAuditService, times(1)).verifyFixes(any(), any(), any(), anyList(), any(), any(), anyInt());

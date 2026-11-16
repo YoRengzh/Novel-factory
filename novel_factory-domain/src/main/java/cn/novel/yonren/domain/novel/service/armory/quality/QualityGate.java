@@ -1,6 +1,8 @@
 package cn.novel.yonren.domain.novel.service.armory.quality;
 
 import cn.novel.yonren.domain.novel.model.valobj.quality.GateResult;
+import cn.novel.yonren.domain.novel.model.valobj.quality.DeliveryReview;
+import cn.novel.yonren.domain.novel.config.StoryProperties.CausalityProperties.Mode;
 import cn.novel.yonren.domain.novel.model.valobj.work.ChapterManuscript;
 import cn.novel.yonren.domain.novel.model.valobj.revise.RewriteContext;
 
@@ -96,6 +98,11 @@ public class QualityGate {
                                               StyleStatEntity styleStat, int globalNo, Path storyDir,
                                               RewriteContext writerContext) {
         if (writerContext != null) writerContext.checkCancellation();
+        DeliveryReviewPolicy.assertConfiguration(storyProperties);
+        Mode deliveryMode = DeliveryReviewPolicy.mode(storyProperties);
+        DeliveryReviewPolicy.Contract deliveryContract = deliveryMode == Mode.OFF ? null
+                : DeliveryReviewPolicy.contract(item);
+        DeliveryReview deliveryReview = DeliveryReview.notChecked();
         // 段落结构兜底：整章若没有换行，应在任何按行统计之前重排，
         // 否则对白行占比会被误算为 1.0，段落密度审校也无法定位段落。
         // ratioOf = 含引号行/非空行，整章仅 1 行且含引号 ⇒ 恒 1.0。
@@ -281,8 +288,12 @@ public class QualityGate {
         // MINOR（文风程度问题）只记录、不触发修订也不触发候选，见 GateResult 类注释
         List<ChapterIssueEntity> mechanicalMinor = nonBlockingOf(mechanicalIssues);
         List<ChapterIssueEntity> mechanicalBlocking = blockingOf(mechanicalIssues);
-        if (!auditEnabled() && mechanicalBlocking.isEmpty()) {
-            return GateResult.of(List.of(), 0, mechanicalMinor, 0);
+        if (!auditEnabled() && deliveryContract != null) {
+            deliveryReview = DeliveryReviewPolicy.unavailable(deliveryRequest(deliveryContract, chapterContent,
+                    deliveryMode, writerContext), "DELIVERY_AUDIT_DISABLED: 审校已关闭，交付未核验");
+        }
+        if (!auditEnabled() && (mechanicalBlocking.isEmpty() || deliveryReview.unknown())) {
+            return GateResult.of(mechanicalBlocking, 0, mechanicalMinor, 0).withDeliveryReview(deliveryReview);
         }
 
         String ledgerPrompt = chapterMemoryService.renderLedgerPrompt(summaries);
@@ -326,19 +337,37 @@ public class QualityGate {
         String planAdjustmentReason = null;
         if (auditEnabled()) {
             semanticFeedbackHash = ChapterManuscript.of(chapterContent).hash();
-            AuditResultEntity auditResult = chapterAuditService.audit(
+            AuditResultEntity auditResult = deliveryContract == null ? chapterAuditService.audit(
                     requestParameter.getStoryVO(), item, chapterContent.getContent(),
-                    ledgerPrompt, foreshadowing, styleStat, globalNo, auditGuard);
+                    ledgerPrompt, foreshadowing, styleStat, globalNo, auditGuard)
+                    : chapterAuditService.audit(requestParameter.getStoryVO(), item, chapterContent.getContent(),
+                    ledgerPrompt, foreshadowing, styleStat, globalNo, auditGuard,
+                    deliveryRequest(deliveryContract, chapterContent, deliveryMode, writerContext));
+            if (deliveryContract != null) {
+                deliveryReview = DeliveryReviewPolicy.ensureBound(auditResult == null ? null : auditResult.getDeliveryReview(),
+                        item, ChapterManuscript.of(chapterContent), deliveryMode == Mode.ENFORCE);
+                if (auditResult == null || auditResult.isAuditUnavailable()) {
+                    deliveryReview = DeliveryReviewPolicy.unavailable(deliveryRequest(deliveryContract, chapterContent,
+                            deliveryMode, writerContext), "DELIVERY_AUDIT_UNAVAILABLE: 首审没有完成，不能把空问题清单当通过");
+                    auditVerifyDegraded = true;
+                }
+            }
             currentBlocking.addAll(blockingOf(auditResult));
+            currentBlocking.addAll(DeliveryReviewPolicy.blockingIssues(deliveryReview));
             minorCount = minorOf(auditResult);
             // P2 审校反馈回灌：语义 MINOR 清单随 GateResult 传出（验证化复审不产出新 MINOR，以首审为准）
             semanticMinors = semanticMinorsOf(auditResult);
+        }
+        // UNKNOWN 不驱动盲目重写；严格模式由 Worker 保全当前稿后阻止提交。
+        if (deliveryReview.unknown()) {
+            return GateResult.of(currentBlocking, minorCount, mechanicalMinor, 0, semanticMinors, auditVerifyDegraded)
+                    .withSemanticFeedbackHash(semanticFeedbackHash).withDeliveryReview(deliveryReview);
         }
         if (currentBlocking.isEmpty()) {
             log.info("第 {} 章审校完成，仅 MINOR（叙事 {} 条 / 文风 {} 条）或不含 BLOCKING 问题，不触发修订",
                     globalNo, minorCount, mechanicalMinor.size());
             return GateResult.of(List.of(), minorCount, mechanicalMinor, 0, semanticMinors, auditVerifyDegraded)
-                    .withSemanticFeedbackHash(semanticFeedbackHash);
+                    .withSemanticFeedbackHash(semanticFeedbackHash).withDeliveryReview(deliveryReview);
         }
 
         log.warn("第 {} 章审校发现 BLOCKING 问题 {} 条，准备修订", globalNo, currentBlocking.size());
@@ -348,7 +377,7 @@ public class QualityGate {
             auditSampleService.record(storyDir, globalNo, item, chapterContent.getContent(),
                     currentBlocking, 0, ledgerPrompt, foreshadowing);
             return GateResult.of(currentBlocking, minorCount, mechanicalMinor, 0, semanticMinors, auditVerifyDegraded)
-                    .withSemanticFeedbackHash(semanticFeedbackHash);
+                    .withSemanticFeedbackHash(semanticFeedbackHash).withDeliveryReview(deliveryReview);
         }
 
         int maxAttempts = Math.max(1, storyProperties.getRevise().getMaxAttempts());
@@ -374,15 +403,22 @@ public class QualityGate {
                 // 修订失败保留审校结论：BLOCKING 记为质量债，随后续章节记忆回灌
                 log.warn("第 {} 章第 {}/{} 轮修订流程异常，保留当前稿并将 BLOCKING 问题记为质量债",
                         globalNo, attempt, maxAttempts, e);
-                auditSampleService.record(storyDir, globalNo, item, chapterContent.getContent(),
-                        currentBlocking, attempt, ledgerPrompt, foreshadowing);
+                if (deliveryContract == null || (!deliveryReview.unknown() && !auditVerifyDegraded)) {
+                    auditSampleService.record(storyDir, globalNo, item, chapterContent.getContent(),
+                            currentBlocking, attempt, ledgerPrompt, foreshadowing);
+                }
                 return GateResult.of(currentBlocking, minorCount, mechanicalMinor, attempt, semanticMinors, auditVerifyDegraded)
-                    .withSemanticFeedbackHash(semanticFeedbackHash);
+                    .withSemanticFeedbackHash(semanticFeedbackHash).withDeliveryReview(deliveryReview);
             }
 
             if (reviseResult.decision().isPlanAdjustmentRequired()) {
                 // 计划与可信事实冲突：不再用同一计划重试，保留当前稿并记录待调整原因。
                 planAdjustmentReason = reviseResult.decision().getReason();
+                if (deliveryContract != null) {
+                    deliveryReview = DeliveryReviewPolicy.unavailable(deliveryRequest(deliveryContract,
+                            chapterContent, deliveryMode, writerContext),
+                            "DELIVERY_PLAN_ADJUSTMENT_REQUIRED: " + planAdjustmentReason);
+                }
                 log.warn("第 {} 章修订暂停：计划与可信事实冲突，保留当前稿等待调整计划：{}",
                         globalNo, planAdjustmentReason);
                 break;
@@ -392,6 +428,9 @@ public class QualityGate {
                 ChapterContentEntity revised = reviseResult.revisedContent();
                 String contentBeforeRevision = chapterContent.getContent();
                 String titleBeforeRevision = chapterContent.getTitle();
+                List<ChapterIssueEntity> minorBeforeRevision = mechanicalMinor;
+                DeliveryReview deliveryBeforeRevision = deliveryReview;
+                boolean degradedBeforeRevision = auditVerifyDegraded;
                 // 标题非空才覆盖：定向补丁刻意不带标题（它只动正文局部），
                 // 无条件赋值会把原本完好的标题清成 null
                 if (StringUtils.isNotBlank(revised.getTitle())) {
@@ -458,7 +497,12 @@ public class QualityGate {
                     List<String> candidates = reviseResult.decision() == null
                             ? List.of() : reviseResult.decision().getReviewCandidates();
                     boolean hasCandidates = candidates != null && !candidates.isEmpty();
-                    ChapterAuditService.FixVerification verification = !hasCandidates
+                    ChapterAuditService.FixVerification verification = deliveryContract != null
+                            ? chapterAuditService.verifyFixes(requestParameter.getStoryVO(), item,
+                                    chapterContent.getContent(), currentBlocking, ledgerPrompt, styleStat, globalNo,
+                                    writerContext, candidates == null ? List.of() : candidates,
+                                    deliveryRequest(deliveryContract, chapterContent, deliveryMode, writerContext))
+                            : !hasCandidates
                             ? (writerContext == null ? chapterAuditService.verifyFixes(
                                     requestParameter.getStoryVO(), item, chapterContent.getContent(),
                                     currentBlocking, ledgerPrompt, styleStat, globalNo)
@@ -468,17 +512,28 @@ public class QualityGate {
                             : chapterAuditService.verifyFixes(requestParameter.getStoryVO(), item,
                                     chapterContent.getContent(), currentBlocking, ledgerPrompt, styleStat, globalNo,
                                     writerContext, candidates);
-                    // 验证没跑成 ≠ 没修好：照旧保守对待（unfixed 原样带回），但标记为【未验证】，
-                    // 由上层决定不落债、观测侧单独计数
-                    auditVerifyDegraded = verification.degraded();
-                    // 完整性候选独立维度：只看它自己的复核结论，不按返回位置推断、不混入旧 BLOCKING。
-                    for (ChapterIssueEntity issue : verification.unfixed()) {
+                    // 验证没跑成 ≠ 没修好：逐项交付结论不能由旧 fixed=true 或词面命中替代。
+                    auditVerifyDegraded = verification == null || verification.degraded();
+                    if (deliveryContract != null) {
+                        deliveryReview = DeliveryReviewPolicy.ensureBound(
+                                verification == null ? null : verification.deliveryReview(), item,
+                                ChapterManuscript.of(chapterContent), deliveryMode == Mode.ENFORCE);
+                        if (auditVerifyDegraded) {
+                            deliveryReview = DeliveryReviewPolicy.unavailable(deliveryRequest(deliveryContract,
+                                    chapterContent, deliveryMode, writerContext),
+                                    "DELIVERY_VERIFY_UNAVAILABLE: 修订复验未完成，不能确认当前稿交付");
+                        }
+                    }
+                    // 完整性候选独立维度；新的交付问题只从同稿报告重算，不能沿用旧稿的问题证据。
+                    List<ChapterIssueEntity> unfixed = verification == null ? currentBlocking : verification.unfixed();
+                    for (ChapterIssueEntity issue : unfixed) {
                         if (ChapterAuditService.PLAN_INTEGRITY_DIMENSION.equals(issue.getDimension())) {
                             planCandidateUnfixed = true;
-                        } else {
+                        } else if (deliveryContract == null || !DeliveryReviewPolicy.isDeliveryIssue(issue)) {
                             newBlocking.add(issue);
                         }
                     }
+                    newBlocking.addAll(DeliveryReviewPolicy.blockingIssues(deliveryReview));
                 }
                 // 完整性候选未通过：修订稿改了原稿，但仍有计划事件未获复核确认，回退本次采纳。
                 // 必须放在“全部修好即通过”之前——旧 BLOCKING 全清但事件被删，同样不能闭环。
@@ -486,13 +541,21 @@ public class QualityGate {
                     chapterContent.setContent(contentBeforeRevision);
                     chapterContent.setTitle(titleBeforeRevision);
                     currentBlocking = blockingBeforeRound;
+                    mechanicalMinor = minorBeforeRevision;
+                    deliveryReview = deliveryBeforeRevision;
+                    auditVerifyDegraded = degradedBeforeRevision;
                     log.warn("第 {} 章第 {}/{} 轮修订未通过计划完整性复核，回退本次采纳", globalNo, attempt, maxAttempts);
                     break;
+                }
+                if (deliveryReview.unknown()) {
+                    // 未验证稿保留为草稿，不把“上一版的问题”当成新稿的内容结论，更不继续盲目重写。
+                    return GateResult.of(newBlocking, minorCount, mechanicalMinor, attempt, semanticMinors, auditVerifyDegraded)
+                            .withSemanticFeedbackHash(semanticFeedbackHash).withDeliveryReview(deliveryReview);
                 }
                 if (newBlocking.isEmpty()) {
                     log.info("第 {} 章第 {}/{} 轮复审通过，闭环完成", globalNo, attempt, maxAttempts);
                     return GateResult.of(List.of(), minorCount, mechanicalMinor, attempt, semanticMinors, auditVerifyDegraded)
-                    .withSemanticFeedbackHash(semanticFeedbackHash);
+                    .withSemanticFeedbackHash(semanticFeedbackHash).withDeliveryReview(deliveryReview);
                 }
                 currentBlocking = newBlocking;
                 log.warn("第 {} 章第 {}/{} 轮复审仍发现 BLOCKING 问题 {} 条，继续修订",
@@ -519,12 +582,21 @@ public class QualityGate {
         log.warn("第 {} 章修订 {} 轮后仍有 BLOCKING 问题 {} 条（结论交由上层处置：主路径记为质量债，"
                         + "候选挑战者路径会连同候选稿一起回退丢弃）",
                 globalNo, reviseRounds, currentBlocking.size());
-        auditSampleService.record(storyDir, globalNo, item, chapterContent.getContent(),
-                currentBlocking, reviseRounds, ledgerPrompt, foreshadowing);
+        if (deliveryContract == null || (!deliveryReview.unknown() && !auditVerifyDegraded)) {
+            auditSampleService.record(storyDir, globalNo, item, chapterContent.getContent(),
+                    currentBlocking, reviseRounds, ledgerPrompt, foreshadowing);
+        }
         GateResult result = GateResult.of(currentBlocking, minorCount, mechanicalMinor, reviseRounds,
                         semanticMinors, auditVerifyDegraded)
-                .withSemanticFeedbackHash(semanticFeedbackHash);
+                .withSemanticFeedbackHash(semanticFeedbackHash).withDeliveryReview(deliveryReview);
         return planAdjustmentReason == null ? result : result.withPlanAdjustmentRequired(planAdjustmentReason);
+    }
+
+    private static DeliveryReviewPolicy.Request deliveryRequest(DeliveryReviewPolicy.Contract contract,
+                                                                 ChapterContentEntity chapter, Mode mode,
+                                                                 RewriteContext writerContext) {
+        return new DeliveryReviewPolicy.Request(contract, ChapterManuscript.of(chapter), mode == Mode.ENFORCE,
+                writerContext == null ? null : writerContext::checkCancellation);
     }
 
     /**
@@ -612,7 +684,7 @@ public class QualityGate {
     }
 
     private List<ChapterIssueEntity> blockingOf(AuditResultEntity auditResult) {
-        if (auditResult.getIssues() == null || auditResult.getIssues().isEmpty()) {
+        if (auditResult == null || auditResult.getIssues() == null || auditResult.getIssues().isEmpty()) {
             return List.of();
         }
         return auditResult.getIssues().stream()

@@ -1,6 +1,11 @@
 package cn.novel.yonren.domain.novel.service.armory.worker;
 
 import cn.novel.yonren.domain.novel.adapter.repository.IStoryRepository;
+import cn.novel.yonren.domain.novel.config.StoryProperties;
+import cn.novel.yonren.domain.novel.config.StoryProperties.CausalityProperties.Mode;
+import cn.novel.yonren.domain.novel.model.valobj.quality.DeliveryReview;
+import cn.novel.yonren.domain.novel.model.valobj.work.ChapterManuscript;
+import cn.novel.yonren.domain.novel.service.armory.quality.DeliveryReviewPolicy;
 import cn.novel.yonren.domain.novel.model.aggregate.ChapterPlanAggregate;
 import cn.novel.yonren.domain.novel.model.entity.ArmoryCommandEntity;
 import cn.novel.yonren.domain.novel.model.entity.ChapterBeatsEntity;
@@ -194,6 +199,9 @@ public class ChapterWorker {
     private IStoryRepository storyRepository;
 
     @Resource
+    private StoryProperties storyProperties;
+
+    @Resource
     private cn.novel.yonren.domain.novel.service.armory.character.CharacterStageProfileService characterStageProfileService;
 
     /**
@@ -201,6 +209,14 @@ public class ChapterWorker {
      * 树尾持久化节点据此统一落盘
      */
     public void generateAll(ArmoryCommandEntity requestParameter, DefaultArmoryFactory.DynamicContext dynamicContext) throws Exception {
+        // 在节拍、召回或正文等任何模型调用前拒绝矛盾配置，不能以关闭审校绕过严格交付。
+        DeliveryReviewPolicy.assertConfiguration(storyProperties);
+        Mode deliveryMode = DeliveryReviewPolicy.mode(storyProperties);
+        boolean deliveryEnforced = deliveryMode == Mode.ENFORCE;
+        if (deliveryEnforced && (dynamicContext.getStoryDir() == null || dynamicContext.getRunDir() == null)) {
+            throw new AppException(ResponseCode.UN_ERROR.getCode(),
+                    "严格交付模式缺少生成前故事/run 检查点，正文未生成");
+        }
         ChapterPlanAggregate chapterPlan = dynamicContext.getChapterPlanAggregate();
         StoryContextEntity storyContext = requestParameter.getStoryContextEntity();
         int totalChapters = chapterPlan.getChapters().size();
@@ -430,8 +446,6 @@ public class ChapterWorker {
             if (StringUtils.isNotBlank(condensed)) {
                 chapterContent.setContent(condensed);
             }
-            chapterContents.add(chapterContent);
-
             // ===== 审校 → 修订（若启用）→ 复审闭环（四期）；未修复的 BLOCKING 问题记为质量债，随下一章记忆回灌 =====
             Map<String, String> usedWriterPrompts = dynamicContext.getUsedPromptMap();
             var writerContext = new cn.novel.yonren.domain.novel.model.valobj.revise.RewriteContext(
@@ -446,16 +460,36 @@ public class ChapterWorker {
                     });
             GateResult gateResult = qualityGate.auditAndReviseIfEnabled(
                     requestParameter, item, chapterContent, summaries, styleStat, globalNo, storyDir, writerContext);
+            if (deliveryMode != Mode.OFF) {
+                gateResult = bindDeliveryReview(gateResult, item, chapterContent, deliveryEnforced);
+            }
             // 候选选优（六期）：低置信通过（MINOR 残留/修订过）时第二模型族重写候选，
-            // 机械排序 + 异模型评审二选一；挑战者复审不过自动回退原稿，未启用时原样返回
-            if (!gateResult.planAdjustmentRequired()) {
+            // UNKNOWN 是未完成核验，不是低置信通过；不得追加候选成本或为其生产合格样本。
+            if (!gateResult.planAdjustmentRequired()
+                    && (deliveryMode == Mode.OFF || !gateResult.deliveryReview().unknown())) {
                 gateResult = chapterCandidateService.challenge(requestParameter, item, ctx, userPrompt,
                         chapterContent, gateResult, summaries, styleStat, globalNo, storyDir);
             }
+            if (deliveryMode != Mode.OFF) {
+                // 候选会原地换稿；必须对最终稿/当前计划重新核对身份，旧报告绝不能授权新正文。
+                gateResult = bindDeliveryReview(gateResult, item, chapterContent, deliveryEnforced);
+                if (gateResult.deliveryReview().blocksCommit()) {
+                    // 必须抛异常而不是 break：break 会路由树尾 PersistChapterPlanNode 写正式正文。
+                    // 计划调整同样不得绕过本拦截；此前已逐章提交的历史保持不变。
+                    dynamicContext.setChapterContents(new ArrayList<>(chapterContents));
+                    throw preserveBlockedDelivery(dynamicContext, item, ChapterManuscript.of(chapterContent),
+                            gateResult, offset + chapterPlan.getChapters().size());
+                }
+                recordDeliveryReview(dynamicContext, item, chapterContent, gateResult);
+            }
+            boolean deliveryUnknown = deliveryMode != Mode.OFF && gateResult.deliveryReview().unknown();
+            boolean deliveryPassed = deliveryMode == Mode.OFF || gateResult.deliveryReview().passed();
+            // 只有交付策略已允许的稿件才进入树尾待写集合。
+            chapterContents.add(chapterContent);
             // 写手样本（训练数据水龙头）：完整最终 prompt 取自 usedPromptMap 的 chapter-N:user/system
             // （LlmInvokeService 已存含规则尾注的版本），正文取过完审校/修订/盲评的最终采纳稿；
-            // 失败案例由 audit-runtime-samples.jsonl 单独留痕，此处只记"任务→合格范文"
-            if (writerSampleService != null) {
+            // OBSERVE 的 ISSUE/UNKNOWN 独立留交付诊断，不得冒充合格范文。
+            if (writerSampleService != null && deliveryPassed) {
                 Map<String, String> usedPrompts = dynamicContext.getUsedPromptMap();
                 writerSampleService.record(storyDir,
                         storyDir == null ? null : storyDir.getFileName().toString(),
@@ -473,7 +507,7 @@ public class ChapterWorker {
                         globalNo, gateResult.planAdjustmentReason());
             }
             // 验证式自动核销：以本章审校结论验证旧债，须在记入本章新债之前
-            if (qualityGate.auditEnabled()) {
+            if (qualityGate.auditEnabled() && !deliveryUnknown) {
                 qualityDebtService.settle(qualityDebts, unresolvedIssues);
             }
             // 记债：未修复 BLOCKING + 降档的机械文风 MINOR。
@@ -484,7 +518,11 @@ public class ChapterWorker {
             // 【确认未修复】——把它记成债等于把基础设施抖动写成内容缺陷，再回灌给写手当
             // "你上一章犯的错"。故这类不落债，只留 WARN + 落盘标记供体检单独立账（与 RECALL_DEGRADED 同则）
             List<ChapterIssueEntity> debtIssues = new java.util.ArrayList<>();
-            if (gateResult.auditVerifyDegraded()) {
+            if (deliveryUnknown) {
+                // unresolvedBlocking 目前混有机械与语义来源，不能把未完成核验整体解释成内容缺陷。
+                // 保留分账明确的 mechanicalMinor，下方不改普通已确认质量债的既有行为。
+                log.warn("第 {} 章交付核验 UNKNOWN：不核销旧债、不把未验证 BLOCKING 记为内容债", globalNo);
+            } else if (gateResult.auditVerifyDegraded()) {
                 log.warn("第 {} 章修订验证未跑成（AUDIT_VERIFY_DEGRADED）：{} 条 BLOCKING 标记为【未验证】，"
                                 + "不记入质量债——避免把基础设施故障写成内容缺陷回灌下一章",
                         globalNo, unresolvedIssues.size());
@@ -501,10 +539,10 @@ public class ChapterWorker {
             }
             // 上章审校反馈（P2）：语义 MINOR（人设/审美等）本章起产生行动通道——压缩要点，
             // 下一章 prompt 的「审校反馈」块消费。此前清单被丢弃：审校每章报 7-9 条却无人行动
-            reviewFeedback = renderReviewFeedback(GateFeedbackPolicy.feedbackMinorsFor(gateResult,
+            reviewFeedback = deliveryUnknown ? null : renderReviewFeedback(GateFeedbackPolicy.feedbackMinorsFor(gateResult,
                     cn.novel.yonren.domain.novel.model.valobj.work.ChapterManuscript.of(chapterContent)));
-            // 文风指纹库：仅首轮全票通过的章节提取高信息密度句入库（滚动上限 50）
-            if (gateResult.grade() == GateResult.PassGrade.CLEAN_PASS) {
+            // 文风指纹库：仅首轮全票通过且已确认交付的章节提取高信息密度句入库（滚动上限 50）
+            if (deliveryPassed && gateResult.grade() == GateResult.PassGrade.CLEAN_PASS) {
                 List<String> additions = styleStatService.extractFingerprints(chapterContent.getContent());
                 if (additions != null && !additions.isEmpty()) {
                     styleStatService.mergeFingerprints(styleFingerprints, additions);
@@ -1554,6 +1592,86 @@ public class ChapterWorker {
     /** 正文、审校与修订使用相同的语域口径。 */
     private String renderRegisterGuidance(StoryContextEntity context) {
         return "\n10. " + cn.novel.yonren.domain.novel.service.armory.prompt.WritingContractPolicy.renderRegister(context);
+    }
+
+    private static GateResult bindDeliveryReview(GateResult gateResult, ChapterPlanItemEntity item,
+                                                 ChapterContentEntity chapterContent, boolean enforced) {
+        GateResult current = gateResult == null ? GateResult.of(List.of(), 0, 0) : gateResult;
+        return current.withDeliveryReview(DeliveryReviewPolicy.ensureBound(
+                current.deliveryReview(), item, ChapterManuscript.of(chapterContent), enforced));
+    }
+
+    /** 拒绝交付必须保全非正式稿并异常退出；失败信息不能冒称草稿已经写入。 */
+    private AppException preserveBlockedDelivery(DefaultArmoryFactory.DynamicContext dynamicContext,
+                                                 ChapterPlanItemEntity item, ChapterManuscript manuscript,
+                                                 GateResult gateResult, int totalChapters) {
+        DeliveryReview review = gateResult.deliveryReview();
+        String stage = review.unknown() ? GenerationJob.DELIVERY_REVIEW_UNAVAILABLE
+                : GenerationJob.DELIVERY_REVIEW_FAILED;
+        String reason = stage + "：第 " + manuscript.chapterNo() + " 章未获交付许可；"
+                + deliveryDiagnostics(review);
+        GenerationJob job = dynamicContext.getJob();
+        Path storyDir = dynamicContext.getStoryDir();
+        Path runDir = dynamicContext.getRunDir();
+        if (job != null) {
+            job.updateProgress(stage, manuscript.chapterNo(), totalChapters,
+                    storyDir == null ? null : storyDir.getFileName().toString());
+        }
+        final Path saved;
+        try {
+            saved = storyRepository.saveUncommittedChapter(storyDir, runDir, manuscript, item, gateResult, reason);
+            if (saved == null) {
+                throw new IllegalStateException("未提交草稿仓储没有返回保存地址");
+            }
+        } catch (Exception e) {
+            String cause = e instanceof AppException app ? app.getInfo() : e.getMessage();
+            String message = reason + "；非正式草稿保全失败，不能确认已保存；目标 run=" + runDir
+                    + "；" + cause + "。本章未正式提交，此前已提交章节保留。";
+            if (job != null) job.setErrorMessage(message);
+            persistJobStatus(dynamicContext);
+            log.error(message, e);
+            return new AppException(ResponseCode.UN_ERROR.getCode(), message, e);
+        }
+        String message = reason + "；非正式草稿已保存：" + saved.toAbsolutePath()
+                + "。本章未正式提交，此前已提交章节保留；可从第 " + manuscript.chapterNo() + " 章重新续写。";
+        if (job != null) job.setErrorMessage(message);
+        persistJobStatus(dynamicContext);
+        log.warn(message);
+        return new AppException(ResponseCode.UN_ERROR.getCode(), message);
+    }
+
+    /** OBSERVE/UNKNOWN 不进入合格样本，单独保留完整交付报告；观测失败不反噬允许继续的模式。 */
+    private void recordDeliveryReview(DefaultArmoryFactory.DynamicContext dynamicContext,
+                                      ChapterPlanItemEntity item, ChapterContentEntity chapterContent,
+                                      GateResult gateResult) {
+        DeliveryReview review = gateResult.deliveryReview();
+        if (!review.passed()) {
+            log.warn("第 {} 章交付核验 {}（enforced={}）：{}", chapterContent.getChapterNo(),
+                    review.status(), review.enforced(), deliveryDiagnostics(review));
+        }
+        try {
+            storyRepository.recordDeliveryReview(dynamicContext.getStoryDir(), dynamicContext.getRunDir(),
+                    ChapterManuscript.of(chapterContent), item, gateResult);
+        } catch (Exception e) {
+            log.warn("第 {} 章交付观测记录写入失败，未影响正式提交许可；{}",
+                    chapterContent.getChapterNo(), deliveryDiagnostics(review), e);
+        }
+    }
+
+    private static String deliveryDiagnostics(DeliveryReview review) {
+        StringJoiner details = new StringJoiner("；");
+        details.add("status=" + review.status());
+        details.add("manuscriptHash=" + review.manuscriptHash());
+        details.add("planHash=" + review.planHash());
+        for (String diagnostic : review.diagnostics()) {
+            if (StringUtils.isNotBlank(diagnostic)) details.add(diagnostic);
+        }
+        for (var check : review.checks()) {
+            if (check.verdict() != cn.novel.yonren.domain.novel.model.valobj.plan.CausalVerdict.Status.PASS) {
+                details.add("[" + check.targetId() + "] " + check.failureType() + "：" + check.reason());
+            }
+        }
+        return details.toString();
     }
 
     private void persistJobStatus(DefaultArmoryFactory.DynamicContext dynamicContext) {

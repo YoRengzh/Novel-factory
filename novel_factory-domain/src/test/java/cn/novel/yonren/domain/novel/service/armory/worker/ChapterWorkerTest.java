@@ -4,6 +4,14 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 
 import cn.novel.yonren.domain.novel.adapter.repository.IStoryRepository;
+import cn.novel.yonren.domain.novel.config.StoryProperties;
+import cn.novel.yonren.domain.novel.config.StoryProperties.CausalityProperties.Mode;
+import cn.novel.yonren.domain.novel.model.entity.ChapterContentEntity;
+import cn.novel.yonren.domain.novel.model.valobj.plan.CausalVerdict;
+import cn.novel.yonren.domain.novel.model.valobj.quality.DeliveryReview;
+import cn.novel.yonren.domain.novel.model.valobj.work.ChapterManuscript;
+import cn.novel.yonren.domain.novel.service.armory.quality.DeliveryReviewPolicy;
+import cn.novel.yonren.domain.novel.service.armory.writer.WriterSampleService;
 import cn.novel.yonren.domain.novel.model.valobj.work.ChapterCommitState;
 import cn.novel.yonren.domain.novel.model.aggregate.ChapterPlanAggregate;
 import cn.novel.yonren.domain.novel.model.entity.ArmoryCommandEntity;
@@ -158,6 +166,12 @@ class ChapterWorkerTest {
     @org.mockito.Spy
     private RollingOutlineService rollingOutlineService = new RollingOutlineService();
 
+    @org.mockito.Spy
+    private StoryProperties storyProperties = new StoryProperties();
+
+    @Mock
+    private WriterSampleService writerSampleService;
+
     @InjectMocks
     private ChapterWorker chapterWorker;
 
@@ -300,6 +314,160 @@ class ChapterWorkerTest {
         String bare = chapterWorker.buildChapterPrompt("【全局设定】", item, null, 5,
                 cn.novel.yonren.domain.novel.model.valobj.contract.ChapterContract.of(item, null));
         assertTrue(!bare.contains("【认知边界·不得越界】"), "没有认知记录时不应出现该块");
+    }
+
+    @Test
+    void enforceDeliveryFailurePreservesDraftBeforeAnyOfficialSideEffect() throws Exception {
+        var ctx = deliveryContext(Mode.ENFORCE, new GenerationJob("job-delivery-fail"));
+        stubDeliveryGate(DeliveryReview.Status.ISSUE);
+        Path draft = ctx.getRunDir().resolve("uncommitted/chapter-0001-test.json");
+        when(storyRepository.saveUncommittedChapter(any(), any(), any(), any(), any(), anyString())).thenReturn(draft);
+
+        AppException failure = assertThrows(AppException.class, () -> chapterWorker.generateAll(command(), ctx));
+
+        assertTrue(failure.getInfo().contains("非正式草稿已保存"));
+        assertTrue(failure.getInfo().contains("第 1 章重新续写"));
+        assertEquals(GenerationJob.DELIVERY_REVIEW_FAILED, ctx.getJob().getCurrentStage());
+        assertTrue(ctx.getChapterContents().isEmpty());
+        verify(storyRepository).saveUncommittedChapter(eq(STORY_DIR), eq(ctx.getRunDir()), any(), any(), any(), anyString());
+        verify(storyRepository, never()).commitChapter(any(), any(), any());
+        verify(chapterSummaryService, never()).summarize(any(), any(), anyString(), anyInt(), anyString(), anyList(), any());
+        verify(qualityDebtService, never()).settle(any(), any());
+        verify(writerSampleService, never()).record(any(), any(), anyInt(), any(), any(), any(), any(), any());
+        verify(styleStatService, never()).merge(any(), anyString(), anyString());
+        verify(llmInvokeService, times(1)).invoke(any(), any(), any(), anyString(), anyMap());
+    }
+
+    @Test
+    void enforceUnknownDoesNotTriggerCandidateOrSettleOldDebts() throws Exception {
+        var ctx = deliveryContext(Mode.ENFORCE, new GenerationJob("job-delivery-unknown"));
+        stubDeliveryGate(DeliveryReview.Status.UNKNOWN);
+        when(storyRepository.saveUncommittedChapter(any(), any(), any(), any(), any(), anyString()))
+                .thenReturn(ctx.getRunDir().resolve("uncommitted/unknown.json"));
+        when(qualityGate.auditEnabled()).thenReturn(true);
+
+        assertThrows(AppException.class, () -> chapterWorker.generateAll(command(), ctx));
+
+        assertEquals(GenerationJob.DELIVERY_REVIEW_UNAVAILABLE, ctx.getJob().getCurrentStage());
+        verify(chapterCandidateService, never()).challenge(any(), any(), any(), anyString(), any(), any(), anyList(), any(), anyInt(), any());
+        verify(qualityDebtService, never()).settle(any(), any());
+        verify(storyRepository, never()).commitChapter(any(), any(), any());
+        verify(chapterSummaryService, never()).summarize(any(), any(), anyString(), anyInt(), anyString(), anyList(), any());
+    }
+
+    @Test
+    void draftSaveFailureIsReportedWithoutPretendingTheDraftWasSaved() throws Exception {
+        var ctx = deliveryContext(Mode.ENFORCE, new GenerationJob("job-draft-disk"));
+        stubDeliveryGate(DeliveryReview.Status.ISSUE);
+        when(storyRepository.saveUncommittedChapter(any(), any(), any(), any(), any(), anyString()))
+                .thenThrow(new java.io.IOException("disk full"));
+
+        AppException failure = assertThrows(AppException.class, () -> chapterWorker.generateAll(command(), ctx));
+
+        assertTrue(failure.getInfo().contains("保全失败"));
+        assertTrue(failure.getInfo().contains("disk full"));
+        assertFalse(failure.getInfo().contains("非正式草稿已保存"));
+        verify(storyRepository, never()).commitChapter(any(), any(), any());
+    }
+
+    @Test
+    void priorCommittedChapterSurvivesTheNextUnverifiedChapter() throws Exception {
+        var ctx = deliveryContext(Mode.ENFORCE, new GenerationJob("job-second-fails"));
+        when(qualityGate.auditAndReviseIfEnabled(any(), any(), any(), anyList(), any(), anyInt(), any(), any()))
+                .thenAnswer(inv -> deliveryGate(inv.getArgument(1), inv.getArgument(2),
+                        (int) inv.getArgument(5) == 1 ? DeliveryReview.Status.PASS : DeliveryReview.Status.ISSUE, true));
+        when(chapterSummaryService.summarize(any(), any(), anyString(), anyInt(), anyString(), anyList(), any()))
+                .thenAnswer(inv -> summary(inv.getArgument(3)));
+        when(storyRepository.saveUncommittedChapter(any(), any(), any(), any(), any(), anyString()))
+                .thenReturn(ctx.getRunDir().resolve("uncommitted/chapter-0002.json"));
+
+        assertThrows(AppException.class, () -> chapterWorker.generateAll(command(), ctx));
+
+        assertEquals(1, ctx.getChapterContents().size());
+        assertEquals(1, ctx.getChapterContents().get(0).getChapterNo());
+        assertEquals(1, ctx.getChapterSummaries().size());
+        verify(storyRepository, times(1)).commitChapter(eq(STORY_DIR), any(), any());
+        verify(chapterSummaryService, times(1)).summarize(any(), any(), anyString(), anyInt(), anyString(), anyList(), any());
+        assertEquals(2, ctx.getJob().getCurrentChapter(), "当前尝试章不是已提交章数");
+        ArgumentCaptor<ChapterManuscript> saved = ArgumentCaptor.forClass(ChapterManuscript.class);
+        verify(storyRepository).saveUncommittedChapter(any(), any(), saved.capture(), any(), any(), anyString());
+        assertEquals(2, saved.getValue().chapterNo());
+    }
+
+    @Test
+    void finalCandidateSwapCannotReuseOriginalDeliveryPass() throws Exception {
+        var ctx = deliveryContext(Mode.ENFORCE, null);
+        stubDeliveryGate(DeliveryReview.Status.PASS);
+        when(chapterCandidateService.challenge(any(), any(), any(), anyString(), any(), any(), anyList(), any(), anyInt(), any()))
+                .thenAnswer(inv -> {
+                    ChapterContentEntity chapter = inv.getArgument(4);
+                    chapter.setContent("候选只有宣布成功。");
+                    return inv.getArgument(5);
+                });
+        when(storyRepository.saveUncommittedChapter(any(), any(), any(), any(), any(), anyString()))
+                .thenReturn(ctx.getRunDir().resolve("uncommitted/stale.json"));
+
+        AppException failure = assertThrows(AppException.class, () -> chapterWorker.generateAll(command(), ctx));
+
+        assertTrue(failure.getInfo().contains("DELIVERY_VERSION_MISMATCH"));
+        verify(storyRepository, never()).commitChapter(any(), any(), any());
+    }
+
+    @Test
+    void observeUnknownIsVisibleButNotAContentDebtOrQualifiedSample() throws Exception {
+        var ctx = deliveryContext(Mode.OBSERVE, null);
+        stubDeliveryGate(DeliveryReview.Status.UNKNOWN);
+        when(qualityGate.auditEnabled()).thenReturn(true);
+        chapterWorker.generateAll(command(), ctx);
+
+        assertEquals(2, ctx.getChapterContents().size());
+        verify(storyRepository, times(2)).recordDeliveryReview(any(), any(), any(), any(), any());
+        verify(storyRepository, times(2)).commitChapter(any(), any(), any());
+        verify(qualityDebtService, never()).settle(any(), any());
+        verify(writerSampleService, never()).record(any(), any(), anyInt(), any(), any(), any(), any(), any());
+        verify(styleStatService, never()).extractFingerprints(anyString());
+        verify(chapterCandidateService, never()).challenge(any(), any(), any(), anyString(), any(), any(), anyList(), any(), anyInt(), any());
+    }
+
+    @Test
+    void conflictingAuditConfigurationFailsBeforeAnyGeneration() {
+        storyProperties.getCausality().setAuditMode(Mode.ENFORCE);
+        storyProperties.getAudit().setEnabled(false);
+        assertThrows(IllegalArgumentException.class, () -> chapterWorker.generateAll(command(), context(null)));
+        verify(llmInvokeService, never()).invoke(any(), any(), any(), anyString(), anyMap());
+    }
+
+    private DefaultArmoryFactory.DynamicContext deliveryContext(Mode mode, GenerationJob job) {
+        storyProperties.getCausality().setAuditMode(mode);
+        var ctx = context(job);
+        ctx.setStoryDir(STORY_DIR);
+        ctx.setRunDir(STORY_DIR.resolve("generation-records/run-0001"));
+        for (var plan : ctx.getChapterPlanAggregate().getChapters()) plan.setKeyEvents(List.of("交付药签"));
+        return ctx;
+    }
+
+    private void stubDeliveryGate(DeliveryReview.Status status) {
+        when(qualityGate.auditAndReviseIfEnabled(any(), any(), any(), anyList(), any(), anyInt(), any(), any()))
+                .thenAnswer(inv -> deliveryGate(inv.getArgument(1), inv.getArgument(2), status,
+                        storyProperties.getCausality().getAuditMode() == Mode.ENFORCE));
+    }
+
+    private static GateResult deliveryGate(ChapterPlanItemEntity plan, ChapterContentEntity chapter,
+                                           DeliveryReview.Status status, boolean enforce) {
+        var request = new DeliveryReviewPolicy.Request(DeliveryReviewPolicy.contract(plan), ChapterManuscript.of(chapter), enforce);
+        DeliveryReview report;
+        if (status == DeliveryReview.Status.UNKNOWN) {
+            report = DeliveryReviewPolicy.unavailable(request, "缺少可靠的核验结果");
+        } else {
+            var issue = status == DeliveryReview.Status.ISSUE;
+            var check = new CausalVerdict(null, issue ? CausalVerdict.Status.ISSUE : CausalVerdict.Status.PASS,
+                    chapter.getContent(), null, issue ? "正文仅有结果，没有计划承诺的交接过程" : "正文已交代交接过程",
+                    issue ? "只补齐交接和确认的必要过程" : null,
+                    issue ? CausalVerdict.FailureType.RESULT_WITHOUT_CAUSE : null,
+                    null, null, null, null, "event:1", "keyEvents[0]", "交付药签");
+            report = DeliveryReviewPolicy.consume(request, List.of(check));
+        }
+        return GateResult.of(DeliveryReviewPolicy.blockingIssues(report), 0, 0).withDeliveryReview(report);
     }
 
     @Test

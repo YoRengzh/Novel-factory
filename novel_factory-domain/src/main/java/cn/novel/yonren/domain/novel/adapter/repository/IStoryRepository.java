@@ -14,6 +14,8 @@ import cn.novel.yonren.domain.novel.model.entity.QualityDebtEntity;
 import cn.novel.yonren.domain.novel.model.entity.StageBlueprintEntity;
 import cn.novel.yonren.domain.novel.model.entity.StyleStatEntity;
 import cn.novel.yonren.domain.novel.model.entity.VolumeBlueprintEntity;
+import cn.novel.yonren.domain.novel.model.valobj.quality.GateResult;
+import cn.novel.yonren.domain.novel.model.valobj.work.ChapterManuscript;
 import cn.novel.yonren.domain.novel.service.armory.factory.DefaultArmoryFactory;
 import cn.novel.yonren.domain.novel.service.job.GenerationJob;
 
@@ -51,6 +53,29 @@ public interface IStoryRepository {
      * 冲突即异常不重试——jobId 全局唯一），供异步作业按 job 定位本批产物
      */
     Path createRunDirectory(Path storyDir, String jobId) throws Exception;
+
+    /**
+     * 严格交付模式的生成前检查点：故事/run 必须已存在且路径受限；只补缺失的 bible/meta，
+     * 已有设定与已固化上限绝不覆盖，并确认恢复所需文件可读。失败必须阻止正文生成。
+     * meta 的 maxChapterCount=0 沿用「未固化上限」语义，不凭空增加章数限制。
+     */
+    void ensureGenerationCheckpoint(Path storyDir, Path runDir, ArmoryCommandEntity command, StoryMeta meta)
+            throws Exception;
+
+    /**
+     * 原子保全未获交付许可的当前稿，仅写既有 run 下的 uncommitted 独立目录。
+     * 文件包含稿件、完整计划、交付报告与拒绝原因；每次独立留档，不污染正式章节/提交日志。
+     * 只有文件完整写入后才返回其路径，失败不得报告「草稿已保存」。
+     */
+    Path saveUncommittedChapter(Path storyDir, Path runDir, ChapterManuscript manuscript,
+                               ChapterPlanItemEntity plan, GateResult gateResult, String reason) throws Exception;
+
+    /**
+     * 交付核验观测件（含 OBSERVE/UNKNOWN）：写既有 run 下 delivery-reviews 独立 JSON，
+     * 与正式正文、未提交草稿和质量债分离。调用方 fail-soft，不影响允许继续的生成。
+     */
+    void recordDeliveryReview(Path storyDir, Path runDir, ChapterManuscript manuscript,
+                              ChapterPlanItemEntity plan, GateResult gateResult) throws Exception;
 
     /**
      * 写作业状态快照到故事目录根 job-status.json（原子写 + 每故事锁）。

@@ -36,7 +36,7 @@ public class StoryProperties {
     private LedgerAdjudicateProperties ledgerAdjudicate = new LedgerAdjudicateProperties();
     // 无人值守续写计划（自续批；默认关闭，开启后作业会自动连续花 token）
     private RunPlanProperties runPlan = new RunPlanProperties();
-    // 场景因果核验：OFF 不调用、OBSERVE 只记警告、ENFORCE 可驳回计划
+    // 场景因果核验：planMode 检查计划前提，auditMode 验收正文交付；各自默认 OFF
     private CausalityProperties causality = new CausalityProperties();
 
     public StoryVO toStoryVO() {
@@ -114,8 +114,9 @@ public class StoryProperties {
          * 修订耗尽仍有未修复 BLOCKING（{@code DEBT}）是否触发候选，默认关闭。
          *
          * 候选仍使用同一份计划与约束，结构性问题可能继续存在。
-         * 挑战者即使赢下盲评，也必须通过自身复检；未过门禁时保留原稿。
-         * 开启前应独立评估采纳收益与额外模型费用。
+         * 已确认交付 ISSUE 可以显式开启本通道救场；UNKNOWN、未验证或计划待调整时不调用候选。
+         * 挑战者即使赢下盲评，也必须通过自身复检；正文交付严格模式须有同稿同计划的 PASS。
+         * 开启前应独立评估采纳收益与额外模型费用，交付模式不会自动开启本开关。
          */
         private boolean triggerOnDebt = false;
         /** 候选重写调用的单次输出上限（评审场景 yml max-tokens 为小值，重写时按此覆盖） */
@@ -188,13 +189,14 @@ public class StoryProperties {
     }
 
     /**
-     * 场景因果核验。
+     * 场景因果与正文交付核验，复用同一组模式值，但两个阶段独立配置。
      *
-     * <p>{@code OFF} 完全不调用，零成本，行为与引入前一致；{@code OBSERVE} 照常调用并产出结论，
-     * 但结论只进警告、不阻断计划；{@code ENFORCE} 结论可驳回计划并触发带反馈重规划。
+     * <p>{@link #planMode} 检查计划所需前提：OFF 不调用，OBSERVE 只记录，ENFORCE 可驳回计划。
+     * {@link #auditMode} 检查已写正文是否兑现当前计划的场景、步骤或关键事件，
+     * 不是再次审查计划是否合理，也不因启用正文验收而自动开启计划核验。
      *
-     * <p>失败降级同样按模式分流：{@code ENFORCE} 下"核验没跑成"本身算阻断，
-     * {@code OBSERVE} 下只记一条警告——避免基础设施故障被当成内容缺陷，也避免它静默通过。
+     * <p>默认均为 OFF，保持兼容。真实模型校准需用户授权；本地 Mock 只证明控制流，
+     * 不证明模型能识别“只有结果、没有必要过程”。完成校准后须显式开启 auditMode=ENFORCE 才拦截提交。
      */
     @Data
     public static class CausalityProperties {
@@ -203,7 +205,15 @@ public class StoryProperties {
         /** 计划期核验模式；默认 OFF，不新增任何调用与费用 */
         private Mode planMode = Mode.OFF;
 
-        /** 审校期核验模式；默认 OFF */
+        /**
+         * 正文交付验收模式（与 planMode 独立）：
+         * <ul>
+         *   <li>OFF：不追加交付验收，报告 NOT_CHECKED，沿用既有审校与提交行为。</li>
+         *   <li>OBSERVE：核验当前正文并记录状态、证据和稿件/计划 hash；报告本身不阻断提交。</li>
+         *   <li>ENFORCE：要求同稿同计划的交付 PASS；ISSUE、UNKNOWN、未检查或报告过期均不能继续提交。</li>
+         * </ul>
+         * 未验证不等于内容缺陷，不能当作已通过或用候选绕过；严格模式要求 story.audit.enabled=true。
+         */
         private Mode auditMode = Mode.OFF;
     }
 

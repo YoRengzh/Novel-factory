@@ -17,6 +17,7 @@ import cn.novel.yonren.domain.novel.model.entity.StageBlueprintEntity;
 import cn.novel.yonren.domain.novel.model.entity.StoryContextEntity;
 import cn.novel.yonren.domain.novel.model.entity.VolumeBlueprintEntity;
 import cn.novel.yonren.domain.novel.model.valobj.StoryVO;
+import cn.novel.yonren.domain.novel.model.valobj.quality.GateResult;
 import cn.novel.yonren.domain.novel.model.valobj.work.ChapterAcceptance;
 import cn.novel.yonren.domain.novel.model.valobj.work.ChapterCommitState;
 import cn.novel.yonren.domain.novel.model.valobj.work.ChapterManuscript;
@@ -34,7 +35,9 @@ import java.io.IOException;
 import java.nio.file.AtomicMoveNotSupportedException;
 import java.nio.file.FileAlreadyExistsException;
 import java.nio.file.Files;
+import java.nio.file.LinkOption;
 import java.nio.file.Path;
+import java.nio.file.attribute.BasicFileAttributes;
 import java.nio.file.Paths;
 import java.nio.file.StandardCopyOption;
 import java.nio.file.StandardOpenOption;
@@ -225,6 +228,134 @@ public class StoryRepository implements IStoryRepository {
                     throw new IOException("创建 run 目录失败：序号连续被并发抢占 " + MAX_SEQUENCE_ATTEMPTS + " 次", e);
                 }
             }
+        }
+    }
+
+    @Override
+    public void ensureGenerationCheckpoint(Path storyDir, Path runDir, ArmoryCommandEntity command,
+                                           IStoryRepository.StoryMeta meta) throws IOException {
+        if (storyDir == null || runDir == null || command == null) {
+            throw new IllegalArgumentException("严格生成检查点缺少故事目录、run 或请求");
+        }
+        withStoryLock(storyDir, () -> {
+            Path checkedRun = requireGenerationRun(storyDir, runDir);
+            Path bible = storyDir.resolve(StorageKeys.STORY_BIBLE_FILE);
+            Path metaFile = storyDir.resolve(StorageKeys.STORY_META_FILE);
+            // 在任何写入前检查既有文件与临时文件，拒绝重定向；不碰作者维护工作副本/执行引用。
+            assertCheckpointAtomicFile(bible);
+            assertCheckpointAtomicFile(metaFile);
+            assertCheckpointAtomicFile(checkedRun.resolve(StorageKeys.CHAPTER_PLAN_FILE));
+            writeStoryBible(storyDir, command);
+            writeStoryMeta(storyDir, meta);
+            // 存在但为空/损坏不能冒充恢复检查点，也不能用本批请求覆盖修复作者的原文件。
+            if (readStoryBible(storyDir).isBlank()) {
+                throw new IOException("严格生成检查点的 story-bible.txt 为空：" + bible.toAbsolutePath());
+            }
+            if (readStoryMeta(storyDir) == null && meta != null) {
+                throw new IOException("严格生成检查点缺少 story-meta.json：" + metaFile.toAbsolutePath());
+            }
+        });
+    }
+
+    @Override
+    public Path saveUncommittedChapter(Path storyDir, Path runDir, ChapterManuscript manuscript,
+                                      ChapterPlanItemEntity plan, GateResult gateResult, String reason) throws IOException {
+        if (reason == null || reason.isBlank()) {
+            throw new IllegalArgumentException("未提交草稿必须保留拒绝原因");
+        }
+        return writeDeliveryRecord(storyDir, runDir, manuscript, plan, gateResult, reason,
+                "uncommitted", "UNCOMMITTED_CHAPTER_V1");
+    }
+
+    @Override
+    public void recordDeliveryReview(Path storyDir, Path runDir, ChapterManuscript manuscript,
+                                     ChapterPlanItemEntity plan, GateResult gateResult) throws IOException {
+        writeDeliveryRecord(storyDir, runDir, manuscript, plan, gateResult, null,
+                "delivery-reviews", "DELIVERY_REVIEW_V1");
+    }
+
+    /** 两类旁路记录共用原子写，但目录与 schema 分离，均不创建/重放章节提交日志。 */
+    private Path writeDeliveryRecord(Path storyDir, Path runDir, ChapterManuscript manuscript,
+                                     ChapterPlanItemEntity plan, GateResult gateResult, String reason,
+                                     String directory, String schema) throws IOException {
+        if (storyDir == null || runDir == null || manuscript == null || plan == null || gateResult == null
+                || manuscript.chapterNo() <= 0 || !Objects.equals(plan.getChapterNo(), manuscript.chapterNo())) {
+            throw new IllegalArgumentException("交付记录缺少目录、稿件、同章计划或门禁结果");
+        }
+        final Path[] saved = new Path[1];
+        withStoryLock(storyDir, () -> {
+            Path checkedRun = requireGenerationRun(storyDir, runDir);
+            Path records = checkedRun.resolve(directory);
+            if (Files.notExists(records, LinkOption.NOFOLLOW_LINKS)) {
+                Files.createDirectory(records);
+            }
+            assertCheckpointPath(records, true, true);
+            Path file = uniqueDeliveryFile(records, manuscript);
+            Map<String, Object> record = new LinkedHashMap<>();
+            record.put("schema", schema);
+            record.put("committed", false);
+            record.put("diagnosticOnly", true);
+            record.put("createdAtMs", System.currentTimeMillis());
+            record.put("chapterNo", manuscript.chapterNo());
+            record.put("manuscriptHash", manuscript.hash());
+            record.put("manuscript", manuscript);
+            // 完整对象序列化，不能复用逐字段手写的计划 YAML（会丢失 scenes/causality 等字段）。
+            record.put("plan", plan);
+            record.put("deliveryReview", gateResult.deliveryReview());
+            record.put("gateResult", gateResult);
+            record.put("reason", reason);
+            writeStringAtomic(file, JSON.toJSONString(record));
+            saved[0] = file;
+        });
+        return saved[0];
+    }
+
+    /** 稿件 hash 便于定位；唯一后缀保留同稿多次失败的不同诊断，绝不覆盖历史记录。 */
+    private static Path uniqueDeliveryFile(Path directory, ChapterManuscript manuscript) throws IOException {
+        String prefix = String.format("chapter-%04d-%s-", manuscript.chapterNo(), manuscript.hash());
+        for (int attempt = 0; attempt < MAX_SEQUENCE_ATTEMPTS; attempt++) {
+            Path file = directory.resolve(prefix + UUID.randomUUID() + ".json");
+            Path temporary = file.resolveSibling("." + file.getFileName() + ".tmp");
+            if (Files.notExists(file, LinkOption.NOFOLLOW_LINKS)
+                    && Files.notExists(temporary, LinkOption.NOFOLLOW_LINKS)) {
+                return file;
+            }
+        }
+        throw new IOException("交付记录无法分配独立文件：" + directory);
+    }
+
+    /** 调用方已解析故事目录；这里再约束既有 run 为本故事 generation-records 的直接子目录。 */
+    private static Path requireGenerationRun(Path storyDir, Path runDir) throws IOException {
+        Path story = storyDir.toAbsolutePath().normalize();
+        Path records = story.resolve(StorageKeys.RECORD);
+        Path run = runDir.toAbsolutePath().normalize();
+        if (story.getFileName() == null || !STORY_DIR_PATTERN.matcher(story.getFileName().toString()).matches()
+                || !Objects.equals(run.getParent(), records) || run.getFileName() == null
+                || !run.getFileName().toString().matches("run-(?:\\d{4,}|job-[A-Za-z0-9][A-Za-z0-9_-]*)")) {
+            throw new IOException("交付记录路径必须是既有故事下的独立 run，禁止越界：" + run);
+        }
+        assertCheckpointPath(story, true, true);
+        assertCheckpointPath(records, true, true);
+        assertCheckpointPath(run, true, true);
+        return run;
+    }
+
+    private static void assertCheckpointAtomicFile(Path file) throws IOException {
+        assertCheckpointPath(file, false, false);
+        assertCheckpointPath(file.resolveSibling("." + file.getFileName() + ".tmp"), false, false);
+    }
+
+    /** 与相邻维护仓储同口径：拒绝符号链接、junction、重定向与非普通文件，不替换已有目录。 */
+    private static void assertCheckpointPath(Path path, boolean directory, boolean required) throws IOException {
+        if (Files.notExists(path, LinkOption.NOFOLLOW_LINKS)) {
+            if (required) throw new IOException("交付检查点目录不存在：" + path);
+            return;
+        }
+        BasicFileAttributes attributes = Files.readAttributes(path, BasicFileAttributes.class, LinkOption.NOFOLLOW_LINKS);
+        if (attributes.isSymbolicLink() || attributes.isOther()
+                || (directory ? !attributes.isDirectory() : !attributes.isRegularFile())
+                || !path.toRealPath().equals(path.toAbsolutePath().normalize())) {
+            throw new IOException("交付检查点不允许符号链接、重定向或非普通路径：" + path);
         }
     }
 

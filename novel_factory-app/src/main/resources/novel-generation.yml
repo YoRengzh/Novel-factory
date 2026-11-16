@@ -163,12 +163,15 @@ story:
     # 体检分级达到该档即停止自动续批，交人工过问：WATCH / DEGRADED / CRITICAL
     stop-on-health-level: CRITICAL
 
-  # 场景因果核验：检查场景结果所依赖的必要前提（人物已有认知、设备能力、交易责任）。
-  # OFF = 完全不调用，零成本；OBSERVE = 照常核验但结论只记日志，不改变计划；
-  # ENFORCE = 结论可驳回计划。失败降级同按模式分流：ENFORCE 下"核验没跑成"也算阻断，
-  # OBSERVE 下只记一条警告——基础设施故障不该被当成内容缺陷，也不该静默通过。
+  # 场景因果与正文交付核验：两个阶段独立配置，不会互相开启。
   causality:
+    # 计划前提核验：OFF 不调用；OBSERVE 只记录；ENFORCE 可驳回计划。
     plan-mode: OFF
+    # 正文交付验收（不是计划审查）：检查正文是否兑现当前计划的场景/步骤/关键事件。
+    # OFF = NOT_CHECKED，保持既有行为；OBSERVE = 记录报告与稿件/计划 hash，不因报告阻断提交；
+    # ENFORCE = 仅同稿同计划 PASS 可提交，ISSUE/UNKNOWN/缺失或过期报告均不放行。
+    # 严格模式要求 audit.enabled=true；不改变机械预检，也不自动开启任何候选等级开关。
+    # 当前维持 OFF 兼容：本地 Mock 仅证明控制流，真实模型校准需授权，校准后显式改为 ENFORCE 才拦截。
     audit-mode: OFF
 
   # 全书总章数上限（完结保护）：enforce-chapter-limit=true 时强制 max-chapter-count，
@@ -198,7 +201,8 @@ story:
     patch-enabled: true
 
   # 候选选优（六期）：审校低置信通过（MINOR 残留/修订过才闭环）时，重写候选，
-  # 机械排序 + 盲评二选一；挑战者复审不过自动回退原稿，保证闸门拒绝率不升。
+  # 机械排序 + 盲评二选一；挑战者复审不过自动回退原稿与原报告，严格模式另须同稿同计划交付 PASS。
+  # UNKNOWN/未验证/计划待调整不发候选调用；已确认 ISSUE 仅在显式开启 DEBT 通道时允许救场。
   # 重写与评审分别走 scene-models.chapter-rewrite / chapter-judge 两族配置：
   # 当前 rewrite=qwen3.8-flash（与原稿同族，零消耗），judge=deepseek-v4-flash（异族中立评审两份 qwen 稿）
   candidate:

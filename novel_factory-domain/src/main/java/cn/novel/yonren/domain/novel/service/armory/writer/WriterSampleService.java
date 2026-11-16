@@ -2,6 +2,7 @@ package cn.novel.yonren.domain.novel.service.armory.writer;
 
 import cn.novel.yonren.domain.novel.adapter.repository.IStoryRepository;
 import cn.novel.yonren.domain.novel.model.entity.ChapterContentEntity;
+import cn.novel.yonren.domain.novel.model.valobj.quality.DeliveryReview;
 import cn.novel.yonren.domain.novel.model.valobj.quality.GateResult;
 import com.alibaba.fastjson2.JSON;
 import jakarta.annotation.Resource;
@@ -25,7 +26,16 @@ public class WriterSampleService {
                        String finalPrompt, String systemPrompt,
                        ChapterContentEntity chapterContent, GateResult gateResult,
                        String generationMode) {
-        if (storyDir == null) {
+        if (storyDir == null || gateResult == null) {
+            return;
+        }
+        DeliveryReview deliveryReview = gateResult.deliveryReview();
+        // 与 Worker 双防御：历史样本允许普通 DEBT，不把“未验证”或严格交付失败写成范文。
+        // OFF 的 NOT_CHECKED 仍按旧行为记录；OBSERVE 的已确认 ISSUE 只随元数据留痕。
+        if (gateResult.grade() == GateResult.PassGrade.UNVERIFIED
+                || (deliveryReview != null && (deliveryReview.unknown() || deliveryReview.blocksCommit()))) {
+            log.info("第 {} 章写手样本跳过（grade={}，delivery={}）", chapterNo, gateResult.grade(),
+                    deliveryReview == null ? null : deliveryReview.status());
             return;
         }
         try {
@@ -37,6 +47,9 @@ public class WriterSampleService {
             gate.put("mechanicalMinorCount", gateResult.mechanicalMinor() == null ? 0 : gateResult.mechanicalMinor().size());
             gate.put("semanticMinorCount", gateResult.semanticMinors() == null ? 0 : gateResult.semanticMinors().size());
             gate.put("auditVerifyDegraded", gateResult.auditVerifyDegraded());
+            gate.put("semanticFeedbackHash", gateResult.semanticFeedbackHash());
+            gate.put("planAdjustmentReason", gateResult.planAdjustmentReason());
+            gate.put("deliveryReview", deliveryReview);
 
             String content = chapterContent == null ? null : chapterContent.getContent();
             Map<String, Object> sample = new HashMap<>();

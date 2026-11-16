@@ -6,20 +6,36 @@ import cn.novel.yonren.domain.novel.model.entity.ChapterIssueEntity;
 import cn.novel.yonren.domain.novel.model.entity.ChapterPlanItemEntity;
 import cn.novel.yonren.domain.novel.model.valobj.LlmCall;
 import cn.novel.yonren.domain.novel.model.valobj.StoryVO;
+import cn.novel.yonren.domain.novel.model.valobj.plan.ScenePlan;
+import cn.novel.yonren.domain.novel.model.valobj.quality.DeliveryReview;
+import cn.novel.yonren.domain.novel.model.valobj.revise.RewriteContext;
+import cn.novel.yonren.domain.novel.model.valobj.work.ChapterManuscript;
+import cn.novel.yonren.domain.novel.service.armory.llm.LlmLocalRejectionException;
+import cn.novel.yonren.domain.novel.service.armory.quality.DeliveryReviewPolicy;
 import cn.novel.yonren.types.exception.AppException;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
+import org.mockito.ArgumentCaptor;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.CancellationException;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.times;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 /**
@@ -265,6 +281,449 @@ class ChapterAuditServiceTest {
 
         // 无正文可比对时不做校验，保持原判定
         assertEquals("BLOCKING", issue.getSeverity());
+    }
+
+    // ---- 同次请求的固定计划交付核验：网关均为 mock，不调用真实模型 ----
+
+    @Test
+    void deliveryAuditUsesOneCallAndBindsLocalIdentityInsteadOfModelReport() {
+        var item = deliveryPlan();
+        var request = deliveryRequest(item, DELIVERED);
+        String raw = "{\"issues\":[],\"deliveryChecks\":[" + passCheck() + "],"
+                + "\"deliveryReview\":{\"status\":\"ISSUE\",\"manuscriptHash\":\"forged\"},"
+                + "\"auditUnavailable\":true}";
+        when(llmGateway.complete(any(), any(LlmCall.class))).thenReturn(raw);
+
+        var result = auditDelivery(item, DELIVERED, request);
+
+        assertTrue(result.getDeliveryReview().passed());
+        assertFalse(result.isAuditUnavailable());
+        assertTrue(result.getIssues().isEmpty());
+        assertEquals(request.manuscript().hash(), result.getDeliveryReview().manuscriptHash());
+        assertEquals(request.contract().planHash(), result.getDeliveryReview().planHash());
+        assertEquals(DeliveryReview.Scope.EVENTS, result.getDeliveryReview().scope());
+        assertEquals(request.manuscript().hash(), result.getDeliveryReview().checks().get(0).manuscriptHash());
+        var call = capturedCalls(1).get(0);
+        assertTrue(call.getUserPrompt().contains("计划交付逐项验收"));
+        assertTrue(call.getUserPrompt().contains("event:1"));
+        assertTrue(call.getUserPrompt().contains("issues 与 deliveryChecks 必须分别显式提供数组"));
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {true, false})
+    void deliveryIssueWithEmptyIssuesIsARealConclusionNotEvidenceDowngraded(boolean enforced) {
+        var item = deliveryPlan();
+        var request = new DeliveryReviewPolicy.Request(DeliveryReviewPolicy.contract(item),
+                new ChapterManuscript(1, item.getTitle(), "他在窗下静坐。"), enforced);
+        when(llmGateway.complete(any(), any(LlmCall.class))).thenReturn(auditJson(missingDeliveryCheck()));
+
+        var result = auditDelivery(item, request.manuscript().content(), request);
+
+        assertEquals(DeliveryReview.Status.ISSUE, result.getDeliveryReview().status());
+        assertEquals(enforced, result.getDeliveryReview().blocksCommit());
+        assertTrue(result.getIssues().isEmpty(), "无正文引文的计划缺席不能塞入旧七维并降为 MINOR");
+        assertFalse(result.isAuditUnavailable());
+        capturedCalls(1);
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"omitted", "empty", "duplicate-target", "unknown-target", "null-check",
+            "fabricated-content", "fabricated-plan", "missing-reason", "model-unknown", "unknown-enum", "numeric-enum"})
+    void incompleteOrInvalidDeliveryChecksStayUnknownAfterAtMostTwoCalls(String failure) {
+        String check = switch (failure) {
+            case "empty" -> "";
+            case "duplicate-target" -> passCheck() + "," + passCheck();
+            case "unknown-target" -> passCheck().replace("event:1", "event:99");
+            case "null-check" -> "null";
+            case "fabricated-content" -> passCheck().replace(DELIVERED_QUOTE, "他已经把银票交给陌生人");
+            case "fabricated-plan" -> passCheck().replace("交付药签", "焚毁银票");
+            case "missing-reason" -> passCheck().replace("接收动作已交付", "");
+            case "model-unknown" -> passCheck().replace("PASS", "UNKNOWN");
+            case "unknown-enum" -> passCheck().replace("PASS", "APPROVED");
+            case "numeric-enum" -> passCheck().replace("\"PASS\"", "0");
+            default -> passCheck();
+        };
+        when(llmGateway.complete(any(), any(LlmCall.class))).thenReturn(
+                "omitted".equals(failure) ? "{\"issues\":[]}" : auditJson(check));
+        var item = deliveryPlan();
+
+        var result = auditDelivery(item, DELIVERED, deliveryRequest(item, DELIVERED));
+
+        assertTrue(result.getDeliveryReview().unknown());
+        assertTrue(result.getDeliveryReview().blocksCommit());
+        assertFalse(result.isAuditUnavailable(), "完整有效 issues 应在交付协议失败时保全");
+        assertFalse(result.getDeliveryReview().diagnostics().isEmpty());
+        var calls = capturedCalls(2);
+        assertTrue(calls.get(1).getUserPrompt().contains("上次核验未完成"));
+        assertTrue(calls.get(1).getUserPrompt().contains(result.getDeliveryReview().diagnostics().get(0)));
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"duplicate-root", "duplicate-check", "truncated", "trailing-json", "dangling-comma",
+            "incomplete-fence", "missing-issues", "null-issues"})
+    void strictDeliveryJsonCannotBeRepairedIntoPass(String failure) {
+        String valid = auditJson(passCheck());
+        String raw = switch (failure) {
+            case "duplicate-root" -> valid.replace("\"issues\":[]", "\"issues\":[],\"issues\":[]");
+            case "duplicate-check" -> valid.replace("\"verdict\":\"PASS\"", "\"verdict\":\"ISSUE\",\"verdict\":\"PASS\"");
+            case "truncated" -> valid.substring(0, valid.length() - 2);
+            case "trailing-json" -> valid + "{}";
+            case "dangling-comma" -> valid.replace("\"issues\":[]", "\"issues\":[,]");
+            case "incomplete-fence" -> "```json\n" + valid;
+            case "missing-issues" -> valid.replace("\"issues\":[],", "");
+            case "null-issues" -> valid.replace("\"issues\":[]", "\"issues\":null");
+            default -> throw new AssertionError(failure);
+        };
+        when(llmGateway.complete(any(), any(LlmCall.class))).thenReturn(raw);
+        var item = deliveryPlan();
+
+        var result = auditDelivery(item, DELIVERED, deliveryRequest(item, DELIVERED));
+
+        assertTrue(result.getDeliveryReview().unknown());
+        assertTrue(result.isAuditUnavailable(), "整体协议或首审字段无效不能假装零问题");
+        capturedCalls(2);
+    }
+
+    @Test
+    void deliveryAuditAllowsOnlyCompleteMarkdownFenceAndRetriesWithSpecificDiagnostics() {
+        when(llmGateway.complete(any(), any(LlmCall.class))).thenReturn(
+                auditJson(passCheck().replace(DELIVERED_QUOTE, "原文并未出现的药签转手")),
+                "```json\n" + auditJson(passCheck()) + "\n```");
+        var item = deliveryPlan();
+
+        var result = auditDelivery(item, DELIVERED, deliveryRequest(item, DELIVERED));
+
+        assertTrue(result.getDeliveryReview().passed());
+        var calls = capturedCalls(2);
+        assertTrue(calls.get(1).getUserPrompt().contains("DELIVERY_CONTENT_EVIDENCE"));
+        assertTrue(calls.get(1).getUserPrompt().contains("[event:1]"));
+    }
+
+    @Test
+    void deliveryAuditPreservesLatestValidIssuesWhenRetryFailsEntirely() {
+        when(llmGateway.complete(any(), any(LlmCall.class))).thenReturn(
+                "{\"issues\":[{\"dimension\":\"hook\",\"severity\":\"BLOCKING\","
+                        + "\"description\":\"保全问题\",\"evidence\":\"虚构的正文引文\"}],\"deliveryChecks\":[]}")
+                .thenThrow(new IllegalStateException("gateway unavailable"));
+        var item = deliveryPlan();
+
+        var result = auditDelivery(item, DELIVERED, deliveryRequest(item, DELIVERED));
+
+        assertFalse(result.isAuditUnavailable());
+        assertEquals("保全问题", result.getIssues().get(0).getDescription());
+        assertEquals("MINOR", result.getIssues().get(0).getSeverity(), "旧七维证据降级继续有效");
+        assertTrue(result.getDeliveryReview().unknown());
+        capturedCalls(2);
+    }
+
+    @Test
+    void deliveryAuditTotalGatewayFailureIsUnavailableNotEmptyPass() {
+        when(llmGateway.complete(any(), any(LlmCall.class))).thenThrow(new IllegalStateException("offline"));
+        var item = deliveryPlan();
+
+        var result = auditDelivery(item, DELIVERED, deliveryRequest(item, DELIVERED));
+
+        assertTrue(result.isAuditUnavailable());
+        assertTrue(result.getDeliveryReview().unknown());
+        capturedCalls(2);
+    }
+
+    @Test
+    void revisionNeedsCurrentDeliveryPassEvenWhenOldFixedIsTrue() {
+        var item = deliveryPlan();
+        var oldIssue = ChapterIssueEntity.builder().dimension("plan-delivery").severity("BLOCKING")
+                .description("交付药签缺失").build();
+        when(llmGateway.complete(any(), any(LlmCall.class))).thenReturn(
+                fixJson("[{\"index\":1,\"fixed\":true}]", missingDeliveryCheck()));
+        String revised = "他在窗下静坐。";
+
+        var result = service.verifyFixes(storyVO(), item, revised, List.of(oldIssue), null, null, 1,
+                null, List.of(), deliveryRequest(item, revised));
+
+        assertFalse(result.degraded(), "有效交付 ISSUE 不是核验降级");
+        assertTrue(result.unfixed().isEmpty(), "旧 fixed 索引语义保留，但不能据此代替交付报告");
+        assertEquals(DeliveryReview.Status.ISSUE, result.deliveryReview().status());
+        assertTrue(result.deliveryReview().blocksCommit());
+        String prompt = capturedCalls(1).get(0).getUserPrompt();
+        assertTrue(prompt.contains("不能用无证据 fixed=true 作为交付证明"));
+        assertTrue(prompt.contains("不得捏造不存在的正文"));
+    }
+
+    @Test
+    void revisionDeliveryPassAndOrdinaryFixedTrueNeedOnlyOneCall() {
+        var item = deliveryPlan();
+        var original = new ChapterManuscript(1, item.getTitle(), "他一直攥着药签。");
+        var context = new RewriteContext("冻结事实：药签唯一", "只写既定视角", original);
+        when(llmGateway.complete(any(), any(LlmCall.class))).thenReturn(
+                fixJson("[{\"index\":1,\"fixed\":true}]", passCheck()));
+
+        var result = service.verifyFixes(storyVO(), item, DELIVERED, List.of(blocking(null)), null, null, 1,
+                context, List.of(), deliveryRequest(item, DELIVERED));
+
+        assertFalse(result.degraded());
+        assertTrue(result.unfixed().isEmpty(), "普通问题 fixed=true 保留无需缺席证据的旧规则");
+        assertTrue(result.deliveryReview().passed());
+        assertEquals(new ChapterManuscript(1, item.getTitle(), DELIVERED).hash(), result.deliveryReview().manuscriptHash());
+        String prompt = capturedCalls(1).get(0).getUserPrompt();
+        assertTrue(prompt.contains(original.content()));
+        assertTrue(prompt.contains("冻结事实：药签唯一"));
+        assertTrue(prompt.contains("只写既定视角"));
+    }
+
+    @Test
+    void revisionRunsDeliveryWithNoOldBlockingAndRendersScenesWithoutWriterPrompt() {
+        var item = deliveryPlan();
+        item.setSchemaVersion(2);
+        item.setScenes(List.of(new ScenePlan("handover", List.of("他", "执事"), "交付药签", "接收待确认",
+                List.of(), "执事接过药签", "交付确认", List.of(), "窗口", "清晨")));
+        String sceneCheck = passCheck().replace("\"targetId\":\"event:1\"", "\"targetId\":\"scene:handover\",\"sceneId\":\"handover\"")
+                .replace("keyEvents[0]", "outcome").replace("交付药签", "执事接过药签");
+        when(llmGateway.complete(any(), any(LlmCall.class))).thenReturn(fixJson("[]", sceneCheck));
+        var context = new RewriteContext(null, null, new ChapterManuscript(1, item.getTitle(), "他握着药签。"));
+
+        var result = service.verifyFixes(storyVO(), item, DELIVERED, List.of(), null, null, 1,
+                context, List.of(), deliveryRequest(item, DELIVERED));
+
+        assertFalse(result.degraded());
+        assertTrue(result.deliveryReview().passed());
+        assertEquals(DeliveryReview.Scope.SCENES, result.deliveryReview().scope());
+        String prompt = capturedCalls(1).get(0).getUserPrompt();
+        assertTrue(prompt.contains("权威场景契约"));
+        assertTrue(prompt.contains("id：handover"));
+        assertTrue(prompt.contains("最终结果(outcome)：执事接过药签"));
+        assertTrue(prompt.contains("修订前版本"));
+        assertTrue(prompt.contains("他握着药签。"));
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"missing-delivery", "old-quote", "duplicate-key", "truncated", "missing-verdict",
+            "duplicate-index", "unknown-index", "missing-fixed", "missing-continuity", "invented-conflict"})
+    void revisionProtocolOrEvidenceFailuresRetryAndStayDegradedUnknown(String failure) {
+        String raw = fixJson("[{\"index\":1,\"fixed\":true}]", passCheck());
+        raw = switch (failure) {
+            case "missing-delivery" -> "{\"verdicts\":[{\"index\":1,\"fixed\":true}],\"continuityChecked\":true,\"introducedConflicts\":[]}";
+            case "old-quote" -> raw.replace(DELIVERED_QUOTE, "修订前药签仍在他的手里");
+            case "duplicate-key" -> raw.replace("\"fixed\":true", "\"fixed\":false,\"fixed\":true");
+            case "truncated" -> raw.substring(0, raw.length() - 2);
+            case "missing-verdict" -> raw.replace("[{\"index\":1,\"fixed\":true}]", "[]");
+            case "duplicate-index" -> raw.replace("[{\"index\":1,\"fixed\":true}]",
+                    "[{\"index\":1,\"fixed\":true},{\"index\":1,\"fixed\":true}]");
+            case "unknown-index" -> raw.replace("\"index\":1", "\"index\":2");
+            case "missing-fixed" -> raw.replace(",\"fixed\":true", "");
+            case "missing-continuity" -> raw.replace("\"continuityChecked\":true,", "");
+            case "invented-conflict" -> raw.replace("\"introducedConflicts\":[]",
+                    "\"introducedConflicts\":[{\"description\":\"凭空出现\",\"evidence\":\"原文不存在的银票\"}]");
+            default -> throw new AssertionError(failure);
+        };
+        when(llmGateway.complete(any(), any(LlmCall.class))).thenReturn(raw);
+        var item = deliveryPlan();
+        var issue = blocking(null);
+        var context = new RewriteContext(null, null,
+                new ChapterManuscript(1, item.getTitle(), "修订前药签仍在他的手里。"));
+
+        var result = service.verifyFixes(storyVO(), item, DELIVERED, List.of(issue), null, null, 1,
+                context, List.of(), deliveryRequest(item, DELIVERED));
+
+        assertTrue(result.degraded());
+        assertEquals(List.of(issue), result.unfixed());
+        assertTrue(result.deliveryReview().unknown());
+        assertTrue(capturedCalls(2).get(1).getUserPrompt().contains("上次核验未完成"));
+    }
+
+    @Test
+    void revisionKeepsPlanIntegrityIndicesAndNewContinuityChecksAlongsideDelivery() {
+        String conflict = "他又从袖中取出已经交走的药签";
+        when(llmGateway.complete(any(), any(LlmCall.class))).thenReturn(
+                fixJson("[{\"index\":1,\"fixed\":true},{\"index\":2,\"fixed\":false}]", passCheck())
+                        .replace("\"introducedConflicts\":[]", "\"introducedConflicts\":[{\"description\":\"药签重复出现\",\"evidence\":\"" + conflict + "\"}]"));
+        var item = deliveryPlan();
+        String revised = DELIVERED + conflict + "。";
+
+        var result = service.verifyFixes(storyVO(), item, revised, List.of(blocking(null)), null, null, 1,
+                null, List.of("保留来访登记"), deliveryRequest(item, revised));
+
+        assertFalse(result.degraded());
+        assertTrue(result.deliveryReview().passed());
+        assertEquals(2, result.unfixed().size());
+        assertEquals(ChapterAuditService.PLAN_INTEGRITY_DIMENSION, result.unfixed().get(0).getDimension());
+        assertEquals("continuity", result.unfixed().get(1).getDimension());
+        assertEquals("BLOCKING", result.unfixed().get(1).getSeverity());
+        assertTrue(capturedCalls(1).get(0).getUserPrompt().contains("2. 【plan-integrity】"));
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"content", "plan", "chapter"})
+    void mismatchedDeliveryRequestIsUnknownWithoutAnyModelCall(String mismatch) {
+        var item = deliveryPlan();
+        var request = deliveryRequest(item, DELIVERED);
+        String content = DELIVERED;
+        int chapterNo = 1;
+        if ("content".equals(mismatch)) content = "完全不同的修订稿。";
+        if ("plan".equals(mismatch)) item.setKeyEvents(List.of("保留药签，不交出"));
+        if ("chapter".equals(mismatch)) chapterNo = 2;
+
+        var audit = service.audit(storyVO(), item, content, null, null, null, chapterNo, null, request);
+        var revision = service.verifyFixes(storyVO(), item, content, List.of(), null, null, chapterNo,
+                null, List.of(), request);
+
+        assertTrue(audit.isAuditUnavailable());
+        assertTrue(audit.getDeliveryReview().unknown());
+        assertTrue(revision.degraded());
+        assertTrue(revision.deliveryReview().unknown());
+        verifyNoInteractions(llmGateway);
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"A", "B"})
+    void deliveryPromptKeepsStrictMissingProcessBoundaryWithoutChangingOffPrompt(String variant) {
+        System.setProperty(AuditPromptVariant.SYSTEM_PROPERTY, variant);
+        try {
+            var item = deliveryPlan();
+            String on = service.buildPrompt(item, DELIVERED, null, null, null, 1, null, deliveryRequest(item, DELIVERED));
+            String off = service.buildPrompt(item, DELIVERED, null, null, null, 1, null);
+            assertTrue(on.contains("必要过程与结果已兑现但表达简短/衔接偏快 = MINOR"));
+            assertTrue(on.contains("计划承诺的必要过程未兑现属于交付缺失"));
+            assertTrue(on.contains("不强制对白、动作展示或扩写"));
+            assertFalse(on.contains("交锋整段缺失 → MINOR"));
+            assertFalse(on.contains("关键事件出现了但展开不足/衔接偏快 = MINOR"));
+            assertTrue(off.contains("关键事件出现了但展开不足/衔接偏快 = MINOR"));
+            assertFalse(off.contains("deliveryChecks"), "OFF 不暗中请求新核验清单");
+        } finally {
+            System.clearProperty(AuditPromptVariant.SYSTEM_PROPERTY);
+        }
+    }
+
+    @Test
+    void offVerificationRetainsEmptyFastPathMissingIndexAndFixedWithoutEvidenceRules() {
+        var empty = service.verifyFixes(storyVO(), planItem(), "正文", List.of(), null, null, 1);
+        assertTrue(empty.unfixed().isEmpty());
+        assertFalse(empty.degraded());
+        assertNull(empty.deliveryReview());
+        verifyNoInteractions(llmGateway);
+        when(llmGateway.complete(any(), any(LlmCall.class)))
+                .thenReturn("{\"verdicts\":[{\"index\":1,\"fixed\":true}]}");
+        var first = blocking(null);
+        var second = blocking("缺少条目");
+
+        var result = service.verifyFixes(storyVO(), planItem(), "正文", List.of(first, second), null, null, 1);
+
+        assertFalse(result.degraded());
+        assertEquals(List.of(second), result.unfixed());
+        assertNull(result.deliveryReview());
+        assertFalse(capturedCalls(1).get(0).getUserPrompt().contains("deliveryChecks"));
+        assertEquals(List.of(first), new ChapterAuditService.FixVerification(List.of(first), true).unfixed());
+        assertFalse(ChapterAuditService.FixVerification.verified(List.of()).degraded());
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"audit-on", "audit-off", "fix-on", "fix-off"})
+    void localRejectionIsNeverRetriedOrConvertedToUnknown(String entry) {
+        var rejection = new LlmLocalRejectionException("local limit");
+        when(llmGateway.complete(any(), any(LlmCall.class))).thenThrow(new IllegalStateException("wrapped", rejection));
+        var item = deliveryPlan();
+        var request = entry.endsWith("on") ? deliveryRequest(item, DELIVERED) : null;
+
+        LlmLocalRejectionException thrown = assertThrows(LlmLocalRejectionException.class, () -> {
+            if (entry.startsWith("audit")) auditDelivery(item, DELIVERED, request);
+            else service.verifyFixes(storyVO(), item, DELIVERED, List.of(blocking(null)), null, null, 1,
+                    null, List.of(), request);
+        });
+
+        assertSame(rejection, thrown);
+        capturedCalls(1);
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"audit-before", "audit-after", "audit-catch", "fix-before", "fix-after", "fix-catch"})
+    void requestCancellationPropagatesBeforeAfterAndDuringFailure(String phase) {
+        var cancelled = new AtomicBoolean(phase.endsWith("before"));
+        var signal = new CancellationException("cancel request");
+        var item = deliveryPlan();
+        var request = new DeliveryReviewPolicy.Request(DeliveryReviewPolicy.contract(item),
+                new ChapterManuscript(1, item.getTitle(), DELIVERED), true, () -> {
+                    if (cancelled.get()) throw signal;
+                });
+        when(llmGateway.complete(any(), any(LlmCall.class))).thenAnswer(invocation -> {
+            cancelled.set(true);
+            if (phase.endsWith("catch")) throw new IllegalStateException("gateway failure");
+            return phase.startsWith("audit") ? auditJson(passCheck()) : fixJson("[]", passCheck());
+        });
+
+        var thrown = assertThrows(CancellationException.class, () -> {
+            if (phase.startsWith("audit")) auditDelivery(item, DELIVERED, request);
+            else service.verifyFixes(storyVO(), item, DELIVERED, List.of(), null, null, 1, null, List.of(), request);
+        });
+
+        assertSame(signal, thrown);
+        capturedCalls(phase.endsWith("before") ? 0 : 1);
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {true, false})
+    void budgetSignalAfterModelCallIsNotSwallowedByProtocolCatch(boolean audit) {
+        var exhausted = new AtomicBoolean();
+        var signal = new AppException("budget", "预算熔断");
+        var item = deliveryPlan();
+        var request = new DeliveryReviewPolicy.Request(DeliveryReviewPolicy.contract(item),
+                new ChapterManuscript(1, item.getTitle(), DELIVERED), true, () -> {
+                    if (exhausted.getAndSet(false)) throw signal;
+                });
+        when(llmGateway.complete(any(), any(LlmCall.class))).thenAnswer(invocation -> {
+            exhausted.set(true);
+            return audit ? auditJson(passCheck()) : fixJson("[]", passCheck());
+        });
+
+        var thrown = assertThrows(AppException.class, () -> {
+            if (audit) auditDelivery(item, DELIVERED, request);
+            else service.verifyFixes(storyVO(), item, DELIVERED, List.of(), null, null, 1, null, List.of(), request);
+        });
+
+        assertSame(signal, thrown, "一次性预算回调也必须传播，不能再次检查后吞掉");
+        capturedCalls(1);
+    }
+
+    private static final String DELIVERED_QUOTE = "执事接过药签，核对编号后收进匣子";
+    private static final String DELIVERED = "他递出药签。" + DELIVERED_QUOTE + "。";
+
+    private ChapterPlanItemEntity deliveryPlan() {
+        var item = planItem();
+        item.setKeyEvents(List.of("交付药签"));
+        return item;
+    }
+
+    private DeliveryReviewPolicy.Request deliveryRequest(ChapterPlanItemEntity item, String content) {
+        return new DeliveryReviewPolicy.Request(DeliveryReviewPolicy.contract(item),
+                new ChapterManuscript(1, item.getTitle(), content), true);
+    }
+
+    private AuditResultEntity auditDelivery(ChapterPlanItemEntity item, String content, DeliveryReviewPolicy.Request request) {
+        return service.audit(storyVO(), item, content, null, null, null, 1, null, request);
+    }
+
+    private String passCheck() {
+        return "{\"targetId\":\"event:1\",\"verdict\":\"PASS\",\"planField\":\"keyEvents[0]\","
+                + "\"planEvidence\":\"交付药签\",\"evidence\":\"" + DELIVERED_QUOTE + "\",\"reason\":\"接收动作已交付\"}";
+    }
+
+    private String missingDeliveryCheck() {
+        return "{\"targetId\":\"event:1\",\"verdict\":\"ISSUE\",\"planField\":\"keyEvents[0]\","
+                + "\"planEvidence\":\"交付药签\",\"reason\":\"核对全文，未发生计划要求的药签交付\","
+                + "\"repair\":\"补足该交付\",\"failureType\":\"MISSING_DELIVERY\"}";
+    }
+
+    private String auditJson(String checks) {
+        return "{\"issues\":[],\"deliveryChecks\":[" + checks + "]}";
+    }
+
+    private String fixJson(String verdicts, String checks) {
+        return "{\"verdicts\":" + verdicts + ",\"continuityChecked\":true,\"introducedConflicts\":[],"
+                + "\"deliveryChecks\":[" + checks + "]}";
+    }
+
+    private List<LlmCall> capturedCalls(int expected) {
+        var captor = ArgumentCaptor.forClass(LlmCall.class);
+        verify(llmGateway, times(expected)).complete(any(), captor.capture());
+        return captor.getAllValues();
     }
 
     private static final String CONTENT = "洛恩抬起头，\n“魔力的空的。”老执事收回了手。\n  他退回阴影里，警戒符在高塔上转黑。";

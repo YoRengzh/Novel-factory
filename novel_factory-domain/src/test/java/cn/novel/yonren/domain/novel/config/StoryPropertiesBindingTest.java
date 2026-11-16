@@ -1,10 +1,14 @@
 package cn.novel.yonren.domain.novel.config;
 
+import cn.novel.yonren.domain.novel.config.StoryProperties.CausalityProperties.Mode;
 import cn.novel.yonren.domain.novel.model.valobj.StoryVO;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.EnumSource;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.boot.context.properties.bind.Binder;
 import org.springframework.boot.context.properties.source.ConfigurationPropertySources;
+import org.springframework.boot.context.properties.source.MapConfigurationPropertySource;
 import org.springframework.boot.env.YamlPropertySourceLoader;
 import org.springframework.core.env.PropertySource;
 import org.springframework.core.io.FileSystemResource;
@@ -23,6 +27,45 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  */
 @EnableConfigurationProperties(StoryProperties.class)
 class StoryPropertiesBindingTest {
+
+    @ParameterizedTest
+    @EnumSource(Mode.class)
+    void auditModeBindsIndependentlyWithoutEnablingPlanOrCandidates(Mode mode) {
+        Binder binder = new Binder(new MapConfigurationPropertySource(Map.of(
+                "story.causality.audit-mode", mode.name(),
+                "story.causality.plan-mode", "OFF",
+                "story.audit.enabled", "true")));
+        StoryProperties properties = binder.bind("story", StoryProperties.class)
+                .orElseThrow(() -> new AssertionError("story 配置绑定失败"));
+
+        assertEquals(mode, properties.getCausality().getAuditMode());
+        assertEquals(Mode.OFF, properties.getCausality().getPlanMode());
+        assertTrue(properties.getAudit().isEnabled());
+        assertFalse(properties.getCandidate().isEnabled());
+        assertFalse(properties.getCandidate().isTriggerOnMinorResidue());
+        assertFalse(properties.getCandidate().isTriggerOnRevisedPass());
+        assertFalse(properties.getCandidate().isTriggerOnDebt());
+    }
+
+    @Test
+    void repositoryAuditModeStaysOffPendingAuthorizedModelCalibration() throws Exception {
+        YamlPropertySourceLoader loader = new YamlPropertySourceLoader();
+        List<PropertySource<?>> sources = loader.load("novel-gen",
+                new FileSystemResource("../novel_factory-app/src/main/resources/novel-generation.yml"));
+        Binder binder = new Binder(ConfigurationPropertySources.from(sources));
+        StoryProperties.CausalityProperties causality = binder.bind(
+                        "story.causality", StoryProperties.CausalityProperties.class)
+                .orElseThrow(() -> new AssertionError("story.causality 绑定失败"));
+        StoryProperties.CandidateProperties candidate = binder.bind(
+                        "story.candidate", StoryProperties.CandidateProperties.class)
+                .orElseThrow(() -> new AssertionError("story.candidate 绑定失败"));
+
+        assertEquals(Mode.OFF, causality.getAuditMode(), "没有真实模型校准授权时，运行配置维持 OFF 兼容");
+        assertEquals(Mode.OFF, causality.getPlanMode(), "正文交付验收不要求开启计划核验");
+        assertFalse(candidate.isTriggerOnMinorResidue());
+        assertFalse(candidate.isTriggerOnRevisedPass());
+        assertFalse(candidate.isTriggerOnDebt(), "交付 ISSUE 不得自动打开 DEBT 候选费用开关");
+    }
 
     @Test
     void defaultReferenceSelectorDoesNotRequireASeparateEmbeddingApiKey() throws Exception {

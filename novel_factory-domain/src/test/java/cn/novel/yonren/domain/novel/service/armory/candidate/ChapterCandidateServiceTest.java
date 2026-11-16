@@ -2,25 +2,38 @@ package cn.novel.yonren.domain.novel.service.armory.candidate;
 
 import cn.novel.yonren.domain.novel.model.entity.ArmoryCommandEntity;
 import cn.novel.yonren.domain.novel.model.entity.ChapterContentEntity;
+import cn.novel.yonren.domain.novel.model.entity.ChapterIssueEntity;
 import cn.novel.yonren.domain.novel.model.entity.ChapterPlanItemEntity;
 import cn.novel.yonren.domain.novel.model.entity.ChapterSummaryEntity;
 import cn.novel.yonren.domain.novel.model.entity.StyleStatEntity;
 import cn.novel.yonren.domain.novel.config.StoryProperties;
+import cn.novel.yonren.domain.novel.config.StoryProperties.CausalityProperties.Mode;
+import cn.novel.yonren.domain.novel.model.valobj.plan.CausalVerdict;
 import cn.novel.yonren.domain.novel.model.valobj.prompt.PromptContext;
+import cn.novel.yonren.domain.novel.model.valobj.quality.DeliveryReview;
 import cn.novel.yonren.domain.novel.model.valobj.quality.GateResult;
 import cn.novel.yonren.domain.novel.model.valobj.quality.GateResult.PassGrade;
+import cn.novel.yonren.domain.novel.model.valobj.work.ChapterManuscript;
+import cn.novel.yonren.domain.novel.service.armory.llm.LlmLocalRejectionException;
+import cn.novel.yonren.domain.novel.service.armory.quality.DeliveryReviewPolicy;
 import cn.novel.yonren.domain.novel.service.armory.quality.QualityGate;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.EnumSource;
 import org.mockito.ArgumentCaptor;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.MockitoAnnotations;
 
 import java.util.List;
+import java.util.concurrent.CancellationException;
+import java.util.concurrent.CompletionException;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertSame;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
@@ -28,8 +41,10 @@ import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.atLeastOnce;
+import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 /**
@@ -65,6 +80,9 @@ class ChapterCandidateServiceTest {
     void setUp() {
         MockitoAnnotations.openMocks(this);
         storyProperties = new StoryProperties();
+        // 旧候选行为显式在 OFF 下验证；交付用例各自切换 OBSERVE/ENFORCE。
+        storyProperties.getCausality().setAuditMode(Mode.OFF);
+        storyProperties.getCausality().setPlanMode(Mode.OFF);
         StoryProperties.CandidateProperties candidate = new StoryProperties.CandidateProperties();
         candidate.setEnabled(true);
         // MINOR_RESIDUE 与 DEBT 的默认开关均已关闭（见 CandidateProperties 注释）。
@@ -360,19 +378,380 @@ class ChapterCandidateServiceTest {
         assertTrue(debt.isLowConfidencePass(), "DEBT 不设条数门槛");
     }
 
+    // ==================== 交付验收边界（全部本地 Mock，不验证模型能力） ====================
+
+    @ParameterizedTest
+    @EnumSource(Mode.class)
+    void unverifiedDegradedOrPlanAdjustment_neverInvokesCandidateModels(Mode mode) {
+        configureDelivery(mode);
+        storyProperties.getCandidate().setTriggerOnRevisedPass(true);
+        storyProperties.getCandidate().setTriggerOnDebt(true);
+        GateResult degraded = GateResult.of(List.of(), 6, List.of(), 0, List.of(), true)
+                .withDeliveryReview(lowConfidenceGate.deliveryReview());
+        GateResult unverified = new GateResult(List.of(), PassGrade.UNVERIFIED, 6, List.of(), 0,
+                List.of(), false, null);
+        GateResult unknown = lowConfidenceGate.withDeliveryReview(
+                reviewFor(chapterContent, mode, CausalVerdict.Status.UNKNOWN));
+
+        for (GateResult blocked : List.of(degraded, unverified, unknown,
+                lowConfidenceGate.withPlanAdjustmentRequired("计划与已确认事实冲突"))) {
+            assertIncumbentRetained(blocked);
+        }
+        verifyNoInteractions(llmInvokeService, llmGateway, qualityGate, candidateSampleService);
+    }
+
+    @ParameterizedTest
+    @EnumSource(value = Mode.class, names = {"OBSERVE", "ENFORCE"})
+    void incumbentMissingOrStaleDelivery_neverInvokesCandidateModels(Mode mode) {
+        configureDelivery(mode);
+        DeliveryReview valid = lowConfidenceGate.deliveryReview();
+        List<DeliveryReview> invalid = List.of(
+                DeliveryReview.notChecked(),
+                new DeliveryReview(DeliveryReview.Status.PASS, valid.enforced(), valid.scope(),
+                        ChapterManuscript.digest("旧原稿"), valid.planHash(), valid.checks(), List.of()),
+                new DeliveryReview(DeliveryReview.Status.PASS, valid.enforced(), valid.scope(),
+                        valid.manuscriptHash(), ChapterManuscript.digest("旧计划"), valid.checks(), List.of()),
+                new DeliveryReview(DeliveryReview.Status.PASS, valid.enforced(), valid.scope(),
+                        valid.manuscriptHash(), valid.planHash(), List.of(), List.of()));
+
+        for (DeliveryReview review : invalid) {
+            assertIncumbentRetained(lowConfidenceGate.withDeliveryReview(review));
+        }
+        verifyNoInteractions(llmInvokeService, llmGateway, qualityGate, candidateSampleService);
+    }
+
+    @Test
+    void enforceConfirmedIssue_doesNotAutomaticallyEnableDebtCandidates() {
+        configureDelivery(Mode.ENFORCE);
+        chapterContent.setContent("原稿正文。药签已经交付，她转身离开。");
+        GateResult issue = lowConfidenceGate.withDeliveryReview(
+                reviewFor(chapterContent, Mode.ENFORCE, CausalVerdict.Status.ISSUE));
+        assertEquals(PassGrade.DEBT, issue.grade());
+        assertTrue(issue.unresolvedBlocking().isEmpty(), "交付 ISSUE 本身也能阻断，不能只看 BLOCKING 列表");
+
+        assertIncumbentRetained(issue);
+
+        assertFalse(storyProperties.getCandidate().isTriggerOnDebt());
+        verifyNoInteractions(llmInvokeService, llmGateway, qualityGate, candidateSampleService);
+    }
+
+    @Test
+    void enforceConfirmedIssue_explicitDebtCandidateCanRescue() {
+        configureDelivery(Mode.ENFORCE);
+        storyProperties.getCandidate().setTriggerOnDebt(true);
+        chapterContent.setContent("原稿正文。药签已经交付，她转身离开。");
+        GateResult issue = lowConfidenceGate.withDeliveryReview(
+                reviewFor(chapterContent, Mode.ENFORCE, CausalVerdict.Status.ISSUE));
+        stubDeliveryChallengerWins();
+        when(qualityGate.auditAndReviseIfEnabled(any(), any(), any(), anyList(), any(), anyInt(), any(), any()))
+                .thenAnswer(inv -> GateResult.of(List.of(), 0, 0).withDeliveryReview(
+                        reviewFor(inv.getArgument(2), Mode.ENFORCE, CausalVerdict.Status.PASS)));
+
+        GateResult result = challenge(issue);
+
+        assertEquals(PassGrade.CLEAN_PASS, result.grade());
+        assertTrue(result.deliveryReview().passed());
+        assertTrue(result.deliveryReview().enforced());
+        assertEquals(ChapterManuscript.of(chapterContent).hash(), result.deliveryReview().manuscriptHash());
+        assertEquals("挑战稿", chapterContent.getTitle());
+        verify(qualityGate).auditAndReviseIfEnabled(any(), any(), any(), anyList(), any(), anyInt(), any(), any());
+    }
+
+    @ParameterizedTest
+    @EnumSource(Mode.class)
+    void emptyBlockingButNotVerified_revertsOriginalManuscriptAndAllGateMetadata(Mode mode) {
+        configureDelivery(mode);
+        stubDeliveryChallengerWins();
+        DeliveryReview review = mode == Mode.OFF ? DeliveryReview.notChecked()
+                : reviewFor(deliveryChallenger(), mode, CausalVerdict.Status.PASS);
+        GateResult clean = GateResult.of(List.of(), 0, 0).withDeliveryReview(review);
+        GateResult degraded = GateResult.of(List.of(), 0, List.of(), 0, List.of(), true)
+                .withDeliveryReview(review);
+        GateResult debtWithoutBlocking = new GateResult(List.of(), PassGrade.DEBT, 0, List.of(), 0,
+                List.of(), false, null, null, review);
+        GateResult unverified = new GateResult(List.of(), PassGrade.UNVERIFIED, 0, List.of(), 0,
+                List.of(), false, null);
+        GateResult unknown = clean.withDeliveryReview(
+                reviewFor(deliveryChallenger(), mode, CausalVerdict.Status.UNKNOWN));
+
+        for (GateResult rejected : List.of(degraded, debtWithoutBlocking, unverified, unknown,
+                clean.withPlanAdjustmentRequired("计划缺少必要前提"))) {
+            assertTrue(rejected.unresolvedBlocking().isEmpty());
+            when(qualityGate.auditAndReviseIfEnabled(any(), any(), any(), anyList(), any(), anyInt(), any(), any()))
+                    .thenReturn(rejected);
+            assertIncumbentRetained(lowConfidenceGate);
+        }
+        verify(candidateSampleService, never()).record(any(), anyInt(), anyString(), eq("challenger-adopted"),
+                any(), any(), any(), any(), any());
+    }
+
+    @ParameterizedTest
+    @EnumSource(value = Mode.class, names = {"OBSERVE", "ENFORCE"})
+    void challengerMissingStaleOrIncompleteReview_revertsOriginalGate(Mode mode) {
+        configureDelivery(mode);
+        stubDeliveryChallengerWins();
+        DeliveryReview valid = reviewFor(deliveryChallenger(), mode, CausalVerdict.Status.PASS);
+        List<DeliveryReview> invalid = List.of(
+                DeliveryReview.notChecked(),
+                new DeliveryReview(DeliveryReview.Status.PASS, false, valid.scope(),
+                        lowConfidenceGate.deliveryReview().manuscriptHash(), valid.planHash(), valid.checks(), List.of()),
+                new DeliveryReview(DeliveryReview.Status.PASS, false, valid.scope(),
+                        valid.manuscriptHash(), ChapterManuscript.digest("另一计划"), valid.checks(), List.of()),
+                new DeliveryReview(DeliveryReview.Status.PASS, false, DeliveryReview.Scope.SCENES,
+                        valid.manuscriptHash(), valid.planHash(), valid.checks(), List.of()),
+                new DeliveryReview(DeliveryReview.Status.PASS, false, valid.scope(),
+                        valid.manuscriptHash(), valid.planHash(), List.of(), List.of()));
+
+        for (DeliveryReview review : invalid) {
+            when(qualityGate.auditAndReviseIfEnabled(any(), any(), any(), anyList(), any(), anyInt(), any(), any()))
+                    .thenReturn(GateResult.of(List.of(), 0, 0).withDeliveryReview(review));
+            assertIncumbentRetained(lowConfidenceGate);
+        }
+        verify(candidateSampleService, never()).record(any(), anyInt(), anyString(), eq("challenger-adopted"),
+                any(), any(), any(), any(), any());
+    }
+
+    @Test
+    void enforceAppliesToChallengerEvenWhenReturnedIssueWasObserveOnly() {
+        configureDelivery(Mode.ENFORCE);
+        stubDeliveryChallengerWins();
+        GateResult observeIssue = GateResult.of(List.of(), 0, 0).withDeliveryReview(
+                reviewFor(deliveryChallenger(), Mode.OBSERVE, CausalVerdict.Status.ISSUE));
+        assertEquals(PassGrade.CLEAN_PASS, observeIssue.grade());
+        assertFalse(observeIssue.deliveryReview().blocksCommit());
+        when(qualityGate.auditAndReviseIfEnabled(any(), any(), any(), anyList(), any(), anyInt(), any(), any()))
+                .thenReturn(observeIssue);
+
+        assertIncumbentRetained(lowConfidenceGate);
+    }
+
+    @Test
+    void observeConfirmedIssue_isRecordedWithoutDeliveryCommitBlock() {
+        configureDelivery(Mode.OBSERVE);
+        stubDeliveryChallengerWins();
+        when(qualityGate.auditAndReviseIfEnabled(any(), any(), any(), anyList(), any(), anyInt(), any(), any()))
+                .thenReturn(GateResult.of(List.of(), 0, 0).withDeliveryReview(
+                        reviewFor(deliveryChallenger(), Mode.OBSERVE, CausalVerdict.Status.ISSUE)));
+
+        GateResult result = challenge(lowConfidenceGate);
+
+        assertEquals("挑战稿", chapterContent.getTitle());
+        assertEquals(DeliveryReview.Status.ISSUE, result.deliveryReview().status());
+        assertFalse(result.deliveryReview().blocksCommit(), "OBSERVE 只记录，不伪装成 ENFORCE");
+    }
+
+    @Test
+    void reviewForGeneratedChallenger_cannotBeReusedAfterRevision() {
+        configureDelivery(Mode.ENFORCE);
+        stubDeliveryChallengerWins();
+        when(qualityGate.auditAndReviseIfEnabled(any(), any(), any(), anyList(), any(), anyInt(), any(), any()))
+                .thenAnswer(inv -> {
+                    ChapterContentEntity candidate = inv.getArgument(2);
+                    DeliveryReview beforeRevision = reviewFor(candidate, Mode.ENFORCE, CausalVerdict.Status.PASS);
+                    candidate.setTitle("已改标题");
+                    candidate.setContent("复审改过的正文，与已核验版本不同。");
+                    return GateResult.of(List.of(), 0, 1).withDeliveryReview(beforeRevision);
+                });
+
+        assertIncumbentRetained(lowConfidenceGate);
+    }
+
+    @Test
+    void enforceAcceptsOnlyReportBoundToFinalRevisedChallenger() {
+        configureDelivery(Mode.ENFORCE);
+        stubDeliveryChallengerWins();
+        when(qualityGate.auditAndReviseIfEnabled(any(), any(), any(), anyList(), any(), anyInt(), any(), any()))
+                .thenAnswer(inv -> {
+                    ChapterContentEntity candidate = inv.getArgument(2);
+                    candidate.setTitle("复审挑战稿");
+                    candidate.setContent("她从药匣取出药签递给掌柜，掌柜逐行核对后收入柜中。");
+                    return GateResult.of(List.of(), 0, 1).withSemanticFeedbackHash("挑战者反馈指纹")
+                            .withDeliveryReview(reviewFor(candidate, Mode.ENFORCE, CausalVerdict.Status.PASS));
+                });
+
+        GateResult result = challenge(lowConfidenceGate);
+
+        assertEquals(PassGrade.REVISED_PASS, result.grade());
+        assertEquals("复审挑战稿", chapterContent.getTitle());
+        assertEquals("挑战者反馈指纹", result.semanticFeedbackHash());
+        assertTrue(result.deliveryReview().passed());
+        assertEquals(ChapterManuscript.of(chapterContent).hash(), result.deliveryReview().manuscriptHash());
+        assertEquals(DeliveryReviewPolicy.contract(item).planHash(), result.deliveryReview().planHash());
+        ArgumentCaptor<ChapterContentEntity> snapshot = ArgumentCaptor.forClass(ChapterContentEntity.class);
+        verify(candidateSampleService).record(any(), eq(1), anyString(), eq("challenger-adopted"),
+                snapshot.capture(), any(), eq("challenger"), anyString(), any());
+        assertEquals("原稿", snapshot.getValue().getTitle(), "采纳样本仍须保留败者原稿，而非被原地改写的对象");
+    }
+
+    @ParameterizedTest
+    @EnumSource(Mode.class)
+    void reAuditThrowsAfterMutation_finallyRestoresOriginalAndPreservesGate(Mode mode) {
+        configureDelivery(mode);
+        stubDeliveryChallengerWins();
+        when(qualityGate.auditAndReviseIfEnabled(any(), any(), any(), anyList(), any(), anyInt(), any(), any()))
+                .thenAnswer(inv -> {
+                    ChapterContentEntity candidate = inv.getArgument(2);
+                    candidate.setChapterNo(99);
+                    candidate.setTitle("异常路径标题");
+                    candidate.setContent("复审在写入半成品后抛异常。");
+                    throw new IllegalStateException("Mock 复审不可用");
+                });
+
+        assertIncumbentRetained(lowConfidenceGate);
+
+        ArgumentCaptor<ChapterContentEntity> snapshot = ArgumentCaptor.forClass(ChapterContentEntity.class);
+        verify(candidateSampleService).record(any(), eq(1), anyString(), eq("error"),
+                snapshot.capture(), any(), any(), anyString(), any());
+        assertEquals(chapterContent, snapshot.getValue(), "异常样本应记录原稿，而不是未采纳的半成品");
+    }
+
+    @ParameterizedTest
+    @EnumSource(Mode.class)
+    void reAuditCancellation_restoresOriginalAndPropagatesDirectOrWrappedSignal(Mode mode) {
+        configureDelivery(mode);
+        stubDeliveryChallengerWins();
+        ChapterContentEntity snapshot = new ChapterContentEntity(chapterContent.getChapterNo(),
+                chapterContent.getTitle(), chapterContent.getContent());
+        CancellationException cancelled = new CancellationException("Mock 交付核验已取消");
+
+        for (RuntimeException failure : List.of(cancelled, new CompletionException(cancelled))) {
+            doAnswer(inv -> {
+                ChapterContentEntity candidate = inv.getArgument(2);
+                candidate.setTitle("取消前的半成品");
+                candidate.setContent("本稿尚未完成交付核验。");
+                throw failure;
+            }).when(qualityGate).auditAndReviseIfEnabled(any(), any(), any(), anyList(), any(), anyInt(), any(), any());
+
+            assertSame(cancelled, assertThrows(CancellationException.class, () -> challenge(lowConfidenceGate)));
+            assertEquals(snapshot, chapterContent, "控制异常向上传递时 finally 仍须回滚标题与原文");
+        }
+        verifyNoInteractions(candidateSampleService);
+    }
+
+    @ParameterizedTest
+    @EnumSource(Mode.class)
+    void reAuditLocalRejection_restoresOriginalAndPropagatesDirectOrWrappedSignal(Mode mode) {
+        configureDelivery(mode);
+        stubDeliveryChallengerWins();
+        ChapterContentEntity snapshot = new ChapterContentEntity(chapterContent.getChapterNo(),
+                chapterContent.getTitle(), chapterContent.getContent());
+        LlmLocalRejectionException rejection = new LlmLocalRejectionException("Mock 本地预算拒绝");
+
+        for (RuntimeException failure : List.of(rejection, new CompletionException(rejection))) {
+            doAnswer(inv -> {
+                ChapterContentEntity candidate = inv.getArgument(2);
+                candidate.setChapterNo(99);
+                candidate.setTitle("拒绝前的半成品");
+                candidate.setContent("本地确定性拒绝不是模型失败。");
+                throw failure;
+            }).when(qualityGate).auditAndReviseIfEnabled(any(), any(), any(), anyList(), any(), anyInt(), any(), any());
+
+            assertSame(rejection, assertThrows(LlmLocalRejectionException.class, () -> challenge(lowConfidenceGate)));
+            assertEquals(snapshot, chapterContent, "本地拒绝不能被 fail-soft 吞掉或留下未采纳稿");
+        }
+        verifyNoInteractions(candidateSampleService);
+    }
+
+    @Test
+    void interruptedReAudit_restoresOriginalAndPropagatesCancellation() {
+        configureDelivery(Mode.ENFORCE);
+        stubDeliveryChallengerWins();
+        ChapterContentEntity snapshot = new ChapterContentEntity(chapterContent.getChapterNo(),
+                chapterContent.getTitle(), chapterContent.getContent());
+        InterruptedException interrupted = new InterruptedException("Mock 核验中断");
+        when(qualityGate.auditAndReviseIfEnabled(any(), any(), any(), anyList(), any(), anyInt(), any(), any()))
+                .thenAnswer(inv -> {
+                    ChapterContentEntity candidate = inv.getArgument(2);
+                    candidate.setContent("被中断的复审稿。");
+                    throw new CompletionException(interrupted);
+                });
+
+        try {
+            CancellationException thrown = assertThrows(CancellationException.class, () -> challenge(lowConfidenceGate));
+            assertSame(interrupted, thrown.getCause());
+            assertTrue(Thread.currentThread().isInterrupted());
+            assertEquals(snapshot, chapterContent);
+            verifyNoInteractions(candidateSampleService);
+        } finally {
+            Thread.interrupted();
+        }
+    }
+
+    private static final String DELIVERY_CHALLENGER_CONTENT = "挑战稿正文，情节完整。她递出药签，掌柜核对后收下。";
+
+    private void configureDelivery(Mode mode) {
+        storyProperties.getCausality().setAuditMode(mode);
+        storyProperties.getCausality().setPlanMode(Mode.OFF);
+        item.setKeyEvents(List.of("交付药签"));
+        chapterContent.setContent("原稿正文。她递出药签，掌柜收下。");
+        lowConfidenceGate = GateResult.of(List.of(), 6,
+                        List.of(ChapterIssueEntity.builder().severity("MINOR").description("原稿机械提示").build()), 0,
+                        List.of(ChapterIssueEntity.builder().severity("MINOR").description("原稿语义反馈").build()))
+                .withSemanticFeedbackHash("原稿反馈指纹")
+                .withDeliveryReview(mode == Mode.OFF ? DeliveryReview.notChecked()
+                        : reviewFor(chapterContent, mode, CausalVerdict.Status.PASS));
+    }
+
+    /** 真 contract + 真引文定位，只把模型的语义裁决桩住，不伪造 PASS + 空 checks。 */
+    private DeliveryReview reviewFor(ChapterContentEntity content, Mode mode, CausalVerdict.Status status) {
+        var request = new DeliveryReviewPolicy.Request(DeliveryReviewPolicy.contract(item),
+                ChapterManuscript.of(content), mode == Mode.ENFORCE);
+        if (status == CausalVerdict.Status.UNKNOWN) {
+            return DeliveryReviewPolicy.unavailable(request, "Mock 交付核验不可用");
+        }
+        boolean issue = status == CausalVerdict.Status.ISSUE;
+        CausalVerdict check = new CausalVerdict(null, status, content.getContent(), null,
+                issue ? "Mock 裁决：未交付必要过程" : "Mock 裁决：正文已完成药签交接",
+                issue ? "补足计划承诺的必要交付过程" : null,
+                issue ? CausalVerdict.FailureType.RESULT_WITHOUT_CAUSE : null,
+                null, null, null, null, "event:1", "keyEvents[0]", "交付药签");
+        DeliveryReview review = DeliveryReviewPolicy.consume(request, List.of(check));
+        assertEquals(status.name(), review.status().name(), "测试夹具须通过真实的协议与引文校验");
+        return review;
+    }
+
+    private ChapterContentEntity deliveryChallenger() {
+        return ChapterContentEntity.builder().chapterNo(1).title("挑战稿")
+                .content(DELIVERY_CHALLENGER_CONTENT).build();
+    }
+
+    private void stubDeliveryChallengerWins() {
+        when(llmInvokeService.invokeWithScene(any(), any(), any(), anyString(), any(), any(), anyString(), any()))
+                .thenReturn("{\"chapterNo\":1,\"title\":\"挑战稿\",\"content\":\"" + DELIVERY_CHALLENGER_CONTENT + "\"}");
+        when(llmGateway.complete(any(), any())).thenAnswer(inv -> {
+            cn.novel.yonren.domain.novel.model.valobj.LlmCall call = inv.getArgument(1);
+            String prompt = call.getUserPrompt();
+            boolean challengerIsA = prompt.indexOf(DELIVERY_CHALLENGER_CONTENT) < prompt.indexOf("【候选 B】");
+            return "{\"winner\":\"" + (challengerIsA ? "A" : "B") + "\",\"reason\":\"Mock 盲评胜出\"}";
+        });
+    }
+
+    private GateResult challenge(GateResult incumbent) {
+        return serviceWithProperties().challenge(command, item, PromptContext.builder().build(),
+                "prompt", chapterContent, incumbent, List.of(), StyleStatEntity.builder().build(), 1, null);
+    }
+
+    private void assertIncumbentRetained(GateResult incumbent) {
+        ChapterContentEntity snapshot = new ChapterContentEntity(chapterContent.getChapterNo(),
+                chapterContent.getTitle(), chapterContent.getContent());
+        assertSame(incumbent, challenge(incumbent), "必须返回原 GateResult 实例，保留全部字段");
+        assertEquals(snapshot, chapterContent, "所有未采纳路径均恢复章号、标题与原文");
+    }
+
     // ==================== 默认配置行为 ====================
 
-    /**
-     * 默认配置下**只有 REVISED_PASS 触发候选**。
-     *
-     * 默认仅启用 REVISED_PASS 通道；MINOR_RESIDUE 与 DEBT 的触发开关默认关闭，
-     * 避免把较弱或未闭环的质量信号直接转成候选调用。
-     */
+    /** 默认分级开关全部关闭；交付验收不得暗中开启任何一档候选。 */
     @Test
-    void defaultConfig_onlyRevisedPassTriggers() {
+    void defaultConfig_allGradeTriggersRemainDisabled() {
         // 用默认值重建一套属性（不复用 setUp 里为测机制而打开的 MINOR 通道）
         StoryProperties defaults = new StoryProperties();
+        defaults.getCausality().setAuditMode(Mode.OFF);
+        defaults.getCausality().setPlanMode(Mode.OFF);
         StoryProperties.CandidateProperties defaultsCandidate = new StoryProperties.CandidateProperties();
+        assertFalse(defaultsCandidate.isEnabled());
+        assertFalse(defaultsCandidate.isTriggerOnMinorResidue());
+        assertFalse(defaultsCandidate.isTriggerOnRevisedPass());
+        assertFalse(defaultsCandidate.isTriggerOnDebt());
         defaultsCandidate.setEnabled(true);
         defaults.setCandidate(defaultsCandidate);
         org.springframework.test.util.ReflectionTestUtils.setField(candidateService, "storyProperties", defaults);
@@ -390,6 +769,13 @@ class ChapterCandidateServiceTest {
                         "prompt", chapterContent, debt, List.of(),
                         StyleStatEntity.builder().build(), 1, null),
                 "DEBT 默认不触发（实测 3 次触发 0 次采纳）");
+
+        GateResult revised = GateResult.of(List.of(), 0, 1);
+        assertSame(revised, candidateService.challenge(command, item, PromptContext.builder().build(),
+                        "prompt", chapterContent, revised, List.of(),
+                        StyleStatEntity.builder().build(), 1, null),
+                "REVISED_PASS 也须用户显式开启，不改变源码默认值");
+        verifyNoInteractions(llmInvokeService, llmGateway, qualityGate, candidateSampleService);
     }
 
     /** DEBT 通道可通过开关重新打开（样本积累后可复用） */

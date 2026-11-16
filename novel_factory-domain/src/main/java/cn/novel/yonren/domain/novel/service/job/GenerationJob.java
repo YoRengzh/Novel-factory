@@ -23,6 +23,8 @@ import java.util.concurrent.ConcurrentHashMap;
 public class GenerationJob {
 
     public static final String PLAN_ADJUSTMENT_REQUIRED = "PLAN_ADJUSTMENT_REQUIRED";
+    public static final String DELIVERY_REVIEW_FAILED = "DELIVERY_REVIEW_FAILED";
+    public static final String DELIVERY_REVIEW_UNAVAILABLE = "DELIVERY_REVIEW_UNAVAILABLE";
 
     private String jobId;
 
