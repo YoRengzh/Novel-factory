@@ -5,6 +5,7 @@ import cn.novel.yonren.domain.novel.model.entity.ChapterSummaryEntity;
 import cn.novel.yonren.domain.novel.model.valobj.plan.FactReference;
 import cn.novel.yonren.domain.novel.model.valobj.work.ChapterManuscript;
 import com.alibaba.fastjson2.JSON;
+import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.lang3.StringUtils;
 
 import java.nio.file.Path;
@@ -13,13 +14,18 @@ import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
+import java.util.concurrent.CancellationException;
 
 /** 有界正式事实引用供给；仅复制现有版本与证据，不调用模型生成依据。 */
+@Slf4j
 public final class FactReferenceSource {
+    private static final int MAX_SOURCE_CHAPTERS = 24;
+
     private FactReferenceSource() {}
 
     public static List<FactReference> select(List<ChapterSummaryEntity> history, int beforeChapter,
-                                             IStoryRepository repository, Path storyDir, int maxEntries) throws Exception {
+                                             IStoryRepository repository, Path storyDir, int maxEntries) {
         if (history == null || history.isEmpty() || repository == null || storyDir == null || maxEntries <= 0) {
             return List.of();
         }
@@ -37,8 +43,8 @@ public final class FactReferenceSource {
         for (FactReference reference : latest.values()) {
             if (StringUtils.isBlank(reference.manuscriptHash()) || StringUtils.isBlank(reference.evidence())) continue;
             if (!manuscripts.containsKey(reference.chapterNo())) {
-                var chapter = repository.readChapter(storyDir, reference.chapterNo());
-                manuscripts.put(reference.chapterNo(), chapter == null ? null : ChapterManuscript.of(chapter));
+                if (manuscripts.size() >= MAX_SOURCE_CHAPTERS) continue;
+                manuscripts.put(reference.chapterNo(), readManuscript(repository, storyDir, reference.chapterNo()));
             }
             var manuscript = manuscripts.get(reference.chapterNo());
             if (manuscript != null && manuscript.chapterNo() == reference.chapterNo()
@@ -49,6 +55,21 @@ public final class FactReferenceSource {
             }
         }
         return List.copyOf(selected);
+    }
+
+    private static ChapterManuscript readManuscript(IStoryRepository repository, Path storyDir, int chapterNo) {
+        try {
+            var chapter = repository.readChapter(storyDir, chapterNo);
+            return chapter == null ? null : ChapterManuscript.of(chapter);
+        } catch (InterruptedException interrupted) {
+            Thread.currentThread().interrupt();
+            throw new CancellationException("读取事实引用来源时中断");
+        } catch (RuntimeException failure) {
+            throw failure;
+        } catch (Exception unavailable) {
+            log.warn("第 {} 章事实引用来源读取失败，跳过该章引用", chapterNo, unavailable);
+            return null;
+        }
     }
 
     private static void add(Map<String, FactReference> latest, ChapterSummaryEntity summary, String ledger,
@@ -69,30 +90,12 @@ public final class FactReferenceSource {
                 .replaceAll("[\\s\\p{Z}]+", "").trim();
     }
 
-    /** 模型可见的引用身份：与校验侧同一算法，模型只需原样回填 factId。 */
-    public static String identity(FactReference reference) {
-        return reference == null ? null : cn.novel.yonren.types.utils.FactIdentity.of(reference.ledger(),
-                reference.chapterNo(), reference.manuscriptHash(), reference.subject(),
-                reference.status(), reference.evidence());
-    }
-
     public static String render(List<FactReference> references) {
         if (references == null || references.isEmpty()) return "";
-        List<Map<String, Object>> rendered = new ArrayList<>();
-        for (FactReference reference : references) {
-            if (reference == null) continue;
-            Map<String, Object> item = new LinkedHashMap<>();
-            item.put("factId", identity(reference));
-            item.put("ledger", reference.ledger());
-            item.put("chapterNo", reference.chapterNo());
-            item.put("manuscriptHash", reference.manuscriptHash());
-            item.put("subject", reference.subject());
-            item.put("status", reference.status());
-            item.put("evidence", reference.evidence());
-            rendered.add(item);
-        }
-        return "\n\n【可引用的正式事实】以下完整 JSON 引用可按当前场景需要复制；不是新的剧情目标。"
-                + "引用时原样回填 factId，不得自行编造 hash、证据或来源；入口引用可以为空。\n"
+        List<FactReference> rendered = references.stream().filter(Objects::nonNull).toList();
+        if (rendered.isEmpty()) return "";
+        return "【可引用的正式事实】仅在当前场景需要时，将下方对象的六个字段原样复制到 entryStates 或 constraints。"
+                + "这些是已有来源，可以不引用。\n"
                 + JSON.toJSONString(rendered);
     }
 }

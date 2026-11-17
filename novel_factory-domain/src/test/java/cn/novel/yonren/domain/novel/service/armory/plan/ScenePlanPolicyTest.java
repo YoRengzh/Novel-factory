@@ -171,7 +171,7 @@ class ScenePlanPolicyTest {
                 "letters-reviewed", "书房", "当晚", "character", "8", "hash", "持有旧信", "收到旧信")) {
             assertTrue(rendered.contains(part), rendered);
         }
-        assertTrue(rendered.contains("已有事实引用"));
+        assertTrue(rendered.contains("入场前提引用"));
         assertTrue(rendered.contains("里程碑引用"));
         assertTrue(rendered.contains("不代表已完成"));
         assertEquals("", ScenePlanPolicy.render(null));
@@ -229,11 +229,11 @@ class ScenePlanPolicyTest {
     }
 
     @Test
-    void absentCausalityKeepsLegacyRenderExactlyUnchanged() {
+    void absentCausalityKeepsQuietRenderWithoutInventingReferences() {
         String expected = "\n\n【权威场景契约】场景最终结果以 outcome/function 为准。\n"
                 + "场景 1｜id：archive\n人物：[江燃]\n意图(intention)：独自整理旧信\n阻力(resistance)："
                 + "\n最终结果(outcome)：\n场景功能(function)：消化\n地点(location)：书房\n时间(time)：当晚"
-                + "\n已有事实引用(entryStates，入场状态，不是本场新结果)：[]"
+                + "\n入场前提引用(entryStates，待核验，不是本场新结果)：[]"
                 + "\n里程碑引用(milestoneRefs，仅映射待推进目标，不代表已完成)：[]\n";
         assertEquals(expected, ScenePlanPolicy.render(List.of(scene("archive", "独自整理旧信", null, null, "消化"))));
     }
@@ -253,7 +253,7 @@ class ScenePlanPolicyTest {
         assertTrue(rendered.contains(JSON.toJSONString(causality)), rendered);
         assertTrue(rendered.contains("belief 是角色主观所信，可与事实不符"), rendered);
         assertTrue(rendered.contains("knowledgeRefs 是人物事实 ID"), rendered);
-        assertTrue(rendered.contains("constraints 是待核验的真实事实引用，非本场新结果"), rendered);
+        assertTrue(rendered.contains("constraints 是待核验约束引用，非本场新结果"), rendered);
     }
 
     @Test
@@ -281,6 +281,64 @@ class ScenePlanPolicyTest {
         assertTrue(rendered.contains("均按实际适用，不要求补齐"), rendered);
         assertNull(choice.cost());
         assertNull(causality.actors().get(0).knowledgeRefs());
+    }
+
+    @Test
+    void renderMarksParsedStringsAsUnverifiedWithoutChangingThePlan() {
+        String raw = "{\"chapters\":[{\"chapterNo\":1,\"schemaVersion\":2,\"title\":\"旧信\",\"goal\":\"整理\","
+                + "\"scenes\":[{\"id\":\"s1\",\"characters\":[\"江燃\"],\"intention\":\"整理旧信\",\"function\":\"静场\","
+                + "\"entryStates\":[\"设备此前已具备远程能力\"],"
+                + "\"causality\":{\"constraints\":[\"通行牌允许进入禁地\"]}}]}]}";
+        var plan = ChapterPlanChecks.parseLenient(raw);
+        assertNotNull(plan);
+        String before = JSON.toJSONString(plan);
+        String rendered = ScenePlanPolicy.render(plan.getChapters().get(0).getScenes());
+        assertTrue(rendered.contains("设备此前已具备远程能力"));
+        assertTrue(rendered.contains("通行牌允许进入禁地"));
+        for (String field : List.of("entryStates[0]", "causality.constraints[0]")) {
+            assertTrue(rendered.contains(field + "：来源缺失或不完整：未核验描述"), rendered);
+        }
+        assertTrue(rendered.contains("不得仅凭此条认定既成事实或已具备能力"));
+        assertFalse(rendered.contains("已有事实引用"));
+        assertFalse(rendered.contains("真实事实引用"));
+        assertEquals(before, JSON.toJSONString(plan));
+    }
+
+    @Test
+    void renderDistinguishesCompleteSourceShapeFromActualVerification() {
+        FactReference complete = new FactReference("ITEM", 8, "a".repeat(64), "旧信", "封存", "封存旧信");
+        String rendered = renderReferences(complete);
+        assertTrue(rendered.contains("来源字段齐全，仍须与可信来源核对；字段齐全不等于已核验。"));
+        assertFalse(rendered.contains("来源缺失或不完整"));
+        for (String value : List.of("ITEM", "8", "a".repeat(64), "旧信", "封存", "封存旧信")) {
+            assertTrue(rendered.contains(value));
+        }
+        List<FactReference> invalid = List.of(
+                new FactReference(null, 8, "a".repeat(64), "旧信", "封存", "封存旧信"),
+                new FactReference(" ", 8, "a".repeat(64), "旧信", "封存", "封存旧信"),
+                new FactReference("ITEM", null, "a".repeat(64), "旧信", "封存", "封存旧信"),
+                new FactReference("ITEM", 0, "a".repeat(64), "旧信", "封存", "封存旧信"),
+                new FactReference("ITEM", -1, "a".repeat(64), "旧信", "封存", "封存旧信"),
+                new FactReference("ITEM", 8, null, "旧信", "封存", "封存旧信"),
+                new FactReference("ITEM", 8, "g".repeat(64), "旧信", "封存", "封存旧信"),
+                new FactReference("ITEM", 8, "hash", "旧信", "封存", "封存旧信"),
+                new FactReference("ITEM", 8, "a".repeat(64), " ", "封存", "封存旧信"),
+                new FactReference("ITEM", 8, "a".repeat(64), "旧信", null, "封存旧信"),
+                new FactReference("ITEM", 8, "a".repeat(64), "旧信", "封存", " "));
+        for (FactReference fact : invalid) {
+            String partial = renderReferences(fact);
+            for (String field : List.of("entryStates[0]", "causality.constraints[0]")) {
+                assertTrue(partial.contains(field + "：来源缺失或不完整：未核验描述"), partial);
+            }
+            assertFalse(partial.contains("来源字段齐全"));
+        }
+    }
+
+    private static String renderReferences(FactReference fact) {
+        ScenePlan scene = new ScenePlan("s1", List.of("江燃"), "整理旧信", null,
+                List.of(fact), null, "静场", null, null, null,
+                new SceneCausality(null, null, null, List.of(fact)));
+        return ScenePlanPolicy.render(List.of(scene));
     }
 
     private static ChapterPlanItemEntity v2(List<ScenePlan> scenes) {

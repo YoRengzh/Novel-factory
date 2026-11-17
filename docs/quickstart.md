@@ -106,7 +106,7 @@ story:
 
 在 **01 生成** 页：
 
-<img src="images/workbench-create.jpeg" width="640" alt="创建新故事">
+<img src="images/workbench-create.png" width="640" alt="创建新故事">
 
 1. **一键生成设定集**（可选但推荐）：点几个题材标签，点「一键生成设定集」，AI 会产出一份设定集并回填下面的表单。只对大纲不满意时，用「只重生成大纲」单独重写它，其余字段不动。
 

@@ -7,6 +7,8 @@ import cn.novel.yonren.domain.novel.model.entity.StageBlueprintEntity;
 import cn.novel.yonren.domain.novel.service.armory.quality.ForeshadowSpanPolicy;
 import cn.novel.yonren.domain.novel.service.armory.quality.SuspenseLadderPolicy;
 import cn.novel.yonren.domain.novel.service.armory.quality.NarrativeProgressionPolicy;
+import cn.novel.yonren.domain.novel.model.valobj.plan.FactReference;
+import com.fasterxml.jackson.annotation.JsonCreator;
 import cn.novel.yonren.types.enums.ResponseCode;
 import cn.novel.yonren.types.exception.AppException;
 import cn.novel.yonren.types.utils.JsonParseFallback;
@@ -45,7 +47,16 @@ public final class ChapterPlanChecks {
                             .enable(com.fasterxml.jackson.databind.MapperFeature.ACCEPT_CASE_INSENSITIVE_ENUMS)
                             .disable(com.fasterxml.jackson.databind.DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES)
                             .enable(com.fasterxml.jackson.databind.DeserializationFeature.READ_UNKNOWN_ENUM_VALUES_AS_NULL)
+                            .addMixIn(FactReference.class, FactReferenceTextMixin.class)
                             .build());
+
+    // 只在模型输出入口放宽字符串，避免 Fastjson2 将委派标注误用为存档对象的构造器。
+    private abstract static class FactReferenceTextMixin {
+        @JsonCreator(mode = JsonCreator.Mode.DELEGATING)
+        public static FactReference fromText(String text) {
+            return null;
+        }
+    }
 
     public static ChapterPlanAggregate parseLenient(String raw) {
         return JsonParseFallback.parse(raw, CHAPTER_PLAN_CONVERTER::convert);

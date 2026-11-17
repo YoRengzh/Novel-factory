@@ -1,0 +1,438 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>README 预览 — StartDrafts</title>
+<style>
+  body { margin:0; background:#0d1117; }
+  .page { max-width: 880px; margin: 0 auto; padding: 40px 48px;
+          background:#0d1117; color:#e6edf3;
+          font-family:-apple-system,"Segoe UI","Microsoft YaHei",Helvetica,Arial,sans-serif;
+          font-size:16px; line-height:1.7; }
+  h1,h2,h3 { border-bottom:1px solid #30363d; padding-bottom:.3em; margin-top:1.6em; }
+  a { color:#58a6ff; }
+  code { background:#161b22; padding:.2em .4em; border-radius:6px;
+         font-family:Consolas,"JetBrains Mono",monospace; font-size:85%; }
+  pre { background:#161b22; padding:16px; border-radius:6px; overflow:auto; }
+  pre code { background:none; padding:0; }
+  table { border-collapse:collapse; margin:1em 0; }
+  th,td { border:1px solid #30363d; padding:6px 13px; }
+  th { background:#161b22; }
+  img { max-width:100%; }
+  figure { text-align:center; margin:1.5em 0; }
+  video { max-width:100%; border-radius:8px; border:1px solid #30363d; }
+  figcaption { color:#8b949e; font-size:14px; margin-top:.5em; }
+  blockquote { color:#8b949e; border-left:4px solid #30363d; padding-left:1em; margin-left:0; }
+  hr { border:0; border-top:1px solid #30363d; margin:2em 0; }
+</style>
+</head>
+<body><div class="page"><p align="center">
+  <img src="electron/icon-256x256.png" width="128" alt="StartDrafts 图标">
+</p>
+
+<h1 id="startdrafts">StartDrafts</h1>
+<blockquote>
+<p><strong>命名说明</strong>：源码项目名为 <code>novel_factory</code>（仓库、Maven 模块与 jar 均沿用此名），对外发布的桌面安装包更名为 <strong>StartDrafts</strong>——两者指同一套代码，下文出现的两个名字不做区分。</p>
+</blockquote>
+<p><strong>面向长篇小说与网文连载的无人值守生成产线。</strong> 从设定集、卷蓝图、阶段蓝图到逐章正文、审校、修订、定稿，整批跑完并留下可复核的体检报告；正式生成不设人工裁决点，异常要么有界兜底、要么明确失败。</p>
+<blockquote>
+<p>实现形态是<strong>多智能体协作 + 确定性编排</strong>：规划、写手、审校、评审、裁决、摘要各由一个角色承担，可分别路由到不同模型甚至不同模型族——候选盲评刻意让写手与评审分属两族，专门对抗"自己评自己"的自偏好；而它们之间的先后与分支由显式管线节点链决定，不靠模型自行协商。</p>
+<p>两种用法：<strong>写作者</strong>直接用 <a href="https://github.com/YoRengzh/Novel-factory/releases/latest">StartDrafts 桌面版</a>（Windows 双击即用）；<strong>开发者</strong>读源码，把它当作长篇生成管线的工程参考实现。</p>
+</blockquote>
+<p><strong>技术栈</strong>：Java 17 · Spring Boot 3.4.3 · Spring AI 1.0（OpenAI Chat Completions / Anthropic Messages / OpenAI Responses 三协议）· Maven 多模块 · 内置向量库（Qdrant 可选）· Electron 桌面壳 · 原生前端
+<strong>规模</strong>：6 个 Maven 模块 · 主代码 4.4 万行 / 测试 3.2 万行 · 134 个测试类 1,562 个用例</p>
+<p><img alt="工作台" src="docs/images/workbench-create.png" /></p>
+<p><strong>▶ 演示视频</strong>：</p>
+<figure><video controls muted loop preload="metadata" src="docs/videos/StartDrafts.mp4"></video><figcaption>StartDrafts 演示</figcaption></figure>
+
+<hr />
+<h2 id="windows">下载：Windows 桌面版（推荐）</h2>
+<p><strong><a href="https://github.com/YoRengzh/Novel-factory/releases/latest">StartDrafts.Setup.exe</a></strong> —— 双击即用：自带 Java 运行时与内置向量库，<strong>无需 JDK、终端或 Docker</strong>；数据保存在 <code>%APPDATA%\StartDrafts</code>。</p>
+<blockquote>
+<p>安装包未做代码签名，Windows 提示"未知发布者"时选择"仍要运行"。当前仅提供 Windows 安装包；macOS / Linux 可走下方源码方式。</p>
+</blockquote>
+<hr />
+<h2 id="_1">最低准备：你需要什么才能跑起来</h2>
+<table>
+<thead>
+<tr>
+<th>档位</th>
+<th>需要准备</th>
+<th>能得到什么</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>桌面版（最简）</strong></td>
+<td><a href="https://github.com/YoRengzh/Novel-factory/releases/latest">安装包</a> + 一个 LLM 端点的 <strong>API Key</strong>（OpenAI 兼容 / Anthropic / Responses 协议均可）（或符合条件的 ChatGPT 套餐授权）</td>
+<td>双击即用，自带 Java 运行时与内置向量库。全流程可跑通：三账本、章节摘要、伏笔排期、一致性索引、批末体检——长篇要的那套约束一个都不少</td>
+</tr>
+<tr>
+<td><strong>源码运行</strong></td>
+<td>上面的 Key + JDK 17 + Maven 3.9（<code>mvn package</code> 后单 jar 启动）</td>
+<td>同上。适合想改代码或跑在非 Windows 系统上的开发者</td>
+</tr>
+<tr>
+<td><strong>质量档（推荐）</strong></td>
+<td>上面任一档 + 一个 <strong>embedding 模型 API Key</strong></td>
+<td>再开启<strong>向量增强</strong>：跨章记忆的语义唤醒、动态参考资料按需注入。这两项直接决定"写到第 60 章还记不记得第 8 章埋的线"。从 v0.2 起向量库已内置，<strong>不再需要 Qdrant</strong>——"变向量"靠 embedding API，"存向量"走本地文件</td>
+</tr>
+</tbody>
+</table>
+<p>只准备第一/二档也完全可用，缺 embedding Key 时系统以"无向量增强"模式运行，并且批末体检的<strong>「无检索唤醒章数占比」指标会明确告诉你哪几章是裸跑的</strong>——不静默降级，是这套设计的通则。</p>
+<blockquote>
+<p>⚠️ <strong>ChatGPT 套餐授权为实验性功能</strong>：它参照 OpenAI 第一方客户端（Codex CLI，Apache-2.0 开源）的实现对接订阅授权通道，
+并非面向第三方应用的正式 API。OpenAI 变更该通道时功能可能失效，且请自行确认使用方式符合你的账号条款。</p>
+<p>提示：两个 Key 可以是同一个供应商的同一把 Key——<code>LLM_API_KEY</code> 同时供对话与嵌入使用；要分开也可以，见<a href="docs/quickstart.md">快速开始</a>。</p>
+<p>进阶用户仍可切回 Qdrant（<code>story.vector-store.mode: qdrant</code>）；动态参考资料检索方式也可在设置页运行时切换：<strong>向量语义检索</strong>（需 embedding Key）或 <strong>LLM 索引选择</strong>（无嵌入设施时用）。</p>
+</blockquote>
+<h2 id="_2">它能做什么</h2>
+<p>按写一本长篇的顺序组织：设定 → 卷蓝图 → 阶段蓝图 → 逐章正文 → 审校修订 → 体检报告。每一步的结果都落成可 diff 的文件，下一步接着用。</p>
+<h3 id="_3">设定集：一句话起步</h3>
+<p>给一个题材关键词，AI 产出书名、风格、世界观、视角、目标人群、基调、主人公、故事大纲、章节目标与建议总章数，回填到表单后逐项可改。不满意可以只重生成某一个字段，也可以只重生成大纲（其余字段锁定不变）。</p>
+<h3 id="_4">卷蓝图与阶段蓝图：全书长期锚 + 滚动大纲</h3>
+<p>卷蓝图定全书方向（一卷 = 一次剧情移动）；阶段蓝图在其窗口内滚动生成，每跨阶段边界出一版。蓝图含悬念档位表（3–6 档有序枚举）与逐章主线推进，两者分别管"走到第几格"和"这一章做了什么"。</p>
+<p>蓝图带<strong>反套路检查</strong>：比对近 10 章实际摘要与本次章级推进，检出明确复述与"问题→能力解围→旁人认可"的重复循环，走一次带反馈返修。这是关键词启发式，不阻断生成，只在告警里留痕。</p>
+<h3 id="_5">逐章正文：质量门禁在写的时候就开着</h3>
+<p>每章生成后自动跑审校（禁泄逐字扫描、一致性核对、AI 腔检测）、段落密度审校、必要时定向补丁修订。低置信章节触发候选盲评：异模型整章重写 + 机械门禁 + 异族评审二选一。</p>
+<h3 id="_6">段落级编辑：选中一段，只改这一段</h3>
+<p>正文阅读时选中一段文字，浮动工具条给出三个动作：</p>
+<ul>
+<li><strong>润色</strong>：只改表达（去空话、把抽象评价换成可观察细节、长短句交替），不改事实与篇幅；</li>
+<li><strong>扩写</strong>：在原有事实基础上补细节，目标 1.5–3 倍篇幅，禁止靠形容词堆砌撑长度；</li>
+<li><strong>续写</strong>：沿原文语气与事件往下写一小段，承接上文动作，不提前解决矛盾、不引入无关新人物。</li>
+</ul>
+<p>结果以<strong>左右对照</strong>呈现（原文 / 改写后），你确认后才替换，再走常规保存（触发摘要回流）。轻量诉求不付整章修订的成本：单次短 prompt 调用，输出上限压到 2048 tokens。</p>
+<h3 id="_7">书内工作区：改设定不动正文</h3>
+<p>打开一本书即进入书内工作区，四个页签分别管概要、正文、创作维护与运行记录。</p>
+<p>创作维护是<strong>与正文分离的作者层</strong>：作者对已提取事实的纠正、以及"从第 N 章起我想让某条线这样走"的后续意图，都写进独立的维护版本，不改写任何已发生的正文。保存走<strong>预览 → 确认</strong>两步——预览按当前正文依据算出候选与哈希，保存必须带同一个哈希，中途被别处改动就会拒绝并提示重新预览。提取类纠正还必须绑定来源章号、正文版本与连续引文，对不上不许保存。</p>
+<p>品质问题是作者对已生成问题的独立记账：可以备注、延后、标为误报，<strong>不改正文、不改质量债、不参与后续生成依据</strong>。</p>
+<h3 id="_8">批末体检：可归因的质量基线</h3>
+<p>每批（默认 5 章）结束输出 30 项量化指标，每项带历史基线与可执行建议。这是判断"这批比上批是好是坏"的唯一依据——不是"生成完就结束"。</p>
+<h3 id="_9">模型接入：中转站 + 三协议</h3>
+<p>设置页登记多个中转站（OpenAI 兼容 / Anthropic / OpenAI Responses），一键拉取模型列表；全局、每个场景、兜底模型都可以只选"哪个站的哪个模型"，不必手填地址密钥。跨协议供应商（如评审指向 Anthropic 站）会自动切换客户端。</p>
+<h3 id="_10">资料与文风：可增补的写作资产</h3>
+<p>内置 58 篇写作资料 + 4 篇文风。在「04 资料设置」里可以导入自己的范例/题材资料（进同一套索引与向量检索），或按题材覆盖文风——无需改代码重新打包。</p>
+<h2 id="_11">它解决什么问题</h2>
+<p>长篇连载（50 万字以上）靠单次提示无法保证质量，真正的难题是<strong>跨章的工程约束</strong>。本项目把每类约束做成机制：</p>
+<table>
+<thead>
+<tr>
+<th>长篇难题</th>
+<th>对应机制</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>写到后面人物状态、持有物、时间线自相矛盾</td>
+<td>三账本（角色/物品/势力）+ 一致性索引 + 时序锚（境界式锁定）</td>
+</tr>
+<tr>
+<td>账本/摘要"记录了正文里没有的事"</td>
+<td><strong>证据链机械校验</strong>（8 档匹配）——模型必须给出正文原文引证，匹配不上就不入账</td>
+</tr>
+<tr>
+<td>伏笔"埋了就忘"或"埋了立刻收"</td>
+<td>伏笔排期表（PLANNED→PLANTED→PAID/MISSED 状态机）+ 卷末清账裁决 + 动态权重（积压到阈值必须评估）+ 写手视图去元信息</td>
+</tr>
+<tr>
+<td>写手"提前说漏嘴"谜底</td>
+<td>禁泄清单：对谜底关键词在正文里<strong>逐字扫描</strong>，命中即 BLOCKING（不做语义判断，宁漏勿误报）</td>
+</tr>
+<tr>
+<td>模型自我修正的同质化陷阱</td>
+<td>候选盲评：低置信章触发异模型整章重写 + 机械门禁 + 异族评审</td>
+</tr>
+<tr>
+<td>反复用同一批套话与同一套情节</td>
+<td>疲劳词表（内置 60+ 中文套话，可外部覆盖）+ 已用情节模式黑名单（舞台复用/同型冲突方/能力展示章数）</td>
+</tr>
+<tr>
+<td>计划写了、正文没写</td>
+<td>计划遵循度：正文与计划事件的<strong>最长公共子串</strong>覆盖率，低于 0.6 即触发加审</td>
+</tr>
+<tr>
+<td>时间/年龄漂移</td>
+<td>时序锚 v2：计划声明的 timeAdvance 是唯一合法推进通道，审计回验</td>
+</tr>
+<tr>
+<td>"这批比上批是好是坏"无法归因</td>
+<td>批末体检：30 项量化指标，每项带历史基线与可执行建议</td>
+</tr>
+<tr>
+<td>长跑批中途失败、无人值守烧钱</td>
+<td>逐章原子提交（正文与摘要同一次落盘，中断可补完）+ 逐章检查点/回滚 + token 预算熔断（命中后<strong>当前章写完即停</strong>，不留半截）</td>
+</tr>
+<tr>
+<td>摘要记错人物认知与承诺</td>
+<td>人物状态投影：认知、信念、目标、决定、意图、行动与承诺分开记账，证据须在正文定位，未通过者隔离待核</td>
+</tr>
+<tr>
+<td>计划场景前后因果断裂</td>
+<td>场景契约（scenes 为唯一生成源）+ 可选因果核验（默认关闭，可只观察或驳回）</td>
+</tr>
+<tr>
+<td>想改设定又不想动正文</td>
+<td>书内工作区：作者维护版本与执行引用分离，保存需预览哈希，纠正须绑定来源章与正文版本</td>
+</tr>
+</tbody>
+</table>
+<h2 id="_12">几个不常规的设计取舍</h2>
+<p>这些是本项目与"多套几层提示词"最不一样的地方，也是它在长跑中不容易崩的原因：</p>
+<p><strong>1. 能机械校验的，绝不交给 LLM 判断。</strong>
+摘要和账本最容易编造"正文里没有的事实"，所以每条状态都必须附 ≤50 字正文引证，再用 8 档匹配（精确→归一化→分段→短语覆盖→锚定→跨度）判定引证是否真实存在——"放宽的是表述，不是事实有无"。禁泄是逐字 <code>indexOf</code> 扫描，计划覆盖率是 LCS，重复用语是词表统计。<strong>判断标准始终是可复算，而不是"模型觉得像"。</strong></p>
+<p><strong>2. 失败语义刻意不对称——该硬失败的地方不许静默降级。</strong>
+向量资料检索失败会<strong>直接终止作业</strong>（注释写明：静默降级会让作业在低质量注入下跑完）；而 LLM 选择资料失败则静默返回空、不阻塞。模型降级链里唯一不换模型的是 <code>CONTENT_POLICY</code>（内容审计与换哪个模型无关）。预算熔断、检查点、自动续批则全部 fail-soft，不反噬主流程。哪里该硬、哪里该软，是逐处设计过的。</p>
+<p><strong>3. 状态机与生命周期，而不是散落的标志位。</strong>
+写作模式按契约完整度自动判定（FREE / SCAFFOLDED / RECOVERY，缺计划就收紧而非自由发挥）；伏笔走四态；质量债用"连续 2 章无同维度复发"验证式核销，<strong>没有验证信号的债永不核销</strong>（不伪造结论）；全书完结上限是 sticky 的——只能下调不能抬高。</p>
+<p><strong>4. 状态尽量做成纯函数，可确定性重算。</strong>
+伏笔权重 <code>score = 重要性×10 + 滞留章数×5</code>，续批决策 <code>decide(...)</code> 同样是纯函数——零新增存储，任何时刻都能从摘要重算，不存在"状态漂移需要修数据"。</p>
+<p><strong>5. 提示词预算是"块优先级淘汰"，而不是一刀切截断。</strong>
+前缀由 8+ 个块拼成（末态红线/记忆/风格/一致性/禁泄/情节黑名单…），每块有独立封顶，但<strong>封顶之和会击穿窗口</strong>。所以装配层有总额预算，超预算时按块优先级淘汰，且<strong>渲染顺序与淘汰次序分离</strong>——丢谁和排谁在前是两件事。禁泄块标记为不可截断（截断会静默丢词），放不下就整块弃并<strong>在日志点名</strong>"依赖下游兜底"。预算日志强制自洽，可脚本对账。</p>
+<p><strong>6. 错误分类驱动重试与降级，而不是无脑重试。</strong>
+供应商报错被分为 7 类，每类带两个正交布尔——"同模型重试是否有意义"和"换模型是否有意义"。<code>UPSTREAM_INTERNAL</code>（500/engine abort）被特别归为"换模型比原样重试更有效"——这条来自实测：某个模型跑 795 秒后被上游 abort。降级链<strong>硬上限 3 个</strong>，防止一条长链一次失败烧掉整串费用。</p>
+<p><strong>7. 有校准设施，而不是只能靠感觉调参。</strong>
+审校判据留了 A/B 变体开关（默认 A 与生产逐字节一致）；"修订耗尽仍未解决的 BLOCKING"整包回流成离线校准集；另有一套需显式开关的评测框架（跨系统盲评、审校校准、运行时采样），共 6 个类 1428 行。</p>
+<h2 id="_13">和"逐章循环"式生成的区别</h2>
+<p>市面上多数小说生成工具是同一个形态：一句话设定 → 逐章循环生成 → 输出全文，跨章状态靠"把前文塞进上下文"。这个形态有三条假设，会随篇幅增长逐条失效：</p>
+<ol>
+<li><strong>上下文装得下</strong>——长到一定程度必须截断，截断即遗忘，且遗忘是静默的；</li>
+<li><strong>模型自评能代替机械校验</strong>——同一模型既写又评会偏向自己的措辞和结构，越改越同质；</li>
+<li><strong>"生成完"就是终点</strong>——没有可归因的质量基线，所以"这批比上批是好是坏"永远说不清，调参只能靠感觉。</li>
+</ol>
+<p>本项目的取舍是：能机械校验的一律不进提示词；账本、伏笔、时间线全部落成可 diff 的文件；每批产出体检报告，让"变好还是变坏"可归因。<strong>判断标准不是"能不能生成"，而是"能不能定位到是哪一层机制没生效"</strong>。</p>
+<h2 id="_14">工程规模</h2>
+<p>工程深度不看行数，但下面这些数字能说明机制是真的在跑：</p>
+<table>
+<thead>
+<tr>
+<th>项</th>
+<th>数量</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Maven 模块</td>
+<td>6（types / api / domain / infrastructure / trigger / app）</td>
+</tr>
+<tr>
+<td>主代码 / 测试代码</td>
+<td>50,853 行 / 34,866 行</td>
+</tr>
+<tr>
+<td>测试类 / 用例</td>
+<td>144 个 / 1,737 个（全绿）</td>
+</tr>
+<tr>
+<td>批末体检指标</td>
+<td>30 项</td>
+</tr>
+<tr>
+<td>质量门禁策略</td>
+<td>19 个（<code>quality/*Policy</code>；该包共 26 个类）</td>
+</tr>
+<tr>
+<td>生成管线节点</td>
+<td>11 个（<code>node/*Node</code>）</td>
+</tr>
+<tr>
+<td>记忆层</td>
+<td>18 个类（<code>memory/</code>）</td>
+</tr>
+<tr>
+<td>提示词策略</td>
+<td>8 个（反 AI 腔、防注水、钩子技法、视角纪律……）；内置参考资料 58 篇，可用户自备</td>
+</tr>
+<tr>
+<td>校准 / 评测框架</td>
+<td>6 个类、1,428 行，其中 4 个需显式开关才运行</td>
+</tr>
+</tbody>
+</table>
+<h2 id="_15">快速开始</h2>
+<h3 id="windows_1">桌面版（Windows）</h3>
+<ol>
+<li>从 <a href="https://github.com/YoRengzh/Novel-factory/releases/latest">Releases</a> 下载 <code>StartDrafts.Setup.exe</code> 并安装；</li>
+<li>启动 StartDrafts，进入「05 设置」配置模型接入：可直接填 Base URL 与 Key，也可在下方「中转站管理」登记多个 OpenAI 兼容 / Anthropic 中转站，一键拉取模型列表后用下拉选用（建议同时填 embedding Key，开启向量增强）；</li>
+<li>（可选）进入「04 资料设置」补充你自己的写作范例与题材资料、或改写各题材文风——与内置资料同等待遇，进向量索引按需注入；</li>
+<li>回到「01 生成」创建故事、提交生成；每批结束后看<strong>批末体检报告</strong>。</li>
+</ol>
+<h3 id="_16">源码运行</h3>
+<p>四步：<strong>打包 → 启动 → 配置模型 → 打开工作台</strong>。完整版（含截图与排错）见<a href="docs/quickstart.md">快速开始</a>。</p>
+<pre><code class="language-bash"># 1) API Key 模式可先配置密钥（ChatGPT 登录模式跳过这步）：
+export LLM_API_KEY=sk-你的密钥
+#   或复制 config/application-local.example.yml 到
+#   novel_factory-app/src/main/resources/application-local.yml 后填入
+#   （该文件名已被 .gitignore 排除；文件里的值会覆盖环境变量，所以只启用你要改的项）
+
+# 2) 打包（首次约 20 秒，不需要预先安装任何模块）
+mvn -pl novel_factory-app -am clean package -DskipTests
+
+# 3) 启动
+java -jar novel_factory-app/target/novel_factory-app.jar
+
+# 4) 打开工作台
+#    http://localhost:8080
+#    设置 → 认证方式：可选择 API Key，或 Continue with ChatGPT 完成浏览器授权
+</code></pre>
+<blockquote>
+<p>开发时想反复重启，用 <code>mvn install -DskipTests</code> 装齐 6 个模块一次，之后 <code>mvn -pl novel_factory-app spring-boot:run</code> 即可（改代码不用重打包）。
+完整测试套件：<code>mvn test</code>（1,598 个用例，1~2 分钟），全量测试在本地执行。
+其中 <code>ArchBoundaryTest</code> 三条 ArchUnit 规则守护分层边界（trigger 不得触碰领域模型、
+model 不得反向依赖 service/adapter/config、api 保持零工程模块依赖），破坏即构建失败。</p>
+</blockquote>
+<p>每批（界面默认 5 章）结束后看<strong>批末体检报告</strong>——30 项指标 + 可执行建议，这就是本系统的仪表盘。</p>
+<h2 id="_17">批末体检长什么样</h2>
+<p>共 30 项指标，每项三列：<strong>当前值 ｜ 目标（含历史基线）｜ 明细</strong>，级别 OK / WATCH / DEGRADED / CRITICAL，尾部附建议。真实示例（节选）：</p>
+<pre><code class="language-text">OK      账本完整度       94.06%（目标 ≥90%） ｜ 严格 523 / 放宽 47 / 挂起 11
+OK      对白轮次密度     22.50次/千字（目标 ≥9）
+WATCH   候选选优触发率    52%（目标 ≤30%） ｜ 触发 39 / 65 章
+DEGRADED 进度对齐        7段（目标 ≤1 段） ｜ 第 65 章按大纲应处【61-70章 2009年/11岁】段
+建议：进度滞后约 6 年：……两条出路：①规划层加速（跳月/压缩日常）；
+②承认慢节奏，重排大纲章段预算。不应长期维持现状——路标与正文漂移会越滚越大。
+</code></pre>
+<p>每条 DEGRADED 都对应一个可执行的下一步——这是本系统与"生成完就结束"的工具最大的区别。</p>
+<h2 id="_18">架构</h2>
+<p>六个 Maven 模块，依赖单向：<code>types</code>（枚举/值对象）与 <code>api</code>（DTO）不依赖任何内部模块；<code>domain</code> 只依赖这两个，承载全部机制（管线节点、质量策略、记忆层、提示词装配）；<code>infrastructure</code>（文件仓库 / 内置向量库·Qdrant / LLM·Embedding 网关）与 <code>trigger</code>（HTTP 端点）并列依赖 <code>domain</code>；<code>app</code> 装配二者并启动。</p>
+<ul>
+<li><strong>存储</strong>：文件仓库——<code>docs/workspace/stories/</code> 下 JSON（正文、摘要、三账本、蓝图、检查点），全部可 git、可 diff、可手工修。写入走"临时文件 + 原子替换"并按故事加锁；记忆类文件损坏即硬失败（静默读空等于丢账本），观测类文件损坏仅告警。</li>
+<li><strong>向量库</strong>：默认<strong>内置向量库</strong>——向量以自定义二进制格式（NVTB）随故事目录落盘，暴力精确检索（本规模下毫秒级，优于近似索引的精确性），删除故事即全清。进阶可切回 Qdrant（<code>story.vector-store.mode: qdrant</code>）。</li>
+<li><strong>前端</strong>：原生 HTML/CSS/JS（无构建步骤），随 jar 由后端同源提供；Windows 桌面版用 Electron 壳包成单安装包（内嵌 jpackage 的 Java sidecar，单实例锁、端口探测、退出时清理进程树）。</li>
+<li><strong>可换的模型</strong>：场景级路由——17 个场景（章节计划/正文/审校/评审……）可独立配模型、温度、思考开关，也可按场景配不同的 base-url 与 api-key，用于让评审场景指向异族模型以保证盲评中立。</li>
+<li><strong>多供应商与协议</strong>：设置页可登记多个中转站（OpenAI 兼容 / Anthropic / OpenAI Responses），一键拉取模型列表后以「站名·模型」标注在场景矩阵里选用；地址带不带 <code>/v1</code> 均可。</li>
+<li><strong>可增补的资料层</strong>：内置 58 篇写作资料 + 4 篇文风，用户可在「04 资料设置」里导入自己的范例/题材资料（进同一套索引与向量检索），或按题材覆盖文风——无需改代码重新打包。</li>
+</ul>
+<h3 id="_19">生成管线节点链</h3>
+<p>规划与正文生成的执行主干是一条显式的规则树节点链（<code>domain</code> 的 <code>node/*</code> 包，从 RootNode 顺序路由到终态），每个节点内部挂接的记忆 / 蓝图 / 审校服务与失败分支如下。可编辑源文件：<a href="docs/node-chain-flowchart.drawio">docs/node-chain-flowchart.drawio</a>。</p>
+<p><img alt="生成管线节点链与各节点内部服务" src="docs/images/node-chain-flowchart.svg" /></p>
+<p>详细设计（管线节点链、各项机制的逐一说明、存储目录契约）：<a href="docs/architecture.md">架构与机制</a></p>
+<h2 id="_20">支持的模型与服务</h2>
+<p>软件不提供模型，也不代管额度。你在设置里填自己的地址、模型名和 API Key。支持三种协议：</p>
+<ul>
+<li><strong>OpenAI Chat Completions</strong>：绝大多数中转站与兼容供应商；</li>
+<li><strong>Anthropic Messages</strong>：Claude 官方与 Anthropic 协议中转站（<code>x-api-key</code> 鉴权）；</li>
+<li><strong>OpenAI Responses</strong>：官方 Responses API 与兼容中转站（gpt-5 系等）。</li>
+</ul>
+<p>设置页内置中转站登记表，可添加多个站并各自选协议；「获取模型」一键拉取该站模型列表，之后全局/场景/兜底的模型输入框都是可点选的下拉。</p>
+<table>
+<thead>
+<tr>
+<th>服务商</th>
+<th>协议</th>
+<th>Base URL 示例</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>DashScope（阿里）</td>
+<td>OpenAI 兼容</td>
+<td><code>https://dashscope.aliyuncs.com/compatible-mode</code></td>
+</tr>
+<tr>
+<td>DeepSeek</td>
+<td>OpenAI 兼容</td>
+<td><code>https://api.deepseek.com</code></td>
+</tr>
+<tr>
+<td>硅基流动</td>
+<td>OpenAI 兼容</td>
+<td><code>https://api.siliconflow.cn/v1</code></td>
+</tr>
+<tr>
+<td>智谱 BigModel</td>
+<td>OpenAI 兼容</td>
+<td><code>https://open.bigmodel.cn/api/paas/v4</code></td>
+</tr>
+<tr>
+<td>OpenAI</td>
+<td>OpenAI 兼容 / Responses</td>
+<td><code>https://api.openai.com</code></td>
+</tr>
+<tr>
+<td>Anthropic</td>
+<td>Anthropic Messages</td>
+<td><code>https://api.anthropic.com</code></td>
+</tr>
+<tr>
+<td>one-api / new-api 等自建中转</td>
+<td>OpenAI 兼容</td>
+<td>你自己的地址</td>
+</tr>
+<tr>
+<td>Ollama（本地）</td>
+<td>OpenAI 兼容</td>
+<td><code>http://127.0.0.1:11434/v1</code></td>
+</tr>
+</tbody>
+</table>
+<p>地址带不带 <code>/v1</code> 都可以：程序会自适应路径，避免拼出 <code>/v1/v1/chat/completions</code>。</p>
+<p>向量检索另需一个 embedding 模型（设置页「向量检索分区」），与聊天模型可分开配。</p>
+<h2 id="_21">模型实测</h2>
+<p>场景级模型路由（每场景可独立配模型/温度/思考开关），作者账号实测结论：</p>
+<table>
+<thead>
+<tr>
+<th>场景</th>
+<th>实测较优</th>
+<th>备注</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>章节计划</td>
+<td>qwen3.8-max</td>
+<td>关键事件供给稳定；温度固定 1.0</td>
+</tr>
+<tr>
+<td>正文</td>
+<td>glm-5.2</td>
+<td>年代质感好；偶发段落坍缩已有机械重排兜底</td>
+</tr>
+<tr>
+<td>审校</td>
+<td>qwen3.7-plus</td>
+<td>抓出过禁泄泄露与年龄幻觉</td>
+</tr>
+<tr>
+<td>候选重写/评审</td>
+<td>qwen3.8-max + deepseek-v4.1-flash</td>
+<td>异族评审防自偏好</td>
+</tr>
+</tbody>
+</table>
+<p>选型理由、降级链、单章成本与踩过的坑（含实测算力统计）：<a href="docs/models-and-costs.md">模型与成本</a></p>
+<h2 id="_22">常见问题</h2>
+<p><strong>免费吗？</strong>
+代码以 Apache-2.0 开源，软件本身不收费。调用云端模型的费用由你和模型服务商结算；用本地 Ollama 则无需付费。</p>
+<p><strong>需要什么模型？</strong>
+任何兼容上述三种协议的模型都可以接。生成质量取决于你选的模型——本项目对跨章一致性有机械约束，但不对模型输出质量作保证。作者实测的较优组合见下方「模型实测」。</p>
+<p><strong>能写多长？</strong>
+总章数由你设定，没有固定上限。写每一章时 AI 拿到的是本章计划、相关记忆摘要、前文摘要与必要的资料片段，而不是整本书的聊天记录——所以篇幅不受单次上下文窗口限制。</p>
+<p><strong>能改提示词吗？</strong>
+可以改资料与文风（04 资料设置，导入自备资料或覆盖文风）。核心规则文件打包在 jar 内，改它需要改源码重新打包——这是有意为之：规则文件的标题锚点是程序切片接口，随意改动会让作业直接终止。</p>
+<p><strong>数据存在哪？</strong>
+<code>%APPDATA%\StartDrafts</code>：<code>docs/workspace/stories/</code> 下是正文、摘要、三账本、蓝图、检查点（纯 JSON/文本，可 git、可手工修）；<code>data/</code> 下是运行时覆盖配置与日志。全部在本机，只有发起生成时相关提示词才会发给你配置的模型服务。</p>
+<h2 id="_23">已知限制</h2>
+<ul>
+<li>面向<strong>中文长篇</strong>设计（分词、账本、体裁模板均以中文假设为前提）；</li>
+<li>桌面安装包目前仅 <strong>Windows</strong>；macOS / Linux 请走源码方式；</li>
+<li>单机文件存储：多机协作、多人共写不在当前范围内；</li>
+<li>每章生成成本 8-25 万 token（视质量档位）——这是"全链路审校+候选"的定价，预算敏感请调低候选触发；</li>
+<li>大纲（chapterGoal）需要作者按"章段+时间标记"格式编写；</li>
+<li>候选盲评与异族评审走独立模型配置（<code>scene-models.chapter-rewrite</code> 与 <code>chapter-judge</code>）。只有单一模型族可用时，把 <code>candidate.enabled</code> 置为 <code>false</code>——保持默认的 <code>true</code> 会在评审阶段空转失败；</li>
+<li>向量增强需要 <strong>embedding API Key</strong>（内置的是"存向量"，"变向量"仍需 embedding 模型；未配置时以无增强模式降级，日志单条提示）；若动态资料检索选用 vector 模式但检索失败，会快速终止而非静默降级——可切回 LLM 索引选择模式；</li>
+<li>启动耗时：解包布局下后端就绪约 4-5 秒（桌面版已加启动闪屏，点图标即时出画面）；</li>
+<li><strong>段落级编辑只在阅读态生效</strong>：编辑态（contenteditable）下不弹浮动条，避免挡住输入；选中片段限 8–2000 字，超长请用整章修订；</li>
+<li>段落级编辑走关键词约束的短 prompt，不做账本校验——它改的是表达，不是事实。若要动情节，仍应走整章修订或直接手改；</li>
+<li><strong>ChatGPT 套餐授权（实验性）</strong>：依赖 OpenAI 未公开文档的第一方授权通道（参数取自开源的 Codex CLI），不保证长期可用；该授权也不含 Embedding，向量检索仍需独立 API Key；</li>
+<li><strong>品质问题的"模型复核"当前只返回未确认</strong>：本版缺少历史稿与候选稿的保真比对，无法区分"问题已解决"与"改动了未授权内容"，因此复核不调用模型、一律返回未确认，由作者自行判断并显式处置；</li>
+<li><strong>场景因果核验默认关闭</strong>（<code>story.causality.plan-mode: OFF</code>）：开启后计划期会多一次模型调用；<code>OBSERVE</code> 只记日志不改变计划，<code>ENFORCE</code> 才会驳回；</li>
+<li><strong>人物决策卡尚未提供</strong>：本版有动态人物状态投影（认知/信念/承诺分开记账），但"按人物档案设计场景决策"那一层还没接进来；</li>
+<li>本协议只覆盖<strong>代码</strong>：生成小说内容的版权归属由「谁运行 + 所用模型服务商的条款」决定，本仓库不做任何主张——商用或公开发布前，请自行确认所用模型方的输出使用权与发布平台规则。</li>
+</ul>
+<h2 id="_24">作者</h2>
+<p>YoRengzh</p>
+<h2 id="license">License</h2>
+<p><a href="LICENSE">Apache-2.0</a></p>
+</div></body>
+</html>

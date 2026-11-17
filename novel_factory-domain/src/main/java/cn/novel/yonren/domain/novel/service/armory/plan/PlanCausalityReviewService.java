@@ -32,7 +32,7 @@ public class PlanCausalityReviewService {
     private static final ObjectMapper MAPPER = new ObjectMapper()
             .enable(DeserializationFeature.FAIL_ON_READING_DUP_TREE_KEY)
             .enable(DeserializationFeature.FAIL_ON_TRAILING_TOKENS);
-    private static final String REVIEW_VERSION = "scene-evidence-v2";
+    private static final String REVIEW_VERSION = "scene-evidence-v3-unverified-references";
     private static final Set<String> NON_EVIDENCE_FIELDS = Set.of("id", "sceneId", "chapterNo",
             "manuscriptHash", "knowledgeRefs", "milestoneRefs", "factId", "effectId", "referenceId",
             "characterId", "belief", "believes");
@@ -116,6 +116,10 @@ public class PlanCausalityReviewService {
         }
         String prompt = "你是计划因果核验员，不是创作者。只检查场景结果所依赖的必要前提，不给对白、冲突、代价或转折配额。"
                 + "\n历史事实优先于计划；人物信念可以错误，要求不等于答应，打算不等于完成。"
+                + "\n候选计划的 entryStates/constraints 只是待核验引用，不是已提交事实。"
+                + "缺少完整来源的引用（包括裸字符串兼容读取形成的描述）不得作为既成事实或已有能力的依据；六字段齐全也不等于来源核验通过。"
+                + "\n只有当结果所必需的前提缺乏已提交事实或合理的场景内行动支撑时才用UNKNOWN；"
+                + "不要仅因存在未核验引用就否定场景或增加证明配额。同场不同字段的内部矛盾仍可按现有规则判ISSUE。"
                 + "\nbelief/believes 与人物 BELIEF 记录不是世界事实，信念与真实情况不同本身不构成 ISSUE。"
                 + "\n历史中的 pending 字段尚未证实；阶段的目标、任务与里程碑是规划，不是已完成事实。"
                 + "\n核对人物已有知识是否被抹掉、设备能力是否无依据扩大、交易双方/支付/验证责任是否支持结果。"

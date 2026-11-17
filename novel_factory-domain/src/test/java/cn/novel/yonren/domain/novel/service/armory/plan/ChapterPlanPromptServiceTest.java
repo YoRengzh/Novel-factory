@@ -1,5 +1,7 @@
 package cn.novel.yonren.domain.novel.service.armory.plan;
 
+import cn.novel.yonren.domain.novel.adapter.repository.IStoryRepository;
+import cn.novel.yonren.domain.novel.model.entity.ChapterContentEntity;
 import cn.novel.yonren.domain.novel.model.entity.ChapterSummaryEntity;
 import cn.novel.yonren.domain.novel.model.entity.ForeshadowSettlementEntity;
 import cn.novel.yonren.domain.novel.model.entity.QualityDebtEntity;
@@ -7,12 +9,18 @@ import cn.novel.yonren.domain.novel.model.entity.ForeshadowScheduleEntity;
 import cn.novel.yonren.domain.novel.model.entity.StageBlueprintEntity;
 import cn.novel.yonren.domain.novel.model.entity.StoryContextEntity;
 import cn.novel.yonren.domain.novel.config.PromptBudgetProperties;
+import cn.novel.yonren.domain.novel.model.valobj.plan.FactReference;
+import cn.novel.yonren.domain.novel.model.valobj.work.ChapterManuscript;
 import cn.novel.yonren.domain.novel.service.armory.factory.DefaultArmoryFactory;
 import cn.novel.yonren.domain.novel.service.armory.memory.ChapterMemoryService;
+import cn.novel.yonren.domain.novel.service.armory.memory.ForeshadowPriorityService;
 import cn.novel.yonren.domain.novel.service.armory.memory.RollingOutlineService;
 import cn.novel.yonren.domain.novel.service.armory.memory.StoryMemoryService;
 import cn.novel.yonren.domain.novel.service.armory.prompt.PromptBudgetGuard;
 import cn.novel.yonren.types.enums.ChapterType;
+import com.fasterxml.jackson.databind.DeserializationFeature;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
@@ -20,7 +28,10 @@ import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.MockitoAnnotations;
 import org.mockito.Spy;
+import org.springframework.test.util.ReflectionTestUtils;
 
+import java.io.IOException;
+import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -30,6 +41,7 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -48,6 +60,9 @@ class ChapterPlanPromptServiceTest {
 
     @Mock
     private StoryMemoryService storyMemoryService;
+
+    @Mock
+    private IStoryRepository storyRepository;
 
     /** 预算属性：默认值下不裁剪（既有用例行为不变），逐用例可调 */
     private final PromptBudgetProperties budgetProperties = new PromptBudgetProperties();
@@ -82,6 +97,46 @@ class ChapterPlanPromptServiceTest {
         assertTrue(prompt.contains("chapterNo 从 3 开始连续递增"));
         assertTrue(prompt.contains("\"chapterNo\":3"));
         assertTrue(prompt.contains("这是续写批次"));
+    }
+
+    @Test
+    void buildPlanPrompt_suppliesCompleteReferencesFromAvailableEarlierManuscripts() throws Exception {
+        ReflectionTestUtils.setField(service, "chapterMemoryService",
+                new ChapterMemoryService(new ForeshadowPriorityService()));
+        Path storyDir = Path.of("test-story");
+        var chapter = ChapterContentEntity.builder().chapterNo(1).title("浅采")
+                .content("苏尘收起浅采牌。牌背刻着“只许在后山外围采药”。").build();
+        var reference = new FactReference("ITEM", 1, ChapterManuscript.of(chapter).hash(),
+                "浅采牌", "持有，仅限外围", "牌背刻着“只许在后山外围采药”");
+        var selectedSummary = ChapterSummaryEntity.builder().chapterNo(1).title(chapter.getTitle())
+                .summary("苏尘领到浅采牌。").manuscriptHash(reference.manuscriptHash())
+                .itemStates(List.of(new ChapterSummaryEntity.StateEntry(
+                        reference.subject(), reference.status(), reference.evidence()))).build();
+        var unreadable = ChapterSummaryEntity.builder().chapterNo(2).manuscriptHash("a".repeat(64))
+                .itemStates(List.of(new ChapterSummaryEntity.StateEntry("旧信", "封存", "原文"))).build();
+        var future = ChapterSummaryEntity.builder().chapterNo(3).manuscriptHash("b".repeat(64))
+                .itemStates(List.of(new ChapterSummaryEntity.StateEntry("钥匙", "取得", "原文"))).build();
+        when(storyRepository.readChapter(storyDir, 1)).thenReturn(chapter);
+        when(storyRepository.readChapter(storyDir, 2)).thenThrow(new IOException("来源不可读"));
+        var context = DefaultArmoryFactory.DynamicContext.builder().storyContext("苏尘继续采药。")
+                .chapterOffset(2).storyDir(storyDir).chapterSummaries(List.of(selectedSummary, unreadable, future))
+                .build();
+
+        String prompt = service.buildPlanPrompt(context);
+
+        assertTrue(prompt.contains("【前章剧情摘要】"));
+        String referencesJson = prompt.lines()
+                .dropWhile(line -> !line.startsWith("【可引用的正式事实】"))
+                .skip(1).findFirst().orElseThrow();
+        ObjectMapper mapper = new ObjectMapper();
+        assertEquals(mapper.valueToTree(List.of(reference)), mapper.readTree(referencesJson));
+        verify(storyRepository, never()).readChapter(storyDir, 3);
+
+        budgetProperties.setPlanPrefixChars(180);
+        String smallPrompt = service.buildPlanPrompt(context);
+        assertFalse(smallPrompt.contains("【可引用的正式事实】"));
+        assertFalse(smallPrompt.contains(reference.manuscriptHash()));
+        assertTrue(smallPrompt.contains("没有完整可核验来源时 entryStates=[]、constraints=[]"));
     }
 
     @Test
@@ -167,6 +222,78 @@ class ChapterPlanPromptServiceTest {
         assertFalse(prompt.contains("【禁止对称出场】"));
         assertFalse(prompt.contains("两次危机之间必须"));
         assertTrue(prompt.contains("多方冲突的出场顺序、信息差与时间差按情境决定"));
+    }
+
+    @Test
+    void buildPlanPrompt_spellsOutFactReferenceShape() throws Exception {
+        when(chapterMemoryService.buildMemoryBlocks(any(), any(), any(), any(), any(), any(), any(), any()))
+                .thenReturn(List.of(new PromptBudgetGuard.Block("近章摘要", 2, true, "【前情记忆标记】")));
+        DefaultArmoryFactory.DynamicContext ctx = DefaultArmoryFactory.DynamicContext.builder()
+                .storyContext("故事上下文")
+                .build();
+
+        String prompt = service.buildPlanPrompt(ctx);
+
+        assertTrue(prompt.contains("每个元素都必须是 FactReference 对象"));
+        assertTrue(prompt.contains("完整六字段 ledger/chapterNo/manuscriptHash/subject/status/evidence"));
+        assertTrue(prompt.contains("从本次输入提供的真实来源逐字段原样复制"));
+        assertTrue(prompt.contains("没有完整可核验来源时 entryStates=[]、constraints=[]"));
+        assertTrue(prompt.contains("禁止写成裸字符串"));
+        assertTrue(prompt.contains("禁止为凑字段编造章号、manuscriptHash、状态或正文引文"));
+        assertTrue(prompt.contains("拟发生的场景结果不能充当历史来源"));
+        assertTrue(prompt.contains("占位文字不是事实，不能作为引用"));
+        assertTrue(prompt.contains("chapterNo 实际应复制来源中的整数章号"));
+
+        // 单列形状是合法 JSON，占位值不可当作历史事实。
+        int shapeMarker = prompt.indexOf("【FactReference 元素形状】");
+        int schemaMarker = prompt.indexOf(ChapterPlanPromptService.PLAN_SCHEMA_MARKER);
+        assertTrue(shapeMarker >= 0 && shapeMarker < schemaMarker);
+        int shapeStart = prompt.indexOf("\n{", shapeMarker);
+        assertTrue(shapeStart > shapeMarker && shapeStart < schemaMarker);
+        JsonNode shape = new ObjectMapper().enable(DeserializationFeature.FAIL_ON_TRAILING_TOKENS)
+                .readTree(prompt.substring(shapeStart, schemaMarker).trim());
+        assertTrue(shape.isObject());
+        assertEquals(6, shape.size());
+        for (String field : List.of("ledger", "chapterNo", "manuscriptHash", "subject", "status", "evidence")) {
+            assertTrue(shape.has(field), field);
+            assertTrue(shape.get(field).isTextual(), "形状示例使用明确占位文字：" + field);
+            assertTrue(shape.get(field).asText().contains("来源"), field);
+        }
+    }
+
+    @Test
+    void buildPlanPrompt_jsonExampleKeepsHistoricalReferencesEmptyWithoutSources() throws Exception {
+        when(chapterMemoryService.buildMemoryBlocks(any(), any(), any(), any(), any(), any(), any(), any()))
+                .thenReturn(List.of());
+        ObjectMapper mapper = new ObjectMapper().enable(DeserializationFeature.FAIL_ON_TRAILING_TOKENS);
+        for (int offset : List.of(0, 6)) {
+            DefaultArmoryFactory.DynamicContext ctx = DefaultArmoryFactory.DynamicContext.builder()
+                    .storyContext("故事上下文")
+                    .chapterOffset(offset)
+                    .build();
+
+            String prompt = service.buildPlanPrompt(ctx);
+            String schemaPrefix = ChapterPlanPromptService.PLAN_SCHEMA_MARKER + ":";
+            int schemaMarker = prompt.indexOf(schemaPrefix);
+            assertTrue(schemaMarker >= 0);
+            JsonNode example = mapper.readTree(prompt.substring(schemaMarker + schemaPrefix.length()).trim());
+
+            assertTrue(example.isObject());
+            assertTrue(example.path("chapters").isArray());
+            assertEquals(1, example.path("chapters").size());
+            JsonNode chapter = example.path("chapters").get(0);
+            assertEquals(offset + 1, chapter.path("chapterNo").asInt());
+            assertEquals(2, chapter.path("schemaVersion").asInt());
+            assertTrue(chapter.path("scenes").isArray());
+            assertEquals(1, chapter.path("scenes").size());
+            for (JsonNode scene : chapter.path("scenes")) {
+                assertTrue(scene.path("entryStates").isArray());
+                assertTrue(scene.path("entryStates").isEmpty(), "无完整来源时不得示范历史事实");
+                JsonNode constraints = scene.path("causality").path("constraints");
+                assertTrue(constraints.isArray());
+                assertTrue(constraints.isEmpty(), "总体示例不得用占位来源填充 constraints");
+            }
+        }
     }
 
     @Test
