@@ -1,5 +1,6 @@
 package cn.novel.yonren.domain.novel.service.armory.plan;
 
+import cn.novel.yonren.domain.novel.adapter.repository.IStoryRepository;
 import cn.novel.yonren.domain.novel.model.entity.ChapterSummaryEntity;
 import cn.novel.yonren.domain.novel.model.entity.ForeshadowScheduleEntity;
 import cn.novel.yonren.domain.novel.model.entity.ForeshadowSettlementEntity;
@@ -54,6 +55,9 @@ public class ChapterPlanPromptService {
     @Resource
     private StoryMemoryService storyMemoryService;
 
+    @Resource
+    private IStoryRepository storyRepository;
+
     /** 输入段总量守门（故事设定 + 记忆前缀）：固定要求与 schema 段不参与裁剪 */
     @Resource
     private PromptBudgetGuard promptBudgetGuard;
@@ -69,6 +73,9 @@ public class ChapterPlanPromptService {
 
     /** 单段规划注入的限期回收条数上限：超出部分留在账本，下次阶段出口重新裁决（自愈，不丢线索） */
     private static final int SETTLEMENT_INJECTION_LIMIT = 12;
+
+    private static final int FACT_REFERENCE_LIMIT = 12;
+    private static final int FACT_REFERENCE_PRIORITY = 3;
 
     /** 低密度判定：有效字符低于该值视为"计划供给不足"（与全局 1500 参考线一致） */
     private static final int LOW_DENSITY_CHARS = 1500;
@@ -141,6 +148,13 @@ public class ChapterPlanPromptService {
         List<PromptBudgetGuard.Block> planBlocks = new ArrayList<>();
         planBlocks.add(new PromptBudgetGuard.Block("故事设定", 5, true, dynamicContext.getStoryContext()));
         planBlocks.addAll(memoryBlocks);
+        var factReferences = FactReferenceSource.select(dynamicContext.getChapterSummaries(), startNo,
+                storyRepository, dynamicContext.getStoryDir(), FACT_REFERENCE_LIMIT);
+        if (!factReferences.isEmpty()) {
+            // 引用必须逐字段复制，预算不足时整块省略，避免截断 JSON 或原文证据。
+            planBlocks.add(new PromptBudgetGuard.Block("可引用的正式事实", FACT_REFERENCE_PRIORITY, false,
+                    FactReferenceSource.render(factReferences)));
+        }
         sb.append(promptBudgetGuard.assemblePlanInput(startNo, planBlocks));
         sb.append(StoryAuthoringService.renderGuidance(planStoryContext, startNo,
                 endNo == null ? startNo : endNo));
@@ -315,6 +329,11 @@ public class ChapterPlanPromptService {
                 .append("steps（actor/action/responder/response/because/requires）、terms 与 constraints。")
                 .append("knowledgeRefs 仅引用上方人物 factId，belief 可以错误而不改变世界事实；")
                 .append("constraints 用真实 FactReference 描述物品/世界能力前提。")
+                .append("entryStates 与 constraints 的**每个元素都必须是 FactReference 对象**，")
+                .append("必须包含完整六字段 ledger/chapterNo/manuscriptHash/subject/status/evidence，元素形状见下方单列示例。")
+                .append("实际引用必须从本次输入提供的真实来源逐字段原样复制；没有完整可核验来源时 entryStates=[]、constraints=[]。")
+                .append("**禁止写成裸字符串**（如 [\"后山浅采牌只许外围\"]），")
+                .append("禁止为凑字段编造章号、manuscriptHash、状态或正文引文；拟发生的场景结果不能充当历史来源。")
                 .append("steps 只写决定性行动及回应，because 说明为什么改变决定，requires 引用依赖事实；")
                 .append("无必要因果说明时可省略，不填配额。")
                 .append("交易才用 terms：offerer/receiver/consideration/payment，以及实际相关的 verificationBy/deadline/onFailure；")
@@ -334,6 +353,12 @@ public class ChapterPlanPromptService {
                 .append("**时间是情节的背景，不是每章的任务**——一个下午能写完的章，就让它停在那天；")
                 .append("不要为了“推进时间”而插入过夜/赶路/季节更替等无信息过渡。")
                 .append("唯一的硬约束：不得与已确立的时间线矛盾（例如主角已上高中，就不能写“小学三年级”）。");
+        // 字段形状单列，不向总体示例填入虚构历史。
+        sb.append("\n\n【FactReference 元素形状】仅展示六字段形状，占位文字不是事实，不能作为引用；")
+                .append("chapterNo 实际应复制来源中的整数章号，其余字段照抄来源值。")
+                .append("\n{\"ledger\":\"来源中的 ledger\",\"chapterNo\":\"来源章号（实际为整数）\",")
+                .append("\"manuscriptHash\":\"来源中的 manuscriptHash\",\"subject\":\"来源中的 subject\",")
+                .append("\"status\":\"来源中的 status\",\"evidence\":\"来源中的正文原文\"}");
         sb.append("\n\n").append(PLAN_SCHEMA_MARKER).append(":")
                 .append("\n{\"chapters\":[{\"chapterNo\":").append(startNo)
                 .append(",\"schemaVersion\":2,\"title\":\"章节标题\",\"goal\":\"本章目标\",")

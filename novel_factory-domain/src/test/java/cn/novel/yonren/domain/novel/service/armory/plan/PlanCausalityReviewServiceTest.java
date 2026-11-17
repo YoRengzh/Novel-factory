@@ -179,6 +179,58 @@ class PlanCausalityReviewServiceTest {
     }
 
     @Test
+    void unverifiedCandidateReferencesStayVisibleAndUnknownRetainsModeSemantics() {
+        String raw = "{\"chapters\":[{\"chapterNo\":2,\"schemaVersion\":2,\"title\":\"核对设备\",\"goal\":\"核对\","
+                + "\"scenes\":[{\"id\":\"s1\",\"characters\":[\"江燃\"],\"intention\":\"核对设备\",\"function\":\"静场\","
+                + "\"outcome\":\"获得远程扫描结果\",\"entryStates\":[\"设备已具备远程能力\"],"
+                + "\"causality\":{\"constraints\":[\"通行牌允许进入禁地\"]}}]}]}";
+        ChapterPlanAggregate candidate = ChapterPlanChecks.parseLenient(raw);
+        assertNotNull(candidate);
+        String before = JSON.toJSONString(candidate);
+        properties.getCausality().setPlanMode(Mode.OFF);
+        assertTrue(service.check(config, candidate, null, List.of(), 2, 2, job, new HashMap<>()).acceptable());
+        verifyNoInteractions(gateway);
+
+        when(gateway.complete(any(), any())).thenReturn(response(
+                check("s1", "UNKNOWN", "", "", "缺少可核对的设备来源", "")));
+        for (Mode mode : List.of(Mode.ENFORCE, Mode.OBSERVE)) {
+            properties.getCausality().setPlanMode(mode);
+            PlanValidationResult result = service.check(config, candidate, null, List.of(), 2, 2, job, new HashMap<>());
+            if (mode == Mode.ENFORCE) {
+                blocked(result, "CAUSALITY_PLAN_UNKNOWN");
+            } else {
+                assertTrue(result.acceptable());
+                assertTrue(result.warnings().stream().anyMatch(value -> value.contains("CAUSALITY_PLAN_UNKNOWN")));
+            }
+        }
+        ArgumentCaptor<LlmCall> calls = ArgumentCaptor.forClass(LlmCall.class);
+        verify(gateway, times(2)).complete(same(config.getModule()), calls.capture());
+        for (LlmCall call : calls.getAllValues()) {
+            String prompt = call.getUserPrompt();
+            assertTrue(prompt.contains("【候选计划】\n" + before));
+            for (String rule : List.of("只是待核验引用，不是已提交事实", "裸字符串兼容读取形成的描述",
+                    "不得作为既成事实或已有能力的依据", "六字段齐全也不等于来源核验通过",
+                    "已提交事实或合理的场景内行动支撑", "不要仅因存在未核验引用就否定场景或增加证明配额",
+                    "同场不同字段的内部矛盾仍可按现有规则判ISSUE")) {
+                assertTrue(prompt.contains(rule), prompt);
+            }
+        }
+        assertEquals(before, JSON.toJSONString(candidate));
+    }
+
+    @Test
+    void quietSceneWithAnUnverifiedReferenceCanStillPass() {
+        properties.getCausality().setPlanMode(Mode.ENFORCE);
+        ScenePlan quiet = new ScenePlan("quiet", List.of("江燃"), "整理旧物", null,
+                List.of(FactReference.fromText("设备可能仍可使用")), null, "余韵", null, null, null);
+        when(gateway.complete(any(), any())).thenReturn(response(pass("quiet")));
+        var result = service.check(config, plan(quiet), null, List.of(), 2, 2, job, new HashMap<>());
+        assertTrue(result.acceptable());
+        assertTrue(result.warnings().isEmpty());
+        verify(gateway).complete(any(), any());
+    }
+
+    @Test
     void nullEmptyPartialOrDuplicateInputScenesFailLocallyWithoutGateway() {
         properties.getCausality().setPlanMode(Mode.ENFORCE);
         List<ChapterPlanAggregate> invalid = Arrays.asList(null, new ChapterPlanAggregate(),

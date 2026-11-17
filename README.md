@@ -16,7 +16,11 @@
 **技术栈**：Java 17 · Spring Boot 3.4.3 · Spring AI 1.0（OpenAI Chat Completions / Anthropic Messages / OpenAI Responses 三协议）· Maven 多模块 · 内置向量库（Qdrant 可选）· Electron 桌面壳 · 原生前端
 **规模**：6 个 Maven 模块 · 主代码 4.4 万行 / 测试 3.2 万行 · 134 个测试类 1,562 个用例
 
-![工作台](docs/images/workbench-create.jpeg)
+![工作台](docs/images/workbench-create.png)
+
+**▶ 演示视频**：
+
+![StartDrafts 演示](docs/videos/StartDrafts.mp4)
 
 ---
 
@@ -317,3 +321,7 @@ YoRengzh
 ## License
 
 [Apache-2.0](LICENSE)
+
+## Link
+
+[linux.do](https://linux.do)

@@ -5,6 +5,9 @@ import cn.novel.yonren.domain.novel.model.aggregate.ChapterPlanAggregate;
 import cn.novel.yonren.domain.novel.model.entity.ChapterPlanItemEntity;
 import cn.novel.yonren.domain.novel.model.entity.ChapterSummaryEntity;
 import cn.novel.yonren.domain.novel.model.entity.StageBlueprintEntity;
+import cn.novel.yonren.domain.novel.model.valobj.plan.FactReference;
+import com.alibaba.fastjson2.JSON;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import cn.novel.yonren.types.enums.ChapterType;
 import cn.novel.yonren.types.exception.AppException;
 import org.junit.jupiter.api.Test;
@@ -41,6 +44,104 @@ class ChapterPlanChecksTest {
         // 未知枚举读成 null，由 ParseChapterPlanNode 归一化为 NORMAL（此前会直接抛异常）
         assertNull(plan.getChapters().get(0).getChapterType());
         assertEquals("开局", plan.getChapters().get(0).getTitle());
+    }
+
+    @Test
+    void parseLenient_coercesStringFactReferencesInsteadOfFailingWholeBatch() {
+        // 实测故障形态（2026-11-16 job-61100633905700864）：模型把 constraints/entryStates 写成
+        // 裸字符串数组，FactReference 按对象读抛 MismatchedInputException，四级文本降级救不了
+        // （JSON 本身合法，只是类型不符），两次重试全败导致整批终止。
+        String raw = "{\"chapters\":[{\"chapterNo\":1,\"schemaVersion\":2,\"title\":\"后山裂窍\","
+                + "\"goal\":\"目标\",\"scenes\":[{"
+                + "\"id\":\"ch-1-scene-1\",\"characters\":[\"苏尘\"],\"intention\":\"意图\",\"resistance\":\"阻力\","
+                + "\"entryStates\":[\"造化道瞳初次开启只显药性一层\"],\"outcome\":\"结果\",\"function\":\"推进\","
+                + "\"milestoneRefs\":[],\"location\":\"后山\",\"time\":\"清晨\","
+                + "\"causality\":{\"actors\":[],\"steps\":[],"
+                + "\"constraints\":[\"后山浅采牌只许外围，不许进入禁地\"]}}]}]}";
+
+        ChapterPlanAggregate plan = ChapterPlanChecks.parseLenient(raw);
+
+        assertNotNull(plan, "裸字符串 constraints/entryStates 不得让整份计划解析失败");
+        var scene = plan.getChapters().get(0).getScenes().get(0);
+        var constraint = scene.causality().constraints().get(0);
+        assertEquals("后山浅采牌只许外围，不许进入禁地", constraint.subject());
+        assertEquals("后山浅采牌只许外围，不许进入禁地", constraint.evidence());
+        // 字符串未提供来源；这一适用性检查不等于已完成来源核验。
+        assertNull(constraint.ledger());
+        assertFalse(CharacterFactReferences.usableAsBasis(constraint, "CAPABILITY_CONFLICT"));
+        assertEquals("造化道瞳初次开启只显药性一层", scene.entryStates().get(0).evidence());
+    }
+
+    @Test
+    void parseLenient_keepsObjectFormFactReferences() {
+        String raw = "{\"chapters\":[{\"chapterNo\":1,\"title\":\"开局\",\"scenes\":[{"
+                + "\"id\":\"s1\",\"characters\":[\"苏尘\"],\"intention\":\"意图\",\"resistance\":\"阻力\","
+                + "\"entryStates\":[{\"ledger\":\"ITEM\",\"chapterNo\":1,\"subject\":\"聚气丹\","
+                + "\"status\":\"LEGACY/持有\",\"evidence\":\"苏尘收下三枚聚气丹\"}],"
+                + "\"outcome\":\"结果\",\"causality\":{\"constraints\":[]}}]}]}";
+
+        ChapterPlanAggregate plan = ChapterPlanChecks.parseLenient(raw);
+
+        assertNotNull(plan);
+        var fact = plan.getChapters().get(0).getScenes().get(0).entryStates().get(0);
+        assertEquals("ITEM", fact.ledger());
+        assertEquals("聚气丹", fact.subject());
+        assertEquals(1, fact.chapterNo());
+        assertEquals("LEGACY/持有", fact.status());
+        // 账本/状态允许参与该类核验，不证明引用已与来源绑定。
+        assertTrue(CharacterFactReferences.usableAsBasis(fact, "CAPABILITY_CONFLICT"));
+    }
+
+    @Test
+    void parseLenient_preservesMixedReferencesAndRoundTripsWithoutInventingSources() throws Exception {
+        ObjectMapper mapper = new ObjectMapper();
+        FactReference complete = new FactReference("ITEM", 7, "a".repeat(64), "聚气丹", "持有", "收下三枚聚气丹");
+        String references = "[" + mapper.writeValueAsString(complete) + ",\"  通行牌只许外围  \",\" \",null]";
+        ChapterPlanAggregate plan = ChapterPlanChecks.parseLenient(referencePlan(references));
+        assertNotNull(plan);
+        var scene = plan.getChapters().get(0).getScenes().get(0);
+        for (var facts : List.of(scene.entryStates(), scene.causality().constraints())) {
+            assertEquals(4, facts.size());
+            assertEquals(complete, facts.get(0));
+            assertEquals(new FactReference(null, null, null, "通行牌只许外围", null, "通行牌只许外围"), facts.get(1));
+            assertNull(facts.get(2));
+            assertNull(facts.get(3));
+        }
+        String serialized = mapper.writeValueAsString(plan);
+        assertEquals(plan, mapper.readValue(serialized, ChapterPlanAggregate.class));
+        assertEquals(plan, ChapterPlanChecks.parseLenient(serialized));
+        assertEquals(plan, JSON.parseObject(JSON.toJSONString(plan), ChapterPlanAggregate.class));
+        assertTrue(serialized.contains("\"ledger\":null"));
+    }
+
+    @Test
+    void parseLenient_doesNotFillMissingObjectFieldsOrNormalizeSourceChapter() {
+        String references = "[{\"subject\":\"旧信\"},{\"evidence\":\"原文\"},"
+                + "{\"chapterNo\":0},{\"chapterNo\":-1},{\"chapterNo\":\"7\"}]";
+        var plan = ChapterPlanChecks.parseLenient(referencePlan(references));
+        assertNotNull(plan);
+        var scene = plan.getChapters().get(0).getScenes().get(0);
+        for (var facts : List.of(scene.entryStates(), scene.causality().constraints())) {
+            assertEquals(new FactReference(null, null, null, "旧信", null, null), facts.get(0));
+            assertEquals(new FactReference(null, null, null, null, null, "原文"), facts.get(1));
+            assertEquals(0, facts.get(2).chapterNo());
+            assertEquals(-1, facts.get(3).chapterNo());
+            assertEquals(7, facts.get(4).chapterNo());
+        }
+    }
+
+    @Test
+    void parseLenient_rejectsInvalidObjectFieldsInsteadOfSilentlyChangingThem() {
+        for (String invalid : List.of("{\"chapterNo\":4294967297}", "{\"chapterNo\":\"oops\"}",
+                "{\"subject\":{\"name\":\"旧信\"}}", "{\"evidence\":[\"原文\"]}")) {
+            assertNull(ChapterPlanChecks.parseLenient(referencePlan("[" + invalid + "]")), invalid);
+        }
+    }
+
+    private static String referencePlan(String references) {
+        return "{\"chapters\":[{\"chapterNo\":1,\"schemaVersion\":2,\"title\":\"核对\",\"goal\":\"核对引用\","
+                + "\"scenes\":[{\"id\":\"s1\",\"characters\":[\"江燃\"],\"intention\":\"核对\",\"function\":\"静场\","
+                + "\"entryStates\":" + references + ",\"causality\":{\"constraints\":" + references + "}}]}]}";
     }
 
     @Test

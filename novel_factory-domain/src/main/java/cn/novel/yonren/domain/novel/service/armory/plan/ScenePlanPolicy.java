@@ -137,13 +137,15 @@ public final class ScenePlanPolicy {
                     .append("\n场景功能(function)：").append(text(scene.function()))
                     .append("\n地点(location)：").append(text(scene.location()))
                     .append("\n时间(time)：").append(text(scene.time()))
-                    .append("\n已有事实引用(entryStates，入场状态，不是本场新结果)：");
+                    .append("\n入场前提引用(entryStates，待核验，不是本场新结果)：");
             if (scene.entryStates().isEmpty()) {
                 sb.append("[]");
             }
-            for (FactReference fact : scene.entryStates()) {
+            for (int i = 0; i < scene.entryStates().size(); i++) {
+                FactReference fact = scene.entryStates().get(i);
+                sb.append("\n  entryStates[").append(i).append("]：").append(sourceStatus(fact));
                 if (fact == null) {
-                    sb.append("\n  （空引用）");
+                    sb.append("（空引用）");
                     continue;
                 }
                 sb.append("\n  {ledger=").append(text(fact.ledger()))
@@ -162,11 +164,30 @@ public final class ScenePlanPolicy {
                         .append("不等于人物已知或正文事实，不得放入 knowledgeRefs/requires；")
                         .append("choice 仅为选择语境，已选行动见 action、理由见 because；")
                         .append("冲突、放弃项、代价与关系影响均按实际适用，不要求补齐；")
-                        .append("constraints 是待核验的真实事实引用，非本场新结果)：\n")
+                        .append("constraints 是待核验约束引用，非本场新结果)：\n")
                         .append(JSON.toJSONString(scene.causality())).append("\n");
+                List<FactReference> constraints = scene.causality().constraints();
+                if (constraints != null) {
+                    for (int i = 0; i < constraints.size(); i++) {
+                        sb.append("  causality.constraints[").append(i).append("]：")
+                                .append(sourceStatus(constraints.get(i))).append("\n");
+                    }
+                }
             }
         }
         return sb.toString();
+    }
+
+    /** 只检查来源形状；字段齐全不证明已与正文或账本核对。 */
+    private static String sourceStatus(FactReference fact) {
+        if (fact != null && StringUtils.isNotBlank(fact.ledger())
+                && fact.chapterNo() != null && fact.chapterNo() > 0
+                && fact.manuscriptHash() != null && fact.manuscriptHash().matches("[0-9a-fA-F]{64}")
+                && StringUtils.isNotBlank(fact.subject()) && StringUtils.isNotBlank(fact.status())
+                && StringUtils.isNotBlank(fact.evidence())) {
+            return "来源字段齐全，仍须与可信来源核对；字段齐全不等于已核验。";
+        }
+        return "来源缺失或不完整：未核验描述，不得仅凭此条认定既成事实或已具备能力。";
     }
 
     private static String text(String value) {
