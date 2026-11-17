@@ -519,7 +519,7 @@ public class ChapterMemoryService {
         // 上一章结尾原文（衔接文风与悬念语气）——明确标注为禁止重复，防止LLM原样复述
         StringBuilder tail = new StringBuilder();
         if (StringUtils.isNotBlank(prevChapterTail)) {
-            tail.append("【上一章结尾原文·禁止重复】以下内容仅用于衔接参考，严禁在本章正文中原样复述或大段重复（与上文文字重复不得超过30字）。本章必须从上文结束的时间点之后继续推进，写后续结果/反应/下一句对话，不得重复上文已写的动作/场景/对话：\n")
+            tail.append("【上一章结尾原文·禁止重复】以下内容用于核对事实、当前悬念与语气，不要求复用其章首格式或物品描写方式，严禁在本章正文中原样复述或大段重复（与上文文字重复不得超过30字）。从上文结束处直接承接后续结果/反应/下一句对话，允许原地续写，不专门交代时间；不得重复上文已写的动作/场景/对话：\n")
                     .append(prevChapterTail.trim()).append("\n");
         }
         blocks.add(section("上章结尾", MEMORY_PRIORITY_DIRECTION, true, tail));

@@ -42,6 +42,15 @@ class ReferenceUsagePolicyTest {
     }
 
     @Test
+    void fantasyExemplarDoesNotFollowEveryChapterByDefault() {
+        PromptContext resourceExchange = PromptContext.builder().theme("玄幻修仙")
+                .chapterBrief("沈砚领取例钱，检查灵石并争取更换巡山灯材料。").build();
+
+        assertFalse(policy.allowsFixed("references/genres/fantasy/exemplars.md", PromptScene.CHAPTER_CONTENT, fantasy));
+        assertTrue(policy.allowsFixed("references/genres/fantasy/exemplars.md", PromptScene.CHAPTER_CONTENT, resourceExchange));
+    }
+
+    @Test
     void unknownAssetsAndNullSceneAreDenied() {
         assertFalse(policy.allowsDocument(null, PromptScene.SETTING_DRAFT, fantasy));
         assertFalse(policy.allowsDocument("unregistered-new-doc", PromptScene.CHAPTER_CONTENT, fantasy));
@@ -82,13 +91,15 @@ class ReferenceUsagePolicyTest {
         for (PromptScene scene : PromptScene.values()) {
             boolean expression = Set.of(PromptScene.CHAPTER_CONTENT, PromptScene.CHAPTER_REVISE,
                     PromptScene.CHAPTER_AUDIT).contains(scene);
-            assertEquals(expression, policy.allowsFixed("references/genres/fantasy/exemplars.md", scene, fantasy));
+            assertFalse(policy.allowsFixed("references/genres/fantasy/exemplars.md", scene, fantasy),
+                    "缺少匹配的本章任务时，不注入物品细节范例");
             assertTrue(policy.allowsFixed("styles/fantasy.md", scene, fantasy));
         }
         assertFalse(policy.allowsFixed("references/genres/fantasy/arc-templates.md", PromptScene.SETTING_DRAFT, fantasy));
         assertTrue(policy.allowsFixed("references/genres/fantasy/arc-templates.md", PromptScene.VOLUME_BLUEPRINT, fantasy));
         assertTrue(policy.allowsFixed("assets/styles/fantasy.md", PromptScene.SETTING_DRAFT, fantasy));
-        assertTrue(policy.allowsRule("genre-exemplar-fantasy", PromptScene.CHAPTER_CONTENT, fantasy));
+        assertTrue(policy.allowsRule("genre-exemplar-fantasy", PromptScene.CHAPTER_CONTENT,
+                PromptContext.builder().theme("玄幻修仙").chapterBrief("领取例钱并检查灵石").build()));
         assertFalse(policy.allowsRule("genre-exemplar-fantasy", PromptScene.SETTING_DRAFT, fantasy));
     }
 

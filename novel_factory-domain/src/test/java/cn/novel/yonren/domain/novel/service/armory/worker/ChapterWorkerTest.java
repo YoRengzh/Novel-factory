@@ -257,6 +257,37 @@ class ChapterWorkerTest {
     }
 
     @Test
+    void buildChapterPrompt_doesNotTurnContinuityMetadataIntoMandatoryOpeningTime() {
+        ChapterPlanItemEntity item = ChapterPlanItemEntity.builder()
+                .chapterNo(3).title("第三章").goal("赴约")
+                .characters(List.of("沈砚")).keyEvents(List.of("到后山门")).endingHook("见面").build();
+        var contract = cn.novel.yonren.domain.novel.model.valobj.contract.ChapterContract.of(item, null);
+
+        String prompt = chapterWorker.buildChapterPrompt("【全局设定】", item, null, 3, contract);
+
+        assertTrue(prompt.contains("允许仍在同一时间点、地点和场景，不必专门交代时间"));
+        assertTrue(prompt.contains("时间用于核对连续性，不是章首报时要求"));
+        assertTrue(prompt.contains("时间跳跃影响理解或具体时间承担赴约、倒计时等剧情作用时明确写出"));
+        assertTrue(prompt.contains("不要求复用其章首格式或物品描写方式"));
+        assertFalse(prompt.contains("本章第一段必须从上一章结束的时间点之后继续推进"));
+    }
+
+    @Test
+    void buildChapterPrompt_selectsObjectDetailsByObservationAndChange() {
+        ChapterPlanItemEntity item = ChapterPlanItemEntity.builder()
+                .chapterNo(2).title("第二章").goal("领取物资")
+                .characters(List.of("沈砚")).keyEvents(List.of("领取丹药")).endingHook("回屋").build();
+        var contract = cn.novel.yonren.domain.novel.model.valobj.contract.ChapterContract.of(item, null);
+
+        String prompt = chapterWorker.buildChapterPrompt("【全局设定】", item, null, 2, contract);
+
+        assertTrue(prompt.contains("物品出现不等于需要外观特写"));
+        assertTrue(prompt.contains("当前人物有理由注意"));
+        assertTrue(prompt.contains("已出现且没有变化的物品再次出现时直接称名"));
+        assertTrue(prompt.contains("状态、人物感受或意义变化才重新展开"));
+    }
+
+    @Test
     void buildChapterPrompt_registerGuidanceIsGenreAware() {
         ChapterPlanItemEntity item = ChapterPlanItemEntity.builder()
                 .chapterNo(1).title("开端").goal("目标")

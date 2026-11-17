@@ -326,6 +326,9 @@ class ChapterMemoryServiceTest {
         // 上一章结尾原文
         assertTrue(prefix.contains("上一章结尾原文"));
         assertTrue(prefix.contains("夜色深沉，小陈握紧了古物。"));
+        assertTrue(prefix.contains("允许原地续写，不专门交代时间"));
+        assertTrue(prefix.contains("不要求复用其章首格式或物品描写方式"));
+        assertFalse(prefix.contains("本章必须从上文结束的时间点之后继续推进"));
     }
 
     @Test

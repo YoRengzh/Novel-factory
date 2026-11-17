@@ -230,7 +230,7 @@ class ScenePlanPolicyTest {
 
     @Test
     void absentCausalityKeepsQuietRenderWithoutInventingReferences() {
-        String expected = "\n\n【权威场景契约】场景最终结果以 outcome/function 为准。\n"
+        String expected = "\n\n【权威场景契约】场景最终结果以 outcome/function 为准。location/time 是连续性元数据，用于核对场景状态，不要求在首句或第一段显式写出。\n"
                 + "场景 1｜id：archive\n人物：[江燃]\n意图(intention)：独自整理旧信\n阻力(resistance)："
                 + "\n最终结果(outcome)：\n场景功能(function)：消化\n地点(location)：书房\n时间(time)：当晚"
                 + "\n入场前提引用(entryStates，待核验，不是本场新结果)：[]"

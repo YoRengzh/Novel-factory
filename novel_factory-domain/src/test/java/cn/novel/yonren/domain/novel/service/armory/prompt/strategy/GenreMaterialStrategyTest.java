@@ -54,6 +54,21 @@ class GenreMaterialStrategyTest {
     }
 
     @Test
+    void fantasyExemplarRequiresMatchingChapterTask() {
+        when(fileLoader.load("references/genres/fantasy/exemplars.md")).thenReturn("正文范例");
+        strategy.setUsagePolicy(new cn.novel.yonren.domain.novel.service.armory.prompt.reference.ReferenceUsagePolicy());
+
+        PromptContext ordinary = PromptContext.builder().theme("玄幻修仙")
+                .chapterBrief("沈砚领取两块竹牌，随后回屋整理床铺。").build();
+        PromptContext resourceExchange = PromptContext.builder().theme("玄幻修仙")
+                .chapterBrief("沈砚领取例钱，检查灵石并争取更换巡山灯材料。").build();
+
+        assertTrue(strategy.load(PromptScene.CHAPTER_CONTENT, ordinary).isEmpty());
+        assertEquals(List.of("genre-exemplar-fantasy"),
+                names(strategy.load(PromptScene.CHAPTER_CONTENT, resourceExchange)));
+    }
+
+    @Test
     void defaultGenreOnlyFallsBackToDefaultStyle() {
         when(fileLoader.load("styles/default.md")).thenReturn("默认风格内容");
 

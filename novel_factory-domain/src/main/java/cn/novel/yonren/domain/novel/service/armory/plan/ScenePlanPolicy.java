@@ -122,7 +122,7 @@ public final class ScenePlanPolicy {
         if (scenes == null || scenes.isEmpty()) {
             return "";
         }
-        StringBuilder sb = new StringBuilder("\n\n【权威场景契约】场景最终结果以 outcome/function 为准。\n");
+        StringBuilder sb = new StringBuilder("\n\n【权威场景契约】场景最终结果以 outcome/function 为准。location/time 是连续性元数据，用于核对场景状态，不要求在首句或第一段显式写出。\n");
         int index = 1;
         for (ScenePlan scene : scenes) {
             if (scene == null) {

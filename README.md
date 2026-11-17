@@ -20,7 +20,7 @@
 
 **▶ 演示视频**：
 
-![StartDrafts 演示](docs/videos/StartDrafts.mp4)
+https://github.com/user-attachments/assets/8c5edc42-3cf6-4836-8fc8-cb7956bca60f
 
 ---
 
