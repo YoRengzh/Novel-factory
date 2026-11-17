@@ -205,6 +205,25 @@ public class StoryManageController {
         }
     }
 
+    /**
+     * 显式重建某一章的记忆（重跑摘要 + 重建向量索引）。
+     *
+     * <p>保存默认只落盘，不重建记忆；这是让记忆跟上正文的唯一入口。
+     * 与保存共用同一把作业互斥，冲突返回 409。
+     */
+    @PostMapping("/{storyDirName}/chapters/{chapterNo}/rebuild-memory")
+    public ChapterSaveResponseDTO rebuildChapterMemory(@PathVariable("storyDirName") String storyDirName,
+                                                       @PathVariable("chapterNo") int chapterNo) {
+        try {
+            return storyManageService.rebuildChapterMemory(storyDirName, chapterNo);
+        } catch (AppException e) {
+            throw new ResponseStatusException(statusOf(e), e.getInfo());
+        } catch (Exception e) {
+            log.error("记忆重建失败：{} 第{}章", storyDirName, chapterNo, e);
+            throw new ResponseStatusException(HttpStatus.INTERNAL_SERVER_ERROR, "记忆重建失败：" + e.getMessage());
+        }
+    }
+
     /** 段落级文本编辑：选中一段正文，让 AI 只改这一段（润色 / 扩写 / 续写），不落盘 */
     @PostMapping("/{storyDirName}/chapters/{chapterNo}/segment-edit")
     public SegmentEditResponseDTO segmentEdit(

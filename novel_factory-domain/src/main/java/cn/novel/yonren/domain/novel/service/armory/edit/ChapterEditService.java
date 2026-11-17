@@ -98,32 +98,21 @@ public class ChapterEditService {
                 return new ReflowResult(false, false,
                         "章节号 " + chapterNo + " 越界（共 " + summaries.size() + " 章）");
             }
-            // 与保存路径同口径：非空即可回流。1500 字是生成质量线，
-            // 人工编辑保存后不该再被它拦一次（否则正文已落盘、摘要却永远不更新）
+            // 与保存路径同口径：非空即可回流。1500 字是生成质量线，人工保存后不该再被它拦一次。
             if (!ChapterLengthPolicy.meetsEditMinimum(newContent)) {
                 return new ReflowResult(false, false, "正文为空，跳过回流");
             }
 
-            ChapterPlanItemEntity item = storyRepository.readChapterPlanItem(storyDir, chapterNo);
-            if (item == null) {
-                item = ChapterPlanItemEntity.builder().chapterNo(chapterNo).title("第" + chapterNo + "章").build();
-            }
-
             StoryVO storyVO = storyProperties.toStoryVO();
-
-            String ledgerPrompt = chapterMemoryService.renderLedgerPrompt(summaries);
-            // 带 ID 前缀版：与生成主链路同口径，编辑回流后回收登记也能回抄 [F章号-序号]
-            List<String> foreshadowing = chapterMemoryService.buildForeshadowContextListWithIds(
-                    summaries, ChapterMemoryService.FORESHADOW_CONTEXT_LIMIT);
-
-            ChapterSummaryEntity newSummary = chapterSummaryService.summarize(
-                    storyVO, item, newContent, chapterNo, ledgerPrompt, foreshadowing);
+            // 重建中间章只能参考它之前的历史；完整摘要列表会把后续章的状态倒灌进本章。
+            List<ChapterSummaryEntity> history = new ArrayList<>(summaries.subList(0, chapterNo - 1));
+            ChapterSummaryEntity newSummary = summarizeEdit(storyDir, chapterNo, newContent, storyVO, history);
 
             var chapter = storyRepository.readChapter(storyDir, chapterNo);
             if (chapter != null) {
                 var manuscript = ChapterManuscript.of(chapter);
                 newSummary.setManuscriptHash(manuscript.hash());
-                CharacterStateProjector.bind(newSummary, manuscript, summaries);
+                CharacterStateProjector.bind(newSummary, manuscript, history);
             }
             summaries.set(chapterNo - 1, newSummary);
             storyRepository.writeChapterSummaries(storyDir, summaries);

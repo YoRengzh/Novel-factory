@@ -24,6 +24,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import org.mockito.InjectMocks;
+import org.mockito.InOrder;
 import org.mockito.Mock;
 import org.mockito.MockitoAnnotations;
 
@@ -40,6 +41,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -224,8 +226,43 @@ class StoryManageServiceTest {
         assertEquals(cn.novel.yonren.types.enums.ResponseCode.ILLEGAL_PARAMETER.getCode(), e.getCode());
     }
 
+    /** 保存默认只落盘：改文风不改情节事实，重算摘要是整章级模型调用，不该随保存自动触发 */
     @Test
-    void saveChapter_success_writesAndReflows() throws Exception {
+    void saveChapter_defaultOnlyPersists_noReflow() throws Exception {
+        when(storyRepository.resolveStoryDirectory(DIR)).thenReturn(STORY_DIR);
+        when(jobRegistry.tryBeginStoryOperation(DIR)).thenReturn(true);
+        String content = "正".repeat(1500);
+
+        ChapterSaveRequestDTO request = new ChapterSaveRequestDTO();
+        request.setContent(content);
+
+        ChapterSaveResponseDTO dto = service.saveChapter(DIR, 1, request);
+
+        assertTrue(dto.isSaved());
+        assertFalse(dto.isSummaryUpdated(), "默认不重建记忆");
+        verify(storyRepository).saveHumanEdit(eq(STORY_DIR), any(), any());
+        verify(chapterEditService, never()).reflow(any(), anyInt(), any());
+    }
+
+    /** 保存不再写待回流标记：改文风不该让下次续写前从本章一路重算到末章 */
+    @Test
+    void saveChapter_doesNotWritePendingReflowMarker() throws Exception {
+        when(storyRepository.resolveStoryDirectory(DIR)).thenReturn(STORY_DIR);
+        when(jobRegistry.tryBeginStoryOperation(DIR)).thenReturn(true);
+
+        ChapterSaveRequestDTO request = new ChapterSaveRequestDTO();
+        request.setContent("正".repeat(1500));
+        service.saveChapter(DIR, 1, request);
+
+        ArgumentCaptor<cn.novel.yonren.domain.novel.adapter.repository.IStoryRepository.PendingChapterEdit> captor =
+                ArgumentCaptor.forClass(cn.novel.yonren.domain.novel.adapter.repository.IStoryRepository.PendingChapterEdit.class);
+        verify(storyRepository).saveHumanEdit(eq(STORY_DIR), any(), captor.capture());
+        assertNull(captor.getValue(), "保存不承诺摘要稍后跟上，不留下待办");
+    }
+
+    /** 显式要求时仍可保存即重建（留给脚本/调试或确实改了大段情节的调用方） */
+    @Test
+    void saveChapter_explicitReflow_callsReflow() throws Exception {
         when(storyRepository.resolveStoryDirectory(DIR)).thenReturn(STORY_DIR);
         when(jobRegistry.tryBeginStoryOperation(DIR)).thenReturn(true);
         String content = "正".repeat(1500);
@@ -234,13 +271,38 @@ class StoryManageServiceTest {
 
         ChapterSaveRequestDTO request = new ChapterSaveRequestDTO();
         request.setContent(content);
+        request.setReflow(true);
 
         ChapterSaveResponseDTO dto = service.saveChapter(DIR, 1, request);
 
         assertTrue(dto.isSaved());
         assertTrue(dto.isSummaryUpdated());
-        verify(storyRepository).saveHumanEdit(eq(STORY_DIR), any(), any());
-        verify(chapterEditService).reflow(STORY_DIR, 1, content);
+        ArgumentCaptor<IStoryRepository.PendingChapterEdit> pending =
+                ArgumentCaptor.forClass(IStoryRepository.PendingChapterEdit.class);
+        InOrder order = inOrder(storyRepository, chapterEditService);
+        order.verify(storyRepository).saveHumanEdit(eq(STORY_DIR), any(), pending.capture());
+        order.verify(chapterEditService).reflow(STORY_DIR, 1, content);
+        assertEquals(1, pending.getValue().fromChapter(), "待办必须先与正文落盘，失败才能补算");
+        assertFalse(pending.getValue().summariesReady());
+    }
+
+    @Test
+    void saveChapter_explicitReflowFailure_keepsSavedResponse() throws Exception {
+        when(storyRepository.resolveStoryDirectory(DIR)).thenReturn(STORY_DIR);
+        when(jobRegistry.tryBeginStoryOperation(DIR)).thenReturn(true);
+        when(chapterEditService.reflow(eq(STORY_DIR), eq(1), any()))
+                .thenReturn(new ChapterEditService.ReflowResult(false, false, "回流失败：模型不可用"));
+        ChapterSaveRequestDTO request = new ChapterSaveRequestDTO();
+        request.setContent("大幅修改后的正文");
+        request.setReflow(true);
+
+        ChapterSaveResponseDTO dto = service.saveChapter(DIR, 1, request);
+
+        assertTrue(dto.isSaved(), "模型失败不回滚正文");
+        assertFalse(dto.isSummaryUpdated());
+        assertTrue(dto.getWarning().contains("模型不可用"));
+        verify(storyRepository).saveHumanEdit(eq(STORY_DIR), any(),
+                eq(new IStoryRepository.PendingChapterEdit(1, false)));
     }
 
     @Test
@@ -311,7 +373,7 @@ class StoryManageServiceTest {
         verify(storyRepository).saveHumanEdit(eq(STORY_DIR), any(), any());
     }
 
-    /** reflow=false 时跳过回流：段落级润色/扩写不改事实，重算摘要是纯浪费（实测几分钟） */
+    /** reflow=false 与缺省等价：都只落盘，摘要不更新（默认语义已翻转） */
     @Test
     void saveChapter_reflowFalse_skipsReflow() throws Exception {
         when(storyRepository.resolveStoryDirectory(DIR)).thenReturn(STORY_DIR);
@@ -330,6 +392,90 @@ class StoryManageServiceTest {
         assertTrue(dto.isSaved());
         assertFalse(dto.isSummaryUpdated(), "跳过回流时摘要不更新");
         verify(chapterEditService, never()).reflow(any(), anyInt(), any());
+    }
+
+    @Test
+    void rebuildChapterMemory_reflowsFromDiskContent() throws Exception {
+        when(storyRepository.resolveStoryDirectory(DIR)).thenReturn(STORY_DIR);
+        when(jobRegistry.tryBeginStoryOperation(DIR)).thenReturn(true);
+        ChapterContentEntity stored = new ChapterContentEntity();
+        stored.setChapterNo(1);
+        stored.setTitle("原标题");
+        stored.setContent("落盘正文");
+        when(storyRepository.readChapter(STORY_DIR, 1)).thenReturn(stored);
+        when(chapterEditService.reflow(STORY_DIR, 1, "落盘正文"))
+                .thenReturn(new ChapterEditService.ReflowResult(true, false, null));
+
+        ChapterSaveResponseDTO dto = service.rebuildChapterMemory(DIR, 1);
+
+        assertTrue(dto.isSaved());
+        assertTrue(dto.isSummaryUpdated());
+        verify(chapterEditService).reflow(STORY_DIR, 1, "落盘正文");
+        InOrder order = inOrder(storyRepository, chapterEditService);
+        order.verify(storyRepository).writePendingChapterEdit(STORY_DIR,
+                new IStoryRepository.PendingChapterEdit(1, false));
+        order.verify(chapterEditService).reflow(STORY_DIR, 1, "落盘正文");
+        verify(jobRegistry).endStoryOperation(DIR);
+    }
+
+    @Test
+    void rebuildChapterMemory_preservesEarlierPendingRange() throws Exception {
+        when(storyRepository.resolveStoryDirectory(DIR)).thenReturn(STORY_DIR);
+        when(jobRegistry.tryBeginStoryOperation(DIR)).thenReturn(true);
+        ChapterContentEntity stored = new ChapterContentEntity();
+        stored.setChapterNo(3);
+        stored.setContent("落盘正文");
+        when(storyRepository.readChapter(STORY_DIR, 3)).thenReturn(stored);
+        when(storyRepository.readPendingChapterEdit(STORY_DIR))
+                .thenReturn(new IStoryRepository.PendingChapterEdit(1, false));
+        when(chapterEditService.reflow(STORY_DIR, 3, "落盘正文"))
+                .thenReturn(new ChapterEditService.ReflowResult(false, false, "模型失败"));
+
+        ChapterSaveResponseDTO dto = service.rebuildChapterMemory(DIR, 3);
+
+        assertTrue(dto.isSaved());
+        assertFalse(dto.isSummaryUpdated());
+        verify(storyRepository).writePendingChapterEdit(STORY_DIR,
+                new IStoryRepository.PendingChapterEdit(1, false));
+        verify(jobRegistry).endStoryOperation(DIR);
+    }
+
+    @Test
+    void rebuildChapterMemory_failureLeavesPendingMarker() throws Exception {
+        when(storyRepository.resolveStoryDirectory(DIR)).thenReturn(STORY_DIR);
+        when(jobRegistry.tryBeginStoryOperation(DIR)).thenReturn(true);
+        ChapterContentEntity stored = new ChapterContentEntity();
+        stored.setChapterNo(1);
+        stored.setContent("落盘正文");
+        when(storyRepository.readChapter(STORY_DIR, 1)).thenReturn(stored);
+        when(chapterEditService.reflow(STORY_DIR, 1, "落盘正文"))
+                .thenReturn(new ChapterEditService.ReflowResult(false, false, "模型失败"));
+
+        service.rebuildChapterMemory(DIR, 1);
+
+        verify(storyRepository, never()).writePendingChapterEdit(STORY_DIR, null);
+    }
+
+    @Test
+    void rebuildChapterMemory_missingChapter_throwsNotFound() throws Exception {
+        when(storyRepository.resolveStoryDirectory(DIR)).thenReturn(STORY_DIR);
+        when(jobRegistry.tryBeginStoryOperation(DIR)).thenReturn(true);
+        when(storyRepository.readChapter(STORY_DIR, 3)).thenReturn(null);
+
+        AppException e = assertThrows(AppException.class, () -> service.rebuildChapterMemory(DIR, 3));
+
+        assertEquals(cn.novel.yonren.types.enums.ResponseCode.CHAPTER_NOT_FOUND.getCode(), e.getCode());
+        verify(chapterEditService, never()).reflow(any(), anyInt(), any());
+        verify(jobRegistry).endStoryOperation(DIR);
+    }
+
+    @Test
+    void rebuildChapterMemory_activeJob_throwsConflict() {
+        when(jobRegistry.tryBeginStoryOperation(DIR)).thenReturn(false);
+
+        AppException e = assertThrows(AppException.class, () -> service.rebuildChapterMemory(DIR, 1));
+
+        assertEquals(cn.novel.yonren.types.enums.ResponseCode.ACTIVE_JOB_CONFLICT.getCode(), e.getCode());
     }
 
     @Test

@@ -11,6 +11,7 @@ import cn.novel.yonren.domain.novel.service.armory.memory.StoryMemoryService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import org.mockito.ArgumentCaptor;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.MockitoAnnotations;
@@ -77,7 +78,7 @@ class ChapterEditServiceTest {
         ChapterSummaryEntity newSummary = ChapterSummaryEntity.builder()
                 .chapterNo(1).title("新标题").summary("新摘要").build();
         String content = "新".repeat(1500);
-        when(chapterSummaryService.summarize(any(), any(), eq(content), eq(1), eq("角色：小唐。"), eq(List.of())))
+        when(chapterSummaryService.summarize(any(), any(), eq(content), eq(1), eq("角色：小唐。"), eq(List.of()), anyList()))
                 .thenReturn(newSummary);
 
         ChapterEditService.ReflowResult result = service.reflow(storyDir, 1, content);
@@ -100,7 +101,7 @@ class ChapterEditServiceTest {
         when(storyRepository.readPendingChapterEdit(storyDir))
                 .thenReturn(new IStoryRepository.PendingChapterEdit(1, false));
         String content = "新".repeat(1500);
-        when(chapterSummaryService.summarize(any(), any(), eq(content), eq(1), eq("账本"), anyList()))
+        when(chapterSummaryService.summarize(any(), any(), eq(content), eq(1), eq("账本"), anyList(), anyList()))
                 .thenReturn(ChapterSummaryEntity.builder().chapterNo(1).summary("新摘要").build());
 
         service.reflow(storyDir, 1, content);
@@ -121,12 +122,52 @@ class ChapterEditServiceTest {
         when(storyRepository.readPendingChapterEdit(storyDir))
                 .thenReturn(new IStoryRepository.PendingChapterEdit(1, false));
         String content = "新".repeat(1500);
-        when(chapterSummaryService.summarize(any(), any(), eq(content), eq(2), eq("账本"), anyList()))
+        when(chapterSummaryService.summarize(any(), any(), eq(content), eq(2), eq("账本"), anyList(), anyList()))
                 .thenReturn(ChapterSummaryEntity.builder().chapterNo(2).summary("新二").build());
 
         service.reflow(storyDir, 2, content);
 
         // 第 1 章的待回流仍然存在，不能因为重建了第 2 章就当作全部同步。
+        verify(storyRepository, never()).writePendingChapterEdit(storyDir, null);
+    }
+
+    @Test
+    void reflow_middleChapter_usesOnlyEarlierHistoryAndKeepsPending(@TempDir Path storyDir) throws Exception {
+        List<ChapterSummaryEntity> summaries = new ArrayList<>(List.of(
+                ChapterSummaryEntity.builder().chapterNo(1).summary("一").build(),
+                ChapterSummaryEntity.builder().chapterNo(2).summary("二").build(),
+                ChapterSummaryEntity.builder().chapterNo(3).summary("未来状态").build()));
+        when(storyRepository.readChapterSummaries(storyDir)).thenReturn(summaries);
+        when(storyRepository.readPendingChapterEdit(storyDir))
+                .thenReturn(new IStoryRepository.PendingChapterEdit(2, false));
+        when(chapterMemoryService.renderLedgerPrompt(anyList())).thenReturn("此前账本");
+        when(chapterMemoryService.buildForeshadowContextListWithIds(anyList(), anyInt())).thenReturn(List.of());
+        when(chapterSummaryService.summarize(any(), any(), eq("重写第二章"), eq(2), any(), anyList(), anyList()))
+                .thenReturn(ChapterSummaryEntity.builder().chapterNo(2).summary("新二").build());
+
+        ChapterEditService.ReflowResult result = service.reflow(storyDir, 2, "重写第二章");
+
+        assertTrue(result.summaryUpdated());
+        ArgumentCaptor<List<ChapterSummaryEntity>> history = ArgumentCaptor.forClass(List.class);
+        verify(chapterMemoryService).renderLedgerPrompt(history.capture());
+        assertEquals(1, history.getValue().size(), "当前章和后续章都不得混入重建上下文");
+        assertEquals(1, history.getValue().get(0).getChapterNo());
+        verify(storyRepository, never()).writePendingChapterEdit(storyDir, null);
+    }
+
+    @Test
+    void reflow_latestPartial_keepsPending(@TempDir Path storyDir) throws Exception {
+        when(storyRepository.readChapterSummaries(storyDir)).thenReturn(new ArrayList<>(List.of(
+                ChapterSummaryEntity.builder().chapterNo(1).summary("旧").build())));
+        when(storyRepository.readPendingChapterEdit(storyDir))
+                .thenReturn(new IStoryRepository.PendingChapterEdit(1, false));
+        when(chapterSummaryService.summarize(any(), any(), any(), anyInt(), any(), anyList(), anyList()))
+                .thenReturn(ChapterSummaryEntity.builder().chapterNo(1).summary("残缺").partial(true).build());
+
+        ChapterEditService.ReflowResult result = service.reflow(storyDir, 1, "正文");
+
+        assertTrue(result.summaryUpdated());
+        assertTrue(result.partial());
         verify(storyRepository, never()).writePendingChapterEdit(storyDir, null);
     }
 
@@ -152,7 +193,7 @@ class ChapterEditServiceTest {
         when(storyRepository.readChapterPlanItem(storyDir, 1)).thenReturn(null);
         when(chapterMemoryService.renderLedgerPrompt(anyList())).thenReturn(null);
         when(chapterMemoryService.buildForeshadowContextList(anyList(), anyInt())).thenReturn(List.of());
-        when(chapterSummaryService.summarize(any(), any(), any(), anyInt(), any(), any()))
+        when(chapterSummaryService.summarize(any(), any(), any(), anyInt(), any(), any(), any()))
                 .thenThrow(new RuntimeException("LLM 调用失败"));
 
         ChapterEditService.ReflowResult result = service.reflow(storyDir, 1, "正".repeat(1500));
@@ -170,7 +211,7 @@ class ChapterEditServiceTest {
         when(storyRepository.readChapterPlanItem(storyDir, 1)).thenReturn(null);
         when(chapterMemoryService.renderLedgerPrompt(anyList())).thenReturn(null);
         when(chapterMemoryService.buildForeshadowContextList(anyList(), anyInt())).thenReturn(List.of());
-        when(chapterSummaryService.summarize(any(), any(), any(), anyInt(), any(), any()))
+        when(chapterSummaryService.summarize(any(), any(), any(), anyInt(), any(), any(), any()))
                 .thenReturn(ChapterSummaryEntity.builder().chapterNo(1).summary("ok").build());
 
         ChapterEditService.ReflowResult result = service.reflow(storyDir, 1, "正".repeat(1500));
@@ -193,7 +234,7 @@ class ChapterEditServiceTest {
 
         assertFalse(result.summaryUpdated());
         assertTrue(result.warning().contains("为空"), "空正文才拒绝，短正文不再拦");
-        verify(chapterSummaryService, never()).summarize(any(), any(), any(), anyInt(), any(), any());
+        verify(chapterSummaryService, never()).summarize(any(), any(), any(), anyInt(), any(), any(), any());
         verify(storyRepository, never()).writeChapterSummaries(any(), any());
     }
 
@@ -204,7 +245,7 @@ class ChapterEditServiceTest {
                 ChapterSummaryEntity.builder().chapterNo(1).build())));
         when(chapterMemoryService.renderLedgerPrompt(anyList())).thenReturn("");
         when(chapterMemoryService.buildForeshadowContextListWithIds(anyList(), anyInt())).thenReturn(List.of());
-        when(chapterSummaryService.summarize(any(), any(), any(), anyInt(), any(), any()))
+        when(chapterSummaryService.summarize(any(), any(), any(), anyInt(), any(), any(), any()))
                 .thenReturn(ChapterSummaryEntity.builder().chapterNo(1).summary("ok").build());
 
         ChapterEditService.ReflowResult result = service.reflow(storyDir, 1, "短正文也能回流");

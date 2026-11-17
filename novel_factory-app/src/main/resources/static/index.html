@@ -276,8 +276,13 @@
                             <div id="chapter-issue-context" class="book-issue-context hidden" role="status"></div>
                             <div class="chapter-actions">
                                 <button id="btn-edit" class="btn-secondary" type="button">编 辑</button>
-                                <button id="btn-save" class="btn-primary hidden" type="button">保 存</button>
+                                <button id="btn-save" class="btn-primary hidden" type="button"
+                                        title="只保存正文，不调用模型；适合润色、去AI味等措辞调整">保 存</button>
+                                <button id="btn-save-rebuild" class="btn-secondary hidden" type="button"
+                                        title="保存正文并调用模型重建本章记忆；适合增删情节等大幅修改">保存并重建记忆</button>
                                 <button id="btn-cancel-edit" class="btn-secondary hidden" type="button">取 消</button>
+                                <button id="btn-rebuild-memory" class="btn-secondary" type="button"
+                                        title="重跑本章摘要并重建向量索引（调用模型，可能需要几分钟）">重建本章记忆</button>
                             </div>
                             <div class="chapter-body">
                                 <div id="chapter-content-readonly" class="chapter-text"></div>

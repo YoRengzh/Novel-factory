@@ -166,10 +166,13 @@ public interface IStoryRepository {
     void writePendingChapterEdit(Path storyDir, PendingChapterEdit pending) throws Exception;
 
     /**
-     * 保存人工编辑的正式章节：正文、接受记录与待回流标记一并原子落盘。
+     * 保存人工编辑的正式章节：正文与接受记录原子落盘，编辑纪元随之推进。
      *
-     * <p>与生成提交共用同一条恢复日志：中途失败不会只改正文而不记待办，
-     * 否则摘要会永久停留在旧版本且没有任何标记提示。
+     * <p>与生成提交共用同一条恢复日志：中途失败不会只改正文而不留凭据。
+     *
+     * @param pending 待回流标记；传 {@code null} 表示本次只改正文、不新增重建待办（如只改文风）。
+     *                此时不会写入或清除标记：既有待办仍须在续写前补算；编辑纪元照常推进，
+     *                使编辑前生成的旧稿无法再提交。非空标记与正文、接受记录一起进入恢复日志。
      */
     void saveHumanEdit(Path storyDir, ChapterContentEntity chapter, PendingChapterEdit pending) throws Exception;
 

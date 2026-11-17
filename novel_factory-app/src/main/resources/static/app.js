@@ -959,15 +959,16 @@
                 && contentEdit.innerText !== chapterSnapshotOnEnter);
         if (changed && !window.confirm('返回章节目录将丢弃本章未保存的修改，继续？')) return;
         ++storyViewToken;
+        ++chapterOperationToken;
         clearBookTransientUi();
         chapterHasUnsavedEdits = false;
-        chapterFactsChanged = false;
         chapterSnapshotOnEnter = null;
         chapterViewDiv.classList.remove('editing');
         contentEdit.classList.add('hidden');
         contentReadonly.classList.remove('hidden');
         btnEdit.classList.remove('hidden');
         btnSave.classList.add('hidden');
+        btnSaveRebuild.classList.add('hidden');
         btnCancelEdit.classList.add('hidden');
         saveResult.classList.add('hidden');
         chapterViewDiv.classList.add('hidden');
@@ -981,12 +982,16 @@
 
     const btnEdit = document.getElementById('btn-edit');
     const btnSave = document.getElementById('btn-save');
+    const btnSaveRebuild = document.getElementById('btn-save-rebuild');
     const btnCancelEdit = document.getElementById('btn-cancel-edit');
+    const btnRebuildMemory = document.getElementById('btn-rebuild-memory');
     const contentReadonly = document.getElementById('chapter-content-readonly');
     const contentEdit = document.getElementById('chapter-content-edit');
     const saveResult = document.getElementById('save-result');
     let currentChapterNo = null;
     let chapterSaving = false;
+    /** 保存/重建操作标识：旧章节的慢响应不得改写新章节的状态或提示。 */
+    let chapterOperationToken = 0;
     let chapterSequence = [];
     const btnPrevChapter = document.getElementById('btn-prev-chapter');
     const btnNextChapter = document.getElementById('btn-next-chapter');
@@ -1017,6 +1022,23 @@
         btnNextChapter.classList.toggle('hidden', !nextVisible);
         // 正文页之外不能留下 fixed 章节导航（全局 tab 的祖先隐藏不影响 body 浮层）。
         chapterNav.classList.toggle('hidden', !(prevVisible || nextVisible));
+    }
+
+    function syncChapterOperationControls() {
+        if (bookWorkspace) bookWorkspace.sync();
+        syncBookNavigation();
+        btnEdit.disabled = chapterSaving;
+        btnSave.disabled = chapterSaving;
+        btnSaveRebuild.disabled = chapterSaving;
+        btnCancelEdit.disabled = chapterSaving;
+        btnRebuildMemory.disabled = chapterSaving;
+        btnPrevChapter.disabled = chapterSaving;
+        btnNextChapter.disabled = chapterSaving;
+    }
+
+    function setChapterSaving(saving) {
+        chapterSaving = saving;
+        syncChapterOperationControls();
     }
 
     function syncBookLayout() {
@@ -1056,6 +1078,10 @@
     }
 
     function navigateChapter(direction) {
+        if (chapterSaving) {
+            showToast('章节保存或记忆重建中，请等待完成后再切换');
+            return;
+        }
         if (chapterViewDiv.classList.contains('editing')) {
             showToast('请先保存或取消当前编辑');
             return;
@@ -1084,11 +1110,6 @@
     }
 
     // 粘贴只保留纯文本，避免从外部粘贴时把样式/超链接带进来污染正文
-    // 用户手改正文：内容可能变了事实，保存时按需回流（保守处理，避免账本与正文脱节）
-    contentEdit.addEventListener('input', function () {
-        chapterFactsChanged = true;
-    });
-
     contentEdit.addEventListener('paste', function (e) {
         e.preventDefault();
         const text = (e.clipboardData || window.clipboardData).getData('text/plain');
@@ -1117,11 +1138,14 @@
         }
         btnEdit.classList.add('hidden');
         btnSave.classList.remove('hidden');
+        btnSaveRebuild.classList.remove('hidden');
         btnCancelEdit.classList.remove('hidden');
+        // 编辑态隐藏重建入口：正文还在改动中，此时重建的是落盘版本，容易让人误以为改的是当前内容
+        if (btnRebuildMemory) btnRebuildMemory.classList.add('hidden');
         saveResult.classList.add('hidden');
         chapterViewDiv.classList.add('editing');
         focusAtEnd(contentEdit);
-        // 记录进入时的内容：保存时兜底对比，防 input 事件漏报
+        // 记录进入时的内容：返回目录前据此判断有没有未保存改动
         chapterSnapshotOnEnter = contentEdit.innerText || '';
     }
 
@@ -1135,9 +1159,10 @@
         contentReadonly.classList.remove('hidden');
         btnEdit.classList.remove('hidden');
         btnSave.classList.add('hidden');
+        btnSaveRebuild.classList.add('hidden');
         btnCancelEdit.classList.add('hidden');
+        if (btnRebuildMemory) btnRebuildMemory.classList.remove('hidden');
         saveResult.classList.add('hidden');
-        chapterFactsChanged = false;   // 取消编辑 = 改动作废，不留下回流意图
         chapterSnapshotOnEnter = null;
     });
 
@@ -1156,40 +1181,126 @@
         return w.replace(/:?\s*null\s*$/, '');
     }
 
-    btnSave.addEventListener('click', function () {
+    function memoryRebuildConfirmation() {
+        var index = chapterSequence.indexOf(currentChapterNo);
+        var later = index >= 0 ? chapterSequence.length - index - 1 : 0;
+        return window.confirm('将调用模型重建本章记忆，可能需要几分钟。'
+                + (later > 0 ? '\n本章之后还有 ' + later + ' 章：其关联记忆会保留为补算待办，'
+                    + '下次续写前按顺序重建，可能产生额外模型耗时和费用。' : '')
+                + '\n继续？');
+    }
+
+    function memoryRebuildResult(resp, chapterNo, prefix) {
+        var warning = normalizeWarning(resp.warning);
+        var index = chapterSequence.indexOf(chapterNo);
+        var later = index >= 0 ? chapterSequence.length - index - 1 : 0;
+        var pendingHint = '已保留补算待办，可稍后重试；续写前也会自动补算。';
+        if (warning) {
+            return { kind: 'warning', text: prefix + '记忆重建未完成：' + warning + '。' + pendingHint,
+                toast: '记忆重建未完成，已保留补算待办' };
+        }
+        if (resp.partial) {
+            return { kind: 'warning', text: prefix + '本章摘要为残缺记忆，账本/伏笔需复核。' + pendingHint,
+                toast: '本章记忆已重建，但需复核' };
+        }
+        if (!resp.summaryUpdated) {
+            return { kind: 'warning', text: prefix + '本章记忆未确认更新。' + pendingHint,
+                toast: '本章记忆未确认更新' };
+        }
+        return { kind: later > 0 ? 'warning' : 'success',
+            text: prefix + '本章记忆已重建。' + (later > 0
+                ? '后续 ' + later + ' 章的关联记忆已留待办，将在续写前补算。' : ''),
+            toast: later > 0 ? '本章记忆已重建，后续章节待补算' : '本章记忆已重建' };
+    }
+
+    function saveChapter(rebuild) {
         if (!currentStoryDir || currentChapterNo == null || chapterSaving) return;
-        chapterSaving = true;
-        if (bookWorkspace) bookWorkspace.sync();
-        syncBookNavigation();
-        btnSave.disabled = true;
-        btnCancelEdit.disabled = true;
+        if (rebuild && !memoryRebuildConfirmation()) return;
+        var storyDir = currentStoryDir;
+        var chapterNo = currentChapterNo;
+        var token = ++chapterOperationToken;
+        setChapterSaving(true);
         saveResult.classList.add('hidden');
         saveResult.textContent = '';
-        // 正文来源按当前状态取：编辑态读 contentEdit，阅读态（段落级改动后）读 contentReadonly。
-        // 之前固定读 contentEdit，阅读态保存会拿到编辑框里的旧内容。
+        // 阅读态可能已有段落改写；提交什么就在成功后显示什么，不能回读旧编辑框。
         var inEditMode = !contentEdit.classList.contains('hidden');
-        // 两种状态统一用 innerText：textContent 不反映渲染空白（段落末尾换行/空格折叠），
-        // 同一章在两种状态下取值会不一致，导致保存格式漂移 + 快照误判。
         var currentText = inEditMode ? contentEdit.innerText : contentReadonly.innerText;
-        // 兜底：input 事件可能漏报（IME 组合输入等），内容真变了就必须回流
-        if (!chapterFactsChanged && chapterSnapshotOnEnter != null
-                && currentText !== chapterSnapshotOnEnter) {
-            chapterFactsChanged = true;
-        }
-        var needReflow = chapterFactsChanged;
-        if (!needReflow) {
-            // 无回流时保存是毫秒级，不需要进度提示；有回流才提示"较慢"
-            showSaveResult('warning', '正在保存…');
-        } else {
-            showSaveResult('warning', '正在保存并重算摘要（这一步会调用模型，可能需要几分钟，请勿关闭窗口）…');
-        }
-        fetch(API_BASE + '/api/stories/' + encodeURIComponent(currentStoryDir) + '/chapters/' + currentChapterNo, {
+        var body = { content: currentText };
+        if (rebuild) body.reflow = true;
+        showSaveResult('warning', rebuild ? '正在保存并重建本章记忆（调用模型，可能需要几分钟）…' : '正在保存…');
+        fetch(API_BASE + '/api/stories/' + encodeURIComponent(storyDir) + '/chapters/' + chapterNo, {
             method: 'PUT',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ content: currentText, reflow: needReflow })
+            body: JSON.stringify(body)
         })
         .then(function (r) {
             if (r.status === 409) throw new Error('该故事有运行中的作业，请等待完成后再编辑');
+            var ct = (r.headers.get('content-type') || '').toLowerCase();
+            if (ct.indexOf('application/json') === -1) {
+                throw new Error('服务暂不可用（' + r.status + '），请稍后重试');
+            }
+            return r.json().then(function (responseBody) {
+                if (!r.ok) throw new Error((responseBody && responseBody.message) ? responseBody.message : '请求失败（' + r.status + '）');
+                return responseBody;
+            });
+        })
+        .then(function (resp) {
+            if (token !== chapterOperationToken || storyDir !== currentStoryDir || chapterNo !== currentChapterNo) return;
+            setChapterSaving(false);
+            var result = rebuild ? memoryRebuildResult(resp, chapterNo, '正文已保存。') : {
+                kind: 'success', text: '正文已保存。记忆未同步——如改动涉及情节，请点「重建本章记忆」。',
+                toast: '正文已保存'
+            };
+            chapterViewDiv.classList.remove('editing');
+            contentEdit.classList.add('hidden');
+            contentReadonly.classList.remove('hidden');
+            contentReadonly.textContent = currentText;
+            contentEdit.textContent = currentText;
+            btnEdit.classList.remove('hidden');
+            btnCancelEdit.classList.add('hidden');
+            btnRebuildMemory.classList.remove('hidden');
+            chapterSnapshotOnEnter = null;
+            chapterHasUnsavedEdits = false;
+            syncChapterSaveButton();
+            showSaveResult(result.kind, result.text);
+            showToast(result.toast);
+        })
+        .catch(function (err) {
+            if (token !== chapterOperationToken || storyDir !== currentStoryDir || chapterNo !== currentChapterNo) return;
+            setChapterSaving(false);
+            var msg = err && err.message ? err.message : String(err);
+            if (/failed to fetch|networkerror|load failed|net::err/i.test(msg)) {
+                msg = '无法连接后端服务，请确认应用已启动；正文本次可能未保存，请刷新确认后重试';
+            }
+            showSaveResult('error', '保存失败：' + msg);
+            showToast('保存失败：' + msg);
+        });
+    }
+
+    btnSave.addEventListener('click', function () { saveChapter(false); });
+    btnSaveRebuild.addEventListener('click', function () { saveChapter(true); });
+
+    /**
+     * 重建本章记忆：保存默认只落盘，这是让摘要/账本/向量索引跟上正文的显式入口。
+     * 与保存共用后端同一把作业互斥，冲突时后端返回 409。
+     */
+    btnRebuildMemory.addEventListener('click', function () {
+        if (!currentStoryDir || currentChapterNo == null || chapterSaving) return;
+        // 重建读的是落盘正文：有未保存改动时先保存，否则会把旧正文的摘要写回记忆
+        if (chapterHasUnsavedEdits || chapterViewDiv.classList.contains('editing')) {
+            showSaveResult('warning', '有未保存的改动，请先点「保 存」再重建记忆');
+            return;
+        }
+        if (!memoryRebuildConfirmation()) return;
+        var storyDir = currentStoryDir;
+        var chapterNo = currentChapterNo;
+        var token = ++chapterOperationToken;
+        setChapterSaving(true);
+        showSaveResult('warning', '正在重建本章记忆（调用模型，可能需要几分钟，请勿关闭窗口）…');
+        fetch(API_BASE + '/api/stories/' + encodeURIComponent(storyDir)
+                + '/chapters/' + chapterNo + '/rebuild-memory', { method: 'POST' })
+        .then(function (r) {
+            if (r.status === 409) throw new Error('该故事有运行中的作业，请等待完成后再重建');
             var ct = (r.headers.get('content-type') || '').toLowerCase();
             if (ct.indexOf('application/json') === -1) {
                 throw new Error('服务暂不可用（' + r.status + '），请稍后重试');
@@ -1200,56 +1311,21 @@
             });
         })
         .then(function (resp) {
-            chapterSaving = false;
-            if (bookWorkspace) bookWorkspace.sync();
-            syncBookNavigation();
-            btnSave.disabled = false;
-            btnCancelEdit.disabled = false;
-            var warning = normalizeWarning(resp.warning);
-            var savedMsg = resp.partial ? '，摘要为残缺记忆（账本/伏笔需复核）'
-                    : (resp.summaryUpdated ? '，摘要已更新' : '');
-            if (!chapterViewDiv.classList.contains('hidden')) {
-                // 仍在章节页：切回阅读态并展示新正文；保存结果提示保留可见，不再被秒藏
-                chapterViewDiv.classList.remove('editing');
-                contentEdit.classList.add('hidden');
-                contentReadonly.classList.remove('hidden');
-                contentReadonly.textContent = contentEdit.innerText;
-                btnEdit.classList.remove('hidden');
-                btnSave.classList.add('hidden');
-                btnCancelEdit.classList.add('hidden');
-                chapterFactsChanged = false;   // 已保存，回流意图消费完毕
-                chapterSnapshotOnEnter = null;
-                chapterHasUnsavedEdits = false;
-                syncChapterSaveButton();
-                if (warning) {
-                    showSaveResult('warning', '正文已保存' + savedMsg + '，记忆回流未完成：' + warning);
-                } else {
-                    showSaveResult('success', '正文已保存' + savedMsg);
-                }
-            }
-            // Toast 与页面是否停留在章节页无关，始终给出结论
-            if (warning) {
-                showToast('正文已保存（记忆回流未完成，正文不受影响）');
-            } else {
-                showToast('正文已保存');
-            }
+            if (token !== chapterOperationToken || storyDir !== currentStoryDir || chapterNo !== currentChapterNo) return;
+            setChapterSaving(false);
+            var result = memoryRebuildResult(resp, chapterNo, '');
+            showSaveResult(result.kind, result.text);
+            showToast(result.toast);
         })
         .catch(function (err) {
-            chapterSaving = false;
-            if (bookWorkspace) bookWorkspace.sync();
-            syncBookNavigation();
-            btnSave.disabled = false;
-            btnCancelEdit.disabled = false;
+            if (token !== chapterOperationToken || storyDir !== currentStoryDir || chapterNo !== currentChapterNo) return;
+            setChapterSaving(false);
             var msg = err && err.message ? err.message : String(err);
             if (/failed to fetch|networkerror|load failed|net::err/i.test(msg)) {
-                msg = '无法连接后端服务，请确认应用已启动；正文本次可能未保存，请重试';
+                msg = '无法连接后端服务，请确认应用已启动；请刷新确认状态后重试';
             }
-            if (!chapterViewDiv.classList.contains('hidden')) {
-                // 请求失败：留在编辑态供重试，原正文仍在输入框内未丢失
-                showSaveResult('error', '保存失败：' + msg);
-            } else {
-                showToast('保存失败：' + msg);
-            }
+            showSaveResult('error', '记忆重建请求失败：' + msg + '；补算待办会由后端保留。');
+            showToast('记忆重建请求失败');
         });
     });
 
@@ -1568,6 +1644,11 @@
             + (hint ? ' · ' + esc(String(hint)) : '') + '</span></div>';
     }
     function loadChapter(storyDir, chapterNo) {
+        if (chapterSaving) {
+            showToast('章节保存或记忆重建中，请等待完成后再切换');
+            return;
+        }
+        ++chapterOperationToken;
         const token = ++storyViewToken;
         // 换章即作废旧选区与异步段落响应，不把上章弹层带入新章。
         clearBookTransientUi();
@@ -1584,13 +1665,14 @@
             currentChapterNo = ch.chapterNo;
             btnEdit.classList.remove('hidden');
             btnSave.classList.add('hidden');
+            btnSaveRebuild.classList.add('hidden');
             btnCancelEdit.classList.add('hidden');
+            if (btnRebuildMemory) btnRebuildMemory.classList.remove('hidden');
             contentEdit.classList.add('hidden');
             contentReadonly.classList.remove('hidden');
             saveResult.classList.add('hidden');
             // 换章：清掉上一章的段落级改动状态（未保存的改动只对原章有效）
             chapterHasUnsavedEdits = false;
-            chapterFactsChanged = false;
             chapterSnapshotOnEnter = null;
             syncBookNavigation();
             // 全局页已切走时不滚动隐藏正文；重新进入小说库再由导航显示。
@@ -1622,14 +1704,7 @@
     /** 退出、切页或关闭弹层即使尚有模型响应，也不能重新打开全局浮层。 */
     let segmentRequestToken = 0;
     /**
-     * 本次编辑是否已改掉情节事实（决定保存时是否重跑摘要回流）。
-     * 润色/扩写只改表达不改事实 → false（跳过回流，省几分钟）；
-     * 续写引入新内容 → true；用户手改正文（进编辑态后输入）也置 true。
-     */
-    let chapterFactsChanged = false;
-    /**
-     * 进入编辑态时的正文快照：保存时与当前内容对比。
-     * 兜底 input 事件漏报（IME 组合输入、脚本改值等边界）——只要内容真的变了就回流。
+     * 进入编辑态时的正文快照：用于判断是否有未保存改动（返回目录前的丢弃确认）。
      */
     let chapterSnapshotOnEnter = null;
     /** 阅读态下是否有未保存的段落级改动（工具条改完不强制进编辑态，靠它提示保存） */
@@ -1756,8 +1831,6 @@
         // 续写是"追加"语义：保留原文，把新内容接在选中片段之后；
         // 润色/扩写是"替换"语义：模型回传的是完整段落，直接替换选中片段。
         // 两种语义必须分开——统一按替换处理会把续写的原句删掉，统一按追加处理会让改写内容重复。
-        // 续写引入新内容 = 事实变了，必须回流；润色/扩写只改表达，跳过回流省几分钟
-        chapterFactsChanged = segmentResult.action === 'continue';
         const inserted = segmentResult.action === 'continue'
             ? segmentSelection.text + segmentResult.editedText
             : segmentResult.editedText;
@@ -1776,8 +1849,8 @@
         markChapterDirty();
 
         showToast(segmentResult.action === 'continue'
-            ? '已追加续写（记得点「保 存」写回，会重算摘要）'
-            : '已替换选中片段（记得点「保 存」写回，不重算摘要）');
+            ? '已追加续写（若新增情节，建议点「保存并重建记忆」；普通保存只写回正文）'
+            : '已替换选中片段（记得点「保 存」写回）');
     }
 
     /**
@@ -1801,10 +1874,10 @@
      */
     function syncChapterSaveButton() {
         if (!btnSave) return;
-        btnSave.classList.toggle('hidden', !chapterHasUnsavedEdits);
-        if (chapterHasUnsavedEdits) {
-            btnSave.disabled = false;   // 上一次保存可能置过 disabled，新改动要恢复可点
-        }
+        // 显隐只看未保存改动；请求期间由统一控件同步负责禁用，二者不要相互覆盖。
+        var hidden = !chapterHasUnsavedEdits && contentEdit.classList.contains('hidden');
+        btnSave.classList.toggle('hidden', hidden);
+        btnSaveRebuild.classList.toggle('hidden', hidden);
     }
 
     /** 调用后端做一次段落编辑 */
@@ -3741,13 +3814,13 @@
     }) : null;
     function closeBook() {
         ++storyViewToken;
+        ++chapterOperationToken;
         clearBookTransientUi();
         currentStoryDir = null;
         currentChapterNo = null;
         chapterSequence = [];
         chapterHasUnsavedEdits = false;
         chapterSaving = false;
-        chapterFactsChanged = false;
         chapterSnapshotOnEnter = null;
         chapterViewDiv.classList.remove('editing');
         chapterViewDiv.classList.add('hidden');

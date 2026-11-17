@@ -167,6 +167,42 @@ class ChapterCommitRepositoryTest {
         assertFalse(Files.exists(journal(storyDir)));
     }
 
+    /**
+     * 传 null 待回流标记 = 「正文已改但不需要重建记忆」（改文风）。
+     * 此时不写标记，但编辑纪元仍须推进——否则编辑前生成的旧稿还能提交回来。
+     */
+    @Test
+    void saveHumanEdit_withoutPendingReflow_stillAdvancesEpoch() throws Exception {
+        Path storyDir = storyDir("20260902-story-0010b");
+        repository.commitChapter(storyDir, chapter(1, "开端", "正文一"), List.of(summary(1, "梗概一")), null);
+        Path epochFile = storyDir.resolve(StorageKeys.MEMORY_DIR).resolve(StorageKeys.CHAPTER_WORK_EPOCH_FILE);
+        String oldEpoch = Files.exists(epochFile) ? Files.readString(epochFile) : null;
+
+        repository.saveHumanEdit(storyDir, chapter(1, "开端", "去AI味后的正文"), null);
+
+        assertEquals("去AI味后的正文", repository.readChapter(storyDir, 1).getContent());
+        assertNull(repository.readPendingChapterEdit(storyDir), "不承诺稍后回流，就不留下待办");
+        var acceptance = repository.readChapterAcceptance(storyDir, 1);
+        assertNotNull(acceptance);
+        assertEquals(ChapterAcceptance.Method.HUMAN_EDIT, acceptance.method());
+        assertTrue(Files.exists(epochFile), "人工编辑必须推进编辑纪元");
+        assertNotEquals(oldEpoch, Files.readString(epochFile), "旧稿不能跨编辑提交");
+        assertFalse(Files.exists(journal(storyDir)));
+    }
+
+    @Test
+    void saveHumanEdit_withoutPending_preservesExistingMarker() throws Exception {
+        Path storyDir = storyDir("20260902-story-0010c");
+        repository.commitChapter(storyDir, chapter(1, "开端", "正文一"), List.of(summary(1, "梗概一")), null);
+        repository.saveHumanEdit(storyDir, chapter(1, "开端", "情节修改"),
+                new cn.novel.yonren.domain.novel.adapter.repository.IStoryRepository.PendingChapterEdit(1, false));
+
+        repository.saveHumanEdit(storyDir, chapter(1, "开端", "情节修改后再润色"), null);
+
+        assertNotNull(repository.readPendingChapterEdit(storyDir), "普通保存不能抹掉此前未完成的补算");
+        assertEquals(1, repository.readPendingChapterEdit(storyDir).fromChapter());
+    }
+
     @Test
     void saveHumanEdit_keepsEarliestAffectedChapterAcrossRepeatedEdits() throws Exception {
         Path storyDir = storyDir("20260902-story-0011");
@@ -255,6 +291,28 @@ class ChapterCommitRepositoryTest {
         assertFalse(Files.exists(journal(storyDir)));
         assertNotEquals(oldEpoch, "epoch-after-edit", "编辑纪元必须推进，旧稿不能跨编辑提交");
         // 编辑只改正文，不伪造摘要：重放后摘要仍是提交时的版本，等待回流。
+        assertEquals("梗概一", repository.readChapterSummaries(storyDir).get(0).getSummary());
+    }
+
+    @Test
+    void recoverChapterCommit_replaysHumanEditWithoutPendingAndAdvancesEpoch() throws Exception {
+        Path storyDir = storyDir("20260902-story-0017b");
+        repository.commitChapter(storyDir, chapter(1, "开端", "正文一"), List.of(summary(1, "梗概一")), null);
+        String hash = ChapterManuscript.of(chapter(1, "开端", "仅润色")).hash();
+        String journal = "{\"schema\":\"CHAPTER_COMMIT_V1\",\"chapter\":{\"chapterNo\":1,\"title\":\"开端\","
+                + "\"content\":\"仅润色\"},\"acceptance\":{\"method\":\"HUMAN_EDIT\",\"manuscriptHash\":\"" + hash
+                + "\",\"actor\":\"local-author\",\"reason\":\"正式章节手工保存\",\"acceptedAtMs\":1},"
+                + "\"epoch\":\"epoch-without-pending\"}";
+        Files.writeString(journal(storyDir), journal, StandardCharsets.UTF_8);
+
+        repository.recoverChapterCommit(storyDir);
+
+        assertEquals("仅润色", repository.readChapter(storyDir, 1).getContent());
+        assertNull(repository.readPendingChapterEdit(storyDir));
+        assertNotNull(repository.readChapterAcceptance(storyDir, 1));
+        assertEquals("epoch-without-pending", Files.readString(storyDir.resolve(StorageKeys.MEMORY_DIR)
+                .resolve(StorageKeys.CHAPTER_WORK_EPOCH_FILE)));
+        assertFalse(Files.exists(journal(storyDir)));
         assertEquals("梗概一", repository.readChapterSummaries(storyDir).get(0).getSummary());
     }
 

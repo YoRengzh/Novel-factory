@@ -240,9 +240,12 @@ public class StoryManageService {
     }
 
     /**
-     * 人工保存正文：保留既有标题，正文写盘后按需触发记忆回流（重跑摘要 + 重建向量索引）。
+     * 人工保存正文：保留既有标题，只落盘并推进编辑纪元，默认不重建记忆。
      *
      * 人工保存只要求非空：生成路径的质量门禁不应阻止用户保存已提交短章的手改。
+     *
+     * 为什么不默认回流：改文风（去 AI 味、润色措辞）通常不需要整章级模型调用。
+     * 用户可选「保存并重建记忆」（{@code reflow=true}）处理增删情节，或稍后再显式重建。
      */
     public ChapterSaveResponseDTO saveChapter(String storyDirName, int chapterNo, ChapterSaveRequestDTO request) {
         if (request.getContent() == null || request.getContent().isBlank()) {
@@ -269,20 +272,19 @@ public class StoryManageService {
         entity.setChapterNo(chapterNo);
         entity.setTitle(existing == null || existing.getTitle() == null ? "" : existing.getTitle());
         entity.setContent(request.getContent());
-        // 走正式编辑事务：正文、接受记录与待回流标记一次落盘。
-        // 先写正文再补摘要的两步写法，一旦在中间失败就会留下"正文已改、摘要仍是旧版且无任何标记"的静默不一致。
-        repo(() -> storyRepository.saveHumanEdit(storyDir, entity,
-                new IStoryRepository.PendingChapterEdit(chapterNo, false)));
+        // 显式重建必须把待办与正文放进同一事务：模型失败或进程中断后，续写仍能补算。
+        // 先写正文再补摘要时，待办不能事后才补，否则中途失败会留下无凭据的旧摘要。
+        // 普通保存不新增待办，但仓储也不会清除更早编辑留下的待办。
+        IStoryRepository.PendingChapterEdit pending = Boolean.TRUE.equals(request.getReflow())
+                ? new IStoryRepository.PendingChapterEdit(chapterNo, false) : null;
+        repo(() -> storyRepository.saveHumanEdit(storyDir, entity, pending));
 
-        // 记忆回流是整章级的 LLM 调用。段落级润色/扩写不改情节事实，
-        // 重算摘要是纯浪费——前端传 reflow=false 跳过；续写引入了新内容，必须回流，否则账本与正文脱节。
-        // 跳过回流时待回流标记保留，下次显式回流或继续生成时会补上。
         ChapterSaveResponseDTO dto = new ChapterSaveResponseDTO();
         dto.setSaved(true);
-        if (Boolean.FALSE.equals(request.getReflow())) {
+        if (!Boolean.TRUE.equals(request.getReflow())) {
             dto.setSummaryUpdated(false);
             dto.setPartial(false);
-            log.info("正文已保存（第{}章），按请求跳过记忆回流（段落级润色/扩写不改事实）", chapterNo);
+            log.info("正文已保存（第{}章），未重建记忆（如需同步摘要请显式重建）", chapterNo);
             return dto;
         }
 
@@ -291,6 +293,51 @@ public class StoryManageService {
         dto.setPartial(reflow.partial());
         dto.setWarning(reflow.warning());
         return dto;
+    }
+
+    /**
+     * 显式重建某一章的记忆：重跑摘要 → 替换账本 → 重嵌入向量索引。
+     *
+     * <p>保存默认不回流后，这是让记忆跟上正文的显式入口。与保存共用同一把作业互斥，
+     * 因此不会与生成或其它维护操作并发写同一目录。调用模型前先建立待办，失败可补算；
+     * 中间章成功后仍保留待办，供续写前按序重建后续关联记忆。
+     *
+     * @return 与保存同形的响应（{@code saved} 恒为 true，其余字段描述回流结果）
+     */
+    public ChapterSaveResponseDTO rebuildChapterMemory(String storyDirName, int chapterNo) {
+        if (!jobRegistry.tryBeginStoryOperation(storyDirName)) {
+            throw new AppException(ResponseCode.ACTIVE_JOB_CONFLICT.getCode(),
+                    "该故事有运行中的作业或维护操作，请等待完成后再重建记忆");
+        }
+        try {
+            Path storyDir = resolveStoryDir(storyDirName);
+            ChapterContentEntity chapter = repo(() -> storyRepository.readChapter(storyDir, chapterNo));
+            if (chapter == null || chapter.getContent() == null || chapter.getContent().isBlank()) {
+                throw new AppException(ResponseCode.CHAPTER_NOT_FOUND.getCode(),
+                        "章节不存在或正文为空：" + storyDirName + " 第 " + chapterNo + " 章");
+            }
+            markChapterMemoryPending(storyDir, chapterNo);
+            ChapterEditService.ReflowResult reflow =
+                    chapterEditService.reflow(storyDir, chapterNo, chapter.getContent());
+            ChapterSaveResponseDTO dto = new ChapterSaveResponseDTO();
+            dto.setSaved(true);
+            dto.setSummaryUpdated(reflow.summaryUpdated());
+            dto.setPartial(reflow.partial());
+            dto.setWarning(reflow.warning());
+            return dto;
+        } finally {
+            jobRegistry.endStoryOperation(storyDirName);
+        }
+    }
+
+    /** 重建从当前章开始；已有更早待办不能因重试后面的章节而缩短范围。 */
+    private void markChapterMemoryPending(Path storyDir, int chapterNo) {
+        repo(() -> {
+            IStoryRepository.PendingChapterEdit previous = storyRepository.readPendingChapterEdit(storyDir);
+            int fromChapter = previous == null ? chapterNo : Math.min(previous.fromChapter(), chapterNo);
+            storyRepository.writePendingChapterEdit(storyDir,
+                    new IStoryRepository.PendingChapterEdit(fromChapter, false));
+        });
     }
 
     /**

@@ -82,6 +82,30 @@ class StoryManageHttpContractTest {
                 .andExpect(status().isBadRequest());
     }
 
+    @Test
+    void rebuildMemory_returnsResult() throws Exception {
+        when(storyManageService.rebuildChapterMemory(eq(DIR), eq(1)))
+                .thenReturn(new cn.novel.yonren.api.dto.ChapterSaveResponseDTO());
+        mvc.perform(post("/api/stories/{d}/chapters/{n}/rebuild-memory", DIR, 1))
+                .andExpect(status().isOk());
+    }
+
+    @Test
+    void rebuildMemory_activeJob_is409() throws Exception {
+        when(storyManageService.rebuildChapterMemory(eq(DIR), anyInt()))
+                .thenThrow(new AppException(ResponseCode.ACTIVE_JOB_CONFLICT.getCode(), "有运行中的作业"));
+        mvc.perform(post("/api/stories/{d}/chapters/{n}/rebuild-memory", DIR, 1))
+                .andExpect(status().isConflict());
+    }
+
+    @Test
+    void rebuildMemory_chapterNotFound_is404() throws Exception {
+        when(storyManageService.rebuildChapterMemory(eq(DIR), anyInt()))
+                .thenThrow(new AppException(ResponseCode.CHAPTER_NOT_FOUND.getCode(), "章节不存在"));
+        mvc.perform(post("/api/stories/{d}/chapters/{n}/rebuild-memory", DIR, 99))
+                .andExpect(status().isNotFound());
+    }
+
     /** 仓储故障必须 500，不能降级成 400 */
     @Test
     void repositoryFailure_is500() throws Exception {

@@ -181,7 +181,7 @@ function memoryDom() {
 
 function harness(overrides = {}) {
     const dom = memoryDom();
-    const timers = [], frames = [], requests = [], confirmations = [], notifications = [], loads = [], windowEvents = {}, layoutObservers = [];
+    const timers = [], frames = [], requests = [], fetchRequests = [], confirmations = [], notifications = [], loads = [], windowEvents = {}, layoutObservers = [];
     class LayoutObserver {
         constructor(callback) { this.callback = callback; layoutObservers.push(this); }
         observe(target) { this.target = target; }
@@ -200,7 +200,12 @@ function harness(overrides = {}) {
     fakeWindow.BookWorkspace = workspaceModule.exports;
     const context = vm.createContext({
         document: dom.doc, window: fakeWindow, requestAnimationFrame: fakeWindow.requestAnimationFrame, ResizeObserver: LayoutObserver,
-        storyViewToken: 0, currentStoryDir: null,
+        storyViewToken: 0, currentStoryDir: null, API_BASE: '',
+        fetch: (url, options = {}) => {
+            const pending = deferred();
+            fetchRequests.push({ url, options, body: options.body ? JSON.parse(options.body) : null, resolve: pending.resolve });
+            return pending.promise;
+        },
         fetchJson: (url, options = {}) => {
             requests.push({ url, method: options.method || 'GET', body: options.body ? JSON.parse(options.body) : null });
             if (overrides.handle) return Promise.resolve(overrides.handle(url, options));
@@ -217,13 +222,14 @@ function harness(overrides = {}) {
         referenceIndexManager: { refresh: () => loads.push('reference-refresh') }
     });
     const declarations = between('    // ===== 故事库 =====', '    // 就地编辑：');
+    const editing = between('    // 就地编辑：', '    function loadStories()');
     const segmentState = between('    // ===== 段落级编辑：', '    function hideSegmentToolbar()');
     const wire = between('    // ===== 书内工作区（作者维护与品质问题）=====', '    // ===== 版本通知');
-    vm.runInContext(declarations + '\n' + segmentState + '\n'
+    vm.runInContext(declarations + '\n' + editing + '\n' + segmentState + '\n'
         + ['focusAtEnd', 'enterChapterEditMode', 'syncChapterSaveButton', 'hideSegmentToolbar', 'resetSegmentSelection', 'maybeShowSegmentToolbar', 'openSegmentDialog', 'closeSegmentDialog', 'runSegmentEdit', 'loadChapter', 'loadChapters'].map(functionSource).join('\n')
         + '\n' + wire + '\n' + between('    // ===== Tab 切换 =====', '    // ===== 生成表单 =====')
-        + '\nglobalThis.navigation = { closeBook, syncBookNavigation, clearBookTransientUi, isBookLibraryVisible, isBookChapterVisible, maybeShowSegmentToolbar, runSegmentEdit, loadChapter, loadChapters, workspace: bookWorkspace, setBook(dir, no, list) { currentStoryDir = dir; currentChapterNo = no; chapterSequence = list; }, dirty(value) { chapterHasUnsavedEdits = value; }, saving(value) { chapterSaving = value; bookWorkspace.sync(); }, editorFixture() { chapterHasUnsavedEdits = true; chapterFactsChanged = true; chapterSnapshotOnEnter = "原正文"; }, enterEdit() { enterChapterEditMode(false); }, select(value) { segmentSelection = value; }, segmentState() { return { selection: segmentSelection, result: segmentResult, request: segmentRequestToken }; }, state() { return { story: currentStoryDir, chapter: currentChapterNo, sequence: chapterSequence, dirty: chapterHasUnsavedEdits, facts: chapterFactsChanged, snapshot: chapterSnapshotOnEnter, token: storyViewToken }; } };', context);
-    const h = { ...dom, api: context.navigation, window: fakeWindow, windowEvents, layoutObservers, timers, requests, confirmations, notifications, loads, selection };
+        + '\nglobalThis.navigation = { closeBook, syncBookNavigation, clearBookTransientUi, isBookLibraryVisible, isBookChapterVisible, maybeShowSegmentToolbar, runSegmentEdit, loadChapter, loadChapters, saveChapter, navigateChapter, setChapterSaving, workspace: bookWorkspace, setBook(dir, no, list) { currentStoryDir = dir; currentChapterNo = no; chapterSequence = list; }, switchChapter(dir, no) { ++chapterOperationToken; currentStoryDir = dir; currentChapterNo = no; setChapterSaving(false); }, dirty(value) { chapterHasUnsavedEdits = value; syncChapterSaveButton(); }, saving(value) { setChapterSaving(value); }, editorFixture() { chapterHasUnsavedEdits = true; chapterSnapshotOnEnter = "原正文"; syncChapterSaveButton(); }, enterEdit() { enterChapterEditMode(false); }, select(value) { segmentSelection = value; }, segmentState() { return { selection: segmentSelection, result: segmentResult, request: segmentRequestToken }; }, state() { return { story: currentStoryDir, chapter: currentChapterNo, sequence: chapterSequence, dirty: chapterHasUnsavedEdits, saving: chapterSaving, snapshot: chapterSnapshotOnEnter, token: storyViewToken }; } };', context);
+    const h = { ...dom, api: context.navigation, window: fakeWindow, windowEvents, layoutObservers, timers, requests, fetchRequests, confirmations, notifications, loads, selection };
     h.activate = name => { h.tabs.forEach(tab => tab.classList.toggle('active', tab.dataset.tab === name));
         for (const tabName of ['generate', 'library', 'reference-index', 'models', 'assets', 'settings']) h.elements['tab-' + tabName].classList.toggle('active', tabName === name); };
     h.open = async () => {
@@ -433,7 +439,7 @@ test('目录按钮未保存章节确认取消时不清编辑器、选区或token
     const token = h.api.state().token;
     await h.elements['btn-back-chapters'].emit('click');
     assert.equal(h.confirmations.length, 1); assert.equal(h.api.state().story, 'book-a'); assert.equal(h.api.state().chapter, 2);
-    assert.equal(h.api.state().token, token); assert.equal(h.api.state().dirty, true); assert.equal(h.api.state().facts, true);
+    assert.equal(h.api.state().token, token); assert.equal(h.api.state().dirty, true);
     assert.equal(h.api.state().snapshot, '原正文'); assert.notEqual(h.api.segmentState().selection, null);
     assert.equal(h.elements['chapter-view'].classList.contains('editing'), true);
     assert.equal(h.elements['chapter-content-edit'].textContent, '未保存的章节草稿');
@@ -446,7 +452,7 @@ test('目录按钮确认丢弃章节编辑后返回目录并重置编辑器，�
     const token = h.api.state().token;
     await h.elements['btn-back-chapters'].emit('click');
     assert.equal(h.confirmations.length, 1); assert.equal(h.api.state().story, 'book-a'); assert.equal(h.api.workspace.state.storyDir, 'book-a');
-    assert.equal(h.api.state().token, token + 1); assert.equal(h.api.state().dirty, false); assert.equal(h.api.state().facts, false); assert.equal(h.api.state().snapshot, null);
+    assert.equal(h.api.state().token, token + 1); assert.equal(h.api.state().dirty, false); assert.equal(h.api.state().snapshot, null);
     assert.equal(h.api.segmentState().selection, null); assert.equal(h.elements['chapter-view'].classList.contains('editing'), false);
     for (const id of ['chapter-view', 'chapter-content-edit', 'btn-save', 'btn-cancel-edit', 'btn-back-chapters', 'chapter-navigation']) hidden(h, id, true);
     for (const id of ['chapter-list', 'chapter-content-readonly', 'btn-edit', 'btn-back-stories']) hidden(h, id, false);
@@ -589,6 +595,91 @@ test('其它全局tab的迟到章节读取不显示body返回/nav也不滚动隐
     chaptersWait.resolve([{ chapterNo: 2, title: '旧目录' }]); await flush();
     assert.equal(h.api.state().story, null); hidden(h, 'book-workspace', true); hidden(h, 'library-list', false);
     hidden(h, 'btn-back-stories', true); hidden(h, 'btn-back-chapters', true);
+});
+
+function chapterResponse(request, body, status = 200) {
+    request.resolve({ ok: status >= 200 && status < 300, status,
+        headers: { get: () => 'application/json' }, json: () => Promise.resolve(body) });
+}
+
+test('普通保存只发一次PUT且不传reflow；成功后隐藏两个保存入口并显示实际提交文本', async () => {
+    const h = harness(); await h.open(); h.editFixture();
+    h.elements['btn-save-rebuild'].classList.remove('hidden');
+    h.elements['chapter-content-edit'].textContent = '修改后的正文';
+    await h.elements['btn-save'].emit('click');
+    assert.equal(h.fetchRequests.length, 1);
+    assert.equal(h.fetchRequests[0].options.method, 'PUT');
+    assert.equal(h.fetchRequests[0].url, '/api/stories/book-a/chapters/2');
+    assert.deepEqual(h.fetchRequests[0].body, { content: '修改后的正文' });
+    assert.equal(h.api.state().saving, true);
+    chapterResponse(h.fetchRequests[0], { saved: true, summaryUpdated: false }); await flush();
+    assert.equal(h.api.state().saving, false); assert.equal(h.api.state().dirty, false);
+    assert.equal(h.elements['chapter-content-readonly'].textContent, '修改后的正文');
+    assert.match(h.elements['save-result'].textContent, /记忆未同步/);
+    hidden(h, 'btn-save', true); hidden(h, 'btn-save-rebuild', true); hidden(h, 'btn-rebuild-memory', false);
+});
+
+test('保存并重建只发一次PUT且reflow=true；中间章成功明确后续待办', async () => {
+    const h = harness(); await h.open(); h.editFixture();
+    h.elements['btn-save-rebuild'].classList.remove('hidden');
+    h.elements['chapter-content-edit'].textContent = '新增关键情节';
+    await h.elements['btn-save-rebuild'].emit('click');
+    assert.equal(h.confirmations.length, 1); assert.match(h.confirmations[0], /1 章[\s\S]*补算待办/);
+    assert.equal(h.fetchRequests.length, 1);
+    assert.deepEqual(h.fetchRequests[0].body, { content: '新增关键情节', reflow: true });
+    chapterResponse(h.fetchRequests[0], { saved: true, summaryUpdated: true, partial: false }); await flush();
+    assert.equal(h.elements['chapter-content-readonly'].textContent, '新增关键情节');
+    assert.match(h.elements['save-result'].textContent, /本章记忆已重建.*后续 1 章.*待办/);
+    assert.doesNotMatch(h.elements['save-result'].textContent, /全书.*已同步/);
+});
+
+test('阅读态段落改动提供双保存；重建warning保留已保存正文与补算提示', async () => {
+    const h = harness(); await h.open(); h.api.dirty(true);
+    h.elements['chapter-content-readonly'].textContent = '段落续写后的正文';
+    h.elements['chapter-content-edit'].textContent = '旧编辑框内容';
+    hidden(h, 'btn-save', false); hidden(h, 'btn-save-rebuild', false);
+    await h.elements['btn-save-rebuild'].emit('click');
+    assert.equal(h.fetchRequests[0].body.content, '段落续写后的正文');
+    chapterResponse(h.fetchRequests[0], { saved: true, summaryUpdated: false, warning: '回流失败：模型不可用' }); await flush();
+    assert.equal(h.elements['chapter-content-readonly'].textContent, '段落续写后的正文');
+    assert.equal(h.elements['chapter-content-edit'].textContent, '段落续写后的正文');
+    assert.match(h.elements['save-result'].textContent, /正文已保存[\s\S]*补算待办/);
+    assert.equal(h.api.state().dirty, false);
+});
+
+test('保存或重建期间禁用重复请求、编辑与切章；HTTP失败保留草稿供重试', async () => {
+    const h = harness(); await h.open(); h.editFixture();
+    await h.elements['btn-save-rebuild'].emit('click');
+    await h.elements['btn-save'].emit('click');
+    await h.elements['btn-save-rebuild'].emit('click');
+    await h.elements['btn-edit'].emit('click');
+    h.api.navigateChapter(1); h.api.loadChapter('book-a', 3);
+    assert.equal(h.fetchRequests.length, 1, '忙碌时不得重复提交');
+    assert.equal(h.api.state().chapter, 2);
+    assert.equal(h.requests.filter(item => /\/chapters\/\d+$/.test(item.url)).length, 0, '忙碌时不得加载下一章');
+    assert.equal(h.elements['btn-next-chapter'].disabled, true);
+    chapterResponse(h.fetchRequests[0], { message: '模型服务暂不可用' }, 500); await flush();
+    assert.equal(h.api.state().saving, false); assert.equal(h.api.state().dirty, true);
+    assert.equal(h.elements['chapter-content-edit'].textContent, '未保存的章节草稿');
+    assert.match(h.elements['save-result'].textContent, /保存失败/);
+    assert.equal(h.elements['btn-save'].disabled, false);
+});
+
+test('迟到保存响应不覆盖后来章节；独立重建拒绝未保存正文并合并结果提示', async () => {
+    const h = harness(); await h.open(); h.editFixture();
+    await h.elements['btn-save'].emit('click');
+    const originalText = h.elements['save-result'].textContent;
+    h.api.switchChapter('book-b', 7);
+    h.elements['chapter-content-readonly'].textContent = '另一本书的新章';
+    chapterResponse(h.fetchRequests[0], { saved: true, summaryUpdated: false }); await flush();
+    assert.equal(h.api.state().story, 'book-b'); assert.equal(h.api.state().chapter, 7);
+    assert.equal(h.elements['chapter-content-readonly'].textContent, '另一本书的新章');
+    assert.equal(h.elements['save-result'].textContent, originalText, '旧请求不得写入新章提示');
+
+    const dirty = harness(); await dirty.open(); dirty.api.dirty(true);
+    await dirty.elements['btn-rebuild-memory'].emit('click');
+    assert.equal(dirty.fetchRequests.length, 0);
+    assert.match(dirty.elements['save-result'].textContent, /未保存/);
 });
 
 test('非library与非正文选区事件不弹段落工具条；返回目录清理body目录入口与选区导航', async () => {

@@ -567,7 +567,7 @@ public class StoryRepository implements IStoryRepository {
         if (commit.acceptance() != null) {
             writeChapterAcceptance(storyDir, commit.chapter().getChapterNo(), commit.acceptance());
         }
-        if (commit.edit() != null) {
+        if (commit.advancesEpoch()) {
             writeStringAtomic(workFile(storyDir, StorageKeys.CHAPTER_WORK_EPOCH_FILE), commit.epoch());
         }
         Files.delete(journal);
@@ -591,7 +591,7 @@ public class StoryRepository implements IStoryRepository {
             if (chapter == null || chapter.getChapterNo() == null) {
                 return false;
             }
-            if (edit != null) {
+            if (advancesEpoch()) {
                 return acceptance != null && epoch != null
                         && ChapterManuscript.of(chapter).hash().equals(acceptance.manuscriptHash());
             }
@@ -605,6 +605,14 @@ public class StoryRepository implements IStoryRepository {
                         && latest.getSummary() != null && !latest.getSummary().isBlank()
                         && chapter.getContent() != null && !chapter.getContent().isBlank()
                         && ChapterManuscript.of(chapter).hash().equals(acceptance.manuscriptHash()));
+        }
+
+        /**
+         * 是否推进编辑纪元。判据是「这是一次人工编辑」，不是「有没有待回流标记」——
+         * 改文风保存不写标记，但旧稿同样必须失效，否则编辑前生成的稿还能提交回来。
+         */
+        private boolean advancesEpoch() {
+            return edit != null || acceptance != null && acceptance.method() == ChapterAcceptance.Method.HUMAN_EDIT;
         }
     }
 
@@ -681,7 +689,7 @@ public class StoryRepository implements IStoryRepository {
             putCommitTarget(targets, StorageKeys.FORESHADOW_SCHEDULE_FILE, state.schedules(), true);
             putCommitTarget(targets, StorageKeys.FORESHADOW_SETTLEMENT_FILE, state.settlements(), true);
         }
-        if (commit.edit() != null) {
+        if (commit.advancesEpoch()) {
             targets.put(StorageKeys.MEMORY_DIR + "/" + StorageKeys.CHAPTER_WORK_EPOCH_FILE,
                     ChapterManuscript.digest(commit.epoch()));
         }
@@ -876,15 +884,20 @@ public class StoryRepository implements IStoryRepository {
     public void saveHumanEdit(Path storyDir, ChapterContentEntity chapter, PendingChapterEdit pending) throws IOException {
         withStoryLock(storyDir, () -> {
             recoverChapterCommitLocked(storyDir);
-            if (chapter == null || chapter.getChapterNo() == null || pending == null || pending.fromChapter() < 1
-                    || pending.fromChapter() > chapter.getChapterNo()) {
-                throw new IllegalArgumentException("正式编辑缺少有效的待回流范围");
+            if (chapter == null || chapter.getChapterNo() == null
+                    || pending != null && (pending.fromChapter() < 1 || pending.fromChapter() > chapter.getChapterNo())) {
+                throw new IllegalArgumentException("正式编辑缺少有效正文或待回流范围");
             }
             ChapterManuscript manuscript = ChapterManuscript.of(chapter);
-            PendingChapterEdit previous = readPendingChapterEditLocked(storyDir);
-            // 多次编辑取最早受影响章：后面的章节都建立在它之上，摘要必须从那里重建。
-            PendingChapterEdit edit = new PendingChapterEdit(previous == null ? pending.fromChapter()
-                    : Math.min(previous.fromChapter(), pending.fromChapter()), false);
+            // pending == null 表示本次只改正文、不新增待办（改文风等）。
+            // 不触碰既有标记，否则另一次普通保存会把尚未补算的待办静默抹掉。
+            PendingChapterEdit edit = null;
+            if (pending != null) {
+                PendingChapterEdit previous = readPendingChapterEditLocked(storyDir);
+                // 多次编辑取最早受影响章：后面的章节都建立在它之上，摘要必须从那里重建。
+                edit = new PendingChapterEdit(previous == null ? pending.fromChapter()
+                        : Math.min(previous.fromChapter(), pending.fromChapter()), false);
+            }
             ChapterAcceptance acceptance = new ChapterAcceptance(ChapterAcceptance.Method.HUMAN_EDIT,
                     manuscript.hash(), chapterWorkBasisLocked(storyDir, readChapterNumbers(storyDir)), null, null,
                     "local-author", "正式章节手工保存", System.currentTimeMillis());
