@@ -256,7 +256,7 @@ public class DynamicReferenceService {
         }
         return index.stream()
                 .filter(entry -> entry.getFileName() != null
-                        && usagePolicy.allowsDocument(entry.getFileName(), scene, ctx))
+                        && usagePolicy.canSelectDocument(entry.getFileName(), scene, ctx))
                 .toList();
     }
 
@@ -304,12 +304,11 @@ public class DynamicReferenceService {
                 break;
             }
             // 选择器或向量检索可能返回未登记来源；落盘前再核一次资格，避免绕过候选过滤。
-            if (!eligibleFiles.contains(fileName) || !sourceEnabled(fileName)
-                    || !usagePolicy.allowsDocument(fileName, scene, ctx)) {
+            if (!eligibleFiles.contains(fileName) || !sourceEnabled(fileName)) {
                 continue;
             }
-            String content = fileLoader.load("references/" + fileName + ".md");
-            if (content == null) {
+            String content = usagePolicy.documentContent(fileName, fileLoader.load("references/" + fileName + ".md"), scene, ctx);
+            if (content.isBlank()) {
                 continue;
             }
             String bounded = boundContent(content, remainingChars);

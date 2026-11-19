@@ -1,13 +1,17 @@
 package cn.novel.yonren.domain.novel.service.armory.prompt.strategy;
 
 import cn.novel.yonren.domain.novel.service.armory.prompt.PromptRuleFileLoader;
+import cn.novel.yonren.domain.novel.service.armory.prompt.reference.ReferenceUsagePolicy;
 import cn.novel.yonren.domain.novel.model.valobj.prompt.PromptContext;
 import cn.novel.yonren.domain.novel.model.valobj.prompt.PromptRule;
 import cn.novel.yonren.types.enums.PromptScene;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 
 import java.util.List;
+import java.util.Optional;
 import java.util.stream.Collectors;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -28,18 +32,17 @@ class GenreMaterialStrategyTest {
     @BeforeEach
     void setUp() {
         fileLoader = mock(PromptRuleFileLoader.class);
-        strategy = new GenreMaterialStrategy(fileLoader);
+        strategy = new GenreMaterialStrategy(fileLoader, new ReferenceUsagePolicy());
         when(fileLoader.load(anyString())).thenReturn(null);
     }
 
     @Test
-    void fantasyPlanSceneLoadsFullPack() {
+    void fantasyPlanLoadsStyleAndArc() {
         stubFantasy();
 
         List<PromptRule> rules = strategy.load(PromptScene.CHAPTER_PLAN, ctx("玄幻"));
 
-        // 是玄幻就把四个玄幻相关文件一次装配
-        assertEquals(List.of("style-fantasy", "genre-style-fantasy", "genre-arc-fantasy", "genre-exemplar-fantasy"), names(rules));
+        assertEquals(List.of("style-fantasy", "genre-style-fantasy", "genre-arc-fantasy"), names(rules));
         rules.forEach(rule -> assertEquals(PromptRule.InjectPosition.USER_TAIL, rule.getInjectPosition()));
     }
 
@@ -47,33 +50,105 @@ class GenreMaterialStrategyTest {
     void fantasyContentSceneSkipsArcTemplates() {
         stubFantasy();
 
-        List<PromptRule> rules = strategy.load(PromptScene.CHAPTER_CONTENT, ctx("玄幻"));
+        List<PromptRule> rules = strategy.load(PromptScene.CHAPTER_CONTENT,
+                PromptContext.builder().theme("玄幻").chapterBrief("排队领例钱").build());
 
         // 弧线模板是规划素材，正文场景不注入；范例双场景注入
         assertEquals(List.of("style-fantasy", "genre-style-fantasy", "genre-exemplar-fantasy"), names(rules));
     }
 
+    @ParameterizedTest
+    @CsvSource({
+            "现代言情, 她第一次主动向对方发出约会邀请。, 桂花酒酿, 股东授权书",
+            "现代言情, 他的身份被揭穿，两人在店门口重新谈条件。, 股东授权书, 桂花酒酿",
+            "悬疑刑侦, 程野回访死者家，想弄清谁来过。, 男式拖鞋, 监控截图",
+            "悬疑刑侦, 刑警拿着监控逐项核对口供。, 监控截图, 男式拖鞋",
+            "悬疑刑侦, 本章暂不核对口供，先回访死者家。, 男式拖鞋, 监控截图"
+    })
+    void rendersOnlyTheProseForThePlannedScene(String theme, String brief, String included, String excluded) {
+        String content = fixedExemplar(theme, brief).orElseThrow();
+        assertEquals(1, content.lines().filter(line -> line.startsWith("## ")).count());
+        assertTrue(content.contains(included));
+        assertFalse(content.contains(excluded));
+    }
+
     @Test
-    void fantasyExemplarRequiresMatchingChapterTask() {
-        when(fileLoader.load("references/genres/fantasy/exemplars.md")).thenReturn("正文范例");
-        strategy.setUsagePolicy(new cn.novel.yonren.domain.novel.service.armory.prompt.reference.ReferenceUsagePolicy());
+    void multipleMatchingScenesKeepSourceOrder() {
+        String content = fixedExemplar("悬疑", "本章先核对口供，下午回访死者家。").orElseThrow();
+        assertEquals(List.of("## 范例一：日常违和感（线索自然埋设）", "## 范例二：审讯对峙（信息控制）"),
+                content.lines().filter(line -> line.startsWith("## ")).toList());
+        assertTrue(content.contains("男式拖鞋"));
+        assertTrue(content.contains("监控截图"));
+    }
 
-        PromptContext ordinary = PromptContext.builder().theme("玄幻修仙")
-                .chapterBrief("沈砚领取两块竹牌，随后回屋整理床铺。").build();
-        PromptContext resourceExchange = PromptContext.builder().theme("玄幻修仙")
-                .chapterBrief("沈砚领取例钱，检查灵石并争取更换巡山灯材料。").build();
+    @ParameterizedTest
+    @CsvSource({
+            "现代言情, 她花了一下午整理发票。",
+            "悬疑刑侦, ",
+            "悬疑刑侦, 本章暂不核对口供。",
+            "现代言情, 本章暂不揭穿身份。",
+            "玄幻修仙, 沈砚领取两块竹牌，随后回屋整理床铺。"
+    })
+    void ordinaryMissingOrDeferredTasksSkipTheGenreExemplar(String theme, String brief) {
+        assertTrue(fixedExemplar(theme, brief).isEmpty());
+    }
 
-        assertTrue(strategy.load(PromptScene.CHAPTER_CONTENT, ordinary).isEmpty());
-        assertEquals(List.of("genre-exemplar-fantasy"),
-                names(strategy.load(PromptScene.CHAPTER_CONTENT, resourceExchange)));
+    @ParameterizedTest
+    @CsvSource({
+            "玄幻修仙, 出门领例钱, 领例钱的队伍",
+            "异能, 显露异能, 能力展示",
+            "末世, 收留幸存者, 收人的决定",
+            "无限流, 规则冲突, 矛盾规则",
+            "科幻, 融资谈判, 商业化谈判",
+            "都市重生, 全家凑钱, 年代对白"
+    })
+    void otherGenresLoadTheirRelevantExample(String theme, String brief, String expectedHeading) {
+        List<String> headings = fixedExemplar(theme, brief).orElseThrow().lines()
+                .filter(line -> line.startsWith("## ")).toList();
+        assertEquals(1, headings.size());
+        assertTrue(headings.get(0).contains(expectedHeading));
+    }
+
+    private Optional<String> fixedExemplar(String theme, String brief) {
+        GenreMaterialStrategy registered = new GenreMaterialStrategy(new PromptRuleFileLoader(), new ReferenceUsagePolicy());
+        PromptContext context = PromptContext.builder().theme(theme).chapterBrief(brief).build();
+        return registered.load(PromptScene.CHAPTER_CONTENT, context).stream()
+                .filter(rule -> rule.getName().startsWith("genre-exemplar-"))
+                .map(PromptRule::getContent)
+                .findFirst();
+    }
+
+    @Test
+    void missingGenreExemplarsAreSkippedWithoutChangingStyleOrFallingBackToSharedProse() {
+        var registered = new GenreMaterialStrategy(new PromptRuleFileLoader(), new ReferenceUsagePolicy());
+
+        for (String theme : List.of("架空历史", "武侠江湖", "剑与魔法", "战争群像", "网游",
+                "体育竞技", "种田", "青春校园", "娱乐圈", "职业文", "航海探险", "校园电竞")) {
+            PromptContext context = PromptContext.builder().theme(theme)
+                    .chapterBrief("人物处理本章任务并面对后果。").build();
+            List<PromptRule> rules = registered.load(PromptScene.CHAPTER_CONTENT, context);
+            assertTrue(rules.stream().noneMatch(rule -> rule.getName().startsWith("genre-exemplar-")), theme);
+        }
+    }
+
+    @ParameterizedTest
+    @CsvSource({
+            "星际科幻, 两边只能靠深空通信联系。, 远处的回答",
+            "民俗怪谈, 调查者开始追查传闻。, 传闻从哪一家开始",
+            "科幻末世, 为整栋楼采购物资。, 囤货写过程感"
+    })
+    void existingGenreExemplarsRemainAvailable(String theme, String brief, String heading) {
+        String excerpt = fixedExemplar(theme, brief).orElseThrow();
+        List<String> headings = excerpt.lines().filter(line -> line.startsWith("## ")).toList();
+        assertEquals(1, headings.size());
+        assertTrue(headings.get(0).contains(heading));
     }
 
     @Test
     void defaultGenreOnlyFallsBackToDefaultStyle() {
         when(fileLoader.load("styles/default.md")).thenReturn("默认风格内容");
 
-        // "科幻太空"自 起路由 SCIFI（不再落 DEFAULT），default 用例改用不可路由题材
-        List<PromptRule> rules = strategy.load(PromptScene.CHAPTER_PLAN, ctx("美食探店"));
+        List<PromptRule> rules = strategy.load(PromptScene.CHAPTER_PLAN, ctx("信件体小品"));
 
         assertEquals(List.of("style-default"), names(rules));
         assertEquals("默认风格内容", rules.get(0).getContent());
@@ -81,7 +156,6 @@ class GenreMaterialStrategyTest {
 
     @Test
     void scifiGenreLoadsGenrePack() {
-        // 科技流题材包：大纲场景四件全装（风格 x2 + 弧线 + 范例）
         when(fileLoader.load("styles/scifi.md")).thenReturn("科技风格");
         when(fileLoader.load("references/genres/scifi/style-references.md")).thenReturn("科技题材风格");
         when(fileLoader.load("references/genres/scifi/arc-templates.md")).thenReturn("科技弧线");
@@ -89,7 +163,7 @@ class GenreMaterialStrategyTest {
 
         List<PromptRule> rules = strategy.load(PromptScene.CHAPTER_PLAN, ctx("黑科技"));
 
-        assertEquals(List.of("style-scifi", "genre-style-scifi", "genre-arc-scifi", "genre-exemplar-scifi"), names(rules));
+        assertEquals(List.of("style-scifi", "genre-style-scifi", "genre-arc-scifi"), names(rules));
     }
 
     @Test
@@ -102,7 +176,7 @@ class GenreMaterialStrategyTest {
 
         List<PromptRule> rules = strategy.load(PromptScene.CHAPTER_PLAN, ctx("都市重生"));
 
-        assertEquals(List.of("style-urban", "genre-style-urban", "genre-arc-urban", "genre-exemplar-urban"), names(rules));
+        assertEquals(List.of("style-urban", "genre-style-urban", "genre-arc-urban"), names(rules));
     }
 
     @Test

@@ -1,6 +1,7 @@
 package cn.novel.yonren.types.enums;
 
 import org.junit.jupiter.api.Test;
+import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
@@ -64,7 +65,19 @@ class GenreTypeTest {
     void match_noHitFallsBackToDefault() {
         assertEquals(GenreType.DEFAULT, GenreType.match(null, null));
         assertEquals(GenreType.DEFAULT, GenreType.match("", ""));
-        assertEquals(GenreType.DEFAULT, GenreType.match("美食探店", "轻松"));
+        assertEquals(GenreType.DEFAULT, GenreType.match("书信体小品", "轻松"));
+    }
+
+    @Test
+    void distinguishesWorldSettingAndMultipleGenresFromAmbiguousWords() {
+        assertEquals(GenreType.MAGIC, GenreType.match("魔法学院", null));
+        assertEquals(GenreType.SCHOOL, GenreType.match("校园成长", null));
+        assertEquals(GenreType.FARM_FOOD, GenreType.match("美食探店", "轻松"));
+        assertEquals(GenreType.WORKPLACE, GenreType.match("职场女性觉醒", "无限可能"));
+        assertEquals(GenreType.ABILITY, GenreType.match("觉醒", null));
+        assertEquals(GenreType.INFINITE_FLOW, GenreType.match("副本", null));
+        assertEquals(GenreType.GAMING, GenreType.match("网游副本", null));
+        assertEquals(List.of(GenreType.SCIFI, GenreType.APOCALYPSE), GenreType.matching("科幻末世", null));
     }
 
     @Test

@@ -19,8 +19,11 @@ import cn.novel.yonren.domain.novel.model.valobj.revise.RewriteContext;
 import cn.novel.yonren.domain.novel.service.armory.llm.LlmLocalRejectionException;
 import cn.novel.yonren.types.utils.JsonParseFallback;
 import com.alibaba.fastjson2.JSON;
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.core.StreamReadFeature;
 import com.fasterxml.jackson.core.json.JsonReadFeature;
 import com.fasterxml.jackson.databind.DeserializationFeature;
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.json.JsonMapper;
 import lombok.Data;
 import lombok.RequiredArgsConstructor;
@@ -36,8 +39,7 @@ import java.util.Map;
 import java.util.stream.Collectors;
 
 /**
- * 章节修订服务：针对 BLOCKING 问题改写整章，并通过纯代码采纳闸门决定是否保留修订稿。
- * 直连 LlmGateway，输出整章 JSON；temperature/maxTokens 由 scene-models 的 revise 场景配置驱动。
+ * 章节修订服务：针对 BLOCKING 问题优先应用局部补丁，修订稿须通过采纳闸门。
  */
 @Slf4j
 @Service
@@ -55,18 +57,12 @@ public class ChapterReviseService {
                     JsonMapper.builder().enable(JsonReadFeature.ALLOW_UNESCAPED_CONTROL_CHARS)
                             .disable(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES).build());
 
-    /**
-     * 定向补丁输出 schema。关闭"未知字段即失败"：补丁 JSON 极小，
-     * 模型常顺手带上 explanation/notes 之类的自认为有用的键，为一个多余键丢掉整份补丁不划算
-     */
-    private static final BeanOutputConverter<PatchPlan> PATCH_CONVERTER =
-            new BeanOutputConverter<>(PatchPlan.class,
-                    JsonMapper.builder()
-                            .enable(JsonReadFeature.ALLOW_UNESCAPED_CONTROL_CHARS)
-                            .disable(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES)
-                            .build());
-
     private static final double MIN_LENGTH_RATIO = 0.8;
+
+    private static final JsonMapper PATCH_MAPPER = JsonMapper.builder()
+            .enable(StreamReadFeature.STRICT_DUPLICATE_DETECTION)
+            .enable(DeserializationFeature.FAIL_ON_TRAILING_TOKENS)
+            .build();
 
     /**
      * 兼容事实硬伤修正造成的词面覆盖变化，阈值不证明真实事件可被删除。
@@ -92,7 +88,8 @@ public class ChapterReviseService {
                     + "\n2. replacement 是替换后的文本；置为空字符串表示删除该片段；"
                     + "\n3. 一处问题一个补丁，补丁之间不得重叠；"
                     + "\n4. 只有当问题**确实无法用局部改动收敛**（例如需要重排整章结构、事件顺序整体错乱）时，"
-                    + "才输出 {\"patches\":[]} 表示放弃。"
+                    + "才返回空 patches 和 rewriteReason，指出具体哪些场景或事件必须整体调整。"
+                    + "锚点找不到、格式不确定或修改太长时，应重新定位原文并缩小改动。"
                     + "\n\n【补丁的典型形态（示例）】"
                     + "\n问题：正文首次持有某物，但可信上下文已明确记录取回，只漏了本章衔接"
                     + "\n正确做法：anchor = 该物首次出现的那一句原文；replacement = 同一句 + 有事实依据的衔接"
@@ -158,24 +155,35 @@ public class ChapterReviseService {
             }
         }
         try {
-            // 定向补丁优先：BLOCKING 若能靠"改一句"收敛，就不该付整章重写的代价——
-            // 整章重写会把**所有未被问题命中的段落**也一并重出，文风回退风险与修复范围完全不成比例。
-            // 空补丁/锚点失败/未过闸门可回退；明确未完成或计划冲突则直接拒绝，不扩大任务范围。
+            String rewriteReason = previousRejectionReason;
             if (patchEnabled()) {
-                PatchOutcome patch = tryPatch(storyVO, item, originalContent, blockingIssues,
-                        ledgerPrompt, foreshadowing, styleStat, globalNo, previousRejectionReason, writerContext);
-                if (patch.applied()) {
-                    log.info("第 {} 章定向补丁已采纳（只改局部，其余正文逐字保留）", globalNo);
-            return new ReviseResult(
-                    RevisionDecisionEntity.builder()
-                            .attempted(true)
-                            .accepted(true)
-                            .reason("定向补丁通过采纳闸门，计划完整性待复核")
-                            .reviewCandidates(missingEvents(originalContent, patch.content(), item))
-                            .build(),
-                    patchedEntity(patch.content()));
+                String diagnostic = previousRejectionReason;
+                for (int attempt = 1; attempt <= 2; attempt++) {
+                    PatchAttempt patch = tryPatch(storyVO, item, originalContent, blockingIssues,
+                            ledgerPrompt, foreshadowing, styleStat, globalNo, diagnostic, writerContext);
+                    if (patch.outcome().applied()) {
+                        String patched = patch.outcome().content();
+                        log.info("第 {} 章定向补丁已采纳", globalNo);
+                        return new ReviseResult(
+                                RevisionDecisionEntity.builder()
+                                        .attempted(true)
+                                        .accepted(true)
+                                        .reason("定向补丁通过采纳闸门，计划完整性待复核")
+                                        .reviewCandidates(missingEvents(originalContent, patched, item))
+                                        .build(),
+                                patchedEntity(patched));
+                    }
+                    if (patch.rewriteReason() != null) {
+                        rewriteReason = "确需调整整章结构的依据：" + patch.rewriteReason();
+                        log.info("第 {} 章补丁明确提出结构性调整，发起整章重写", globalNo);
+                        break;
+                    }
+                    diagnostic = patch.outcome().failureReason();
+                    log.info("第 {} 章第 {}/2 次定向补丁未采纳，原因：{}", globalNo, attempt, diagnostic);
+                    if (attempt == 2) {
+                        return new ReviseResult(buildRejected("两次定向补丁未采纳，保留原稿：" + diagnostic), null);
+                    }
                 }
-                log.info("第 {} 章定向补丁未采用（{}），回退整章重写", globalNo, patch.failureReason());
             }
 
             // maxTokens/temperature 不再硬编码，由 scene-models 的 revise 场景配置驱动
@@ -183,7 +191,7 @@ public class ChapterReviseService {
             String raw = llmGateway.complete(storyVO.getModule(), LlmCall.builder()
                     .systemPrompt(writerContext == null ? null : writerContext.writerSystemPrompt())
                     .userPrompt(buildPrompt(item, originalContent, blockingIssues, ledgerPrompt,
-                            foreshadowing, styleStat, globalNo, previousRejectionReason, false, writerContext))
+                            foreshadowing, styleStat, globalNo, rewriteReason, false, writerContext))
                     .label("revise-第" + globalNo + "章")
                     .scene(ModelScene.CHAPTER_REVISE)
                     .build());
@@ -307,10 +315,10 @@ public class ChapterReviseService {
     /**
      * 尝试用定向补丁修复：模型只产出「锚点 → 替换文本」，本方法机械套用后再走**同一套**采纳闸门。
      *
-     * 任何一步不成立都返回"未采用"而非抛异常——回退整章重写是设计内的正常路径，不是错误：
-     * 模型判定"不是局部问题"、锚点被改写过、补丁反而让文风变差，都是合理结果。
+     * 格式、锚点与采纳闸门的失败返回诊断，供一次定向重试。
+     * 完整响应明确给出结构性原因时，可以进入整章重写。
      */
-    private PatchOutcome tryPatch(StoryVO storyVO,
+    private PatchAttempt tryPatch(StoryVO storyVO,
                                   ChapterPlanItemEntity item,
                                   String originalContent,
                                   List<ChapterIssueEntity> blockingIssues,
@@ -334,33 +342,61 @@ public class ChapterReviseService {
             LlmLocalRejectionException.rethrowIfPresent(e);
             if (writerContext != null) writerContext.checkCancellation();
             if (e instanceof java.util.concurrent.CancellationException cancellation) throw cancellation;
-            return new PatchOutcome(null, "补丁调用异常：" + e.getMessage());
+            if (isAuthorizationFailure(e)) throw e;
+            return patchFailure("补丁调用异常，需重新输出补丁");
         }
         if (writerContext != null) writerContext.checkCancellation();
         // 位于解析降级之外：completed=false 不可被当成坏补丁再触发整章重写。
         rejectIfIncomplete(raw);
 
-        PatchPlan plan = JsonParseFallback.parse(raw, PATCH_CONVERTER::convert);
-        if (plan == null || plan.getPatches() == null || plan.getPatches().isEmpty()) {
-            // 模型主动放弃（空补丁）或输出根本无法解析——两者都说明"这问题不是局部改动能收敛的"
-            return new PatchOutcome(null, "模型未给出可用补丁");
+        String json = StringUtils.trimToEmpty(raw).replaceFirst("(?is)^```(?:json)?\\s*(.*?)\\s*```$", "$1");
+        JsonNode root;
+        try {
+            root = PATCH_MAPPER.readTree(json);
+        } catch (JsonProcessingException invalid) {
+            return patchFailure("补丁 JSON 无法解析，请重新返回一个完整的 JSON 对象");
         }
-
-        PatchOutcome outcome = applyPatches(originalContent, plan.getPatches());
+        JsonNode entries = root == null ? null : root.get("patches");
+        if (entries == null || !entries.isArray()) {
+            return patchFailure("补丁缺少 patches 数组");
+        }
+        if (entries.isEmpty()) {
+            String rewriteReason = StringUtils.trimToNull(root.path("rewriteReason").textValue());
+            return rewriteReason == null
+                    ? patchFailure("空补丁未说明需要整章调整的原因，请重新定位原文")
+                    : new PatchAttempt(new PatchOutcome(null, null), rewriteReason);
+        }
+        List<Patch> patches = new ArrayList<>(entries.size());
+        for (JsonNode entry : entries) {
+            if (!entry.path("anchor").isTextual() || !entry.path("replacement").isTextual()) {
+                return patchFailure("补丁须提供完整的 anchor 和 replacement，删除请显式使用空字符串");
+            }
+            Patch patch = new Patch();
+            patch.setAnchor(entry.path("anchor").textValue());
+            patch.setReplacement(entry.path("replacement").textValue());
+            patches.add(patch);
+        }
+        PatchOutcome outcome = applyPatches(originalContent, patches);
         if (!outcome.applied()) {
-            return outcome;
+            return new PatchAttempt(outcome, null);
         }
         if (outcome.content().equals(originalContent)) {
             // 套用成功但等于空操作。若放过，就会把"什么也没修"当成"修完了"，还白烧一次复审
-            return new PatchOutcome(null, "补丁未改变任何内容");
+            return patchFailure("补丁未改变任何内容");
         }
 
         String gateReason = runGates(originalContent, patchedEntity(outcome.content()), item, styleStat, globalNo);
         if (gateReason != null) {
-            return new PatchOutcome(null, "补丁未过采纳闸门：" + gateReason);
+            return patchFailure("补丁未过采纳闸门：" + gateReason);
         }
-        return new PatchOutcome(outcome.content(), null);
+        return new PatchAttempt(outcome, null);
     }
+
+    private static PatchAttempt patchFailure(String reason) {
+        return new PatchAttempt(new PatchOutcome(null, reason), null);
+    }
+
+    private record PatchAttempt(PatchOutcome outcome, String rewriteReason) { }
 
     public static PatchOutcome applyPatches(String original, List<Patch> patches) {
         List<int[]> spans = new ArrayList<>(patches.size());
@@ -409,12 +445,6 @@ public class ChapterReviseService {
         return entity;
     }
 
-    /** 定向补丁输出：模型只需给出若干「原文锚点 → 替换文本」 */
-    @Data
-    public static class PatchPlan {
-        private List<Patch> patches;
-    }
-
     @Data
     public static class Patch {
         /** 原稿中逐字存在且唯一的锚点片段 */
@@ -424,7 +454,7 @@ public class ChapterReviseService {
     }
 
     /**
-     * 补丁套用结果：content 非空 = 成功；否则 failureReason 说明为何回退（仅用于日志）。
+     * 补丁套用结果：content 非空表示成功；失败时提供可用于重试的诊断。
      * 包外可见以便段落信息增量审校复用（见 {@link #applyPatches}）。
      */
     public record PatchOutcome(String content, String failureReason) {
@@ -514,6 +544,13 @@ public class ChapterReviseService {
                     .append("\n   evidence：").append(nullToBlank(issue.getEvidence()))
                     .append("\n   suggestion：").append(nullToBlank(issue.getSuggestion()))
                     .append("\n");
+            if (StringUtils.isNotBlank(issue.getFactEvidence())) {
+                sb.append("   既定事实原句：").append(issue.getFactEvidence()).append("\n");
+            }
+            if (StringUtils.isNotBlank(issue.getPlanEvidence())) {
+                sb.append("   本章揭晓上限原句：").append(issue.getPlanEvidence()).append("\n");
+                sb.append("   保留已有线索和人物判断，改回本章允许的知情程度。\n");
+            }
         }
         // aesthetic 也可能来自语义审校；有 evidence 不等于程序已确认每一词都违规。
         List<String> aestheticEvidence = blockingIssues.stream()
@@ -533,7 +570,8 @@ public class ChapterReviseService {
         if (patchMode) {
             sb.append("\n\n请严格按照以下 JSON 格式输出补丁（只输出这一个 JSON，不要附带解释文字）：")
                     .append("\n{\"completed\":true,\"reason\":\"修正依据\",\"patches\":[{\"anchor\":\"原稿中逐字存在且唯一的片段\",\"replacement\":\"替换后的文本\"}]}")
-                    .append("\n仅因非局部问题放弃补丁时，输出 {\"patches\":[]}；计划不成立或证据不足时，输出 {\"completed\":false,\"reason\":\"冲突及依据，计划需调整\"}。")
+                    .append("\n确需重排整章结构时输出 {\"patches\":[],\"rewriteReason\":\"需要整体调整的场景、顺序与原因\"}；")
+                    .append("计划不成立或证据不足时，输出 {\"completed\":false,\"reason\":\"冲突及依据，计划需调整\"}。")
                     .append("\n再次提醒：anchor 会被程序逐字索引，改一个字就套不上，整份补丁会被直接丢弃。");
         } else {
             sb.append("\n\n请严格按照以下 JSON 格式输出整章：")

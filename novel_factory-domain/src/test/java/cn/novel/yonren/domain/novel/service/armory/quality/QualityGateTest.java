@@ -129,7 +129,7 @@ class QualityGateTest {
     void unknownDeliveryDoesNotTriggerBlindRevisionEvenWithOtherBlocking() {
         enableDelivery(Mode.ENFORCE);
         item.setKeyEvents(List.of("交付药签"));
-        when(chapterAuditService.audit(any(), any(), any(), any(), any(), any(), anyInt(), any(), any()))
+        when(chapterAuditService.audit(any(), any(), any(), any(), any(), any(), anyInt(), any(), any(), any()))
                 .thenAnswer(inv -> {
                     var result = blockingResult();
                     result.setDeliveryReview(DeliveryReviewPolicy.unavailable(inv.getArgument(8), "核验结果漏项"));
@@ -200,7 +200,7 @@ class QualityGateTest {
         assertEquals(GateResult.PassGrade.REVISED_PASS, result.grade());
         assertTrue(result.deliveryReview().passed());
         assertTrue(result.unresolvedBlocking().isEmpty());
-        verify(chapterAuditService, times(1)).audit(any(), any(), any(), any(), any(), any(), anyInt(), any(), any());
+        verify(chapterAuditService, times(1)).audit(any(), any(), any(), any(), any(), any(), anyInt(), any(), any(), any());
         verify(chapterAuditService, times(1)).verifyFixes(any(), any(), any(), anyList(), any(), any(), anyInt(), any(), anyList(), any());
     }
 
@@ -235,7 +235,7 @@ class QualityGateTest {
         item.setKeyEvents(List.of("交付药签"));
         chapterContent.setContent("交付药签，拿到回执。");
         var original = ChapterManuscript.of(chapterContent);
-        when(chapterAuditService.audit(any(), any(), any(), any(), any(), any(), anyInt(), any(), any()))
+        when(chapterAuditService.audit(any(), any(), any(), any(), any(), any(), anyInt(), any(), any(), any()))
                 .thenAnswer(inv -> {
                     var result = blockingResult();
                     result.setDeliveryReview(deliveryReport(inv.getArgument(8),
@@ -264,7 +264,7 @@ class QualityGateTest {
         enableDelivery(Mode.ENFORCE);
         item.setKeyEvents(List.of("交付药签"));
         chapterContent.setContent("交付药签，拿到回执。");
-        when(chapterAuditService.audit(any(), any(), any(), any(), any(), any(), anyInt(), any(), any()))
+        when(chapterAuditService.audit(any(), any(), any(), any(), any(), any(), anyInt(), any(), any(), any()))
                 .thenAnswer(inv -> {
                     var result = blockingResult();
                     result.setDeliveryReview(deliveryReport(inv.getArgument(8), CausalVerdict.Status.PASS));
@@ -289,7 +289,7 @@ class QualityGateTest {
     }
 
     private void stubDeliveryAudit(CausalVerdict.Status status) {
-        when(chapterAuditService.audit(any(), any(), any(), any(), any(), any(), anyInt(), any(), any()))
+        when(chapterAuditService.audit(any(), any(), any(), any(), any(), any(), anyInt(), any(), any(), any()))
                 .thenAnswer(inv -> AuditResultEntity.builder().issues(List.of())
                         .deliveryReview(deliveryReport(inv.getArgument(8), status)).build());
     }
@@ -311,33 +311,33 @@ class QualityGateTest {
 
         assertTrue(qualityGate.auditAndReviseIfEnabled(command, item, chapterContent, List.of(), styleStat, 1, null)
                 .unresolvedBlocking().isEmpty());
-        verify(chapterAuditService, never()).audit(any(), any(), any(), any(), any(), any(), anyInt(), any());
+        verify(chapterAuditService, never()).audit(any(), any(), any(), any(), any(), any(), anyInt(), any(), any(), any());
     }
 
     @Test
     void chapterBelow1500Characters_noLongerBlocking_proceedsToAudit() {
         // 字数不足改为仅告警（拒收只会逼模型注水，密度信号改由摘要回灌规划层治本）
         audit.setEnforceMinimumChapterLength(true);
-        when(chapterAuditService.audit(any(), any(), any(), any(), any(), any(), anyInt(), any()))
+        when(chapterAuditService.audit(any(), any(), any(), any(), any(), any(), anyInt(), any(), any(), any()))
                 .thenReturn(AuditResultEntity.builder().build());
 
         GateResult result = qualityGate.auditAndReviseIfEnabled(
                 command, item, chapterContent, List.of(), styleStat, 1, null);
 
         assertTrue(result.unresolvedBlocking().isEmpty(), "短章不再是 BLOCKING");
-        verify(chapterAuditService).audit(any(), any(), any(), any(), any(), any(), anyInt(), any());
+        verify(chapterAuditService).audit(any(), any(), any(), any(), any(), any(), anyInt(), any(), any(), any());
     }
 
     @Test
     void chapterAt1500Characters_continuesToAudit() {
         audit.setEnforceMinimumChapterLength(true);
         chapterContent.setContent("字".repeat(1500));
-        when(chapterAuditService.audit(any(), any(), any(), any(), any(), any(), anyInt(), any()))
+        when(chapterAuditService.audit(any(), any(), any(), any(), any(), any(), anyInt(), any(), any(), any()))
                 .thenReturn(AuditResultEntity.builder().build());
 
         assertTrue(qualityGate.auditAndReviseIfEnabled(command, item, chapterContent, List.of(), styleStat, 1, null)
                 .unresolvedBlocking().isEmpty());
-        verify(chapterAuditService).audit(any(), any(), any(), any(), any(), any(), anyInt(), any());
+        verify(chapterAuditService).audit(any(), any(), any(), any(), any(), any(), anyInt(), any(), any(), any());
     }
 
     @Test
@@ -353,12 +353,12 @@ class QualityGateTest {
         assertTrue(result.unresolvedBlocking().isEmpty());
         assertEquals("原文", chapterContent.getContent(), "短章保留原稿");
         verify(chapterReviseService, never()).revise(any(), any(), any(), anyList(), any(), any(), any(), anyInt(), any());
-        verify(chapterAuditService, never()).audit(any(), any(), any(), any(), any(), any(), anyInt(), any());
+        verify(chapterAuditService, never()).audit(any(), any(), any(), any(), any(), any(), anyInt(), any(), any(), any());
     }
 
     @Test
     void auditNoIssues_returnsCleanPass() {
-        when(chapterAuditService.audit(any(), any(), any(), any(), any(), any(), anyInt(), any()))
+        when(chapterAuditService.audit(any(), any(), any(), any(), any(), any(), anyInt(), any(), any(), any()))
                 .thenReturn(AuditResultEntity.builder().build());
 
         GateResult result = qualityGate.auditAndReviseIfEnabled(
@@ -371,7 +371,7 @@ class QualityGateTest {
 
     @Test
     void onlyMinorIssues_returnsMinorResidue_withoutRevise() {
-        when(chapterAuditService.audit(any(), any(), any(), any(), any(), any(), anyInt(), any()))
+        when(chapterAuditService.audit(any(), any(), any(), any(), any(), any(), anyInt(), any(), any(), any()))
                 .thenReturn(AuditResultEntity.builder()
                         .issues(List.of(ChapterIssueEntity.builder().severity("MINOR").description("小瑕疵").build()))
                         .build());
@@ -389,7 +389,7 @@ class QualityGateTest {
     @Test
     void blocking_withReviseDisabled_returnsBlockingAndRecordsSample() {
         revise.setEnabled(false);
-        when(chapterAuditService.audit(any(), any(), any(), any(), any(), any(), anyInt(), any())).thenReturn(blockingResult());
+        when(chapterAuditService.audit(any(), any(), any(), any(), any(), any(), anyInt(), any(), any(), any())).thenReturn(blockingResult());
 
         GateResult result =
                 qualityGate.auditAndReviseIfEnabled(command, item, chapterContent, List.of(), styleStat, 1, null);
@@ -428,7 +428,7 @@ class QualityGateTest {
         revise.setEnabled(true);
         when(styleStatService.crossChapterDialogueRepeats(any(), any()))
                 .thenReturn(List.of("「那句话还会不会兑现？」"));
-        when(chapterAuditService.audit(any(), any(), any(), any(), any(), any(), anyInt(), any()))
+        when(chapterAuditService.audit(any(), any(), any(), any(), any(), any(), anyInt(), any(), any(), any()))
                 .thenReturn(AuditResultEntity.builder().issues(List.of()).build());
         when(chapterReviseService.revise(any(), any(), any(), anyList(), any(), any(), any(), anyInt(), any()))
                 .thenReturn(new cn.novel.yonren.domain.novel.service.armory.revise.ChapterReviseService.ReviseResult(
@@ -447,7 +447,7 @@ class QualityGateTest {
     @Test
     void planIntegrityCandidateUnfixed_rollsBackAcceptedRevisionAndStopsRetry() {
         revise.setMaxAttempts(3);
-        when(chapterAuditService.audit(any(), any(), any(), any(), any(), any(), anyInt(), any()))
+        when(chapterAuditService.audit(any(), any(), any(), any(), any(), any(), anyInt(), any(), any(), any()))
                 .thenReturn(blockingResult());
         when(chapterAuditService.verifyFixes(any(), any(), any(), anyList(), any(), any(), anyInt(), any(), anyList()))
                 .thenAnswer(inv -> {
@@ -480,7 +480,7 @@ class QualityGateTest {
     @Test
     void planAdjustmentRequired_keepsOriginalAndDoesNotRetry() {
         revise.setMaxAttempts(3);
-        when(chapterAuditService.audit(any(), any(), any(), any(), any(), any(), anyInt(), any()))
+        when(chapterAuditService.audit(any(), any(), any(), any(), any(), any(), anyInt(), any(), any(), any()))
                 .thenReturn(blockingResult());
         when(chapterReviseService.revise(any(), any(), any(), anyList(), any(), any(), any(), anyInt(), any()))
                 .thenReturn(new ChapterReviseService.ReviseResult(
@@ -502,7 +502,7 @@ class QualityGateTest {
     @Test
     void blocking_reviseAccepted_reAuditClean_replacesContent_returnsRevisedPass() {
         // A3 复审验证化：复审=verifyFixes 逐条验证（空列表=全部已修复），不再是第二次全章 audit
-        when(chapterAuditService.audit(any(), any(), any(), any(), any(), any(), anyInt(), any()))
+        when(chapterAuditService.audit(any(), any(), any(), any(), any(), any(), anyInt(), any(), any(), any()))
                 .thenReturn(blockingResult());
         when(chapterAuditService.verifyFixes(any(), any(), any(), anyList(), any(), any(), anyInt()))
                 .thenReturn(new ChapterAuditService.FixVerification(List.of(), false));
@@ -520,9 +520,39 @@ class QualityGateTest {
         assertTrue(result.isLowConfidencePass());
         assertEquals("修订标题", chapterContent.getTitle());
         assertEquals("修订正文", chapterContent.getContent());
-        verify(chapterAuditService, times(1)).audit(any(), any(), any(), any(), any(), any(), anyInt(), any());
+        verify(chapterAuditService, times(1)).audit(any(), any(), any(), any(), any(), any(), anyInt(), any(), any(), any());
         verify(chapterAuditService, times(1)).verifyFixes(any(), any(), any(), anyList(), any(), any(), anyInt());
         verify(auditSampleService, never()).record(any(), anyInt(), any(), anyString(), anyList(), anyInt(), any(), anyString());
+    }
+
+    @Test
+    void revisionWithConfirmedNewConflictRestoresOriginalAndItsOwnIssues() {
+        String rule = "能力停止后须冷却十五分钟。";
+        command.setStoryContextEntity(StoryContextEntity.builder().worldSetting(rule).build());
+        var original = ChapterManuscript.of(chapterContent);
+        var initial = blockingResult();
+        when(chapterAuditService.audit(any(), any(), any(), any(), any(), any(), anyInt(), any(), any(), contains(rule)))
+                .thenReturn(initial);
+        when(chapterReviseService.revise(any(), any(), any(), anyList(), any(), any(), any(), anyInt(), any()))
+                .thenReturn(new ChapterReviseService.ReviseResult(
+                        RevisionDecisionEntity.builder().accepted(true).build(),
+                        new ChapterContentEntity(1, "修订标题", "五分钟后再次启动能力。")));
+        var introduced = ChapterIssueEntity.builder().severity("BLOCKING").dimension("continuity")
+                .evidence("五分钟后再次启动能力。").factEvidence(rule).description("冷却期内再次启动").build();
+        when(chapterAuditService.verifyFixes(any(), any(), any(), anyList(), any(), any(), anyInt(),
+                any(cn.novel.yonren.domain.novel.model.valobj.revise.RewriteContext.class)))
+                .thenAnswer(inv -> {
+                    cn.novel.yonren.domain.novel.model.valobj.revise.RewriteContext verificationContext = inv.getArgument(7);
+                    assertTrue(verificationContext.authorFacts().contains(rule));
+                    assertEquals(original, verificationContext.original());
+                    return new ChapterAuditService.FixVerification(List.of(introduced), false, null, true);
+                });
+
+        GateResult result = qualityGate.auditAndReviseIfEnabled(command, item, chapterContent, List.of(), styleStat, 1, null);
+
+        assertEquals(original, ChapterManuscript.of(chapterContent));
+        assertEquals(initial.getIssues(), result.unresolvedBlocking());
+        assertEquals(1, result.reviseRounds());
     }
 
     @Test
@@ -532,7 +562,7 @@ class QualityGateTest {
         var original = ChapterManuscript.of(chapterContent);
         var issues = new java.util.ArrayList<>(blockingResult().getIssues());
         issues.add(minor);
-        when(chapterAuditService.audit(any(), any(), any(), any(), any(), any(), anyInt(), any()))
+        when(chapterAuditService.audit(any(), any(), any(), any(), any(), any(), anyInt(), any(), any(), any()))
                 .thenReturn(AuditResultEntity.builder().issues(issues).build());
         when(chapterAuditService.verifyFixes(any(), any(), any(), anyList(), any(), any(), anyInt()))
                 .thenReturn(new ChapterAuditService.FixVerification(List.of(), false));
@@ -548,7 +578,7 @@ class QualityGateTest {
         assertTrue(GateFeedbackPolicy.feedbackMinorsFor(result,
                 ChapterManuscript.of(chapterContent)).isEmpty());
         assertEquals(1, GateFeedbackPolicy.feedbackMinorsFor(result, original).size());
-        verify(chapterAuditService, times(1)).audit(any(), any(), any(), any(), any(), any(), anyInt(), any());
+        verify(chapterAuditService, times(1)).audit(any(), any(), any(), any(), any(), any(), anyInt(), any(), any(), any());
         verify(chapterAuditService, times(1)).verifyFixes(any(), any(), any(), anyList(), any(), any(), anyInt());
     }
 
@@ -557,7 +587,7 @@ class QualityGateTest {
         // 验证"没跑成"必须与"确认未修复"分开——原先两者都走"未修复"，
         // 于是一次网关抖动会被记成质量债，再回灌给写手当作"你上一章犯的错"。
         // 本用例锁定两件事：①标记透出；②内容侧偏向不变（仍算未通过、不放行未验证的稿）
-        when(chapterAuditService.audit(any(), any(), any(), any(), any(), any(), anyInt(), any()))
+        when(chapterAuditService.audit(any(), any(), any(), any(), any(), any(), anyInt(), any(), any(), any()))
                 .thenReturn(blockingResult());
         when(chapterAuditService.verifyFixes(any(), any(), any(), anyList(), any(), any(), anyInt()))
                 .thenAnswer(inv -> new ChapterAuditService.FixVerification(
@@ -579,7 +609,7 @@ class QualityGateTest {
     void blocking_reviseAccepted_reAuditStillBlocking_maxAttemptsExhausted_returnsBlockingAndRecordsSample() {
         revise.setMaxAttempts(2);
         // 首审 BLOCKING；两轮复核均确认未修复（verifyFixes 原样回传入参=全部未修复）；两轮修订均被采纳
-        when(chapterAuditService.audit(any(), any(), any(), any(), any(), any(), anyInt(), any()))
+        when(chapterAuditService.audit(any(), any(), any(), any(), any(), any(), anyInt(), any(), any(), any()))
                 .thenReturn(blockingResult());
         when(chapterAuditService.verifyFixes(any(), any(), any(), anyList(), any(), any(), anyInt()))
                 .thenAnswer(inv -> new ChapterAuditService.FixVerification(
@@ -594,7 +624,7 @@ class QualityGateTest {
 
         assertEquals(1, result.unresolvedBlocking().size());
         assertEquals("修订正文", chapterContent.getContent(), "轮次耗尽后保留最后一版采纳稿");
-        verify(chapterAuditService, times(1)).audit(any(), any(), any(), any(), any(), any(), anyInt(), any());
+        verify(chapterAuditService, times(1)).audit(any(), any(), any(), any(), any(), any(), anyInt(), any(), any(), any());
         verify(chapterAuditService, times(2)).verifyFixes(any(), any(), any(), anyList(), any(), any(), anyInt());
         verify(chapterReviseService, times(2)).revise(any(), any(), any(), anyList(), any(), any(), any(), anyInt(), any());
         verify(auditSampleService).record(any(), anyInt(), any(), anyString(), anyList(), anyInt(), any(), anyString());
@@ -604,7 +634,7 @@ class QualityGateTest {
     void blocking_reviseAccepted_thenSecondRoundClean_returnsEmpty() {
         revise.setMaxAttempts(2);
         // 第一轮复核确认未修复（回传入参），第二轮复核全部已修复（空列表）
-        when(chapterAuditService.audit(any(), any(), any(), any(), any(), any(), anyInt(), any()))
+        when(chapterAuditService.audit(any(), any(), any(), any(), any(), any(), anyInt(), any(), any(), any()))
                 .thenReturn(blockingResult());
         when(chapterAuditService.verifyFixes(any(), any(), any(), anyList(), any(), any(), anyInt()))
                 .thenAnswer(inv -> new ChapterAuditService.FixVerification(
@@ -619,7 +649,7 @@ class QualityGateTest {
                 qualityGate.auditAndReviseIfEnabled(command, item, chapterContent, List.of(), styleStat, 1, null);
 
         assertTrue(result.unresolvedBlocking().isEmpty());
-        verify(chapterAuditService, times(1)).audit(any(), any(), any(), any(), any(), any(), anyInt(), any());
+        verify(chapterAuditService, times(1)).audit(any(), any(), any(), any(), any(), any(), anyInt(), any(), any(), any());
         verify(chapterAuditService, times(2)).verifyFixes(any(), any(), any(), anyList(), any(), any(), anyInt());
         verify(chapterReviseService, times(2)).revise(any(), any(), any(), anyList(), any(), any(), any(), anyInt(), any());
         verify(auditSampleService, never()).record(any(), anyInt(), any(), anyString(), anyList(), anyInt(), any(), anyString());
@@ -627,7 +657,7 @@ class QualityGateTest {
 
     @Test
     void blocking_reviseRejected_keepsOriginal_returnsBlockingAndRecordsSample() {
-        when(chapterAuditService.audit(any(), any(), any(), any(), any(), any(), anyInt(), any())).thenReturn(blockingResult());
+        when(chapterAuditService.audit(any(), any(), any(), any(), any(), any(), anyInt(), any(), any(), any())).thenReturn(blockingResult());
         when(chapterReviseService.revise(any(), any(), any(), anyList(), any(), any(), any(), anyInt(), any()))
                 .thenReturn(new ChapterReviseService.ReviseResult(
                         RevisionDecisionEntity.builder().accepted(false).reason("修订不如原稿").build(),
@@ -657,7 +687,7 @@ class QualityGateTest {
 
         assertTrue(result.unresolvedBlocking().isEmpty(), "修订稿清除违规后应闭环");
         assertEquals("他写下那段推导，随后便把它忘了。", chapterContent.getContent());
-        verify(chapterAuditService, never()).audit(any(), any(), any(), any(), any(), any(), anyInt(), any());
+        verify(chapterAuditService, never()).audit(any(), any(), any(), any(), any(), any(), anyInt(), any(), any(), any());
         verify(chapterReviseService).revise(any(), any(), any(), anyList(), any(), any(), any(), anyInt(), any());
     }
 
@@ -757,7 +787,7 @@ class QualityGateTest {
     void styleClean_noLlmAuditIssues_returnsEmpty() {
         // 干净正文：机械门禁与 LLM 审校均零命中，不触发修订
         chapterContent.setContent("他推开门，看见桌上的信。信封没有落款，只有一枚烧焦的蜡印。");
-        when(chapterAuditService.audit(any(), any(), any(), any(), any(), any(), anyInt(), any()))
+        when(chapterAuditService.audit(any(), any(), any(), any(), any(), any(), anyInt(), any(), any(), any()))
                 .thenReturn(AuditResultEntity.builder().build());
 
         assertTrue(qualityGate.auditAndReviseIfEnabled(command, item, chapterContent, List.of(), styleStat, 1, null)
@@ -767,7 +797,7 @@ class QualityGateTest {
 
     @Test
     void blocking_reviseThrows_keepsOriginal_returnsBlockingAndRecordsSample() {
-        when(chapterAuditService.audit(any(), any(), any(), any(), any(), any(), anyInt(), any())).thenReturn(blockingResult());
+        when(chapterAuditService.audit(any(), any(), any(), any(), any(), any(), anyInt(), any(), any(), any())).thenReturn(blockingResult());
         when(chapterReviseService.revise(any(), any(), any(), anyList(), any(), any(), any(), anyInt(), any()))
                 .thenThrow(new RuntimeException("修订服务爆炸"));
 
@@ -794,7 +824,7 @@ class QualityGateTest {
         assertEquals(1, result.unresolvedBlocking().size());
         assertEquals("foreshadow", result.unresolvedBlocking().get(0).getDimension());
         assertTrue(result.unresolvedBlocking().get(0).getEvidence().contains("那枚玉佩实为关键凭证×1"));
-        verify(chapterAuditService, never()).audit(any(), any(), any(), any(), any(), any(), anyInt(), any());
+        verify(chapterAuditService, never()).audit(any(), any(), any(), any(), any(), any(), anyInt(), any(), any(), any());
     }
 
     @Test
@@ -802,14 +832,14 @@ class QualityGateTest {
         // 禁泄 prompt 块要同时注入审校（判变相泄露）与修订（防修订引入泄露）
         when(chapterMemoryService.buildSecrecyGuard(anyList(), any())).thenReturn(new ChapterMemoryService.SecrecyGuard(
                 List.of("事故背后另有主使"), "【本章禁泄清单】事故背后另有主使"));
-        when(chapterAuditService.audit(any(), any(), any(), any(), any(), any(), anyInt(), anyString()))
+        when(chapterAuditService.audit(any(), any(), any(), any(), any(), any(), anyInt(), anyString(), any(), any()))
                 .thenReturn(AuditResultEntity.builder().build());
         audit.setEnabled(true);
 
         qualityGate.auditAndReviseIfEnabled(command, item, chapterContent, List.of(), styleStat, 1, null);
 
         verify(chapterAuditService).audit(any(), any(), any(), any(), any(), any(), anyInt(),
-                contains("【本章禁泄清单】"));
+                contains("【本章禁泄清单】"), any(), any());
     }
 
     @Test
@@ -818,7 +848,7 @@ class QualityGateTest {
                 .style("细腻思辨，允许完整内心讲述").perspective("第三人称限知")
                 .tone("沉静克制").build();
         command.setStoryContextEntity(context);
-        when(chapterAuditService.audit(any(), any(), any(), any(), any(), any(), anyInt(), any()))
+        when(chapterAuditService.audit(any(), any(), any(), any(), any(), any(), anyInt(), any(), any(), any()))
                 .thenReturn(blockingResult());
         when(chapterReviseService.revise(any(), any(), any(), anyList(), any(), any(), any(), anyInt(), any()))
                 .thenReturn(new ChapterReviseService.ReviseResult(
@@ -829,7 +859,7 @@ class QualityGateTest {
 
         ArgumentCaptor<String> auditGuard = ArgumentCaptor.forClass(String.class);
         ArgumentCaptor<String> revisionContext = ArgumentCaptor.forClass(String.class);
-        verify(chapterAuditService).audit(any(), any(), any(), any(), any(), any(), anyInt(), auditGuard.capture());
+        verify(chapterAuditService).audit(any(), any(), any(), any(), any(), any(), anyInt(), auditGuard.capture(), any(), any());
         verify(chapterReviseService).revise(any(), any(), any(), anyList(), any(), revisionContext.capture(), any(), anyInt(), any());
         for (String prompt : List.of(auditGuard.getValue(), revisionContext.getValue())) {
             assertTrue(prompt.contains("【语言与时代语域检查】"), "保留旧标题兼容");
@@ -844,14 +874,14 @@ class QualityGateTest {
         // 大纲偏离检测：覆盖率 < 60% 时给审校注入加审预警（不直接 BLOCKING）
         item.setKeyEvents(List.of("小陈在藏经阁偶得上古残卷", "陆瑶察觉宗门长老的异动"));
         chapterContent.setContent("他推开门，看见桌上的信。信封没有落款，只有一枚烧焦的蜡印。");
-        when(chapterAuditService.audit(any(), any(), any(), any(), any(), any(), anyInt(), any()))
+        when(chapterAuditService.audit(any(), any(), any(), any(), any(), any(), anyInt(), any(), any(), any()))
                 .thenReturn(AuditResultEntity.builder().build());
         audit.setEnabled(true);
 
         qualityGate.auditAndReviseIfEnabled(command, item, chapterContent, List.of(), styleStat, 1, null);
 
         verify(chapterAuditService).audit(any(), any(), any(), any(), any(), any(), anyInt(),
-                contains("【计划覆盖预警】"));
+                contains("【计划覆盖预警】"), any(), any());
     }
 
     @Test
@@ -859,19 +889,19 @@ class QualityGateTest {
         // 覆盖率达标（含 4 字以上公共片段视为覆盖）不注入预警
         item.setKeyEvents(List.of("小陈在藏经阁偶得上古残卷"));
         chapterContent.setContent("小陈在藏经阁偶得上古残卷，指尖抚过封皮上斑驳的纹路。");
-        when(chapterAuditService.audit(any(), any(), any(), any(), any(), any(), anyInt(), any()))
+        when(chapterAuditService.audit(any(), any(), any(), any(), any(), any(), anyInt(), any(), any(), any()))
                 .thenReturn(AuditResultEntity.builder().build());
         audit.setEnabled(true);
 
         qualityGate.auditAndReviseIfEnabled(command, item, chapterContent, List.of(), styleStat, 1, null);
 
         verify(chapterAuditService).audit(any(), any(), any(), any(), any(), any(), anyInt(),
-                org.mockito.AdditionalMatchers.not(contains("【计划覆盖预警】")));
+                org.mockito.AdditionalMatchers.not(contains("【计划覆盖预警】")), any(), any());
     }
 
     @Test
     void noKeyEvents_noAdherenceHint() {
-        when(chapterAuditService.audit(any(), any(), any(), any(), any(), any(), anyInt(), any()))
+        when(chapterAuditService.audit(any(), any(), any(), any(), any(), any(), anyInt(), any(), any(), any()))
                 .thenReturn(AuditResultEntity.builder().build());
         audit.setEnabled(true);
 
@@ -879,7 +909,7 @@ class QualityGateTest {
 
         // guard 可能合法携带其它预警（如密度预警），只断言不含计划覆盖预警
         verify(chapterAuditService).audit(any(), any(), any(), any(), any(), any(), anyInt(),
-                org.mockito.AdditionalMatchers.not(contains("【计划覆盖预警】")));
+                org.mockito.AdditionalMatchers.not(contains("【计划覆盖预警】")), any(), any());
     }
 
     @Test
@@ -1007,12 +1037,12 @@ class QualityGateTest {
         chapterContent.setContent(content.toString());
         assertEquals(1, DialoguePresencePolicy.missingScenes(item.getDialogueScenes(), content.toString()).size(),
                 "等价改写刻意不命中词面规则");
-        when(chapterAuditService.audit(any(), any(), any(), any(), any(), any(), anyInt(), any()))
+        when(chapterAuditService.audit(any(), any(), any(), any(), any(), any(), anyInt(), any(), any(), any()))
                 .thenReturn(AuditResultEntity.builder().issues(List.of()).build());
 
         GateResult result = qualityGate.auditAndReviseIfEnabled(command, item, chapterContent, List.of(), styleStat, 1, null);
         assertTrue(result.unresolvedBlocking().isEmpty());
-        verify(chapterAuditService).audit(any(), any(), any(), any(), any(), any(), anyInt(), any());
+        verify(chapterAuditService).audit(any(), any(), any(), any(), any(), any(), anyInt(), any(), any(), any());
         verify(chapterReviseService, never()).revise(any(), any(), any(), anyList(), any(), any(), any(), anyInt(), any());
     }
 
@@ -1075,7 +1105,7 @@ class QualityGateTest {
         original.append("「既然记着，这个也记上。」");
         chapterContent.setContent(original.toString());
         String repaired = original + "\n「嗯。」";
-        when(chapterAuditService.audit(any(), any(), any(), any(), any(), any(), anyInt(), any()))
+        when(chapterAuditService.audit(any(), any(), any(), any(), any(), any(), anyInt(), any(), any(), any()))
                 .thenReturn(AuditResultEntity.builder().issues(List.of(ChapterIssueEntity.builder()
                         .dimension("plan-adherence").severity("BLOCKING")
                         .description("场景要求乙明确接受任务，但正文没有其回应或接受结果")
@@ -1129,7 +1159,7 @@ class QualityGateTest {
         audit.setEnforceCollapseFloor(true);
         revise.setEnabled(true);
         chapterContent.setContent("字".repeat(674));
-        when(chapterAuditService.audit(any(), any(), any(), any(), any(), any(), anyInt(), any()))
+        when(chapterAuditService.audit(any(), any(), any(), any(), any(), any(), anyInt(), any(), any(), any()))
                 .thenReturn(AuditResultEntity.builder().issues(List.of()).build());
         when(chapterReviseService.revise(any(), any(), any(), anyList(), any(), any(), any(), anyInt(), any()))
                 .thenReturn(new ChapterReviseService.ReviseResult(
@@ -1155,7 +1185,7 @@ class QualityGateTest {
         audit.setEnforceCollapseFloor(true);
         revise.setMaxAttempts(1);
         revise.setEnabled(true);
-        when(chapterAuditService.audit(any(), any(), any(), any(), any(), any(), anyInt(), any()))
+        when(chapterAuditService.audit(any(), any(), any(), any(), any(), any(), anyInt(), any(), any(), any()))
                 .thenReturn(blockingResult());
         when(chapterAuditService.verifyFixes(any(), any(), any(), anyList(), any(), any(), anyInt()))
                 .thenReturn(new ChapterAuditService.FixVerification(List.of(), false));

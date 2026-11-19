@@ -112,12 +112,13 @@ class ChapterAuditServiceTest {
     void revisionVerificationChecksNewFactConflictsAgainstOriginalContextInTheSameCall() {
         when(llmGateway.complete(any(), any(LlmCall.class))).thenReturn("{\"verdicts\":[{\"index\":1,\"fixed\":true}],"
                 + "\"continuityChecked\":true,\"introducedConflicts\":[{\"description\":\"已交出的药签无依据重现\","
-                + "\"evidence\":\"他从袖里取出已交出的药签\"}]}");
+                + "\"evidence\":\"他从袖里取出已交出的药签\",\"factEvidence\":\"他把药签交给执事\"}]}");
         var context = new cn.novel.yonren.domain.novel.model.valobj.revise.RewriteContext("药签已经交给执事", null,
                 new cn.novel.yonren.domain.novel.model.valobj.work.ChapterManuscript(1, "标题", "他把药签交给执事。"));
         var target = ChapterIssueEntity.builder().dimension("continuity").severity("BLOCKING").description("事件未交付").build();
         var result = service.verifyFixes(storyVO(), planItem(), "他从袖里取出已交出的药签。", List.of(target), null, null, 1, context);
         assertFalse(result.degraded());
+        assertTrue(result.introducedFactConflict());
         assertEquals(1, result.unfixed().size());
         assertEquals("BLOCKING", result.unfixed().get(0).getSeverity());
         assertTrue(result.unfixed().get(0).getDescription().contains("药签"));
@@ -141,20 +142,90 @@ class ChapterAuditServiceTest {
     @Test
     void audit_parsesValidJson() {
         String json = "{\"issues\":[{\"dimension\":\"consistency\",\"severity\":\"BLOCKING\"," +
-                "\"evidence\":\"小陈已死，后文又出现\",\"description\":\"角色死亡后再次出场\"," +
+                "\"evidence\":\"小陈推门而入\",\"factEvidence\":\"小陈已经死了\",\"description\":\"角色死亡后再次出场\"," +
                 "\"suggestion\":\"删除该出场或改为回忆\"}]}";
         when(llmGateway.complete(any(), any(LlmCall.class))).thenReturn(json);
 
         AuditResultEntity result = service.audit(storyVO(), planItem(),
-                "前文交代小陈已死，后文又出现小陈的身影。", null, null, null, 1);
+                "小陈推门而入。", "小陈已经死了，遗体尚在停尸房。", null, null, 1);
 
         assertNotNull(result);
         assertEquals(1, result.getIssues().size());
         ChapterIssueEntity issue = result.getIssues().get(0);
         assertEquals("consistency", issue.getDimension());
-        // 证据能在正文中命中，保持 BLOCKING
         assertEquals("BLOCKING", issue.getSeverity());
-        assertEquals("小陈已死，后文又出现", issue.getEvidence());
+        assertEquals("小陈推门而入", issue.getEvidence());
+        assertEquals("小陈已经死了", issue.getFactEvidence());
+    }
+
+    @Test
+    void auditRequiresTheCurrentChapterLimitAndBodyQuoteForEarlyReveal() {
+        String limit = "林长渊怀疑两处煞气同源，但来不及确认。";
+        var item = planItem();
+        item.setScenes(List.of(new ScenePlan("mines", List.of("林长渊"), "调查矿料", "不得停留",
+                List.of(), limit, "发现疑点", List.of(), null, null)));
+        String body = "两处煞气是一个根上长出来的。";
+        String response = """
+                {"issues":[{"dimension":"foreshadow","severity":"BLOCKING",
+                "evidence":"两处煞气是一个根上长出来的。",
+                "planEvidence":"林长渊怀疑两处煞气同源，但来不及确认。","description":"提前坐实同源"}]}
+                """;
+        when(llmGateway.complete(any(), any(LlmCall.class))).thenReturn(response,
+                response.replace(limit, "下一章林长渊会拿到证据。"), response);
+
+        var supported = service.audit(storyVO(), item, body, null, null, null, 1);
+        var inventedLimit = service.audit(storyVO(), item, body, null, null, null, 1);
+        var bodyWithSuspicion = service.audit(storyVO(), item, "这股冷像老矿里吹来的风。他想再查一查。",
+                null, null, null, 1);
+
+        assertEquals("BLOCKING", supported.getIssues().get(0).getSeverity());
+        assertEquals("MINOR", inventedLimit.getIssues().get(0).getSeverity());
+        assertEquals("MINOR", bodyWithSuspicion.getIssues().get(0).getSeverity());
+        assertTrue(capturedCalls(3).get(0).getUserPrompt().contains("planEvidence 逐字引用"));
+    }
+
+    @Test
+    void revisionVerificationRejectsNewEarlyRevealEvenWhenOldIssueIsFixed() {
+        var item = planItem();
+        item.setSuspenseBeat("林长渊只怀疑两处煞气同源。");
+        var original = new ChapterManuscript(1, "标题", "这股冷像是从旧矿吹来的。");
+        var context = new RewriteContext(null, null, original);
+        var target = ChapterIssueEntity.builder().severity("BLOCKING").description("漏写矿务抽查").build();
+        when(llmGateway.complete(any(), any(LlmCall.class))).thenReturn("""
+                {"verdicts":[{"index":1,"fixed":true}],"continuityChecked":true,"introducedConflicts":[
+                {"evidence":"两处煞气果然同源。","planEvidence":"林长渊只怀疑两处煞气同源。",
+                "description":"把怀疑写成定论"}]}
+                """);
+
+        var result = service.verifyFixes(storyVO(), item, "两处煞气果然同源。", List.of(target), null, null, 1, context);
+
+        assertFalse(result.degraded());
+        assertTrue(result.introducedFactConflict());
+        assertEquals("foreshadow", result.unfixed().get(0).getDimension());
+    }
+
+    @Test
+    void auditRequiresBothContinuousQuotesForKnownRuleConflict() {
+        String rule = "每次停止后须冷却十五分钟。";
+        String body = "只过去五分钟，他再次启动了能力。";
+        String issue = """
+                {"issues":[{"dimension":"consistency","severity":"BLOCKING","evidence":"只过去五分钟，他再次启动了能力。","factEvidence":"每次停止后须冷却十五分钟。","description":"冷却结束前再次使用"}]}
+                """;
+        when(llmGateway.complete(any(), any(LlmCall.class))).thenReturn(issue,
+                issue.replace(rule, "接触物品会自动启动。"),
+                issue.replace("只过去五分钟，他再次启动了能力。", "只过去五分钟，……再次启动了能力。"));
+
+        var supported = service.audit(storyVO(), planItem(), body, null, null, null, 1, null, null, rule);
+        var onlyAdvice = service.audit(storyVO(), planItem(), body, null, null, null, 1,
+                "创作参考：接触物品会自动启动。", null, rule);
+        var stitched = service.audit(storyVO(), planItem(), body, null, null, null, 1, null, null, rule);
+
+        assertEquals("BLOCKING", supported.getIssues().get(0).getSeverity());
+        assertTrue(capturedCalls(3).get(0).getUserPrompt().contains(rule));
+        for (var assessment : List.of(onlyAdvice, stitched)) {
+            assertEquals("MINOR", assessment.getIssues().get(0).getSeverity());
+            assertTrue(assessment.getIssues().get(0).getDescription().startsWith(ChapterIssueEntity.PENDING_FACT_PREFIX));
+        }
     }
 
     @Test
@@ -535,11 +606,12 @@ class ChapterAuditServiceTest {
         String conflict = "他又从袖中取出已经交走的药签";
         when(llmGateway.complete(any(), any(LlmCall.class))).thenReturn(
                 fixJson("[{\"index\":1,\"fixed\":true},{\"index\":2,\"fixed\":false}]", passCheck())
-                        .replace("\"introducedConflicts\":[]", "\"introducedConflicts\":[{\"description\":\"药签重复出现\",\"evidence\":\"" + conflict + "\"}]"));
+                        .replace("\"introducedConflicts\":[]", "\"introducedConflicts\":[{\"description\":\"药签重复出现\","
+                                + "\"factEvidence\":\"他把药签交给执事\",\"evidence\":\"" + conflict + "\"}]"));
         var item = deliveryPlan();
         String revised = DELIVERED + conflict + "。";
 
-        var result = service.verifyFixes(storyVO(), item, revised, List.of(blocking(null)), null, null, 1,
+        var result = service.verifyFixes(storyVO(), item, revised, List.of(blocking(null)), "他把药签交给执事。", null, 1,
                 null, List.of("保留来访登记"), deliveryRequest(item, revised));
 
         assertFalse(result.degraded());
@@ -730,7 +802,7 @@ class ChapterAuditServiceTest {
 
     private ChapterIssueEntity blocking(String evidence) {
         return ChapterIssueEntity.builder()
-                .dimension("continuity")
+                .dimension("hook")
                 .severity("BLOCKING")
                 .evidence(evidence)
                 .build();

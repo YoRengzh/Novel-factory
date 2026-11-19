@@ -199,7 +199,7 @@ class UserAssetStoreTest {
 
     @Test
     void styleCrud_rejectsUnknownGenreAndStrayDelete() {
-        assertThrows(IllegalArgumentException.class, () -> store.writeStyle("wuxia", "# x\n内容"));
+        assertThrows(IllegalArgumentException.class, () -> store.writeStyle("unregistered-genre", "# x\n内容"));
         assertThrows(IllegalArgumentException.class, () -> store.deleteStyle("default"),
                 "没有覆盖时删除应 404 而不是误删内置语义");
     }

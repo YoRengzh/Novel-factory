@@ -105,6 +105,27 @@ class DynamicReferenceServiceTest {
     }
 
     @Test
+    void fileSelectionLoadsOnlyTheMatchingEmotionExampleBeforeApplyingTheBudget() throws Exception {
+        String id = "exemplar-emotion";
+        String path = "references/" + id + ".md";
+        String markdown = new org.springframework.core.io.ClassPathResource("assets/" + path)
+                .getContentAsString(java.nio.charset.StandardCharsets.UTF_8);
+        when(referenceIndexLoader.getIndex()).thenReturn(List.of(entry(id)));
+        when(selector.select(any(), any(), any(), anyList())).thenReturn(List.of(id));
+        when(fileLoader.load(path)).thenReturn(markdown);
+        properties.setContentSceneRecallChars(260);
+        var context = PromptContext.builder().theme("悬疑").chapterBrief("两人终于解开误会").build();
+
+        var rules = service.selectAsRules(null, PromptScene.CHAPTER_CONTENT, context);
+
+        assertEquals(1, rules.size());
+        String content = rules.get(0).getContent();
+        assertTrue(content.contains("## 范例二：误会揭穿"));
+        assertFalse(content.contains("## 范例一：雨夜告白"));
+        assertTrue(content.length() <= 260);
+    }
+
+    @Test
     void runtimeOverrideDecidesMode() {
         // 运行时覆盖 = llm：即使 yml 是 vector，也走 LLM 选择器（不触发向量检索）
         properties.setMode("vector");

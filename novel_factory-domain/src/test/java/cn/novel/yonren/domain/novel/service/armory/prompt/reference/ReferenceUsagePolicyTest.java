@@ -5,6 +5,8 @@ import cn.novel.yonren.types.enums.PromptScene;
 import com.alibaba.fastjson2.JSON;
 import com.alibaba.fastjson2.JSONObject;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 import org.springframework.core.io.ClassPathResource;
 import org.springframework.core.io.Resource;
 import org.springframework.core.io.support.PathMatchingResourcePatternResolver;
@@ -36,9 +38,26 @@ class ReferenceUsagePolicyTest {
         assertTrue(policy.allowsDocument("exemplar-dialogue", PromptScene.CHAPTER_CONTENT, extraction),
                 "非突破专用范例不受此限制");
         PromptContext deferred = PromptContext.builder().theme("玄幻修仙")
-                .chapterBrief("本章暂不突破，先整理药园账目。").build();
+                .chapterBrief("本章暂不破境，先整理药园账目。").build();
         assertFalse(policy.allowsDocument("exemplar-breakthrough", PromptScene.CHAPTER_CONTENT, deferred),
                 "否定任务不得命中突破范例");
+    }
+
+    @ParameterizedTest
+    @CsvSource({
+            "玄幻修仙, 沈砚卡在修为瓶颈，试着绕开原来的关隘。, true",
+            "玄幻修仙, 她从潮汐涨落中参悟功法，回书房重画脉络图。, true",
+            "武侠, 主脉不通，他改走支脉再试一次。, true",
+            "玄幻修仙, 主角受功法反噬，改约比试日期。, true",
+            "玄幻修仙, 主角测试新生的力量，先稳固境界。, true",
+            "现代言情, 她在晚餐时突破谈判僵局。, false",
+            "都市, 主管让他参加销售进阶课。, false",
+            "玄幻修仙, 本章暂不参悟功法，先去药房交账。, false",
+            "玄幻修仙, 兄妹去领饭，顺路拿回一本功法册。, false"
+    })
+    void breakthroughExemplarCoversAdjacentCultivationTasks(String theme, String brief, boolean expected) {
+        var context = PromptContext.builder().theme(theme).chapterBrief(brief).build();
+        assertEquals(expected, policy.allowsDocument("exemplar-breakthrough", PromptScene.CHAPTER_CONTENT, context));
     }
 
     @Test
@@ -82,7 +101,7 @@ class ReferenceUsagePolicyTest {
     void proseExamplesStayInExpressionScenesAndGenrePrinciplesRemainAvailable() {
         PromptContext breakthrough = PromptContext.builder().theme("玄幻修仙")
                 .chapterBrief("主角尝试破境冲关。").build();
-        for (String id : List.of("exemplar-battle", "exemplar-breakthrough", "exemplar-dialogue", "exemplar-emotion")) {
+        for (String id : List.of("exemplar-battle", "exemplar-breakthrough", "exemplar-dialogue")) {
             PromptContext expressionContext = "exemplar-breakthrough".equals(id) ? breakthrough : fantasy;
             assertFalse(policy.allowsDocument(id, PromptScene.SETTING_DRAFT, expressionContext));
             assertFalse(policy.allowsDocument(id, PromptScene.CHAPTER_PLAN, expressionContext));
@@ -101,6 +120,53 @@ class ReferenceUsagePolicyTest {
         assertTrue(policy.allowsRule("genre-exemplar-fantasy", PromptScene.CHAPTER_CONTENT,
                 PromptContext.builder().theme("玄幻修仙").chapterBrief("领取例钱并检查灵石").build()));
         assertFalse(policy.allowsRule("genre-exemplar-fantasy", PromptScene.SETTING_DRAFT, fantasy));
+    }
+
+    @Test
+    void emotionBlocksFollowTheChapterEvenInAnotherGenre() throws IOException {
+        String id = "exemplar-emotion";
+        String path = "assets/references/" + id + ".md";
+        String markdown = new ClassPathResource(path).getContentAsString(StandardCharsets.UTF_8);
+        var scene = PromptScene.CHAPTER_CONTENT;
+        var chapter = PromptContext.builder().theme("悬疑").chapterBrief("两人澄清误会，本章暂不表白。").build();
+        var policyBlocks = new ReferenceAtomBuilder().build(id, "情感场面范例", "technique", markdown, new ReferenceChunker());
+        assertEquals(List.of("导言", "范例二：误会揭穿（虐点三段式：铺垫→引爆→宣泄）"), policyBlocks.stream()
+                .map(ReferenceAtom::headingPath).filter(title -> policy.allowsSection(id, title, scene, chapter)).toList());
+        assertFalse(policy.allowsSection(id, "全文", scene, chapter));
+        assertFalse(policy.allowsSection(id, "导言", scene, fantasy));
+        assertFalse(policy.canSelectDocument(id, scene, fantasy));
+        assertFalse(policy.canSelectDocument(id, PromptScene.CHAPTER_PLAN, chapter));
+    }
+
+    @Test
+    void onlyCurrentSceneMentionsEnableAnExample() {
+        var current = PromptContext.builder().theme("言情").chapterBrief("告白留到下一章，这一章她第一次主动邀约。").build();
+        assertFalse(policy.canSelectDocument("exemplar-emotion", PromptScene.CHAPTER_CONTENT, current));
+        assertTrue(policy.allowsRule("genre-exemplar-romance", PromptScene.CHAPTER_CONTENT, current));
+        var deferred = PromptContext.builder().theme("悬疑").chapterBrief("两人下章再核对口供。").build();
+        assertFalse(policy.allowsRule("genre-exemplar-suspense", PromptScene.CHAPTER_CONTENT, deferred));
+        var mixed = PromptContext.builder().theme("言情").chapterBrief("他暂不表白，她却先向他表白。").build();
+        assertTrue(policy.canSelectDocument("exemplar-emotion", PromptScene.CHAPTER_CONTENT, mixed));
+    }
+
+    @Test
+    void registeredExemplarHeadingsMatchTheShippedMarkdown() throws IOException {
+        JSONObject root = JSON.parseObject(usageJson());
+        var chunker = new ReferenceChunker();
+        for (String group : List.of("documents", "fixed")) {
+            JSONObject entries = root.getJSONObject(group);
+            for (String key : entries.keySet()) {
+                JSONObject headings = entries.getJSONObject(key).getJSONObject("chapterKeywordsByHeading");
+                if (headings == null) {
+                    continue;
+                }
+                String path = group.equals("fixed") ? key : "references/" + key + ".md";
+                String markdown = new ClassPathResource("assets/" + path).getContentAsString(StandardCharsets.UTF_8);
+                List<String> titles = chunker.sections(markdown).stream().map(ReferenceChunker.Section::title).toList();
+                assertEquals(titles.size(), headings.size(), path);
+                assertEquals(Set.copyOf(titles), headings.keySet(), path);
+            }
+        }
     }
 
     @Test

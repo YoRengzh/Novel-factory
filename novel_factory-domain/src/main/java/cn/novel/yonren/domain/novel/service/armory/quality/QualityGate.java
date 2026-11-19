@@ -2,6 +2,7 @@ package cn.novel.yonren.domain.novel.service.armory.quality;
 
 import cn.novel.yonren.domain.novel.model.valobj.quality.GateResult;
 import cn.novel.yonren.domain.novel.model.valobj.quality.DeliveryReview;
+import cn.novel.yonren.domain.novel.model.valobj.authoring.StoryAuthoringSnapshot;
 import cn.novel.yonren.domain.novel.config.StoryProperties.CausalityProperties.Mode;
 import cn.novel.yonren.domain.novel.model.valobj.work.ChapterManuscript;
 import cn.novel.yonren.domain.novel.model.valobj.revise.RewriteContext;
@@ -321,6 +322,8 @@ public class QualityGate {
         String auditGuard = joinBlocks(
                 joinBlocks(joinBlocks(secrecyGuard.promptBlock(), adherenceHint), chapterRefHint),
                 joinBlocks(joinBlocks(registerContract, timeAnchor), characterProfileHint(requestParameter)));
+        String authorFacts = renderAuthorFacts(requestParameter == null ? null : requestParameter.getStoryContextEntity(), globalNo);
+        String factSources = joinBlocks(authorFacts, timeAnchor);
         // 修订输入保留禁泄清单与语域契约（防修订环节修好事实、却引入时代错位或人物失语）
         String reviseForeshadowing = joinBlocks(joinBlocks(foreshadowing, secrecyGuard.promptBlock()), registerContract);
 
@@ -337,12 +340,10 @@ public class QualityGate {
         String planAdjustmentReason = null;
         if (auditEnabled()) {
             semanticFeedbackHash = ChapterManuscript.of(chapterContent).hash();
-            AuditResultEntity auditResult = deliveryContract == null ? chapterAuditService.audit(
-                    requestParameter.getStoryVO(), item, chapterContent.getContent(),
-                    ledgerPrompt, foreshadowing, styleStat, globalNo, auditGuard)
-                    : chapterAuditService.audit(requestParameter.getStoryVO(), item, chapterContent.getContent(),
-                    ledgerPrompt, foreshadowing, styleStat, globalNo, auditGuard,
-                    deliveryRequest(deliveryContract, chapterContent, deliveryMode, writerContext));
+            AuditResultEntity auditResult = chapterAuditService.audit(requestParameter.getStoryVO(), item,
+                    chapterContent.getContent(), ledgerPrompt, foreshadowing, styleStat, globalNo, auditGuard,
+                    deliveryContract == null ? null : deliveryRequest(deliveryContract, chapterContent, deliveryMode, writerContext),
+                    factSources);
             if (deliveryContract != null) {
                 deliveryReview = DeliveryReviewPolicy.ensureBound(auditResult == null ? null : auditResult.getDeliveryReview(),
                         item, ChapterManuscript.of(chapterContent), deliveryMode == Mode.ENFORCE);
@@ -488,6 +489,7 @@ public class QualityGate {
                 List<ChapterIssueEntity> newBlocking = new java.util.ArrayList<>(blockingOf(rescan));
                 List<ChapterIssueEntity> blockingBeforeRound = new java.util.ArrayList<>(currentBlocking);
                 boolean planCandidateUnfixed = false;
+                boolean introducedFactConflict = false;
                 if (auditEnabled()) {
                     // A3 复审验证化（docs/enhancement-plan.md）：复审不再全章重审——开放任务方差大，
                     // 二轮翻案即"修订拉锯"；改为逐条验证上一轮 BLOCKING 是否已修复（未确认已修复=仍未修复）。
@@ -497,23 +499,31 @@ public class QualityGate {
                     List<String> candidates = reviseResult.decision() == null
                             ? List.of() : reviseResult.decision().getReviewCandidates();
                     boolean hasCandidates = candidates != null && !candidates.isEmpty();
+                    RewriteContext verificationContext = null;
+                    if (writerContext != null || StringUtils.isNotBlank(factSources)) {
+                        var beforeRevision = new ChapterManuscript(globalNo, titleBeforeRevision, contentBeforeRevision);
+                        verificationContext = writerContext == null
+                                ? new RewriteContext(null, null, beforeRevision, null, factSources)
+                                : writerContext.forVerification(beforeRevision, factSources);
+                    }
                     ChapterAuditService.FixVerification verification = deliveryContract != null
                             ? chapterAuditService.verifyFixes(requestParameter.getStoryVO(), item,
                                     chapterContent.getContent(), currentBlocking, ledgerPrompt, styleStat, globalNo,
-                                    writerContext, candidates == null ? List.of() : candidates,
+                                    verificationContext, candidates == null ? List.of() : candidates,
                                     deliveryRequest(deliveryContract, chapterContent, deliveryMode, writerContext))
                             : !hasCandidates
-                            ? (writerContext == null ? chapterAuditService.verifyFixes(
+                            ? (verificationContext == null ? chapterAuditService.verifyFixes(
                                     requestParameter.getStoryVO(), item, chapterContent.getContent(),
                                     currentBlocking, ledgerPrompt, styleStat, globalNo)
                                     : chapterAuditService.verifyFixes(requestParameter.getStoryVO(), item,
                                     chapterContent.getContent(), currentBlocking, ledgerPrompt, styleStat, globalNo,
-                                    writerContext))
+                                    verificationContext))
                             : chapterAuditService.verifyFixes(requestParameter.getStoryVO(), item,
                                     chapterContent.getContent(), currentBlocking, ledgerPrompt, styleStat, globalNo,
-                                    writerContext, candidates);
+                                    verificationContext, candidates);
                     // 验证没跑成 ≠ 没修好：逐项交付结论不能由旧 fixed=true 或词面命中替代。
                     auditVerifyDegraded = verification == null || verification.degraded();
+                    introducedFactConflict = verification != null && verification.introducedFactConflict();
                     if (deliveryContract != null) {
                         deliveryReview = DeliveryReviewPolicy.ensureBound(
                                 verification == null ? null : verification.deliveryReview(), item,
@@ -535,16 +545,16 @@ public class QualityGate {
                     }
                     newBlocking.addAll(DeliveryReviewPolicy.blockingIssues(deliveryReview));
                 }
-                // 完整性候选未通过：修订稿改了原稿，但仍有计划事件未获复核确认，回退本次采纳。
-                // 必须放在“全部修好即通过”之前——旧 BLOCKING 全清但事件被删，同样不能闭环。
-                if (planCandidateUnfixed) {
+                // 修订破坏计划完整性或引入有证据的事实矛盾时，恢复与原稿同版的审校结果。
+                if (planCandidateUnfixed || introducedFactConflict) {
                     chapterContent.setContent(contentBeforeRevision);
                     chapterContent.setTitle(titleBeforeRevision);
                     currentBlocking = blockingBeforeRound;
                     mechanicalMinor = minorBeforeRevision;
                     deliveryReview = deliveryBeforeRevision;
                     auditVerifyDegraded = degradedBeforeRevision;
-                    log.warn("第 {} 章第 {}/{} 轮修订未通过计划完整性复核，回退本次采纳", globalNo, attempt, maxAttempts);
+                    log.warn("第 {} 章第 {}/{} 轮撤回修订，原因：{}", globalNo, attempt, maxAttempts,
+                            introducedFactConflict ? "引入新的事实矛盾" : "计划完整性复核未通过");
                     break;
                 }
                 if (deliveryReview.unknown()) {
@@ -707,7 +717,34 @@ public class QualityGate {
         return "【人物档案·代词与既定事实】（作者声明的事实锚，判定时以此为准）\n" + profiles
                 + "\n与档案冲突的写法属**事实矛盾**：代词用错（把女角色写成「他」）、"
                 + "班级/年级/志愿写错、亲属关系写错、已声明的事实被改写——"
-                + "这类错误读者一眼能看出，必须记 BLOCKING 并给出正文中的确切位置。";
+                + "核实两处引文和直接矛盾后记 BLOCKING。";
+    }
+
+    private static String renderAuthorFacts(StoryContextEntity context, int globalNo) {
+        if (context == null) return null;
+        StringBuilder facts = new StringBuilder();
+        appendFactSource(facts, "世界观", context.getWorldSetting());
+        appendFactSource(facts, "主人公", context.getProtagonist());
+        appendFactSource(facts, "人物档案", context.getCharacterProfiles());
+        appendFactSource(facts, "视角", context.getPerspective());
+        var authoring = context.getStoryAuthoring();
+        if (authoring != null && globalNo >= authoring.effectiveFromChapter()) {
+            for (var entry : authoring.entries()) {
+                if (entry.operation() == StoryAuthoringSnapshot.Operation.EXTRACTION_CORRECTION
+                        && entry.status() == StoryAuthoringSnapshot.Status.AUTHOR_CORRECTED
+                        && globalNo >= entry.effectiveFromChapter()) {
+                    appendFactSource(facts, "作者纠错 · " + entry.entityName() + " · 来源第 " + entry.sourceChapter() + " 章",
+                            entry.after());
+                }
+            }
+        }
+        return facts.toString();
+    }
+
+    private static void appendFactSource(StringBuilder facts, String label, String content) {
+        if (StringUtils.isNotBlank(content)) {
+            facts.append(label).append("：\n").append(content).append("\n");
+        }
     }
 
     /**

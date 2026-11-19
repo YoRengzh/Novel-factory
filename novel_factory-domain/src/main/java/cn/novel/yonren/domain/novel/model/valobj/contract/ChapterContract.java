@@ -31,6 +31,11 @@ public record ChapterContract(
 
 
     public static ChapterContract of(ChapterPlanItemEntity item, List<ChapterSummaryEntity> summaries) {
+        return of(item, summaries, null);
+    }
+
+    public static ChapterContract of(ChapterPlanItemEntity item, List<ChapterSummaryEntity> summaries,
+                                     String projectedKnowledge) {
         if (item == null) {
             return null;
         }
@@ -41,9 +46,19 @@ public record ChapterContract(
                 item.getKeyEvents(),
                 item.getEndingHook(),
                 null,
-                extractKnowledgeBoundary(summaries, item.getChapterNo()),
+                StringUtils.isNotBlank(projectedKnowledge) ? projectedKnowledge
+                        : extractKnowledgeBoundary(summaries, item.getChapterNo()),
                 null,
                 item.getChapterType());
+    }
+
+    public static String renderKnowledgeProgress(ChapterPlanItemEntity item) {
+        if (item == null || StringUtils.isBlank(item.getSuspenseBeat())) {
+            return "";
+        }
+        return "\n\n【本章悬念进度】" + item.getSuspenseBeat()
+                + "\n按场景结果核对谁在何时凭什么知道。明确只到察觉、怀疑或待查的线索，保持这个程度；"
+                + "允许依据本章新证据完成计划明确安排的确认。前情摘要、全书方向和后续计划不能授权提前揭晓。";
     }
 
 

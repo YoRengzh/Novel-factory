@@ -22,6 +22,7 @@ import cn.novel.yonren.domain.novel.model.entity.StoryContextEntity;
 import cn.novel.yonren.domain.novel.model.valobj.work.ChapterCommitState;
 import cn.novel.yonren.domain.novel.service.armory.authoring.StoryAuthoringService;
 import cn.novel.yonren.domain.novel.service.armory.memory.CharacterStateProjector;
+import cn.novel.yonren.domain.novel.service.armory.quality.ChapterLengthPolicy;
 import cn.novel.yonren.domain.novel.model.entity.StyleStatEntity;
 import cn.novel.yonren.domain.novel.service.armory.audit.ParagraphDensityAuditService;
 import cn.novel.yonren.domain.novel.model.valobj.contract.ChapterContract;
@@ -63,16 +64,18 @@ import cn.novel.yonren.types.enums.GenreType;
 import cn.novel.yonren.types.enums.PromptScene;
 import cn.novel.yonren.types.enums.ResponseCode;
 import cn.novel.yonren.types.exception.AppException;
-import cn.novel.yonren.types.utils.JsonRepair;
+import cn.novel.yonren.types.utils.ChapterTitleNormalizer;
+import cn.novel.yonren.types.utils.JsonParseFallback;
+import com.fasterxml.jackson.core.JsonFactory;
+import com.fasterxml.jackson.core.JsonToken;
 import com.fasterxml.jackson.core.json.JsonReadFeature;
-import com.fasterxml.jackson.databind.json.JsonMapper;
 import jakarta.annotation.Resource;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.lang3.StringUtils;
-import org.springframework.ai.converter.BeanOutputConverter;
 import org.springframework.stereotype.Service;
 
 import java.nio.file.Path;
+import java.io.IOException;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
@@ -97,9 +100,8 @@ public class ChapterWorker {
      * Jackson 默认严格模式会拒绝字符串内未转义的控制字符（如真实换行），
      * 模型长文本输出偶发该问题，这里放宽解析。
      */
-    private static final BeanOutputConverter<ChapterContentEntity> CHAPTER_CONTENT_CONVERTER =
-            new BeanOutputConverter<>(ChapterContentEntity.class,
-                    JsonMapper.builder().enable(JsonReadFeature.ALLOW_UNESCAPED_CONTROL_CHARS).build());
+    private static final JsonFactory CHAPTER_JSON =
+            JsonFactory.builder().enable(JsonReadFeature.ALLOW_UNESCAPED_CONTROL_CHARS).build();
 
     /** 终局审查返工重试预算：审查不通过最多重写几轮，防递归失控（配合顶帽头寸双护栏） */
     private static final int MAX_FINALE_REWORK = 2;
@@ -387,7 +389,7 @@ public class ChapterWorker {
 
             // 章节契约 + 生成模式：契约把"任务层"从一段文本提升为可判定对象；
             // 模式由「契约完整度 + 节拍可用性」决定，三档都有真实触发场景，且落日志以便归因
-            ChapterContract contract = ChapterContract.of(item, summaries);
+            ChapterContract contract = buildChapterContract(item, summaries);
             ChapterBeatsEntity beats = chapterBeatsService.buildBeats(
                     requestParameter.getStoryVO(), item, globalNo,
                     buildBeatsContext(summaries, globalNo));
@@ -1349,42 +1351,15 @@ public class ChapterWorker {
     private ChapterContentEntity generateChapterWithFallback(
             ArmoryCommandEntity requestParameter, ChapterPlanItemEntity item,
             PromptContext ctx, String userPrompt, int globalNo, Map<String, String> usedPromptMap) {
-        String lastRaw = null;
-        String bestRescued = null;
         for (int attempt = 1; attempt <= 2; attempt++) {
             try {
                 String raw = llmInvokeService.invoke(
                         requestParameter.getStoryVO(), PromptScene.CHAPTER_CONTENT, ctx, userPrompt, usedPromptMap);
-                lastRaw = raw;
-                for (String candidate : JsonRepair.extractStringFields(raw, "content")) {
-                    if (bestRescued == null || cn.novel.yonren.domain.novel.service.armory.quality.ChapterLengthPolicy
-                            .effectiveCharacterCount(candidate) > cn.novel.yonren.domain.novel.service.armory.quality.ChapterLengthPolicy
-                            .effectiveCharacterCount(bestRescued)) bestRescued = candidate;
-                }
-
-                ChapterContentEntity chapter = tryConvertChapter(raw);
-                if (chapter == null) {
-                    chapter = tryConvertChapter(JsonRepair.repair(raw));
-                    if (chapter != null) {
-                        log.info("第 {} 章正文经文本修复后解析成功", globalNo);
-                    }
-                }
-                // 解析"成功"但正文为空 = 实际失败（重复 content 键取到后一个空串的典型形态）：
-                // 不能直接返回，否则后续校验/落盘会拿到空稿；交由下一级降级接住
-                if (chapter != null && StringUtils.isNotBlank(chapter.getContent())) {
-                    if (bestRescued != null && cn.novel.yonren.domain.novel.service.armory.quality.ChapterLengthPolicy
-                            .effectiveCharacterCount(bestRescued) > cn.novel.yonren.domain.novel.service.armory.quality.ChapterLengthPolicy
-                            .effectiveCharacterCount(chapter.getContent())) {
-                        chapter.setContent(bestRescued);
-                        chapter.setTitle(cn.novel.yonren.types.utils.ChapterTitleNormalizer.normalize(item.getTitle()));
-                    }
+                ChapterContentEntity chapter = JsonParseFallback.parse(raw, json -> readChapterResponse(json, item));
+                if (chapter != null) {
                     // 正文实体以全局章节号为准（落盘文件名/续写衔接均依赖），不信任模型输出的编号
                     chapter.setChapterNo(globalNo);
                     return chapter;
-                }
-                if (chapter != null) {
-                    log.warn("第 {} 章正文第 {}/2 次输出解析为空正文（疑似重复 content 键），继续降级",
-                            globalNo, attempt);
                 }
                 log.warn("第 {} 章正文第 {}/2 次输出无法解析", globalNo, attempt);
             } catch (Exception e) {
@@ -1392,30 +1367,55 @@ public class ChapterWorker {
             }
         }
 
-        // 跨重试保留最长的根对象正文，短JSON或空的重复键不能覆盖此前完整正文。
-        String content = bestRescued;
-        if (StringUtils.isNotBlank(content)) {
-            log.warn("第 {} 章正文解析失败，已抢救正文主体（标题取自章节计划）", globalNo);
-            return ChapterContentEntity.builder()
-                    .chapterNo(globalNo)
-                    .title(cn.novel.yonren.types.utils.ChapterTitleNormalizer.normalize(item.getTitle()))
-                    .content(content)
-                    .build();
-        }
         throw new AppException(ResponseCode.UN_ERROR.getCode(),
                 "第 " + globalNo + " 章正文生成与解析彻底失败，本批终止；"
                         + "此前章节已通过逐章检查点落盘，可在请求中携带 resumeStoryDir 续写补齐后续章节");
     }
 
-    private ChapterContentEntity tryConvertChapter(String raw) {
-        try {
-            ChapterContentEntity chapter = CHAPTER_CONTENT_CONVERTER.convert(raw);
-            if (chapter != null) {
-                // 模型输出标题常自带"第N章"前缀，落盘/展示会与章节号重复，入口归一
-                chapter.setTitle(cn.novel.yonren.types.utils.ChapterTitleNormalizer.normalize(chapter.getTitle()));
+    private ChapterContentEntity readChapterResponse(String json, ChapterPlanItemEntity item) {
+        try (var parser = CHAPTER_JSON.createParser(json)) {
+            if (parser.nextToken() != JsonToken.START_OBJECT) {
+                return null;
             }
-            return chapter;
-        } catch (Exception e) {
+            String title = null;
+            String body = null;
+            String lastBody = null;
+            int bodyLength = -1;
+            while (parser.nextToken() == JsonToken.FIELD_NAME) {
+                String field = parser.currentName();
+                if (parser.nextToken() != JsonToken.VALUE_STRING) {
+                    if ("content".equals(field)) {
+                        lastBody = null;
+                    }
+                    parser.skipChildren();
+                    continue;
+                }
+                if ("title".equals(field)) {
+                    title = parser.getText();
+                } else if ("content".equals(field)) {
+                    // 模型偶尔重复输出 content，保留最长的非空根字段。
+                    String candidate = parser.getText();
+                    lastBody = candidate;
+                    int length = ChapterLengthPolicy.effectiveCharacterCount(candidate);
+                    if (length >= bodyLength && StringUtils.isNotBlank(candidate)) {
+                        body = candidate;
+                        bodyLength = length;
+                    }
+                }
+            }
+            // 必须读完外层对象，不能将裸引号之前的前缀作为完整正文。
+            if (parser.currentToken() != JsonToken.END_OBJECT || parser.nextToken() != null || body == null) {
+                return null;
+            }
+            // 末尾重复字段选错稿时，使用程序已有的计划标题。
+            if (!body.equals(lastBody)) {
+                title = item.getTitle();
+            }
+            return ChapterContentEntity.builder()
+                    .title(ChapterTitleNormalizer.normalize(StringUtils.defaultIfBlank(title, item.getTitle())))
+                    .content(body)
+                    .build();
+        } catch (IOException invalidJson) {
             return null;
         }
     }
@@ -1468,6 +1468,11 @@ public class ChapterWorker {
         return sb.isEmpty() ? null : sb.toString();
     }
 
+    ChapterContract buildChapterContract(ChapterPlanItemEntity item, List<ChapterSummaryEntity> summaries) {
+        String knowledge = CharacterStateProjector.render(summaries, item.getChapterNo(), item.getCharacters());
+        return ChapterContract.of(item, summaries, knowledge);
+    }
+
     /**
      * 组装正文 prompt —— **四层结构**：
      *
@@ -1491,6 +1496,7 @@ public class ChapterWorker {
                 // v2 场景计划：场景是权威来源，派生事件只是摘要视图。
                 // 写手据此按场演出，而不是把派生事件再压成一句话。
                 + renderSceneContract(item)
+                + ChapterContract.renderKnowledgeProgress(item)
                 + renderContinuityConstraints(contract)
                 + renderWritingGuidance(globalNo, storyContextEntity);
     }
@@ -1554,12 +1560,11 @@ public class ChapterWorker {
                 .append("\n2. 无缝承接上一章结尾【上一章结尾原文·禁止重复】：上一章结尾原文仅用于核对事实、当前悬念与语气，不要求复用其章首格式或物品描写方式，严禁在本章正文中原样复述或大段重复（与上一章结尾文字重复不得超过30字）。本章从上一章结束处直接承接后续发展，允许仍在同一时间点、地点和场景，不必专门交代时间——如果上一章结尾是动作定格，本章开头写这个动作的后续结果而非重复动作本身；如果是悬念定格，本章开头写角色对悬念的反应而非重复悬念描述；如果是对话未答，本章开头写下一句对话而非重复上一句。计划、账本和前文中的时间用于核对连续性，不是章首报时要求；仅当时间跳跃影响理解或具体时间承担赴约、倒计时等剧情作用时明确写出。禁止另起炉灶、禁止重复叙述上一章已写内容；人物状态、伤势、位置、持有物必须与角色账本及上一章结尾一致；人物所处位置、持有物与修为必须与【账本末态红线】（如有）一致，位置/持有物变化必须有过渡描写，严禁无过渡跳变；若上一章结尾是悬念/高潮定格，本章开头必须先接住这个定格再推进，但只能写后续不能复述定格本身。")
                 .append("\n3. 关键事件里的括号注释（如\"回收第N章埋设的XX\"）是给你看的执行提示——")
                 .append("必须把它转化为真实剧情来兑现该伏笔，严禁把方括号注释或其原文写进正文。");
-        // 认知边界：账本一直在记录"谁还不知道什么"，但从未进过正文 prompt。
-        // 不编号——避免与表现层的 4-11 撞号
         if (contract != null && StringUtils.isNotBlank(contract.knowledgeBoundary())) {
-            sb.append("\n【认知边界·不得越界】").append(contract.knowledgeBoundary())
-                    .append("。本章任何角色不得表现出超出上述范围的认知——")
-                    .append("不得把\"怀疑\"写成\"确认\"，不得让角色知道他尚未获知的信息。");
+            sb.append("\n【认知边界·不得越界】\n").append(contract.knowledgeBoundary())
+                    .append("\n以上是进入本章前的状态。不得把\"怀疑\"写成\"确认\"，也不得将某人的所知分给其他人。")
+                    .append("本章可凭新证据推进到计划指定的程度；旧摘要或召回若与本章明确的悬念边界冲突，")
+                    .append("先保留证据和人物当时的判断，不把待核或主观判断写成定论。");
         }
         sb.append("\n【角色能力边界】动作、语言和表达须符合已确立年龄、伤势、训练和特殊能力。")
                 .append("明确允许的认知超前不得被年龄常识抹去；不得靠更换载体绕过真实能力限制。")

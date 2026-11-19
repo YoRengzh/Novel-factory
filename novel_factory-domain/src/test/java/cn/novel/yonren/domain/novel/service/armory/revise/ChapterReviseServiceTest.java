@@ -436,10 +436,9 @@ class ChapterReviseServiceTest {
     }
 
     @Test
-    void patch_fallsBackToRewrite_whenModelGivesNoPatches() {
-        // 模型判定"不是局部问题"（空补丁）＝ 正常回退信号，不是错误
+    void patch_escalatesToRewrite_whenResponseExplainsStructuralChange() {
         when(llmGateway.complete(any(), any(LlmCall.class)))
-                .thenReturn("{\"patches\":[]}", REWRITE_JSON);
+                .thenReturn("{\"patches\":[],\"rewriteReason\":\"事件B目前先于事件A，须一起调整开端和结尾的因果顺序\"}", REWRITE_JSON);
 
         ChapterReviseService.ReviseResult result = patchService().revise(
                 storyVO(), planItem(), PATCH_ORIGINAL,
@@ -448,75 +447,114 @@ class ChapterReviseServiceTest {
         assertTrue(result.decision().isAccepted());
         assertEquals("小陈拔剑，事件A发生，事件B也发生，结尾呼应钩子。", result.revisedContent().getContent());
         assertTrue(result.decision().getReason().contains("采纳闸门"));
+        ArgumentCaptor<LlmCall> calls = ArgumentCaptor.forClass(LlmCall.class);
+        verify(llmGateway, org.mockito.Mockito.times(2)).complete(any(), calls.capture());
+        assertEquals("patch-第1章", calls.getAllValues().get(0).getLabel());
+        assertEquals("revise-第1章", calls.getAllValues().get(1).getLabel());
+        assertTrue(calls.getAllValues().get(1).getUserPrompt().contains("须一起调整开端和结尾"));
     }
 
     @Test
-    void patch_fallsBackToRewrite_whenAnchorNotFound() {
-        // 模型改写过锚点（不是逐字复制原文）→ 套用失败，绝不模糊匹配
-        String json = "{\"patches\":[{\"anchor\":\"他坐了下来。\",\"replacement\":\"他坐下了。\"}]}";
-        when(llmGateway.complete(any(), any(LlmCall.class))).thenReturn(json, REWRITE_JSON);
+    void patch_retriesWithDiagnostic_whenAnchorNotFound() {
+        String invalid = "{\"patches\":[{\"anchor\":\"他坐了下来。\",\"replacement\":\"他坐稳了。\"}]}";
+        String valid = "{\"patches\":[{\"anchor\":\"他坐下了。\",\"replacement\":\"他坐稳了。\"}]}";
+        when(llmGateway.complete(any(), any(LlmCall.class))).thenReturn(invalid, valid);
 
         ChapterReviseService.ReviseResult result = patchService().revise(
                 storyVO(), planItem(), PATCH_ORIGINAL,
                 List.of(blockingIssue()), null, null, emptyStyleStat(), 1, null);
 
-        assertEquals("小陈拔剑，事件A发生，事件B也发生，结尾呼应钩子。", result.revisedContent().getContent());
+        assertTrue(result.decision().isAccepted());
+        assertEquals(PATCH_ORIGINAL.replace("他坐下了。", "他坐稳了。"), result.revisedContent().getContent());
+        assertNull(result.revisedContent().getTitle());
+        assertTrue(patchCalls().get(1).getUserPrompt().contains("锚点在原稿中不存在"));
     }
 
     @Test
-    void patch_fallsBackToRewrite_whenAnchorAppearsMoreThanOnce() {
+    void patch_keepsOriginal_whenAnchorAppearsMoreThanOnce() {
         // 锚点不唯一 → 无法确定该改哪一处，整份作废（套错位置比不修更糟）
         String original = "事件A发生。他坐下了。事件B发生。他坐下了。";
         String json = "{\"patches\":[{\"anchor\":\"他坐下了。\",\"replacement\":\"他坐稳了。\"}]}";
-        when(llmGateway.complete(any(), any(LlmCall.class))).thenReturn(json, REWRITE_JSON);
+        when(llmGateway.complete(any(), any(LlmCall.class))).thenReturn(json);
 
         ChapterReviseService.ReviseResult result = patchService().revise(
                 storyVO(), planItem(), original,
                 List.of(blockingIssue()), null, null, emptyStyleStat(), 1, null);
 
-        assertEquals("小陈拔剑，事件A发生，事件B也发生，结尾呼应钩子。", result.revisedContent().getContent());
+        assertPatchRejected(result, "锚点在原稿中出现多次");
     }
 
     @Test
-    void patch_fallsBackToRewrite_whenAnchorsOverlap() {
+    void patch_keepsOriginal_whenAnchorsOverlap() {
         // 一个锚点套住另一个 → "谁先改"会改变结果，拒绝套用
         String original = "事件A发生。他坐下了。事件B发生。";
         String json = "{\"patches\":["
                 + "{\"anchor\":\"事件A发生。他坐下了。\",\"replacement\":\"事件A发生。他坐下了，手按在剑柄上。\"},"
                 + "{\"anchor\":\"他坐下了。\",\"replacement\":\"他坐稳了。\"}]}";
-        when(llmGateway.complete(any(), any(LlmCall.class))).thenReturn(json, REWRITE_JSON);
+        when(llmGateway.complete(any(), any(LlmCall.class))).thenReturn(json);
 
         ChapterReviseService.ReviseResult result = patchService().revise(
                 storyVO(), planItem(), original,
                 List.of(blockingIssue()), null, null, emptyStyleStat(), 1, null);
 
-        assertEquals("小陈拔剑，事件A发生，事件B也发生，结尾呼应钩子。", result.revisedContent().getContent());
+        assertPatchRejected(result, "补丁锚点互相重叠");
     }
 
     @Test
-    void patch_fallsBackToRewrite_whenPatchChangesNothing() {
+    void patch_keepsOriginal_whenPatchChangesNothing() {
         // 空操作补丁：套用"成功"但正文一字未变。若放过，会把"什么也没修"当成"修完了"
         String json = "{\"patches\":[{\"anchor\":\"他坐下了。\",\"replacement\":\"他坐下了。\"}]}";
-        when(llmGateway.complete(any(), any(LlmCall.class))).thenReturn(json, REWRITE_JSON);
+        when(llmGateway.complete(any(), any(LlmCall.class))).thenReturn(json);
 
         ChapterReviseService.ReviseResult result = patchService().revise(
                 storyVO(), planItem(), PATCH_ORIGINAL,
                 List.of(blockingIssue()), null, null, emptyStyleStat(), 1, null);
 
-        assertEquals("小陈拔剑，事件A发生，事件B也发生，结尾呼应钩子。", result.revisedContent().getContent());
+        assertPatchRejected(result, "补丁未改变任何内容");
     }
 
     @Test
-    void patch_fallsBackToRewrite_whenPatchedTextFailsGate() {
+    void patch_keepsOriginal_whenPatchedTextFailsGate() {
         // 补丁把大段正文删掉 → 字数闸挡住。补丁与整章重写走的是同一套闸门，没有豁免
         String json = "{\"patches\":[{\"anchor\":\"小陈拔剑，事件A发生，事件B随后发生。\",\"replacement\":\"\"}]}";
-        when(llmGateway.complete(any(), any(LlmCall.class))).thenReturn(json, REWRITE_JSON);
+        when(llmGateway.complete(any(), any(LlmCall.class))).thenReturn(json);
 
         ChapterReviseService.ReviseResult result = patchService().revise(
                 storyVO(), planItem(), PATCH_ORIGINAL,
                 List.of(blockingIssue()), null, null, emptyStyleStat(), 1, null);
 
-        assertEquals("小陈拔剑，事件A发生，事件B也发生，结尾呼应钩子。", result.revisedContent().getContent());
+        assertPatchRejected(result, "补丁未过采纳闸门");
+    }
+
+    @Test
+    void patch_retriesTruncatedJsonAndKeepsOriginalOnUnexplainedEmptyPlan() {
+        when(llmGateway.complete(any(), any(LlmCall.class))).thenReturn(
+                "{\"rewriteReason\":\"需要重排场景\",\"patches\":[", "{\"patches\":[]}");
+
+        ChapterReviseService.ReviseResult result = patchService().revise(
+                storyVO(), planItem(), PATCH_ORIGINAL,
+                List.of(blockingIssue()), null, null, emptyStyleStat(), 1, null);
+
+        assertFalse(result.decision().isAccepted());
+        assertNull(result.revisedContent());
+        assertTrue(result.decision().getReason().contains("空补丁未说明"));
+        assertTrue(patchCalls().get(1).getUserPrompt().contains("补丁 JSON 无法解析"));
+    }
+
+    private void assertPatchRejected(ChapterReviseService.ReviseResult result, String reason) {
+        assertFalse(result.decision().isAccepted());
+        assertNull(result.revisedContent());
+        assertTrue(result.decision().getReason().contains("保留原稿"));
+        assertTrue(result.decision().getReason().contains(reason));
+        assertTrue(patchCalls().get(1).getUserPrompt().contains(reason));
+    }
+
+    private List<LlmCall> patchCalls() {
+        ArgumentCaptor<LlmCall> calls = ArgumentCaptor.forClass(LlmCall.class);
+        verify(llmGateway, org.mockito.Mockito.times(2)).complete(any(), calls.capture());
+        List<LlmCall> captured = calls.getAllValues();
+        assertTrue(captured.stream().allMatch(call -> call.getLabel().equals("patch-第1章")));
+        return captured;
     }
 
     @Test
@@ -548,7 +586,7 @@ class ChapterReviseServiceTest {
         assertTrue(prompt.contains("定向补丁"));
         assertTrue(prompt.contains("逐字存在、且只出现一次"), "必须讲清锚点的唯一性要求");
         assertTrue(prompt.contains("anchor 会被程序逐字索引"), "要让它知道改一个字即整份丢弃的代价");
-        assertTrue(prompt.contains("{\"patches\":[]}"), "必须显式给出'放弃'的出口，否则会硬凑不合法补丁");
+        assertTrue(prompt.contains("{\"patches\":[],\"rewriteReason\":"), "结构性升级必须给出具体原因");
         // 两种形态共用业务上下文：补丁 prompt 同样带关键事件红线与账本
         assertTrue(prompt.contains("【关键事件红线】"));
         assertTrue(prompt.contains("账本内容"));

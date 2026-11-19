@@ -2,6 +2,7 @@ package cn.novel.yonren.domain.novel.service.armory.prompt.strategy;
 
 import cn.novel.yonren.domain.novel.service.armory.prompt.PromptRuleFileLoader;
 import cn.novel.yonren.domain.novel.model.valobj.prompt.PromptRule;
+import cn.novel.yonren.domain.novel.model.valobj.prompt.PromptContext;
 import cn.novel.yonren.types.enums.PromptScene;
 import org.junit.jupiter.api.Test;
 
@@ -34,5 +35,12 @@ class ContrastExamplesStrategyTest {
         assertTrue(content.contains("待审"), "应含待审表达");
         assertTrue(content.contains("可选处理"), "应含可选处理");
         assertEquals(PromptRule.InjectPosition.USER_TAIL, rules.get(0).getInjectPosition());
+    }
+
+    @Test
+    void deletionOfSharedPackDoesNotSuppressIndependentContrastExamples() {
+        var customGenre = PromptContext.builder().theme("书信体").chapterBrief("登门道歉。").build();
+
+        assertEquals(1, strategy.load(PromptScene.CHAPTER_CONTENT, customGenre).size());
     }
 }

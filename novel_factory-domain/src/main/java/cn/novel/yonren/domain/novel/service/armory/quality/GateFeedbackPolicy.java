@@ -22,6 +22,7 @@ public final class GateFeedbackPolicy {
         return result.semanticMinors().stream()
                 .filter(issue -> issue != null && "MINOR".equalsIgnoreCase(issue.getSeverity())
                         && issue.getDescription() != null && !issue.getDescription().isBlank()
+                        && !issue.getDescription().stripLeading().startsWith(ChapterIssueEntity.PENDING_FACT_PREFIX)
                         && EvidenceMatch.contained(issue.getEvidence(), content))
                 .toList();
     }

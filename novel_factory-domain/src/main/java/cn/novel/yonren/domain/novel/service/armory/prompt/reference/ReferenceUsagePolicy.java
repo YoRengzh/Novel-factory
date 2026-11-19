@@ -21,6 +21,7 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
+import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
 /**
@@ -33,6 +34,11 @@ import java.util.stream.Collectors;
 public class ReferenceUsagePolicy {
 
     private static final String RESOURCE = "assets/reference-usage-policy.json";
+    private static final ReferenceChunker CHUNKER = new ReferenceChunker();
+    private static final Pattern NON_CURRENT_PREFIX = Pattern.compile(
+            "(?:不|未|无法|不能|不需|不必|避免|放弃|没有|无需|不需要|暂缓|搁置|(?:下(?:一)?章|后续章节)(?:再|才))\\s*$");
+    private static final Pattern DEFERRED_SUFFIX = Pattern.compile(
+            "\\s*(?:留到|放到|推迟到|推到|延至|安排在)(?:下(?:一)?章|后续章节)");
     private final Registry registry;
 
     public ReferenceUsagePolicy() {
@@ -51,12 +57,18 @@ public class ReferenceUsagePolicy {
 
     /** 整文件安全资格：任一小节在本场景不合格就拒绝整文。 */
     public boolean allowsDocument(String docId, PromptScene scene, PromptContext ctx) {
-        if (docId == null) {
-            return false;
-        }
-        Entry entry = registry.documents().get(docId);
-        return entry != null && allows(entry.metadata(), scene, ctx)
-                && entry.sections().stream().allMatch(section -> allows(section.metadata(), scene, ctx));
+        Entry entry = docId == null ? null : registry.documents().get(docId);
+        return eligibleFile(entry, scene, ctx) && entry.chapterKeywordsByHeading().isEmpty();
+    }
+
+    /** 文件级选择器可以选中按章裁剪的小节，但不能据此回传整篇原文。 */
+    boolean canSelectDocument(String docId, PromptScene scene, PromptContext ctx) {
+        Entry entry = docId == null ? null : registry.documents().get(docId);
+        return eligibleFile(entry, scene, ctx) && entry.matchesAnyHeading(ctx);
+    }
+
+    String documentContent(String docId, String content, PromptScene scene, PromptContext ctx) {
+        return selectContent(registry.documents().get(docId), content, scene, ctx);
     }
 
     /** 小节资格：块级检索在候选阶段逐条调用，依赖项不能因身份豁免。 */
@@ -68,27 +80,54 @@ public class ReferenceUsagePolicy {
         if (entry == null || !allows(entry.metadata(), scene, ctx)) {
             return false;
         }
-        if (entry.sections().isEmpty()) {
-            return true;
-        }
         // 混合文档的"全文"不是普通小节：必须按整文安全口径判断。
         if ("全文".equals(headingPath)) {
             return allowsDocument(docId, scene, ctx);
+        }
+        if (!entry.chapterKeywordsByHeading().isEmpty()) {
+            // 导言是正文块的非独立依赖。没有匹配的正文块时也跳过导言。
+            String heading = headingPath.split(" › ", 2)[0];
+            boolean matches = "导言".equals(headingPath) ? entry.matchesAnyHeading(ctx) : entry.matchesHeading(heading, ctx);
+            if (!matches) {
+                return false;
+            }
         }
         return entry.sections().stream()
                 .filter(section -> section.matches(headingPath))
                 .allMatch(section -> allows(section.metadata(), scene, ctx));
     }
 
-    /** 固定资料与动态资料同样按 scene/purpose/type/context 判断；拒绝未登记路径。 */
+    /** 固定规则是否有可用内容。按章选段的资料须通过 fixedContent 装配。 */
     public boolean allowsFixed(String resourcePath, PromptScene scene, PromptContext ctx) {
-        if (resourcePath == null) {
-            return false;
-        }
-        String path = resourcePath.startsWith("assets/") ? resourcePath.substring(7) : resourcePath;
-        Entry entry = registry.fixed().get(path);
+        Entry entry = fixedEntry(resourcePath);
+        return eligibleFile(entry, scene, ctx) && entry.matchesAnyHeading(ctx);
+    }
+
+    public String fixedContent(String resourcePath, String content, PromptScene scene, PromptContext ctx) {
+        return selectContent(fixedEntry(resourcePath), content, scene, ctx);
+    }
+
+    private Entry fixedEntry(String path) {
+        return path == null ? null : registry.fixed().get(path.startsWith("assets/") ? path.substring(7) : path);
+    }
+
+    private static boolean eligibleFile(Entry entry, PromptScene scene, PromptContext ctx) {
         return entry != null && allows(entry.metadata(), scene, ctx)
                 && entry.sections().stream().allMatch(section -> allows(section.metadata(), scene, ctx));
+    }
+
+    private static String selectContent(Entry entry, String content, PromptScene scene, PromptContext ctx) {
+        if (content == null || !eligibleFile(entry, scene, ctx) || !entry.matchesAnyHeading(ctx)) {
+            return "";
+        }
+        if (entry.chapterKeywordsByHeading().isEmpty()) {
+            return content;
+        }
+        String selected = CHUNKER.sections(content).stream()
+                .filter(section -> entry.matchesHeading(section.title(), ctx))
+                .map(ReferenceChunker.Section::content)
+                .collect(Collectors.joining());
+        return selected.isEmpty() ? "" : CHUNKER.frontMatter(content) + selected;
     }
 
     /** 最终装配时对固定题材/风格规则的资格检查；其他业务规则不应送入本方法。 */
@@ -154,12 +193,22 @@ public class ReferenceUsagePolicy {
                 && ctx.getTargetFields().stream().noneMatch(metadata.targetFields()::contains)) {
             return false;
         }
-        if (!metadata.genres().isEmpty() && (ctx == null || !metadata.genres().contains(
-                GenreType.match(ctx.getTheme(), ctx.getStyle()).getCode()))) {
+        if (!metadata.genres().isEmpty() && !matchesGenre(metadata, ctx)) {
             return false;
         }
         return matches(metadata.themeKeywords(), ctx == null ? null : ctx.getTheme())
                 && matches(metadata.styleKeywords(), ctx == null ? null : ctx.getStyle());
+    }
+
+    private static boolean matchesGenre(Metadata metadata, PromptContext ctx) {
+        if (ctx == null) {
+            return false;
+        }
+        if (metadata.types().contains(MaterialType.EXEMPLAR)) {
+            return GenreType.matching(ctx.getTheme(), ctx.getStyle()).stream()
+                    .anyMatch(genre -> metadata.genres().contains(genre.getCode()));
+        }
+        return metadata.genres().contains(GenreType.match(ctx.getTheme(), ctx.getStyle()).getCode());
     }
 
     /** 章节任务关键词：无约束时放行；有约束时必须能从本章要点中找到对应任务，否定表述不算命中。 */
@@ -175,19 +224,17 @@ public class ReferenceUsagePolicy {
         return keywords.stream().map(s -> s.toLowerCase(Locale.ROOT)).anyMatch(keyword -> {
             int index = normalized.indexOf(keyword);
             while (index >= 0) {
-                if (!isNegated(normalized, index)) return true;
+                if (!isNonCurrent(normalized, index, index + keyword.length())) return true;
                 index = normalized.indexOf(keyword, index + keyword.length());
             }
             return false;
         });
     }
 
-    /** “暂不突破”“无法冲关”“未破境”等否定任务不得视为该章包含对应写作任务。 */
-    private static boolean isNegated(String text, int keywordIndex) {
-        int start = Math.max(0, keywordIndex - 8);
-        String prefix = text.substring(start, keywordIndex);
-        return java.util.regex.Pattern.compile("(?:不|未|暂不|无法|不能|不需|不必|避免|放弃|并未|尚未|没有|无需|不需要|暂缓|先不)\\s*$")
-                .matcher(prefix).find();
+    /** 章计划也会说明暂缓的戏，例如「暂不讯问」「下章再表白」「告白留到下一章」。 */
+    private static boolean isNonCurrent(String text, int start, int end) {
+        return NON_CURRENT_PREFIX.matcher(text).region(Math.max(0, start - 12), start).find()
+                || DEFERRED_SUFFIX.matcher(text).region(end, text.length()).lookingAt();
     }
 
     private static boolean matches(Set<String> keywords, String text) {
@@ -246,7 +293,21 @@ public class ReferenceUsagePolicy {
                     sections.add(new Section(selectors, metadata(section, metadata)));
                 }
             }
-            result.put(key, new Entry(metadata, List.copyOf(sections)));
+            Map<String, Set<String>> headingKeywords = new LinkedHashMap<>();
+            JSONObject headings = rule.getJSONObject("chapterKeywordsByHeading");
+            if (headings != null) {
+                if (headings.isEmpty()) {
+                    throw new IllegalArgumentException("缺少范例标题 " + key);
+                }
+                for (String title : headings.keySet()) {
+                    Set<String> keywords = strings(headings, title);
+                    if (title.isBlank() || keywords.isEmpty()) {
+                        throw new IllegalArgumentException("范例标题与章节关键词不能为空 " + key);
+                    }
+                    headingKeywords.put(title, keywords);
+                }
+            }
+            result.put(key, new Entry(metadata, List.copyOf(sections), Map.copyOf(headingKeywords)));
         }
         return Map.copyOf(result);
     }
@@ -319,7 +380,16 @@ public class ReferenceUsagePolicy {
     private record Registry(String version, Map<String, Entry> documents, Map<String, Entry> fixed) {
     }
 
-    private record Entry(Metadata metadata, List<Section> sections) {
+    private record Entry(Metadata metadata, List<Section> sections, Map<String, Set<String>> chapterKeywordsByHeading) {
+        boolean matchesAnyHeading(PromptContext ctx) {
+            return chapterKeywordsByHeading.isEmpty()
+                    || chapterKeywordsByHeading.values().stream().anyMatch(words -> matchesChapterBrief(words, ctx));
+        }
+
+        boolean matchesHeading(String title, PromptContext ctx) {
+            Set<String> words = chapterKeywordsByHeading.get(title);
+            return words != null && matchesChapterBrief(words, ctx);
+        }
     }
 
     private record Metadata(String group, Set<PromptScene> scenes, Set<Purpose> purposes, Set<MaterialType> types,

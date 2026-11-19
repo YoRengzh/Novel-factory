@@ -631,11 +631,11 @@
     const draftLockedFields = new Set();
     const draftAiAppliedFields = new Set();
 
-    /**
-     * 常用题材。刻意都命中 GenreTypeVO 的关键词表（玄幻 / 悬疑 / 言情三族）——
-     * 后端题材资料策略据此路由到对应 genres 资料包，不命中的题材只能落到 styles/default.md。
-     */
-    const THEME_PRESETS = ['都市异能', '玄幻修真', '悬疑推理', '刑侦犯罪', '甜宠言情', '校园青春', '科幻末世', '无限流'];
+    const THEME_PRESETS = [
+        '都市异能', '玄幻修真', '魔法奇幻', '武侠江湖', '悬疑推理', '刑侦犯罪', '甜宠言情', '校园青春',
+        '星际科幻', '科幻末世', '末世废土', '无限流', '都市现实', '架空历史', '战争群像', '游戏电竞',
+        '体育竞技', '种田美食', '职业职场', '娱乐圈', '远行探险'
+    ];
 
     const FIELD_LABELS = {
         novelTitle: '书名', style: '风格', worldSetting: '世界观', perspective: '视角',
@@ -3458,9 +3458,12 @@
     let editingStyleHasOverride = false;
 
     const GENRE_LABELS = {
-        fantasy: '玄幻 / 奇幻 / 修仙', ability: '都市异能', suspense: '悬疑 / 推理 / 刑侦',
+        fantasy: '玄幻 / 修仙', magic: '架空奇幻 / 魔法', ability: '都市异能', suspense: '悬疑 / 推理 / 刑侦',
         romance: '言情 / 情感', scifi: '科幻 / 星际', apocalypse: '末世 / 废土',
-        'infinite-flow': '无限流 / 副本', urban: '都市现实 / 重生 / 年代', default: '通用（未命中题材时）'
+        'infinite-flow': '无限流 / 副本', urban: '都市现实 / 重生 / 年代', wuxia: '武侠 / 江湖',
+        history: '历史 / 权谋', war: '军事 / 战争群像', gaming: '游戏 / 电竞', sports: '体育竞技',
+        'farm-food': '种田 / 美食经营', school: '校园 / 成长', 'performing-arts': '演艺 / 直播',
+        workplace: '职业 / 职场', adventure: '探险 / 远行', default: '通用（未命中题材时）'
     };
 
     function styleStatus(msg, type) {

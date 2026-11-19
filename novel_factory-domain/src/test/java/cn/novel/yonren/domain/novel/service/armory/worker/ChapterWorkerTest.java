@@ -7,6 +7,7 @@ import cn.novel.yonren.domain.novel.adapter.repository.IStoryRepository;
 import cn.novel.yonren.domain.novel.config.StoryProperties;
 import cn.novel.yonren.domain.novel.config.StoryProperties.CausalityProperties.Mode;
 import cn.novel.yonren.domain.novel.model.entity.ChapterContentEntity;
+import cn.novel.yonren.domain.novel.model.valobj.character.CharacterEffect;
 import cn.novel.yonren.domain.novel.model.valobj.plan.CausalVerdict;
 import cn.novel.yonren.domain.novel.model.valobj.quality.DeliveryReview;
 import cn.novel.yonren.domain.novel.model.valobj.work.ChapterManuscript;
@@ -25,6 +26,7 @@ import cn.novel.yonren.domain.novel.service.armory.factory.DefaultArmoryFactory;
 import cn.novel.yonren.domain.novel.service.armory.llm.LlmInvokeService;
 import cn.novel.yonren.domain.novel.service.armory.memory.ChapterMemoryService;
 import cn.novel.yonren.domain.novel.service.armory.memory.ChapterSummaryService;
+import cn.novel.yonren.domain.novel.service.armory.memory.CharacterStateProjector;
 import cn.novel.yonren.domain.novel.service.armory.memory.ForeshadowScheduleService;
 import cn.novel.yonren.domain.novel.service.armory.memory.LedgerAdjudicateService;
 import cn.novel.yonren.domain.novel.service.armory.memory.QualityDebtService;
@@ -345,6 +347,37 @@ class ChapterWorkerTest {
         String bare = chapterWorker.buildChapterPrompt("【全局设定】", item, null, 5,
                 cn.novel.yonren.domain.novel.model.valobj.contract.ChapterContract.of(item, null));
         assertTrue(!bare.contains("【认知边界·不得越界】"), "没有认知记录时不应出现该块");
+    }
+
+    @Test
+    void buildChapterPrompt_usesRelevantStructuredKnowledgeAndCurrentProgress() {
+        String suspicion = "陈九看见了黑气，怀疑林长渊藏着东西。";
+        String unrelated = "周管事得知粮价涨了。";
+        var manuscript = new ChapterManuscript(1, "柴房", suspicion + unrelated);
+        var summary = ChapterSummaryEntity.builder().chapterNo(1).manuscriptHash(manuscript.hash())
+                .characterStates(List.of(new ChapterSummaryEntity.StateEntry("陈九", "陈九确认铁片的来历", suspicion)))
+                .characterEffects(List.of(
+                        new CharacterEffect("陈九", CharacterEffect.Kind.BELIEF,
+                                "林长渊藏了东西", CharacterEffect.State.SUSPECTED,
+                                "林长渊藏着东西", suspicion, "亲眼看见黑气", null),
+                        new CharacterEffect("周管事", CharacterEffect.Kind.KNOWLEDGE, "粮价",
+                                CharacterEffect.State.ESTABLISHED, "粮价涨了", unrelated, "听商人说", null)))
+                .pendingCharacterEffects(List.of(new CharacterEffect("陈九", CharacterEffect.Kind.KNOWLEDGE,
+                        "铁片来历", CharacterEffect.State.ESTABLISHED, "铁片来自矿洞", "未能定位", "推断", null)))
+                .build();
+        CharacterStateProjector.bind(summary, manuscript, List.of());
+        var item = ChapterPlanItemEntity.builder().chapterNo(2).title("矿柴").characters(List.of("陈九"))
+                .suspenseBeat("陈九仍只怀疑林长渊藏着东西，没有见到铁片。").build();
+        String prompt = chapterWorker.buildChapterPrompt("设定", item, null, 2,
+                chapterWorker.buildChapterContract(item, List.of(summary)));
+
+        assertTrue(prompt.contains("BELIEF/SUSPECTED"));
+        assertTrue(prompt.contains("亲眼看见黑气"));
+        assertTrue(prompt.contains("【本章悬念进度】" + item.getSuspenseBeat()));
+        assertTrue(prompt.contains("UNRESOLVED 1 项"));
+        assertFalse(prompt.contains("陈九确认铁片的来历"));
+        assertFalse(prompt.contains("铁片来自矿洞"));
+        assertFalse(prompt.contains("粮价涨了"));
     }
 
     @Test
@@ -937,7 +970,6 @@ class ChapterWorkerTest {
     void generateAll_duplicateContentKey_salvagesFirstNonBlankContent() throws Exception {
         String duplicated = "{\"chapterNo\":1,\"title\":\"第一章\","
                 + "\"content\":\"这是真正文内容，长度足够。\",\"content\":\"\",\"note\":\"\"}";
-        // 两次尝试都给重复键输出：第一次判空正文 → 重试 → 仍失败 → 抢救首个非空 content
         when(llmInvokeService.invoke(any(), any(), any(), anyString(), anyMap()))
                 .thenReturn(duplicated);
 
@@ -954,5 +986,41 @@ class ChapterWorkerTest {
         assertTrue(captor.getAllValues().stream()
                         .anyMatch(c -> c.getContent() != null && c.getContent().contains("这是真正文内容")),
                 "重复键时必须抢救首个非空 content，而不是落盘空稿");
+    }
+
+    @Test
+    void generateAll_keepsDialogueAndEndingAfterRepairingBareQuotesAndNewlines() throws Exception {
+        String body = "他推开门。\n\n\"你也在？\"陈九转过来。\n\n他们听见了第三声锣。";
+        String response = "{\"chapterNo\":1,\"title\":\"柴房\",\"content\":\"" + body + "\"}";
+        when(llmInvokeService.invoke(any(), any(), any(), anyString(), anyMap())).thenReturn(response);
+
+        var ctx = context(new GenerationJob("job-quotes"));
+        ctx.getChapterPlanAggregate().setChapters(List.of(item(1)));
+        chapterWorker.generateAll(command(), ctx);
+
+        var captor = org.mockito.ArgumentCaptor.forClass(
+                cn.novel.yonren.domain.novel.model.entity.ChapterContentEntity.class);
+        verify(storyRepository).commitChapter(any(), captor.capture(), any(ChapterCommitState.class));
+        assertEquals(body, captor.getValue().getContent());
+        verify(llmInvokeService).invoke(any(), any(), any(), anyString(), anyMap());
+    }
+
+    @Test
+    void generateAll_retriesAnUnclosedBodyInsteadOfSubmittingItsPrefix() throws Exception {
+        String truncated = "{\"chapterNo\":1,\"title\":\"柴房\",\"content\":\"他推开门。\"你也在？\"陈九";
+        when(llmInvokeService.invoke(any(), any(), any(), anyString(), anyMap()))
+                .thenReturn(truncated, "{\"chapterNo\":\"第一章\",\"title\":\"柴房\","
+                        + "\"content\":\"他放下斧头，走出柴房。\",\"note\":{\"content\":\"这段嵌套内容更长但不能覆盖正文。\"}}");
+
+        var ctx = context(new GenerationJob("job-truncated"));
+        ctx.getChapterPlanAggregate().setChapters(List.of(item(1)));
+        chapterWorker.generateAll(command(), ctx);
+
+        var captor = org.mockito.ArgumentCaptor.forClass(
+                cn.novel.yonren.domain.novel.model.entity.ChapterContentEntity.class);
+        verify(storyRepository).commitChapter(any(), captor.capture(), any(ChapterCommitState.class));
+        assertEquals(1, captor.getValue().getChapterNo());
+        assertEquals("他放下斧头，走出柴房。", captor.getValue().getContent());
+        verify(llmInvokeService, org.mockito.Mockito.times(2)).invoke(any(), any(), any(), anyString(), anyMap());
     }
 }
