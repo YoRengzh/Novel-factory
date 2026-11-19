@@ -84,7 +84,7 @@
 <p>⚠️ <strong>ChatGPT 套餐授权为实验性功能</strong>：它参照 OpenAI 第一方客户端（Codex CLI，Apache-2.0 开源）的实现对接订阅授权通道，
 并非面向第三方应用的正式 API。OpenAI 变更该通道时功能可能失效，且请自行确认使用方式符合你的账号条款。</p>
 <p>提示：两个 Key 可以是同一个供应商的同一把 Key——<code>LLM_API_KEY</code> 同时供对话与嵌入使用；要分开也可以，见<a href="docs/quickstart.md">快速开始</a>。</p>
-<p>进阶用户仍可切回 Qdrant（<code>story.vector-store.mode: qdrant</code>）；动态参考资料检索方式也可在设置页运行时切换：<strong>向量语义检索</strong>（需 embedding Key）或 <strong>LLM 索引选择</strong>（无嵌入设施时用）。</p>
+<p>进阶用户仍可切回 Qdrant（<code>story.vector-store.mode: qdrant</code>）。动态参考资料默认使用 <strong>LLM 索引选择</strong>，配置 Embedding API Key 后可在「06 设置 → 资料检索方式」切换到 <strong>向量语义检索</strong>。</p>
 </blockquote>
 <h2 id="_2">它能做什么</h2>
 <p>按写一本长篇的顺序组织：设定 → 卷蓝图 → 阶段蓝图 → 逐章正文 → 审校修订 → 体检报告。每一步的结果都落成可 diff 的文件，下一步接着用。</p>
@@ -112,7 +112,7 @@
 <h3 id="_9">模型接入：中转站 + 三协议</h3>
 <p>设置页登记多个中转站（OpenAI 兼容 / Anthropic / OpenAI Responses），一键拉取模型列表；全局、每个场景、兜底模型都可以只选"哪个站的哪个模型"，不必手填地址密钥。跨协议供应商（如评审指向 Anthropic 站）会自动切换客户端。</p>
 <h3 id="_10">资料与文风：可增补的写作资产</h3>
-<p>内置 58 篇写作资料 + 4 篇文风。在「04 资料设置」里可以导入自己的范例/题材资料（进同一套索引与向量检索），或按题材覆盖文风——无需改代码重新打包。</p>
+<p>内置 58 篇写作资料 + 4 篇文风。在「04 资料配置」里可以导入自己的范例/题材资料（进同一套索引与向量检索），或按题材覆盖文风——无需改代码重新打包。</p>
 <h2 id="_11">它解决什么问题</h2>
 <p>长篇连载（50 万字以上）靠单次提示无法保证质量，真正的难题是<strong>跨章的工程约束</strong>。本项目把每类约束做成机制：</p>
 <table>
@@ -253,8 +253,8 @@
 <h3 id="windows_1">桌面版（Windows）</h3>
 <ol>
 <li>从 <a href="https://github.com/YoRengzh/Novel-factory/releases/latest">Releases</a> 下载 <code>StartDrafts.Setup.exe</code> 并安装；</li>
-<li>启动 StartDrafts，进入「05 设置」配置模型接入：可直接填 Base URL 与 Key，也可在下方「中转站管理」登记多个 OpenAI 兼容 / Anthropic 中转站，一键拉取模型列表后用下拉选用（建议同时填 embedding Key，开启向量增强）；</li>
-<li>（可选）进入「04 资料设置」补充你自己的写作范例与题材资料、或改写各题材文风——与内置资料同等待遇，进向量索引按需注入；</li>
+<li>启动 StartDrafts，进入「06 设置」配置模型接入：可直接填 Base URL 与 Key，也可在下方「中转站管理」登记多个 OpenAI 兼容 / Anthropic 中转站，一键拉取模型列表后用下拉选用（建议同时填 embedding Key，开启向量增强）；</li>
+<li>（可选）进入「04 资料配置」补充你自己的写作范例与题材资料、或改写各题材文风——与内置资料同等待遇，进向量索引按需注入；</li>
 <li>回到「01 生成」创建故事、提交生成；每批结束后看<strong>批末体检报告</strong>。</li>
 </ol>
 <h3 id="_16">源码运行</h3>
@@ -298,9 +298,9 @@ DEGRADED 进度对齐        7段（目标 ≤1 段） ｜ 第 65 章按大纲�
 <li><strong>存储</strong>：文件仓库——<code>docs/workspace/stories/</code> 下 JSON（正文、摘要、三账本、蓝图、检查点），全部可 git、可 diff、可手工修。写入走"临时文件 + 原子替换"并按故事加锁；记忆类文件损坏即硬失败（静默读空等于丢账本），观测类文件损坏仅告警。</li>
 <li><strong>向量库</strong>：默认<strong>内置向量库</strong>——向量以自定义二进制格式（NVTB）随故事目录落盘，暴力精确检索（本规模下毫秒级，优于近似索引的精确性），删除故事即全清。进阶可切回 Qdrant（<code>story.vector-store.mode: qdrant</code>）。</li>
 <li><strong>前端</strong>：原生 HTML/CSS/JS（无构建步骤），随 jar 由后端同源提供；Windows 桌面版用 Electron 壳包成单安装包（内嵌 jpackage 的 Java sidecar，单实例锁、端口探测、退出时清理进程树）。</li>
-<li><strong>可换的模型</strong>：场景级路由——17 个场景（章节计划/正文/审校/评审……）可独立配模型、温度、思考开关，也可按场景配不同的 base-url 与 api-key，用于让评审场景指向异族模型以保证盲评中立。</li>
+<li><strong>可换的模型</strong>：场景级路由——16 个场景（章节计划/正文/审校/评审……）可独立配模型、温度、思考开关，也可按场景配不同的 base-url 与 api-key，用于让评审场景指向异族模型以保证盲评中立。</li>
 <li><strong>多供应商与协议</strong>：设置页可登记多个中转站（OpenAI 兼容 / Anthropic / OpenAI Responses），一键拉取模型列表后以「站名·模型」标注在场景矩阵里选用；地址带不带 <code>/v1</code> 均可。</li>
-<li><strong>可增补的资料层</strong>：内置 58 篇写作资料 + 4 篇文风，用户可在「04 资料设置」里导入自己的范例/题材资料（进同一套索引与向量检索），或按题材覆盖文风——无需改代码重新打包。</li>
+<li><strong>可增补的资料层</strong>：内置 58 篇写作资料 + 4 篇文风，用户可在「04 资料配置」里导入自己的范例/题材资料（进同一套索引与向量检索），或按题材覆盖文风——无需改代码重新打包。</li>
 </ul>
 <h3 id="_19">生成管线节点链</h3>
 <p>规划与正文生成的执行主干是一条显式的规则树节点链（<code>domain</code> 的 <code>node/*</code> 包，从 RootNode 顺序路由到终态），每个节点内部挂接的记忆 / 蓝图 / 审校服务与失败分支如下。可编辑源文件：<a href="docs/node-chain-flowchart.drawio">docs/node-chain-flowchart.drawio</a>。</p>
@@ -409,7 +409,7 @@ DEGRADED 进度对齐        7段（目标 ≤1 段） ｜ 第 65 章按大纲�
 <p><strong>能写多长？</strong>
 总章数由你设定，没有固定上限。写每一章时 AI 拿到的是本章计划、相关记忆摘要、前文摘要与必要的资料片段，而不是整本书的聊天记录——所以篇幅不受单次上下文窗口限制。</p>
 <p><strong>能改提示词吗？</strong>
-可以改资料与文风（04 资料设置，导入自备资料或覆盖文风）。核心规则文件打包在 jar 内，改它需要改源码重新打包——这是有意为之：规则文件的标题锚点是程序切片接口，随意改动会让作业直接终止。</p>
+可以改资料与文风（04 资料配置，导入自备资料或覆盖文风）。核心规则文件打包在 jar 内，改它需要改源码重新打包——这是有意为之：规则文件的标题锚点是程序切片接口，随意改动会让作业直接终止。</p>
 <p><strong>数据存在哪？</strong>
 <code>%APPDATA%\StartDrafts</code>：<code>docs/workspace/stories/</code> 下是正文、摘要、三账本、蓝图、检查点（纯 JSON/文本，可 git、可手工修）；<code>data/</code> 下是运行时覆盖配置与日志。全部在本机，只有发起生成时相关提示词才会发给你配置的模型服务。</p>
 <h2 id="_23">已知限制</h2>

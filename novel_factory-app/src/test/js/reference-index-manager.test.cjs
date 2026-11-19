@@ -67,7 +67,7 @@ function memoryDom() {
     }
     const root = new Element('section'); root.id = 'reference-index-manager';
     const elements = { 'reference-index-manager': root };
-    const start = html.indexOf('<section id="reference-index-manager"'), end = html.indexOf('<!-- 05 资料设置', start);
+    const start = html.indexOf('<section id="reference-index-manager"'), end = html.indexOf('<section id="tab-assets"', start);
     assert.ok(start >= 0 && end > start, '真实 HTML 必须有独立管理容器');
     for (const [, tag, attrs] of html.slice(start, end).matchAll(/<([\w-]+)\b([^>]*\bid="[^"]+"[^>]*)>/g)) {
         const id = /\bid="([^"]+)"/.exec(attrs)[1]; if (id === root.id) continue;
@@ -137,11 +137,15 @@ test('UMD/create/refresh 契约：初始化不请求，两次refresh仅GET，不
     await h.api.refresh(); await h.api.refresh(); assert.deepEqual(h.requests.map(item => [item.method, item.url]), [['GET', BASE], ['GET', BASE]]);
     assert.equal(h.confirmations.length, 0); assert.equal(h.notifications.length, 0);
 });
-test('独立03索引tab，manager完全移出settings；04模型/05资料/06设置，辅助默认details收起', () => {
+test('03 索引管理独立；04 资料、05 模型、06 设置按顺序排列，检索方式位于向量检索分区上方', () => {
     const navs = [...html.matchAll(/<button\b[^>]*data-tab="([^"]+)"[^>]*>\s*<span\b[^>]*>(\d+)<\/span>/g)].map(match => [match[1], match[2]]);
-    assert.deepEqual(navs, [['generate', '01'], ['library', '02'], ['reference-index', '03'], ['models', '04'], ['assets', '05'], ['settings', '06']]);
+    assert.deepEqual(navs, [['generate', '01'], ['library', '02'], ['reference-index', '03'], ['assets', '04'], ['models', '05'], ['settings', '06']]);
     const settings = html.slice(html.indexOf('<section id="tab-settings"'), html.indexOf('<section id="tab-reference-index"'));
     assert.ok(settings.replace(/<!--[\s\S]*?-->/g, '').trimEnd().endsWith('</section>')); assert.ok(!settings.includes('id="reference-index-manager"'));
+    const referenceMode = settings.indexOf('id="reference-mode-form"');
+    assert.ok(referenceMode >= 0 && referenceMode < settings.indexOf('id="embed-form"'));
+    assert.match(settings, /<select id="reference_mode">\s*<option value="llm">/);
+    assert.equal([...html.matchAll(/id="reference-mode-form"/g)].length, 1);
     assert.ok(html.indexOf('id="reference-index-manager"') > html.indexOf('id="tab-reference-index"'));
     for (const id of ['reference-index-sources-details', 'reference-index-points-details']) {
         assert.match(html, new RegExp('<details[^>]*id="' + id + '"[^>]*>')); assert.doesNotMatch(new RegExp('<details[^>]*id="' + id + '"[^>]*>').exec(html)[0], /\bopen\b/);

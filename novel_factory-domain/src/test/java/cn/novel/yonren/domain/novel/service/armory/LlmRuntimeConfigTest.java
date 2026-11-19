@@ -478,6 +478,7 @@ class LlmRuntimeConfigTest {
         LlmConfigSaveRequestDTO.SceneOverride unknown = new LlmConfigSaveRequestDTO.SceneOverride();
         unknown.setModel("ghost-model");
         scenes.put("not-a-real-scene", unknown);
+        scenes.put("setting-draft", unknown);
         scenes.put("audit", sceneOverride("audit-model", null, null));
         request.setScenes(scenes);
         config.save(request);
@@ -485,8 +486,32 @@ class LlmRuntimeConfigTest {
         // 未知 key 不落盘（存进去也永远不会被路由匹配），合法 key 正常生效
         String persisted = Files.readString(tmp.resolve("override.json"));
         assertFalse(persisted.contains("not-a-real-scene"));
+        assertFalse(persisted.contains("setting-draft"));
         assertEquals("audit-model",
                 config.applyModel(ModelScene.CHAPTER_AUDIT, staticModule().getChatModel()).getModel());
+    }
+
+    @Test
+    void legacySettingDraftOverrideIsIgnoredAndRemovedOnSave() throws Exception {
+        Path file = tmp.resolve("override.json");
+        Files.writeString(file, """
+                {"scenes":{"setting-draft":{"model":"old-draft-model","providerId":"missing"},
+                           "audit":{"model":"audit-model"}}}
+                """);
+        LlmRuntimeConfig config = new LlmRuntimeConfig(file);
+        StoryProperties statics = new StoryProperties();
+        statics.setModule(staticModule());
+
+        assertFalse(config.view(statics).getScenes().stream().anyMatch(row -> "setting-draft".equals(row.getKey())));
+
+        LlmConfigSaveRequestDTO global = new LlmConfigSaveRequestDTO();
+        global.setModel("global-model");
+        config.save(global);
+
+        assertFalse(Files.readString(file).contains("setting-draft"));
+        assertEquals("global-model", config.applyModel(null, statics.getModule().getChatModel()).getModel());
+        assertEquals("audit-model",
+                config.applyModel(ModelScene.CHAPTER_AUDIT, statics.getModule().getChatModel()).getModel());
     }
 
     @Test

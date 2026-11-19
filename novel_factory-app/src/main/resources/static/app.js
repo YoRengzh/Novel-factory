@@ -80,11 +80,10 @@
             if (btn.dataset.tab !== 'library') clearBookTransientUi();
             syncBookNavigation();
             if (btn.dataset.tab === 'library') { loadStories(); }
-            // 04 项目模型配置与 06 设置共用同一份配置视图（GET /api/config/llm）：一次拉取，两页同时刷新
+            // 05 项目模型设置与 06 设置共用同一份配置视图。
             if (btn.dataset.tab === 'models' || btn.dataset.tab === 'settings') { loadLlmConfig(); }
             if (btn.dataset.tab === 'reference-index' && referenceIndexManager) { referenceIndexManager.refresh(); }
-            // 05 资料设置进入时同步「我的参考资料 / 文风 / 资料检索方式」卡片
-            if (btn.dataset.tab === 'assets') { loadLlmConfig(); loadUserAssets(); }
+            if (btn.dataset.tab === 'assets') { loadUserAssets(); }
             // 回到生成页时刷新故事列表：刚写完的故事应能立刻被续写
             if (btn.dataset.tab === 'generate') { loadStoryOptions(); loadMetrics(); }
         });
@@ -1046,9 +1045,9 @@
         const workspace = document.getElementById('book-workspace');
         const left = Math.max(0, workspace.getBoundingClientRect().left);
         workspace.style.setProperty('--book-page-gutter', left + 'px');
-        const notice = document.getElementById('btn-update').getBoundingClientRect();
-        const noticeSpace = Math.max(0, window.innerHeight - notice.top + 10);
-        workspace.style.setProperty('--book-bookmark-bottom', noticeSpace + 'px');
+        const helpButton = document.getElementById('btn-help').getBoundingClientRect();
+        const railSpace = Math.max(0, window.innerHeight - helpButton.top + 10);
+        workspace.style.setProperty('--book-bookmark-bottom', railSpace + 'px');
     }
 
     function syncBookNavigation() {
@@ -2710,7 +2709,7 @@
     function renderReferenceMode(data) {
         if (!referenceModeForm) return;
         // 直接回显生效值（覆盖优先，未覆盖= yml 静态值）——用户只面对 vector/llm 二选一
-        inputReferenceMode.value = data.effectiveReferenceMode || 'vector';
+        inputReferenceMode.value = data.effectiveReferenceMode || 'llm';
         referenceModeStatus.className = 'config-status';
         referenceModeStatus.classList.remove('hidden');
         referenceModeStatus.textContent = data.referenceMode
@@ -3851,6 +3850,22 @@
             loadWorkbench(currentStoryDir);
             loadCheckpoints(currentStoryDir);
         }
+    });
+
+    // ===== 使用说明 =====
+    const helpDialog = document.getElementById('help-dialog');
+    const helpContent = document.getElementById('help-content');
+    document.getElementById('btn-help').addEventListener('click', function () {
+        helpDialog.showModal();
+        helpContent.scrollTop = 0;
+    });
+    helpDialog.querySelectorAll('.help-toc a').forEach(function (link) {
+        link.addEventListener('click', function (event) {
+            event.preventDefault();
+            const heading = helpDialog.querySelector(link.hash);
+            heading.focus({ preventScroll: true });
+            heading.scrollIntoView({ block: 'start' });
+        });
     });
 
     // ===== 版本通知（左下角）=====

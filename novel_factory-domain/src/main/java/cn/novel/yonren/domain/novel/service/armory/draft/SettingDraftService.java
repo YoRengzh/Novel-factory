@@ -122,7 +122,7 @@ public class SettingDraftService {
     /**
      * 生成/重生成设定集草稿。
      *
-     * @param storyVO yml 模型配置（走 scene-models.setting-draft；未配置时回落统一 chat-model）
+     * @param storyVO 配置来源，设定集使用全局聊天模型
      * @param request 题材 + 可选偏好 + 目标字段 + 上一版内容
      * @throws AppException 题材为空（非法参数）或两次尝试均无法产出齐备的草稿
      */

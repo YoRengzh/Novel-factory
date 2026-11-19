@@ -193,7 +193,7 @@ function harness(overrides = {}) {
         removeEventListener(type, listener) { windowEvents[type] = (windowEvents[type] || []).filter(item => item !== listener); },
         requestAnimationFrame(callback) { frames.push(callback); return frames.length; }, cancelAnimationFrame() {} };
     dom.setRect('#book-workspace', { left: 96, top: 74, width: 1088, height: 620 });
-    dom.setRect('#btn-update', { left: 12, top: 846, width: 80, height: 36 });
+    dom.setRect('#btn-help', { left: 12, top: 716, width: 26, height: 78 });
     dom.doc.documentElement.rect = { left: 0, top: 0, width: fakeWindow.innerWidth, height: fakeWindow.innerHeight };
     const workspaceModule = { exports: {} };
     vm.runInNewContext(fs.readFileSync(path.join(staticRoot, 'book-workspace.js'), 'utf8'), { module: workspaceModule });
@@ -352,7 +352,7 @@ test('书签7个完整标签在links wrapper内，单列同grid-area外侧sticky
             assert.ok(gutter + offset >= 0, '窄gutter不会越过视口左边');
         }
         assert.match(scroll['overflow-y'] ?? scroll.overflow ?? '', /^(?:auto|scroll)$/);
-        assert.match(scroll['max-height'], /--book-bookmark-bottom/, '滚动范围必须避开底部通知');
+        assert.match(scroll['max-height'], /--book-bookmark-bottom/, '滚动范围必须避开底部悬浮入口');
         assert.equal(button['white-space'] ?? scroll['white-space'] ?? bookmark['white-space'] ?? 'normal', 'normal', '默认或显式normal都可完整换行');
         assert.equal(button['overflow-wrap'], 'anywhere');
         assert.notEqual(button['text-overflow'], 'ellipsis'); assert.equal(button['-webkit-line-clamp'], undefined);
@@ -542,9 +542,12 @@ test('真实syncBookNavigation/resize按workspace实际x更新gutter，退出和
         h.setRect('#book-workspace', { left }); h.api.syncBookNavigation();
         assert.equal(h.elements['book-workspace'].style.getPropertyValue('--book-page-gutter'), left + 'px', '不能从同一1280px视口猜margin');
     }
+    assert.equal(h.elements['book-workspace'].style.getPropertyValue('--book-bookmark-bottom'), '194px');
     h.setRect('#book-workspace', { left: 33 }); h.window.innerWidth = 390; h.doc.documentElement.rect.width = 390;
+    h.setRect('#btn-help', { top: 724 });
     await h.emitWindow('resize');
     assert.equal(h.elements['book-workspace'].style.getPropertyValue('--book-page-gutter'), '33px', '窄视口仍以rectfixture为准');
+    assert.equal(h.elements['book-workspace'].style.getPropertyValue('--book-bookmark-bottom'), '186px');
     await h.clickTab('models'); await h.emitWindow('resize');
     hidden(h, 'btn-back-stories', true); hidden(h, 'btn-back-chapters', true);
     h.api.closeBook(); h.setRect('#book-workspace', { left: 0, width: 0, height: 0 }); await h.emitWindow('resize');

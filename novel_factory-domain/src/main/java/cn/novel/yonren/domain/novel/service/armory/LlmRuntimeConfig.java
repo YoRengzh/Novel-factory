@@ -1313,7 +1313,14 @@ public class LlmRuntimeConfig {
                 return new Overlay();
             }
             Overlay loaded = JSON.parseObject(content, Overlay.class);
-            return loaded == null ? new Overlay() : loaded;
+            if (loaded == null) {
+                return new Overlay();
+            }
+            // 设定集已改用全局模型，旧场景条目也不参与后续的中转站校验。
+            if (loaded.getScenes() != null) {
+                loaded.getScenes().remove("setting-draft");
+            }
+            return loaded;
         } catch (Exception e) {
             log.warn("LLM 运行时覆盖加载失败，忽略（回退静态配置）：{}", e.getMessage());
             return new Overlay();

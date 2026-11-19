@@ -119,7 +119,7 @@ public class LlmInvokeService {
         return content;
     }
 
-    /** PromptScene（规则注入）→ ModelScene（模型路由）映射；未覆盖的返回 null（走统一模型） */
+    /** 将提示词场景映射到模型路由场景，null 表示使用全局模型。 */
     private ModelScene toModelScene(PromptScene scene) {
         if (scene == null) {
             return null;
@@ -131,10 +131,7 @@ public class LlmInvokeService {
             case CHAPTER_CONTENT -> ModelScene.CHAPTER_CONTENT;
             case CHAPTER_AUDIT -> ModelScene.CHAPTER_AUDIT;
             case CHAPTER_REVISE -> ModelScene.CHAPTER_REVISE;
-            // 设定集草稿：千字级结构化长文本（世界观/主人公/故事概述各数百字），
-            // 走独立场景才能配到 pro 档；此前映射为 null（统一 chat-model 的 flash 档），
-            // 是"一键生成的设定集质量低下"的直接原因
-            case SETTING_DRAFT -> ModelScene.SETTING_DRAFT;
+            case SETTING_DRAFT -> null;
         };
     }
 

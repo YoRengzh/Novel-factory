@@ -109,13 +109,6 @@ story:
         max-tokens: 2048
         temperature: 0.1
         enable-thinking: false
-      setting-draft:  # 一键生成设定集：单次千字级结构化长文本（世界观/主人公/故事概述各数百字），
-                      # 用统一 chat-model 的 flash 档会明显塌陷（信息密度低、模板化）；
-                      # 配 pro 档 + 较高温度换取构思多样性，输出上限按三块长文本的容量给
-        model: deepseek-v4-pro
-        max-tokens: 16384
-        temperature: 0.9
-        enable-thinking: false
       quality-review:  # 全书质量评分（每 N 章一次，抽样打分）：低频高价值判定，给 pro 档；
                        # 输出是若干条维度评分的小 JSON，max-tokens 无需大。cost 与效果单独核算——
                        # 这是"改了 prompt 之后质量是变好还是变差"的唯一对照基线
@@ -211,7 +204,7 @@ story:
     trigger-on-minor-residue: false
     minor-residue-threshold: 6
     # 默认关闭（原为 true）：整章重写+盲评单次 20 分钟量级、采纳率约 2/3——
-    # 默认开着会让单章耗时翻十倍。要最高质量时在 03 项目模型配置里打开 candidate 开关
+    # 默认开着会让单章耗时翻十倍。要最高质量时在 05 项目模型设置里打开 candidate 开关
     trigger-on-revised-pass: false
     trigger-on-debt: false
     rewrite-max-tokens: 16384
@@ -240,10 +233,8 @@ story:
       enabled: true          # 总开关：关闭后不发起选择调用、不注入动态资料
       cache-enabled: true    # 按 场景+题材+章节类型 缓存选择结果；false 则每章实时选择
       max-selected: 3        # 单次最多注入的资料份数
-      # 默认用 llm，让 Continue with ChatGPT 在没有独立 Embedding Key 时也能完整生成。
-      # 配好 embedding-api 的 Key + Qdrant（story.vector-store）后建议改为 vector，语义检索比索引挑选更准；
-      # vector 链路失败仍会快速终止，不静默降级。
-      mode: vector                 # llm = LLM 索引选择；vector = 向量语义检索
+      # 只配置聊天模型即可使用 LLM 索引选择。需要向量语义检索时，先配置 Embedding API Key，再切换到 vector。
+      mode: llm
       top-k: 3               # 向量检索命中点数（聚合到文件级后受 max-selected 截断）
       min-score: 0.35        # 向量检索最低相似分（Cosine 越大越相近）；过滤无关命中
       max-recall-chars: 12000 # 动态资料全文注入字符预算，超出按段落截

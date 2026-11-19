@@ -78,10 +78,7 @@ class StoryPropertiesBindingTest {
                         "story.prompt.reference-selector", ReferenceSelectorProperties.class)
                 .orElseThrow(() -> new AssertionError("story.prompt.reference-selector 绑定失败"));
 
-        // v0.2 起默认 vector：内置向量库成为标配，语义检索全量可用（仅 ChatGPT 订阅授权等
-        // 无 embedding 场景才需要用户在设置页把检索方式切到 llm——运行时覆盖开关承接）
-        assertEquals("vector", selector.getMode(),
-                "默认应为向量语义检索（内置向量库 v0.2 起成为标配）；无嵌入设施的用户经设置页切 llm");
+        assertEquals("llm", selector.getMode(), "只配置聊天模型时应默认使用 LLM 索引选择");
     }
 
     @Test
@@ -100,8 +97,8 @@ class StoryPropertiesBindingTest {
         // scene-models 应绑定成功
         Map<String, StoryVO.Module.ChatModel> sceneModels = module.getSceneModels();
         assertNotNull(sceneModels, "scene-models 不应为 null");
-        assertEquals(17, sceneModels.size(),
-                "应有 17 个场景配置（16 个既有 + 新增 setting-draft 设定集草稿）");
+        assertEquals(16, sceneModels.size());
+        assertFalse(sceneModels.containsKey("setting-draft"), "设定集应使用全局聊天模型");
 
         // 结构校验：每个场景模型名必须落在可调用模型集合内，提前拦截拼错调用名导致的运行期 404。
         // 具体用哪个模型允许随时手调，不在断言范围内。

@@ -8,7 +8,6 @@ import cn.novel.yonren.domain.novel.service.armory.prompt.reference.DynamicRefer
 import cn.novel.yonren.domain.novel.service.job.JobRegistry;
 import org.springframework.test.util.ReflectionTestUtils;
 import cn.novel.yonren.domain.novel.model.valobj.prompt.PromptContext;
-import cn.novel.yonren.types.enums.ModelScene;
 import cn.novel.yonren.types.enums.PromptScene;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
@@ -16,15 +15,12 @@ import org.mockito.ArgumentCaptor;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
-/**
- * 场景 → 模型路由映射测试：SETTING_DRAFT 曾映射为 null（走统一 chat-model 的 flash 档），
- * 直接用最便宜档位生成千字级设定集，是"一键生成质量低下"的直接原因。
- */
 class LlmInvokeServiceSceneRoutingTest {
 
     @Test
@@ -99,7 +95,7 @@ class LlmInvokeServiceSceneRoutingTest {
     }
 
     @Test
-    void settingDraftRoutesToItsOwnSceneModel() {
+    void settingDraftRoutesToGlobalModel() {
         PromptBuilder promptBuilder = mock(PromptBuilder.class);
         LlmGateway gateway = mock(LlmGateway.class);
         DynamicReferenceService references = mock(DynamicReferenceService.class);
@@ -116,9 +112,7 @@ class LlmInvokeServiceSceneRoutingTest {
 
         ArgumentCaptor<LlmCall> captor = ArgumentCaptor.forClass(LlmCall.class);
         verify(gateway).complete(any(), captor.capture());
-        assertEquals(ModelScene.SETTING_DRAFT, captor.getValue().getScene(),
-                "设定集必须路由到独立场景，才能配到 pro 档而不被统一 flash 档拉低质量");
-        assertEquals("setting-draft", ModelScene.SETTING_DRAFT.getConfigKey(),
-                "configKey 必须与 yml scene-models 的键一致");
+        assertNull(captor.getValue().getScene(), "设定集应使用全局聊天模型");
+        assertEquals("setting-draft", captor.getValue().getLabel(), "用量仍按设定集记录");
     }
 }

@@ -6,7 +6,7 @@ html.book-library-active { scrollbar-gutter: stable; }
     --book-content-padding: 26px;
     --book-left-padding: max(var(--book-content-padding), calc(52px - var(--book-page-gutter)));
     --book-bookmark-width: min(146px, max(0px, calc(var(--book-page-gutter) - 6px)));
-    --book-bookmark-bottom: 104px;
+    --book-bookmark-bottom: 194px;
     position: relative;
     min-width: 0;
     width: 100%;
