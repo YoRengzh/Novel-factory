@@ -19,6 +19,13 @@ public class ChapterBeatsEntity {
     /** 按叙事顺序排列的节拍 */
     private List<Beat> beats;
 
+    /** 原结尾末尾可省的策划说明，必须逐字来自计划，供写作提示核对。 */
+    private String redundantEndingSuffix;
+
+    public ChapterBeatsEntity(List<Beat> beats) {
+        this.beats = beats;
+    }
+
     @Data
     @NoArgsConstructor
     @AllArgsConstructor

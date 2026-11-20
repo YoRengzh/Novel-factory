@@ -26,6 +26,7 @@ import cn.novel.yonren.domain.novel.service.armory.quality.ChapterLengthPolicy;
 import cn.novel.yonren.domain.novel.model.entity.StyleStatEntity;
 import cn.novel.yonren.domain.novel.service.armory.audit.ParagraphDensityAuditService;
 import cn.novel.yonren.domain.novel.model.valobj.contract.ChapterContract;
+import cn.novel.yonren.domain.novel.service.armory.plan.FactReferenceSource;
 import cn.novel.yonren.domain.novel.model.valobj.contract.GenerationMode;
 import cn.novel.yonren.domain.novel.service.armory.factory.DefaultArmoryFactory;
 import cn.novel.yonren.domain.novel.service.armory.candidate.ChapterCandidateService;
@@ -392,9 +393,11 @@ public class ChapterWorker {
             // 章节契约 + 生成模式：契约把"任务层"从一段文本提升为可判定对象；
             // 模式由「契约完整度 + 节拍可用性」决定，三档都有真实触发场景，且落日志以便归因
             ChapterContract contract = buildChapterContract(item, summaries);
+            String writingScenes = ScenePlanPolicy.renderForWriting(item,
+                    FactReferenceSource.verifyForWriting(item, summaries, globalNo, storyRepository, storyDir));
             ChapterBeatsEntity beats = chapterBeatsService.buildBeats(
                     requestParameter.getStoryVO(), item, globalNo,
-                    buildBeatsContext(summaries, globalNo));
+                    buildBeatsContext(summaries, globalNo), writingScenes);
             GenerationMode mode = GenerationMode.decide(contract, beats != null);
             log.info("第 {} 章生成模式：{}（契约{}；节拍{}）", globalNo, mode.getLabel(),
                     contract != null && contract.isComplete() ? "完整"
@@ -403,7 +406,7 @@ public class ChapterWorker {
                     beats == null ? "不可用" : beats.getBeats().size() + " 拍");
 
             String userPrompt = buildChapterPrompt(dynamicContext.getStoryContext(), item, fullPrefix, globalNo,
-                    contract, storyContext);
+                    contract, storyContext, writingScenes, beats == null ? null : beats.getRedundantEndingSuffix());
             String depthMode = cn.novel.yonren.domain.novel.model.valobj.character.CharacterDepthSettings.mode(storyContext);
             List<String> visibleCharacterFields = List.of();
             if ("APPLY".equals(depthMode)) {
@@ -1491,10 +1494,16 @@ public class ChapterWorker {
 
     String buildChapterPrompt(String storyContext, ChapterPlanItemEntity item, String memoryPrefix,
                               int globalNo, ChapterContract contract, StoryContextEntity storyContextEntity) {
-        String scenes = ScenePlanPolicy.renderForWriting(item);
+        return buildChapterPrompt(storyContext, item, memoryPrefix, globalNo, contract, storyContextEntity,
+                ScenePlanPolicy.renderForWriting(item), null);
+    }
+
+    String buildChapterPrompt(String storyContext, ChapterPlanItemEntity item, String memoryPrefix,
+                              int globalNo, ChapterContract contract, StoryContextEntity storyContextEntity,
+                              String scenes, String redundantEndingSuffix) {
         return renderFacts(storyContext, memoryPrefix)
                 + StoryAuthoringService.renderGuidance(storyContextEntity, globalNo, globalNo)
-                + renderContract(contract, globalNo, scenes.isEmpty())
+                + renderContract(contract, globalNo, scenes.isEmpty(), redundantEndingSuffix)
                 + scenes
                 + ChapterContract.renderKnowledgeProgress(item)
                 + renderContinuityConstraints(contract)
@@ -1519,7 +1528,8 @@ public class ChapterWorker {
     /**
      * 任务层：本章计划条目（标题/目标/角色/关键事件/结尾悬念）+「要求」总起。
      */
-    private String renderContract(ChapterContract contract, int globalNo, boolean includeKeyEvents) {
+    private String renderContract(ChapterContract contract, int globalNo, boolean includeKeyEvents,
+                                  String redundantEndingSuffix) {
         if (contract == null) {
             return "";
         }
@@ -1534,7 +1544,7 @@ public class ChapterWorker {
             sb.append("\n  关键事件：").append(contract.mustHappen() == null
                     ? "" : String.join("、", contract.mustHappen()));
         }
-        sb.append("\n  结尾落点：").append(contract.endingImage())
+        sb.append(ChapterContract.renderEndingForWriting(contract.endingImage(), redundantEndingSuffix))
                 .append("\n【本章完成条件】按计划真实完成事件，关键过程与结果必须让读者能够理解。")
                 .append("独处、观察、心理、动作与交流都可以承载事件，不要求同伴、对手、固定轮次或情感时刻。")
                 .append("结尾呼应具体计划落点，允许闭合和余韵，不为制造钩子另起冲突。")

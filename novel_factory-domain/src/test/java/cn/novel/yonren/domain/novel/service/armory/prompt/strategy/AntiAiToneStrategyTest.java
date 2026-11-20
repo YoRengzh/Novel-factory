@@ -35,20 +35,25 @@ class AntiAiToneStrategyTest {
     }
 
     @Test
-    @DisplayName("writer（正文/修订）拿除第七节外的全文；editor（审校）拿全文做逐项对照")
-    void writerAndEditorScenesGetFullRules() {
-        for (PromptScene scene : List.of(PromptScene.CHAPTER_CONTENT, PromptScene.CHAPTER_REVISE,
-                PromptScene.CHAPTER_AUDIT)) {
+    @DisplayName("正文与修订使用行文指引，审校使用完整判据")
+    void writerAndEditorScenesGetTheirOwnRuleFiles() {
+        for (PromptScene scene : List.of(PromptScene.CHAPTER_CONTENT, PromptScene.CHAPTER_REVISE)) {
             assertTrue(strategy.supports(scene, ctx()), scene + " 应注入");
             String content = contentOf(scene);
-            assertTrue(content.length() > 2500, scene + " 应拿主体规则，实际 " + content.length() + " 字符");
-            assertTrue(content.contains("## 二、用词 AI 味"));
-            assertTrue(content.contains("## 六、模式化循环"));
+            assertTrue(content.contains("前文已经让读者理解人物的用意"));
+            assertTrue(content.contains("内心取舍和首次需要交代的规则可以直接写"));
+            assertFalse(content.contains("90%"));
+            assertFalse(content.contains("单一语域"));
+            assertFalse(content.contains("每千有效字"));
+            assertFalse(content.contains("## 七、模板句式速查"), scene + " 不应拿审校速查表");
         }
-        // 第七节自标「editor 逐项对照」且条目与二/三/五节重复：只有 editor 需要，writer 不注入（省 846 字符）
-        assertTrue(contentOf(PromptScene.CHAPTER_AUDIT).contains("## 七、模板句式速查"));
-        assertFalse(contentOf(PromptScene.CHAPTER_CONTENT).contains("## 七、模板句式速查"));
-        assertFalse(contentOf(PromptScene.CHAPTER_REVISE).contains("## 七、模板句式速查"));
+        assertTrue(strategy.supports(PromptScene.CHAPTER_AUDIT, ctx()));
+        String audit = contentOf(PromptScene.CHAPTER_AUDIT);
+        assertTrue(audit.length() > 2500, "审校应拿判据主体，实际 " + audit.length() + " 字符");
+        assertTrue(audit.contains("## 二、用词 AI 味"));
+        assertTrue(audit.contains("## 六、模式化循环"));
+        // 第七节自标「editor 逐项对照」且条目与二/三/五节重复：只有 editor 需要
+        assertTrue(audit.contains("## 七、模板句式速查"));
     }
 
     @Test

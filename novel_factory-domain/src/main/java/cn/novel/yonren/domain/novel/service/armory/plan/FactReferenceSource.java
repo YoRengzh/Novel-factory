@@ -1,6 +1,7 @@
 package cn.novel.yonren.domain.novel.service.armory.plan;
 
 import cn.novel.yonren.domain.novel.adapter.repository.IStoryRepository;
+import cn.novel.yonren.domain.novel.model.entity.ChapterPlanItemEntity;
 import cn.novel.yonren.domain.novel.model.entity.ChapterSummaryEntity;
 import cn.novel.yonren.domain.novel.model.valobj.plan.FactReference;
 import cn.novel.yonren.domain.novel.model.valobj.work.ChapterManuscript;
@@ -12,9 +13,11 @@ import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Set;
 import java.util.concurrent.CancellationException;
 
 /** 有界正式事实引用供给；仅复制现有版本与证据，不调用模型生成依据。 */
@@ -29,6 +32,32 @@ public final class FactReferenceSource {
         if (history == null || history.isEmpty() || repository == null || storyDir == null || maxEntries <= 0) {
             return List.of();
         }
+        return readVerified(latestReferences(history, beforeChapter).values(), repository, storyDir, maxEntries);
+    }
+
+    /** 写作只核验当前场景引用到的事实。旧引用、裸描述或无可信来源的内容不能成为写作事实。 */
+    public static Set<FactReference> verifyForWriting(ChapterPlanItemEntity item, List<ChapterSummaryEntity> history,
+                                                      int beforeChapter, IStoryRepository repository, Path storyDir) {
+        if (item == null || !Integer.valueOf(2).equals(item.getSchemaVersion()) || item.getScenes() == null
+                || history == null || history.isEmpty() || repository == null || storyDir == null) {
+            return Set.of();
+        }
+        Set<FactReference> requested = new LinkedHashSet<>();
+        for (var scene : item.getScenes()) {
+            if (scene == null) continue;
+            requested.addAll(scene.entryStates());
+            if (scene.causality() != null && scene.causality().constraints() != null) {
+                requested.addAll(scene.causality().constraints());
+            }
+        }
+        if (requested.isEmpty()) return Set.of();
+        List<FactReference> candidates = latestReferences(history, beforeChapter).values().stream()
+                .filter(requested::contains)
+                .toList();
+        return Set.copyOf(readVerified(candidates, repository, storyDir, candidates.size()));
+    }
+
+    private static Map<String, FactReference> latestReferences(List<ChapterSummaryEntity> history, int beforeChapter) {
         Map<String, FactReference> latest = new LinkedHashMap<>();
         history.stream().filter(summary -> summary != null && summary.getChapterNo() != null
                         && summary.getChapterNo() > 0 && summary.getChapterNo() < beforeChapter)
@@ -38,9 +67,14 @@ public final class FactReferenceSource {
                     add(latest, summary, "ITEM", summary.getItemStates());
                     add(latest, summary, "FACTION", summary.getFactionStates());
                 });
+        return latest;
+    }
+
+    private static List<FactReference> readVerified(Iterable<FactReference> references, IStoryRepository repository,
+                                                    Path storyDir, int maxEntries) {
         Map<Integer, ChapterManuscript> manuscripts = new LinkedHashMap<>();
         List<FactReference> selected = new ArrayList<>();
-        for (FactReference reference : latest.values()) {
+        for (FactReference reference : references) {
             if (StringUtils.isBlank(reference.manuscriptHash()) || StringUtils.isBlank(reference.evidence())) continue;
             if (!manuscripts.containsKey(reference.chapterNo())) {
                 if (manuscripts.size() >= MAX_SOURCE_CHAPTERS) continue;

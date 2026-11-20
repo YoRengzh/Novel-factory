@@ -2,6 +2,7 @@ package cn.novel.yonren.domain.novel.service.armory.plan;
 
 import cn.novel.yonren.domain.novel.model.entity.ChapterPlanItemEntity;
 import cn.novel.yonren.domain.novel.model.valobj.plan.FactReference;
+import cn.novel.yonren.domain.novel.model.valobj.plan.SceneCausality;
 import cn.novel.yonren.domain.novel.model.valobj.plan.ScenePlan;
 import com.alibaba.fastjson2.JSON;
 import org.apache.commons.lang3.StringUtils;
@@ -118,28 +119,108 @@ public final class ScenePlanPolicy {
                         || value.startsWith(type + "：") || value.startsWith(type + " "));
     }
 
-    /** 完整渲染权威场景，保留 ID 和引用边界，不把入场事实或里程碑引用写成新结果。 */
-    public static String render(List<ScenePlan> scenes) {
-        return render(scenes, false);
+    /** 无核验上下文时仍提供场景内容，略过不能证实的事实引用。 */
+    public static String renderForWriting(ChapterPlanItemEntity item) {
+        return renderForWriting(item, Set.of());
     }
 
-    /** 写作优先使用 v2 场景；空场景和 legacy 由调用方回退到关键事件。 */
-    public static String renderForWriting(ChapterPlanItemEntity item) {
+    /** 写作只需场景经过、落点与核实后的前情。旧版无结构化场景时由调用方使用关键事件。 */
+    public static String renderForWriting(ChapterPlanItemEntity item, Set<FactReference> verifiedReferences) {
         if (item == null || !Integer.valueOf(2).equals(item.getSchemaVersion()) || item.getScenes() == null
                 || item.getScenes().stream().noneMatch(Objects::nonNull)) {
             return "";
         }
-        return render(item.getScenes(), true);
+        StringBuilder sb = new StringBuilder("\n\n【场景安排】用这些信息安排人物的反应和本场经过。\n");
+        int index = 1;
+        for (ScenePlan scene : item.getScenes()) {
+            if (scene == null) {
+                continue;
+            }
+            sb.append("\n场景 ").append(index++);
+            String whereWhen = formatWhereWhen(scene.time(), scene.location());
+            if (!whereWhen.isEmpty()) {
+                sb.append("（").append(whereWhen).append("，仅作定位，不必在首句报时）");
+            }
+            sb.append("\n- 在场人物：").append(String.join("、", scene.characters()));
+            appendWritingLine(sb, "当下想做的事", scene.intention());
+            appendWritingLine(sb, "眼前的阻碍", scene.resistance());
+            appendWritingLine(sb, "本场落点", StringUtils.defaultIfBlank(scene.outcome(), scene.function()));
+            if (StringUtils.isNotBlank(scene.outcome()) && quietFunction(scene.function())
+                    && !scene.outcome().trim().equals(scene.function().trim())) {
+                appendWritingLine(sb, "余味与节奏", scene.function());
+            }
+            appendWritingFacts(sb, "已证实的前情", scene.entryStates(), verifiedReferences);
+            if (scene.causality() != null) {
+                appendWritingCausality(sb, scene.causality());
+                appendWritingFacts(sb, "已证实的限制", scene.causality().constraints(), verifiedReferences);
+            }
+            sb.append("\n");
+        }
+        return sb.toString();
     }
 
-    private static String render(List<ScenePlan> scenes, boolean forWriting) {
+    private static void appendWritingCausality(StringBuilder sb, SceneCausality causality) {
+        if (causality.actors() != null) {
+            for (var actor : causality.actors()) {
+                if (actor != null) {
+                    appendWritingLine(sb, StringUtils.defaultIfBlank(actor.character(), "人物") + "此刻相信", actor.belief());
+                }
+            }
+        }
+        if (causality.steps() != null) {
+            for (var step : causality.steps()) {
+                if (step == null) continue;
+                appendWritingLine(sb, StringUtils.defaultIfBlank(step.actor(), "人物") + "的行动", step.action());
+                appendWritingLine(sb, StringUtils.defaultIfBlank(step.responder(), "对方") + "的回应", step.response());
+                if (step.choice() != null) {
+                    appendWritingLine(sb, "放弃的做法", step.choice().foregoneOption());
+                    appendWritingLine(sb, "这个选择的代价", step.choice().cost());
+                }
+            }
+        }
+        var terms = causality.terms();
+        if (terms != null && StringUtils.isNotBlank(terms.consideration())) {
+            appendWritingLine(sb, StringUtils.trimToEmpty(terms.offerer()) + "向"
+                    + StringUtils.trimToEmpty(terms.receiver()) + "提供", terms.consideration());
+            appendWritingLine(sb, "回报", terms.payment());
+            appendWritingLine(sb, "验收方式", terms.verificationBy());
+            appendWritingLine(sb, "期限", terms.deadline());
+            appendWritingLine(sb, "未达约定时", terms.onFailure());
+        }
+    }
+
+    private static void appendWritingFacts(StringBuilder sb, String label, List<FactReference> references,
+                                           Set<FactReference> verifiedReferences) {
+        if (references == null || verifiedReferences == null || verifiedReferences.isEmpty()) return;
+        List<String> facts = references.stream().filter(Objects::nonNull)
+                .filter(verifiedReferences::contains)
+                .map(fact -> fact.subject().trim() + "：" + fact.status().trim())
+                .distinct()
+                .toList();
+        appendWritingLine(sb, label, String.join("；", facts));
+    }
+
+    private static void appendWritingLine(StringBuilder sb, String label, String value) {
+        if (StringUtils.isNotBlank(value)) {
+            sb.append("\n- ").append(label).append("：").append(value.trim());
+        }
+    }
+
+    private static String formatWhereWhen(String time, String location) {
+        boolean hasTime = StringUtils.isNotBlank(time);
+        boolean hasLoc = StringUtils.isNotBlank(location);
+        if (hasTime && hasLoc) {
+            return time.trim() + " · " + location.trim();
+        }
+        return hasTime ? time.trim() : (hasLoc ? location.trim() : "");
+    }
+
+    /** 完整渲染权威场景，保留 ID 和引用边界，不把入场事实或里程碑引用写成新结果。 */
+    public static String render(List<ScenePlan> scenes) {
         if (scenes == null || scenes.isEmpty()) {
             return "";
         }
         StringBuilder sb = new StringBuilder("\n\n【权威场景契约】场景最终结果以 outcome/function 为准。location/time 是连续性元数据，用于核对场景状态，不要求在首句或第一段显式写出。\n");
-        if (forWriting) {
-            sb.append("意图与因果理由用于选择人物反应；用实际过程体现结果。静场功能可决定节奏和余韵。\n");
-        }
         int index = 1;
         for (ScenePlan scene : scenes) {
             if (scene == null) {
@@ -150,11 +231,9 @@ public final class ScenePlanPolicy {
                     .append("\n人物：").append(scene.characters())
                     .append("\n意图(intention)：").append(text(scene.intention()))
                     .append("\n阻力(resistance)：").append(text(scene.resistance()))
-                    .append("\n最终结果(outcome)：").append(text(scene.outcome()));
-            if (!forWriting || StringUtils.isBlank(scene.outcome()) || quietFunction(scene.function())) {
-                sb.append("\n场景功能(function)：").append(text(scene.function()));
-            }
-            sb.append("\n地点(location)：").append(text(scene.location()))
+                    .append("\n最终结果(outcome)：").append(text(scene.outcome()))
+                    .append("\n场景功能(function)：").append(text(scene.function()))
+                    .append("\n地点(location)：").append(text(scene.location()))
                     .append("\n时间(time)：").append(text(scene.time()))
                     .append("\n入场前提引用(entryStates，待核验，不是本场新结果)：");
             if (scene.entryStates().isEmpty()) {
@@ -174,10 +253,8 @@ public final class ScenePlanPolicy {
                         .append(", status=").append(text(fact.status()))
                         .append(", evidence=").append(text(fact.evidence())).append("}");
             }
-            if (!forWriting) {
-                sb.append("\n里程碑引用(milestoneRefs，仅映射待推进目标，不代表已完成)：")
-                        .append(scene.milestoneRefs());
-            }
+            sb.append("\n里程碑引用(milestoneRefs，仅映射待推进目标，不代表已完成)：")
+                    .append(scene.milestoneRefs());
             sb.append("\n");
             if (scene.causality() != null) {
                 sb.append("可选因果补充(causality；belief 是角色主观所信，可与事实不符；")

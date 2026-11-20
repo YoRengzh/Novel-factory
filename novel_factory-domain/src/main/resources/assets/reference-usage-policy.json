@@ -1196,6 +1196,60 @@
         "chapterGoal"
       ]
     },
+    "styles/register-crisp-classical.md": {
+      "group": "style",
+      "scenes": [
+        "SETTING_DRAFT",
+        "CHAPTER_PLAN",
+        "STAGE_BLUEPRINT",
+        "VOLUME_BLUEPRINT",
+        "CHAPTER_CONTENT",
+        "CHAPTER_REVISE",
+        "CHAPTER_AUDIT"
+      ],
+      "purposes": [
+        "STYLE_GUIDANCE"
+      ],
+      "types": [
+        "STYLE",
+        "PRINCIPLE"
+      ],
+      "targetFields": [
+        "style",
+        "tone",
+        "perspective",
+        "targetAudience",
+        "outline",
+        "chapterGoal"
+      ]
+    },
+    "styles/register-traditional-wuxia.md": {
+      "group": "style",
+      "scenes": [
+        "SETTING_DRAFT",
+        "CHAPTER_PLAN",
+        "STAGE_BLUEPRINT",
+        "VOLUME_BLUEPRINT",
+        "CHAPTER_CONTENT",
+        "CHAPTER_REVISE",
+        "CHAPTER_AUDIT"
+      ],
+      "purposes": [
+        "STYLE_GUIDANCE"
+      ],
+      "types": [
+        "STYLE",
+        "PRINCIPLE"
+      ],
+      "targetFields": [
+        "style",
+        "tone",
+        "perspective",
+        "targetAudience",
+        "outline",
+        "chapterGoal"
+      ]
+    },
     "styles/fantasy.md": {
       "group": "style",
       "scenes": [

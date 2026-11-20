@@ -49,6 +49,26 @@ class ChapterBeatsServiceTest {
     }
 
     @Test
+    void buildBeats_carriesRedundantEndingSuffixWithoutPuttingItInTheBeatPromptForTheWriter() {
+        String suffix = "这意味着调查才刚刚开始。";
+        when(llmGateway.complete(any(), any(LlmCall.class))).thenAnswer(invocation -> {
+            LlmCall call = invocation.getArgument(1);
+            assertTrue(call.getUserPrompt().contains("原计划结尾：她接过回执，" + suffix));
+            assertTrue(call.getUserPrompt().contains("保留；有疑问"));
+            assertTrue(call.getUserPrompt().contains("【场景安排】她接过回执"));
+            return "{\"beats\":[{\"conflict\":\"她接过回执\"}],\"redundantEndingSuffix\":\"" + suffix + "\"}";
+        });
+        ChapterPlanItemEntity plan = item();
+        plan.setEndingHook("她接过回执，" + suffix);
+
+        ChapterBeatsEntity beats = service.buildBeats(storyVO(), plan, 5, null, "【场景安排】她接过回执");
+
+        assertNotNull(beats);
+        assertEquals(suffix, beats.getRedundantEndingSuffix());
+        assertFalse(service.renderBeatsPrompt(beats).contains(suffix));
+    }
+
+    @Test
     void buildBeats_parseFailure_returnsNull() {
         when(llmGateway.complete(any(), any(LlmCall.class))).thenReturn("这不是 JSON");
 

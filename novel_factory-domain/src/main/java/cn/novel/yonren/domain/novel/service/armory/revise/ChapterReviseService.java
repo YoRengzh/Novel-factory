@@ -491,7 +491,7 @@ public class ChapterReviseService {
             plan.append("\n关键事件：").append(joinList(item.getKeyEvents()));
             scenes = ScenePlanPolicy.render(item.getScenes());
         }
-        return plan.append("\n结尾悬念：").append(nullToBlank(item.getEndingHook()))
+        return plan.append(ChapterContract.renderEndingForWriting(item.getEndingHook(), null))
                 .append("\n章节类型：").append(item.getChapterType() == null ? "normal" : item.getChapterType().getCode())
                 .append(scenes)
                 .append(ChapterContract.renderKnowledgeProgress(item))

@@ -45,10 +45,15 @@ public class ChapterBeatsService {
      */
     public ChapterBeatsEntity buildBeats(StoryVO storyVO, ChapterPlanItemEntity item, int globalNo,
                                          String contextText) {
+        return buildBeats(storyVO, item, globalNo, contextText, ScenePlanPolicy.renderForWriting(item));
+    }
+
+    public ChapterBeatsEntity buildBeats(StoryVO storyVO, ChapterPlanItemEntity item, int globalNo,
+                                         String contextText, String scenes) {
         try {
             // 独立 chapter-beats 场景：每章一次的高频调用留在 flash 控成本，不跟随 chapter-plan 升 max
             String raw = llmGateway.complete(storyVO.getModule(), LlmCall.builder()
-                    .userPrompt(buildPrompt(item, globalNo, contextText))
+                    .userPrompt(buildPrompt(item, globalNo, contextText, scenes))
                     .label("beats-第" + globalNo + "章")
                     .scene(ModelScene.CHAPTER_BEATS)
                     .build());
@@ -138,7 +143,7 @@ public class ChapterBeatsService {
      *
      * @param contextText 紧邻本章之前的章节摘要（由调用方裁剪，避免把整段记忆前缀塞进来）
      */
-    private String buildPrompt(ChapterPlanItemEntity item, int globalNo, String contextText) {
+    private String buildPrompt(ChapterPlanItemEntity item, int globalNo, String contextText, String scenes) {
         StringBuilder sb = new StringBuilder();
         sb.append("你是小说场景调度师。把以下章节计划拆成供写手展开的节拍，数量服从场景本身，")
                 .append("单场、单拍或安静场景同样可以成立。")
@@ -152,6 +157,11 @@ public class ChapterBeatsService {
                 .append("\n2. 节拍按叙事顺序排列，合起来覆盖本章目标与场景契约；不新增计划外人物、事件、结果或冲突。")
                 .append("\n3. 第一拍承接上一章结尾，最后一拍落在本章结尾的事件、感受或新认识。")
                 .append("最后一拍无需重复已交付的结论；按本章证据保持察觉、怀疑或确认的程度。")
+                .append("\n3.1 仅当原结尾是一句以句号结束、无对白的叙述，并且最后一个逗号或分号后的分句只是总结已呈现的意义，")
+                .append("才把这一个分句（含末尾句号，不含分隔标点）")
+                .append("逐字填入 redundantEndingSuffix，并且各节拍不要复述它。整段结尾不得填入。")
+                .append("它必须是原结尾的末尾原文，且前面还有能单独成立的落点。")
+                .append("人物首次确认的事实、真正的取舍、情绪变化与对白均须保留；有疑问或没有可省内容时填空字符串。")
                 .append("\n4. 每拍的 conflict 必须具体，严禁‘推进剧情’‘发展关系’这类空话。")
                 .append("\n4.1 有计划内交流时标记 exchange=true，动作或静场可标记 false。"
                         + "任何字段都不得写对白原句或编造交流内容；具体措辞由写手依据场景契约创作。")
@@ -162,18 +172,18 @@ public class ChapterBeatsService {
                 .append("\n\n【本章计划】")
                 .append("\n标题：").append(item.getTitle() == null ? "" : item.getTitle())
                 .append("\n目标：").append(item.getGoal() == null ? "" : item.getGoal());
-        String scenes = ScenePlanPolicy.renderForWriting(item);
         if (scenes.isEmpty()) {
             sb.append("\n关键事件：")
                     .append(item.getKeyEvents() == null ? "" : String.join("、", item.getKeyEvents()));
         }
-        sb.append("\n结尾悬念：").append(item.getEndingHook() == null ? "" : item.getEndingHook())
+        sb.append("\n原计划结尾：").append(StringUtils.defaultString(item.getEndingHook()))
                 .append(scenes)
                 .append(ChapterContract.renderKnowledgeProgress(item));
         sb.append("\n\n请严格按照以下 JSON 格式输出：")
                 .append("\n{\"beats\":[{\"location\":\"地点\",\"characters\":[\"角色A\"],")
                 .append("\"conflict\":\"本拍发生的事\",\"exchange\":false,")
-                .append("\"infoGain\":\"本拍的信息或状态变化（安静场可留空）\",\"weight\":\"30%\"}]}");
+                .append("\"infoGain\":\"本拍的信息或状态变化（安静场可留空）\",\"weight\":\"30%\"}],")
+                .append("\"redundantEndingSuffix\":\"\"}");
         return sb.toString();
     }
 

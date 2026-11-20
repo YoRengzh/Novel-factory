@@ -52,6 +52,29 @@ public record ChapterContract(
                 item.getChapterType());
     }
 
+    /** 节拍只能建议省去单句结尾的解释性分句，独立句和原始章纲保留供核对。 */
+    public static String renderEndingForWriting(String ending, String redundantSuffix) {
+        String text = StringUtils.trimToEmpty(ending);
+        String suffix = StringUtils.trimToEmpty(redundantSuffix);
+        int start = text.length() - suffix.length();
+        if (start > 0 && suffix.endsWith("。") && text.endsWith(suffix)) {
+            String prefix = text.substring(0, start).stripTrailing();
+            if (!prefix.isEmpty()) {
+                char boundary = prefix.charAt(prefix.length() - 1);
+                String sentenceBoundaryOrQuote = "。！？.!?\n\r“”‘’「」『』\"";
+                if ("，,；;".indexOf(boundary) >= 0
+                        && prefix.chars().noneMatch(c -> sentenceBoundaryOrQuote.indexOf(c) >= 0)
+                        && suffix.substring(0, suffix.length() - 1).chars()
+                            .noneMatch(c -> (sentenceBoundaryOrQuote + "，,；;").indexOf(c) >= 0)) {
+                    text = prefix.substring(0, prefix.length() - 1) + "。";
+                }
+            }
+        }
+        return "\n结尾落点：" + text
+                + "\n按读者能经历的事件、反应、感受或有证据的新认识收笔；"
+                + "若原计划还说明了已由事件体现的意义，把那层说明留在计划里。";
+    }
+
     public static String renderKnowledgeProgress(ChapterPlanItemEntity item) {
         if (item == null || StringUtils.isBlank(item.getSuspenseBeat())) {
             return "";

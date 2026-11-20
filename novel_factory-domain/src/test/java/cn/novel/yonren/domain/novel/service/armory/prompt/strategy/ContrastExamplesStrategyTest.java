@@ -13,7 +13,7 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
- * 对照片例库固定注入策略测试：仅正文场景命中、内容含坏→好对照
+ * 正文注入表达对照，兼顾压缩重复与保留有用信息。
  */
 class ContrastExamplesStrategyTest {
 
@@ -32,8 +32,10 @@ class ContrastExamplesStrategyTest {
 
         assertEquals(1, rules.size());
         String content = rules.get(0).getContent();
-        assertTrue(content.contains("待审"), "应含待审表达");
-        assertTrue(content.contains("可选处理"), "应含可选处理");
+        assertTrue(content.contains("动作和对白已经交代了用意"));
+        assertTrue(content.contains("人物的判断提供了新信息"));
+        assertTrue(content.contains("改写"));
+        assertTrue(content.contains("保留"));
         assertEquals(PromptRule.InjectPosition.USER_TAIL, rules.get(0).getInjectPosition());
     }
 

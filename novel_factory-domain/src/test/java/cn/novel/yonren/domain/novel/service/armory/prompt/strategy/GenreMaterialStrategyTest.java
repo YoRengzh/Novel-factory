@@ -1,6 +1,7 @@
 package cn.novel.yonren.domain.novel.service.armory.prompt.strategy;
 
 import cn.novel.yonren.domain.novel.service.armory.prompt.PromptRuleFileLoader;
+import cn.novel.yonren.domain.novel.service.armory.prompt.PromptBuilder;
 import cn.novel.yonren.domain.novel.service.armory.prompt.reference.ReferenceUsagePolicy;
 import cn.novel.yonren.domain.novel.model.valobj.prompt.PromptContext;
 import cn.novel.yonren.domain.novel.model.valobj.prompt.PromptRule;
@@ -119,6 +120,21 @@ class GenreMaterialStrategyTest {
     }
 
     @Test
+    void writingAndRevisionUseProseWhileAuditKeepsTeachingNotes() {
+        GenreMaterialStrategy registered = new GenreMaterialStrategy(new PromptRuleFileLoader(), new ReferenceUsagePolicy());
+        PromptContext context = PromptContext.builder().theme("悬疑").chapterBrief("程野回访死者家").build();
+        for (PromptScene scene : List.of(PromptScene.CHAPTER_CONTENT, PromptScene.CHAPTER_REVISE, PromptScene.CHAPTER_AUDIT)) {
+            String content = registered.load(scene, context).stream()
+                    .filter(rule -> rule.getName().equals("genre-exemplar-suspense"))
+                    .findFirst().orElseThrow().getContent();
+            assertTrue(content.contains("水池里放着两只饭碗"));
+            assertEquals(scene == PromptScene.CHAPTER_AUDIT, content.contains("【场景指令】"));
+            assertEquals(scene == PromptScene.CHAPTER_AUDIT, content.contains("【思维链拆解】"));
+        }
+        assertTrue(fixedExemplar("科幻", "深空通信").orElseThrow().contains("她就地坐下"));
+    }
+
+    @Test
     void missingGenreExemplarsAreSkippedWithoutChangingStyleOrFallingBackToSharedProse() {
         var registered = new GenreMaterialStrategy(new PromptRuleFileLoader(), new ReferenceUsagePolicy());
 
@@ -152,6 +168,47 @@ class GenreMaterialStrategyTest {
 
         assertEquals(List.of("style-default"), names(rules));
         assertEquals("默认风格内容", rules.get(0).getContent());
+    }
+
+    @ParameterizedTest
+    @CsvSource({
+            "CHAPTER_CONTENT, 武侠, 传统武侠, register-traditional-wuxia, 文体语域：传统古典评书风",
+            "CHAPTER_REVISE, 玄幻, 语域：冷峻白描古风，叙事克制, register-crisp-classical, 文体语域：冷峻白描古风",
+            "CHAPTER_PLAN, 武侠, 本书采用传统武侠风格, register-traditional-wuxia, 文体语域：传统古典评书风"
+    })
+    void explicitRegisterReplacesGenreStyleInTheAssembledPrompt(PromptScene scene, String theme, String style,
+                                                              String card, String cardTitle) {
+        var registered = new GenreMaterialStrategy(new PromptRuleFileLoader(), new ReferenceUsagePolicy());
+        var builder = new PromptBuilder(List.of(registered));
+        var context = PromptContext.builder().theme(theme).style(style).build();
+        String prompt = builder.buildUserTail(scene, context);
+
+        assertTrue(prompt.contains("【style-" + card + "】"));
+        assertTrue(prompt.contains(cardTitle));
+        assertFalse(prompt.contains("【style-wuxia】"));
+        assertFalse(prompt.contains("【style-fantasy】"));
+        assertFalse(prompt.contains("【style-default】"));
+    }
+
+    @ParameterizedTest
+    @CsvSource(value = {"武侠江湖|", "传统武侠|避免传统武侠", "武侠|传统武侠，冷峻白描古风"}, delimiter = '|')
+    void genreAloneOrUnclearStyleDoesNotSelectARegister(String theme, String style) {
+        when(fileLoader.load("styles/wuxia.md")).thenReturn("作者保存的武侠题材卡");
+        var context = PromptContext.builder().theme(theme).style(style).build();
+        List<PromptRule> rules = strategy.load(PromptScene.CHAPTER_CONTENT, context);
+
+        assertEquals(List.of("style-wuxia"), names(rules));
+        assertEquals("作者保存的武侠题材卡", rules.get(0).getContent());
+    }
+
+    @Test
+    void explicitRegisterKeepsMatchingGenreExemplar() {
+        var registered = new GenreMaterialStrategy(new PromptRuleFileLoader(), new ReferenceUsagePolicy());
+        var context = PromptContext.builder().theme("玄幻").style("冷峻白描古风").chapterBrief("排队领例钱").build();
+        List<PromptRule> rules = registered.load(PromptScene.CHAPTER_CONTENT, context);
+
+        assertEquals(List.of("style-register-crisp-classical", "genre-style-fantasy", "genre-exemplar-fantasy"),
+                names(rules));
     }
 
     @Test

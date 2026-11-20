@@ -184,6 +184,11 @@ public class QualityGate {
         // 对白数量仅作观测，不进审稿条件或修订指令。
         int dialogueCount = chapterContent == null ? 0 : ContentDensityPolicy.countDialogue(chapterContent.getContent());
         log.info("第 {} 章对白数量观测：{}（不作为数量准入或补稿要求）", globalNo, dialogueCount);
+        if (chapterContent != null) {
+            log.info("第 {} 章叙述比喻标记观测：{} 次 / {} 有效字", globalNo,
+                    ContentDensityPolicy.countNarrativeSimileMarkers(chapterContent.getContent()),
+                    ChapterLengthPolicy.effectiveCharacterCount(chapterContent.getContent()));
+        }
         // 章节编号元信息泄露检测（机械预检）：正文中出现"第X章""本章/上一章"等作者层面元信息时给审校注入加审预警
         // 同时 StyleViolationPolicy.check 会将其标记为 BLOCKING issue 进入修订闭环，双重保险
         String chapterRefEvidence = chapterContent == null ? null

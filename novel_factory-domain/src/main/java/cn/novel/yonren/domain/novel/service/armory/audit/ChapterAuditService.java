@@ -586,7 +586,8 @@ public class ChapterAuditService {
                 .append(deliveryEnabled
                         ? "\n  2) 关键交付缺失：计划承诺的事件或必要过程未兑现；在 deliveryChecks 独立报告，不重复填入七维 issues；"
                         : "\n  2) 关键事件缺失（pacing）：本章计划列出的关键事件在正文中完全未出现；")
-                .append("\n  3) endingHook 未呼应（hook）：正文结尾与计划的结尾悬念指向明显冲突或完全未触及；")
+                .append("\n  3) endingHook 未呼应（hook）：正文结尾与计划安排的事件、反应或新认识明显冲突或完全未触及；")
+                .append("结尾该有的变化已经写进场景时，不要求人物或旁白再总结一次意义；")
                 .append("\n  4) 视角或知情越界：叙事越出设定视角用 aesthetic；明确提前揭晓用 foreshadow，并提供正文和计划引文。")
                 .append("\n- MINOR：一切程度性问题——铺垫不足、钩子力度偏弱、衔接略跳、节奏偏快、表述不够精准、")
                 .append("临场冲击被削弱、细节交代不充分、文风与疲劳词等。只记录，不触发修订。")

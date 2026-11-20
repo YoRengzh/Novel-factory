@@ -275,10 +275,37 @@ class ChapterWorkerTest {
         assertTrue(prompt.contains("悄悄退回钥匙"));
         assertTrue(prompt.contains("他把钥匙放在台上"));
         assertTrue(prompt.contains("余韵：回过神来"));
-        assertTrue(prompt.contains("【意图与读者信息】"));
+        assertTrue(prompt.contains("【留白与克制】"));
         assertFalse(prompt.contains("派生事件不重复给写手"));
         assertFalse(prompt.contains("回收策划标记"));
         assertFalse(prompt.contains("后续目标"));
+    }
+
+    @Test
+    void buildChapterPrompt_trimsOnlyAnExactRedundantEndingSuffixAndPreservesThePlan() {
+        String action = "孙执事叫她明日去矿洞外围搬新料";
+        String commentary = "她的追查终于踏上了新征程。";
+        var item = ChapterPlanItemEntity.builder().chapterNo(3).title("新差事").goal("接下新差事")
+                .endingHook(action + "，" + commentary).build();
+        var contract = cn.novel.yonren.domain.novel.model.valobj.contract.ChapterContract.of(item, List.of());
+
+        String prompt = chapterWorker.buildChapterPrompt("设定", item, null, 3, contract, null, "", commentary);
+        assertTrue(prompt.contains("结尾落点：" + action + "。"));
+        assertFalse(prompt.contains(commentary));
+        assertEquals(action + "，" + commentary, item.getEndingHook());
+
+        for (String invalid : List.of(item.getEndingHook(), "追查终于踏上了新征程。", action, "不同于原文的解释")) {
+            String fallback = chapterWorker.buildChapterPrompt("设定", item, null, 3, contract, null, "", invalid);
+            assertTrue(fallback.contains(item.getEndingHook()));
+        }
+
+        String discovery = "她认出回执上的亲笔署名，第一次确认失踪的弟弟还活着。";
+        item.setEndingHook("驿卒把回执交给她。" + discovery);
+        var discoveryContract = cn.novel.yonren.domain.novel.model.valobj.contract.ChapterContract.of(item, List.of());
+        for (String invalid : List.of(discovery, "第一次确认失踪的弟弟还活着。")) {
+            String fallback = chapterWorker.buildChapterPrompt("设定", item, null, 3, discoveryContract, null, "", invalid);
+            assertTrue(fallback.contains(item.getEndingHook()));
+        }
     }
 
     @Test

@@ -11,6 +11,7 @@ import org.junit.jupiter.api.Test;
 
 import java.util.Arrays;
 import java.util.List;
+import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -302,6 +303,54 @@ class ScenePlanPolicyTest {
         assertFalse(rendered.contains("已有事实引用"));
         assertFalse(rendered.contains("真实事实引用"));
         assertEquals(before, JSON.toJSONString(plan));
+    }
+
+    @Test
+    void writerReceivesOnlyVerifiedWorldFactsAndKeepsBeliefsPersonal() {
+        String hash = "b".repeat(64);
+        FactReference verified = new FactReference("ITEM", 8, hash, "契纸", "印章完整", "检视了契纸的印章");
+        FactReference completeButUnverified = new FactReference("ITEM", 8, hash, "钥匙", "能开禁地",
+                "查看了钥匙");
+        FactReference bare = FactReference.fromText("设备此前已具备远程能力");
+        SceneCausality causality = new SceneCausality(List.of(
+                new SceneCausality.ActorInput("江燃", null, null, null, null, "这条路通向后门")),
+                null, null, List.of(completeButUnverified, verified));
+        ScenePlan scene = new ScenePlan("trade", List.of("江燃"), "确认货物", "没有约好价钱",
+                List.of(bare, verified), "收下货物", null, null, null, null, causality);
+        ChapterPlanItemEntity item = v2(List.of(scene));
+
+        String prompt = ScenePlanPolicy.renderForWriting(item, Set.of(verified));
+        assertTrue(prompt.contains("已证实的前情：契纸：印章完整"), prompt);
+        assertTrue(prompt.contains("已证实的限制：契纸：印章完整"), prompt);
+        assertTrue(prompt.contains("江燃此刻相信：这条路通向后门"), prompt);
+        for (String omitted : List.of("能开禁地", "具备远程能力", hash, "ITEM", "检视了契纸")) {
+            assertFalse(prompt.contains(omitted), prompt);
+        }
+        assertFalse(ScenePlanPolicy.renderForWriting(item).contains("契纸"), "缺少核验上下文时不认定事实");
+    }
+
+    @Test
+    void writerKeepsTradeAndActionsAndValidSceneEndings() {
+        SceneCausality causality = new SceneCausality(null, List.of(
+                new SceneCausality.CausalStep("江燃", "先验印", "掌柜", "把契纸转过来", "试探掌柜是否认识他", null),
+                new SceneCausality.CausalStep("江燃", "签下欠条", null, null, null, null)),
+                new SceneCausality.Terms("掌柜", "江燃", "半袋米", "三枚铜钱", "由江燃验印", "三日内付清",
+                        "收回剩余的米"), null);
+        ScenePlan trade = new ScenePlan("trade", List.of("江燃", "掌柜"), "取米", "手头短缺",
+                null, "收下半袋米", "余韵：终于放下内疚", List.of("next-stage"), null, null, causality);
+        ScenePlan letter = scene("letter", "审查旧信", "字迹模糊", null, "首次发现签名伪造");
+        var plan = v2(List.of(trade, letter));
+        assertEquals(List.of(), ScenePlanPolicy.violations(plan));
+
+        String prompt = ScenePlanPolicy.renderForWriting(plan);
+        assertTrue(prompt.indexOf("先验印") >= 0 && prompt.indexOf("先验印") < prompt.indexOf("签下欠条"), prompt);
+        for (String part : List.of("掌柜的回应：把契纸转过来", "掌柜向江燃提供：半袋米", "回报：三枚铜钱",
+                "验收方式：由江燃验印", "期限：三日内付清", "未达约定时：收回剩余的米", "本场落点：收下半袋米",
+                "余味与节奏：余韵：终于放下内疚", "本场落点：首次发现签名伪造")) {
+            assertTrue(prompt.contains(part), prompt);
+        }
+        assertFalse(prompt.contains("试探掌柜是否认识他"));
+        assertFalse(prompt.contains("next-stage"));
     }
 
     @Test

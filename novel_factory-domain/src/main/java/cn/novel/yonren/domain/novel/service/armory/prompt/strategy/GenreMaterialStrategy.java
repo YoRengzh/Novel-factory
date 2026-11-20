@@ -12,16 +12,16 @@ import org.springframework.stereotype.Component;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Locale;
 
-/** 主文风与弧线取主类；原有题材的正文范例仅在登记且本章匹配时装配。 */
+/** 文风优先采用作者明确指定的语域；题材资料按主类及本章任务装配。 */
 @Component
 @RequiredArgsConstructor
 public class GenreMaterialStrategy implements PromptRuleStrategy {
 
     private static final List<MaterialEntry> MATERIALS = List.of(
-            new MaterialEntry("style-%s", "styles/%s.md", false, true),
-            new MaterialEntry("genre-style-%s", "references/genres/%s/style-references.md", false, false),
-            new MaterialEntry("genre-arc-%s", "references/genres/%s/arc-templates.md", true, false));
+            new MaterialEntry("genre-style-%s", "references/genres/%s/style-references.md", false),
+            new MaterialEntry("genre-arc-%s", "references/genres/%s/arc-templates.md", true));
 
     static String exemplarPath(String code) {
         return "references/genres/" + code + "/exemplars.md";
@@ -40,6 +40,10 @@ public class GenreMaterialStrategy implements PromptRuleStrategy {
         List<GenreType> genres = GenreType.matching(ctx.getTheme(), ctx.getStyle());
         GenreType primary = genres.isEmpty() ? GenreType.DEFAULT : genres.get(0);
         List<PromptRule> rules = new ArrayList<>();
+        PromptRule styleRule = loadStyle(scene, ctx, primary);
+        if (styleRule != null) {
+            rules.add(styleRule);
+        }
         for (MaterialEntry entry : MATERIALS) {
             if (entry.planOnly() && scene != PromptScene.CHAPTER_PLAN) {
                 continue;
@@ -49,9 +53,6 @@ public class GenreMaterialStrategy implements PromptRuleStrategy {
                 continue;
             }
             String content = fileLoader.load(entry.pathPattern().formatted(primary.getCode()));
-            if (content == null && entry.fallbackDefault()) {
-                content = fileLoader.load("styles/default.md");
-            }
             if (content != null && !content.isBlank()) {
                 rules.add(new PromptRule(ruleName, content, PromptRule.InjectPosition.USER_TAIL));
             }
@@ -64,6 +65,9 @@ public class GenreMaterialStrategy implements PromptRuleStrategy {
                 continue;
             }
             String content = usagePolicy.fixedContent(path, fileLoader.load(path), scene, ctx);
+            if (scene == PromptScene.CHAPTER_CONTENT || scene == PromptScene.CHAPTER_REVISE) {
+                content = stripTeachingCommentary(content);
+            }
             if (!content.isBlank()) {
                 rules.add(new PromptRule("genre-exemplar-" + genre.getCode(), content, PromptRule.InjectPosition.USER_TAIL));
                 break;
@@ -72,5 +76,76 @@ public class GenreMaterialStrategy implements PromptRuleStrategy {
         return rules;
     }
 
-    private record MaterialEntry(String namePattern, String pathPattern, boolean planOnly, boolean fallbackDefault) { }
+    private PromptRule loadStyle(PromptScene scene, PromptContext ctx, GenreType primary) {
+        String register = explicitRegister(ctx.getStyle());
+        if (register != null) {
+            String path = "styles/" + register + ".md";
+            if (usagePolicy.allowsFixed(path, scene, ctx)) {
+                String content = fileLoader.load(path);
+                if (content != null && !content.isBlank()) {
+                    return new PromptRule("style-" + register, content, PromptRule.InjectPosition.USER_TAIL);
+                }
+            }
+        }
+
+        String ruleName = "style-" + primary.getCode();
+        if (!usagePolicy.allowsRule(ruleName, scene, ctx)) {
+            return null;
+        }
+        String content = fileLoader.load("styles/" + primary.getCode() + ".md");
+        if (content == null && primary != GenreType.DEFAULT) {
+            content = fileLoader.load("styles/default.md");
+        }
+        return content == null || content.isBlank()
+                ? null : new PromptRule(ruleName, content, PromptRule.InjectPosition.USER_TAIL);
+    }
+
+    /** 风格是自由文本，只用明确写出的名称选卡。提及题材、否定某种写法或并列两张卡时沿用原路径。 */
+    private static String explicitRegister(String style) {
+        if (style == null) {
+            return null;
+        }
+        String selected = null;
+        for (String clause : style.split("[,，、;；。\\r\\n]+")) {
+            String name = clause.strip().toLowerCase(Locale.ROOT)
+                    .replaceFirst("^(?:(?:文风|语域)\\s*[:：]|(?:本书)?(?:采用|使用))\\s*", "");
+            String register = switch (name) {
+                case "冷峻白描古风", "register-crisp-classical" -> "register-crisp-classical";
+                case "传统武侠", "传统武侠风", "传统武侠风格", "传统古典评书风", "古典评书风",
+                        "register-traditional-wuxia" -> "register-traditional-wuxia";
+                default -> null;
+            };
+            if (register != null) {
+                if (selected != null && !selected.equals(register)) {
+                    return null;
+                }
+                selected = register;
+            }
+        }
+        return selected;
+    }
+
+    /** 保留已选中的正文小节，有标签的长范例与无标签的短篇使用同一路径。 */
+    static String stripTeachingCommentary(String content) {
+        if (content == null || content.isBlank()) {
+            return "";
+        }
+        StringBuilder out = new StringBuilder();
+        boolean skipping = content.lines().anyMatch(line -> line.stripLeading().startsWith("## "));
+        for (String line : content.lines().toList()) {
+            String trimmed = line.trim();
+            if (trimmed.startsWith("## ")) {
+                skipping = false;
+            }
+            if (trimmed.startsWith("【思维链拆解】") || trimmed.startsWith("（要点：")) {
+                skipping = true;
+            }
+            if (!skipping && !trimmed.startsWith("【场景指令】") && !trimmed.equals("【正文片段】")) {
+                out.append(line).append("\n");
+            }
+        }
+        return out.toString().trim();
+    }
+
+    private record MaterialEntry(String namePattern, String pathPattern, boolean planOnly) { }
 }
