@@ -490,11 +490,12 @@ public class QualityGate {
                 List<ChapterIssueEntity> blockingBeforeRound = new java.util.ArrayList<>(currentBlocking);
                 boolean planCandidateUnfixed = false;
                 boolean introducedFactConflict = false;
+                List<ChapterIssueEntity> revisedExplanationIssues = List.of();
                 if (auditEnabled()) {
                     // A3 复审验证化（docs/enhancement-plan.md）：复审不再全章重审——开放任务方差大，
                     // 二轮翻案即"修订拉锯"；改为逐条验证上一轮 BLOCKING 是否已修复（未确认已修复=仍未修复）。
                     // 机械门禁重扫（上方 rescan）照旧兜住修订稿新引入的硬伤。
-                    // 观测口径变化：叙事 MINOR 计数保留首审值——验证任务不做全章扫描，不产出新 MINOR
+                    // 保留首审统计；本轮编辑反馈只核对有双引文支持的意图复述。
                     // 没有计划完整性候选时走原调用形态，保持既有复验入口不变。
                     List<String> candidates = reviseResult.decision() == null
                             ? List.of() : reviseResult.decision().getReviewCandidates();
@@ -524,6 +525,9 @@ public class QualityGate {
                     // 验证没跑成 ≠ 没修好：逐项交付结论不能由旧 fixed=true 或词面命中替代。
                     auditVerifyDegraded = verification == null || verification.degraded();
                     introducedFactConflict = verification != null && verification.introducedFactConflict();
+                    if (!auditVerifyDegraded) {
+                        revisedExplanationIssues = verification.explanationIssues();
+                    }
                     if (deliveryContract != null) {
                         deliveryReview = DeliveryReviewPolicy.ensureBound(
                                 verification == null ? null : verification.deliveryReview(), item,
@@ -556,6 +560,10 @@ public class QualityGate {
                     log.warn("第 {} 章第 {}/{} 轮撤回修订，原因：{}", globalNo, attempt, maxAttempts,
                             introducedFactConflict ? "引入新的事实矛盾" : "计划完整性复核未通过");
                     break;
+                }
+                if (!revisedExplanationIssues.isEmpty()) {
+                    semanticMinors = revisedExplanationIssues;
+                    semanticFeedbackHash = ChapterManuscript.of(chapterContent).hash();
                 }
                 if (deliveryReview.unknown()) {
                     // 未验证稿保留为草稿，不把“上一版的问题”当成新稿的内容结论，更不继续盲目重写。

@@ -35,6 +35,14 @@ public final class WritingContractPolicy {
                 + "若计划与可信事实不能同时满足，指出冲突及依据，不编造能力、材料或已发生事件来强行完成计划。";
     }
 
+    public static String renderIntentGuidance() {
+        return "【意图与读者信息】计划中的意图、因果理由、场景功能用于安排场景。"
+                + "若动作、对白或上下文已让读者理解某个打算，不再提前报出完整计策，也不在兑现后翻译一遍。"
+                + "确有新取舍、新推断、自欺、情绪变化或人物声口时，可以直接写心理与讲述。"
+                + "以本章允许的揭晓程度为准；推进靠当下的新证据，阶段目标与前情摘要不能代替证据。"
+                + "结尾的行动、结果、感受或新认识落定后收笔，避免用章纲结论再点一遍题。";
+    }
+
     private static void append(StringBuilder rule, String label, String value) {
         if (value != null && !value.isBlank()) {
             rule.append('\n').append(label).append('：').append(value);

@@ -26,6 +26,10 @@ public class ChapterIssueEntity {
     /** 原文引用（证据） */
     private String evidence;
 
+    /** 同一稿件中已交付该信息的原句，用于证实旁白复述。 */
+    @JsonInclude(JsonInclude.Include.NON_NULL)
+    private String contextEvidence;
+
     /** 用于对照事实矛盾的连续原句，旧记录可以没有。 */
     @JsonInclude(JsonInclude.Include.NON_NULL)
     private String factEvidence;

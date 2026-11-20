@@ -48,9 +48,11 @@ import cn.novel.yonren.domain.novel.service.armory.memory.StyleStatService;
 import cn.novel.yonren.domain.novel.service.armory.memory.ConsistencyIndexService;
 import cn.novel.yonren.domain.novel.service.armory.plan.ChapterPlanPromptService;
 import cn.novel.yonren.domain.novel.service.armory.plan.ChapterPlanSegmentPlanner;
+import cn.novel.yonren.domain.novel.service.armory.plan.ScenePlanPolicy;
 import cn.novel.yonren.domain.novel.service.armory.plan.TimeAdvanceChecks;
 import cn.novel.yonren.domain.novel.service.armory.prompt.PromptBudgetGuard;
 import cn.novel.yonren.domain.novel.service.armory.prompt.PromptBudgetGuard.PrefixBlock;
+import cn.novel.yonren.domain.novel.service.armory.prompt.WritingContractPolicy;
 import cn.novel.yonren.domain.novel.model.valobj.prompt.PromptContext;
 import cn.novel.yonren.domain.novel.service.armory.candidate.CandidateSampleService;
 import cn.novel.yonren.domain.novel.model.valobj.quality.BatchHealthReport;
@@ -1343,8 +1345,7 @@ public class ChapterWorker {
     }
 
     /**
-     * 正文生成与解析的四级降级（复用摘要链路思路）：
-     * ①原文解析 ②修复后重解 ③重试一次 LLM ④抢救 content 字段。
+     * 每次调用先严格解析，再尝试修复 JSON；失败时重试一次 LLM。
      * 正文是核心交付物、无降级替身——全部失败时抛出异常终止本批
      * （逐章检查点已保住此前章节，可用 resumeStoryDir 续写补齐）
      */
@@ -1490,26 +1491,15 @@ public class ChapterWorker {
 
     String buildChapterPrompt(String storyContext, ChapterPlanItemEntity item, String memoryPrefix,
                               int globalNo, ChapterContract contract, StoryContextEntity storyContextEntity) {
+        String scenes = ScenePlanPolicy.renderForWriting(item);
         return renderFacts(storyContext, memoryPrefix)
                 + StoryAuthoringService.renderGuidance(storyContextEntity, globalNo, globalNo)
-                + renderContract(contract, globalNo)
-                // v2 场景计划：场景是权威来源，派生事件只是摘要视图。
-                // 写手据此按场演出，而不是把派生事件再压成一句话。
-                + renderSceneContract(item)
+                + renderContract(contract, globalNo, scenes.isEmpty())
+                + scenes
                 + ChapterContract.renderKnowledgeProgress(item)
                 + renderContinuityConstraints(contract)
+                + "\n\n" + WritingContractPolicy.renderIntentGuidance()
                 + renderWritingGuidance(globalNo, storyContextEntity);
-    }
-
-    /**
-     * 权威场景契约（仅 v2 计划）：逐场给出意图、阻力、结果与可选因果。
-     * 旧计划（schemaVersion 为 null）返回空串，写作提示词与引入前逐字一致。
-     */
-    private String renderSceneContract(ChapterPlanItemEntity item) {
-        if (item == null || !Integer.valueOf(2).equals(item.getSchemaVersion())) {
-            return "";
-        }
-        return cn.novel.yonren.domain.novel.service.armory.plan.ScenePlanPolicy.render(item.getScenes());
     }
 
     /**
@@ -1529,7 +1519,7 @@ public class ChapterWorker {
     /**
      * 任务层：本章计划条目（标题/目标/角色/关键事件/结尾悬念）+「要求」总起。
      */
-    private String renderContract(ChapterContract contract, int globalNo) {
+    private String renderContract(ChapterContract contract, int globalNo, boolean includeKeyEvents) {
         if (contract == null) {
             return "";
         }
@@ -1539,10 +1529,12 @@ public class ChapterWorker {
                 .append("\n  标题：").append(contract.chapterTitle())
                 .append("\n  目标：").append(contract.dramaticTask())
                 .append("\n  角色：").append(contract.characters() == null
-                        ? "" : String.join("、", contract.characters()))
-                .append("\n  关键事件：").append(contract.mustHappen() == null
-                        ? "" : String.join("、", contract.mustHappen()))
-                .append("\n  结尾落点：").append(contract.endingImage())
+                        ? "" : String.join("、", contract.characters()));
+        if (includeKeyEvents) {
+            sb.append("\n  关键事件：").append(contract.mustHappen() == null
+                    ? "" : String.join("、", contract.mustHappen()));
+        }
+        sb.append("\n  结尾落点：").append(contract.endingImage())
                 .append("\n【本章完成条件】按计划真实完成事件，关键过程与结果必须让读者能够理解。")
                 .append("独处、观察、心理、动作与交流都可以承载事件，不要求同伴、对手、固定轮次或情感时刻。")
                 .append("结尾呼应具体计划落点，允许闭合和余韵，不为制造钩子另起冲突。")
@@ -1591,7 +1583,8 @@ public class ChapterWorker {
                 .append("\n11. 检查无意义的情节复用，但因果上必要的同类解法可以再次使用，不要求每章换解法、增加对手或伤害。")
                 .append("\n\n请严格按照以下 JSON 格式输出：")
                 .append("\n{\"chapterNo\":").append(globalNo)
-                .append(",\"title\":\"章节标题\",\"content\":\"章节正文\"}");
+                .append(",\"title\":\"章节标题\",\"content\":\"章节正文\"}")
+                .append("\n只返回这一个对象。content 内对白默认用中文引号，使用英文双引号时按 JSON 规则转义。");
         return sb.toString();
     }
 

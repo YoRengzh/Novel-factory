@@ -1,5 +1,8 @@
 package cn.novel.yonren.domain.novel.service.armory.beats;
 
+import cn.novel.yonren.domain.novel.model.valobj.contract.ChapterContract;
+import cn.novel.yonren.domain.novel.service.armory.plan.ScenePlanPolicy;
+
 import cn.novel.yonren.domain.novel.adapter.llm.LlmGateway;
 import cn.novel.yonren.domain.novel.model.entity.ChapterBeatsEntity;
 import cn.novel.yonren.domain.novel.model.entity.ChapterPlanItemEntity;
@@ -121,6 +124,7 @@ public class ChapterBeatsService {
         }
         sb.append("\n扩写纪律：节拍只展开本章场景契约，不新增人物、事实、结果、对白或代价。")
                 .append("等待、心理、环境与后果消化可以独立承担阅读功能，不要求每拍有状态变化。")
+                .append("信息增量用于核对发生的变化，不要求正文在过程之后再解释其意义。")
                 .append("若节拍与权威场景或已确认事实冲突，以后者为准；已承诺的行动和结果须连贯完成。");
         return sb.toString();
     }
@@ -141,12 +145,13 @@ public class ChapterBeatsService {
                 .append("\n要求：")
                 .append("\n1. 每拍字段：location（地点）、characters（在场角色）、conflict（本拍要发生的事或阻力，无外部阻力可写人物的等待、观察或消化）、")
                 .append("exchange（布尔值：本拍是否需要展开计划已安排的人物交流）、")
-                .append("infoGain（本拍带来的新信息/状态变化/关系变化；安静场可留空，不强制状态增量）、weight（篇幅占比，合计 100%）；")
+                .append("infoGain（本拍首次交付的信息、证据或状态变化；前拍已有的结论和安静场可留空）、weight（篇幅占比，合计 100%）；")
                 .append("\n   ⚠️ characters 必须是**纯字符串数组**，元素就是角色名本身，"
                         + "不得写成对象、不得夹带身份说明——身份信息不属于本字段。")
                 .append("✅ [\"角色A\",\"角色B\"]　❌ [{\"角色A\":\"婴儿\"}]　❌ [\"角色A（婴儿）\"]")
                 .append("\n2. 节拍按叙事顺序排列，合起来覆盖本章目标与场景契约；不新增计划外人物、事件、结果或冲突。")
-                .append("\n3. 第一拍承接上一章结尾的现场/状态，最后一拍落在本章计划的结尾落点。")
+                .append("\n3. 第一拍承接上一章结尾，最后一拍落在本章结尾的事件、感受或新认识。")
+                .append("最后一拍无需重复已交付的结论；按本章证据保持察觉、怀疑或确认的程度。")
                 .append("\n4. 每拍的 conflict 必须具体，严禁‘推进剧情’‘发展关系’这类空话。")
                 .append("\n4.1 有计划内交流时标记 exchange=true，动作或静场可标记 false。"
                         + "任何字段都不得写对白原句或编造交流内容；具体措辞由写手依据场景契约创作。")
@@ -156,13 +161,15 @@ public class ChapterBeatsService {
                         + contextText)
                 .append("\n\n【本章计划】")
                 .append("\n标题：").append(item.getTitle() == null ? "" : item.getTitle())
-                .append("\n目标：").append(item.getGoal() == null ? "" : item.getGoal())
-                .append("\n关键事件：")
-                .append(item.getKeyEvents() == null ? "" : String.join("、", item.getKeyEvents()))
-                .append("\n结尾悬念：").append(item.getEndingHook() == null ? "" : item.getEndingHook());
-        if (item.getScenes() != null && !item.getScenes().isEmpty()) {
-            sb.append("\n\n").append(cn.novel.yonren.domain.novel.service.armory.plan.ScenePlanPolicy.render(item.getScenes()));
+                .append("\n目标：").append(item.getGoal() == null ? "" : item.getGoal());
+        String scenes = ScenePlanPolicy.renderForWriting(item);
+        if (scenes.isEmpty()) {
+            sb.append("\n关键事件：")
+                    .append(item.getKeyEvents() == null ? "" : String.join("、", item.getKeyEvents()));
         }
+        sb.append("\n结尾悬念：").append(item.getEndingHook() == null ? "" : item.getEndingHook())
+                .append(scenes)
+                .append(ChapterContract.renderKnowledgeProgress(item));
         sb.append("\n\n请严格按照以下 JSON 格式输出：")
                 .append("\n{\"beats\":[{\"location\":\"地点\",\"characters\":[\"角色A\"],")
                 .append("\"conflict\":\"本拍发生的事\",\"exchange\":false,")

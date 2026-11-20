@@ -87,6 +87,39 @@ class ChapterAuditServiceTest {
     }
 
     @Test
+    void verifyEvidence_acceptsOnlyPairedQuotesForExplanatoryAside() {
+        var valid = ChapterIssueEntity.builder().dimension("aesthetic").severity("BLOCKING")
+                .evidence("这么做就是要瞒住他").contextEvidence("她把信压在账簿底下")
+                .description("翻译藏信动作（A5）").build();
+        var invalid = ChapterIssueEntity.builder().dimension("aesthetic").severity("MINOR")
+                .evidence("这么做就是要瞒住他").description("缺少另一处引文（A5）").build();
+        var result = new AuditResultEntity(List.of(valid, invalid));
+
+        service.verifyEvidence(result, "门响了。她把信压在账簿底下。这么做就是要瞒住他。", 1);
+
+        assertEquals(List.of(valid), result.getIssues());
+        assertEquals("MINOR", valid.getSeverity());
+    }
+
+    @Test
+    void verifyFixes_reportsRewrittenProseAsEditorialFeedbackSeparateFromBlockers() {
+        when(llmGateway.complete(any(), any())).thenReturn("""
+                {"verdicts":[{"index":1,"fixed":true}],"continuityChecked":true,"introducedConflicts":[],
+                 "explanationIssues":[{"dimension":"explanation","severity":"MINOR","evidence":"这么做就是要瞒住他",
+                 "contextEvidence":"她把信压在账簿底下","description":"重复交代"藏信"意图（A5）","suggestion":"收在动作"}]}
+                """);
+        var context = new RewriteContext("冻结写作依据", null, new ChapterManuscript(1, "标题", "原稿"));
+        var result = service.verifyFixes(storyVO(), planItem(), "门响了。她把信压在账簿底下。这么做就是要瞒住他。",
+                List.of(blocking(null)), null, null, 1, context);
+
+        assertFalse(result.degraded());
+        assertTrue(result.unfixed().isEmpty());
+        assertEquals(1, result.explanationIssues().size());
+        assertEquals("aesthetic", result.explanationIssues().get(0).getDimension());
+        assertEquals("她把信压在账簿底下", result.explanationIssues().get(0).getContextEvidence());
+    }
+
+    @Test
     void prompt_injectsAbilityBoundaryCriterionOnlyWhenTimeAnchorPresent() {
         // 机械层测不了"阶段越界的能力展示"。时序锚由 guard 带入，
         // 有时序锚才要求审校查阶段越界；无锚时不输出，避免让模型去猜一个不存在的锚。

@@ -60,6 +60,13 @@ public class ChapterAuditService {
 
     /** 修订后计划事件完整性的复核维度；与旧 BLOCKING 分开，避免位置错配和误归因。 */
     public static final String PLAN_INTEGRITY_DIMENSION = "plan-integrity";
+    private static final String EXPLANATION_CRITERION = "A5";
+    private static final String EXPLANATION_REVIEW =
+            "只报告替读者抢先说破策略、或事后翻译已能读懂的动作、对白和结尾。"
+                    + "evidence 引用多余解释，contextEvidence 引用同一稿件中交付同一信息的另一处短句。"
+                    + "两处各逐字复制一段连续文字；对白中间插有叙述时，只取足以作证的一小段，不能跳过叙述拼接台词。"
+                    + "若直述提供新取舍、推断、角色自欺、情绪余波或独特声口，保留。"
+                    + "仅以 aesthetic/MINOR 报告，description 末尾标（A5）；删改须保住因果、视角和作者风格。";
 
     private static final BeanOutputConverter<AuditResultEntity> CONVERTER =
             new BeanOutputConverter<>(AuditResultEntity.class,
@@ -418,6 +425,7 @@ public class ChapterAuditService {
         // B 分支由 A2（审计目录化 + 三态锚样例）填充，当前与 A 等价以支撑骨架自检
         sb.append(AuditPromptVariant.isB() ? criteriaVariantB(deliveryRequest != null)
                 : criteriaVariantA(deliveryRequest != null));
+        sb.append("\n\n【意图复述核对 A5】").append(EXPLANATION_REVIEW);
 
         sb.append("\n\n【本章计划】")
                 .append("\n标题：").append(nullToBlank(item.getTitle()))
@@ -627,6 +635,9 @@ public class ChapterAuditService {
         String normalizedContent = EvidenceMatch.normalize(content);
         String normalizedLedger = EvidenceMatch.normalize(ledgerPrompt);
         String normalizedAuthorFacts = EvidenceMatch.normalize(authorFacts);
+        result.setIssues(result.getIssues().stream().filter(issue -> issue != null)
+                .filter(issue -> !isExplanationIssue(issue) || acceptExplanation(issue, normalizedContent))
+                .toList());
         for (ChapterIssueEntity issue : result.getIssues()) {
             if (issue == null || !"BLOCKING".equalsIgnoreCase(issue.getSeverity())) {
                 continue;
@@ -659,6 +670,41 @@ public class ChapterAuditService {
             log.info("第 {} 章 BLOCKING 证据校验未通过，已降级 MINOR（{}）：{}",
                     globalNo, issue.getDimension(), StringUtils.abbreviate(issue.getEvidence(), 200));
         }
+    }
+
+    private static boolean isExplanationIssue(ChapterIssueEntity issue) {
+        String description = StringUtils.defaultString(issue.getDescription()).stripTrailing();
+        return (issue.getContextEvidence() != null && "aesthetic".equalsIgnoreCase(issue.getDimension()))
+                || description.endsWith("（" + EXPLANATION_CRITERION + "）")
+                || description.endsWith("(" + EXPLANATION_CRITERION + ")");
+    }
+
+    private static boolean acceptExplanation(ChapterIssueEntity issue, String content) {
+        if (issue.getFactEvidence() != null || issue.getPlanEvidence() != null) {
+            return false;
+        }
+        String explanation = EvidenceMatch.normalize(issue.getEvidence());
+        String context = EvidenceMatch.normalize(issue.getContextEvidence());
+        if (!continuousQuote(explanation, content) || !continuousQuote(context, content)
+                || explanation.equals(context)) {
+            return false;
+        }
+        boolean separatePassages = content.indexOf(explanation) + explanation.length() <= content.lastIndexOf(context)
+                || content.indexOf(context) + context.length() <= content.lastIndexOf(explanation);
+        if (!separatePassages) return false;
+        issue.setDimension("aesthetic");
+        issue.setSeverity("MINOR");
+        return true;
+    }
+
+    private static List<ChapterIssueEntity> checkedExplanationIssues(FixCheckOutput output, String revisedContent) {
+        if (output.getExplanationIssues() == null) {
+            return List.of();
+        }
+        String content = EvidenceMatch.normalize(revisedContent);
+        return output.getExplanationIssues().stream()
+                .filter(issue -> issue != null && acceptExplanation(issue, content))
+                .toList();
     }
 
     private static boolean isFactIssue(ChapterIssueEntity issue) {
@@ -702,6 +748,8 @@ public class ChapterAuditService {
                 .append("才以 foreshadow/BLOCKING 报告提前揭晓。evidence 引用正文定论原句，")
                 .append("planEvidence 逐字引用本章悬念进度或场景结果里的限制。")
                 .append("planEvidence 只用于这类问题，不作为已发生事实的 factEvidence。")
+                .append("也检查内心叙述的确定程度：‘特征相似，得再查’是推测；")
+                .append("只有相似特征却无保留地断言‘两件东西出自同一个人’，并把共同来源作为已知前提，是确认。")
                 .append("推测、误信、谎言和计划允许且有新依据的确认不报；摘要、待核记录与未来计划不能当成获知依据。");
     }
 
@@ -716,7 +764,11 @@ public class ChapterAuditService {
         private List<FixVerdict> verdicts;
         private Boolean continuityChecked;
         private List<ChapterIssueEntity> introducedConflicts;
+        private List<ChapterIssueEntity> explanationIssues;
         private List<CausalVerdict> deliveryChecks;
+
+        public List<ChapterIssueEntity> getExplanationIssues() { return explanationIssues; }
+        public void setExplanationIssues(List<ChapterIssueEntity> value) { explanationIssues = value; }
 
         public List<CausalVerdict> getDeliveryChecks() { return deliveryChecks; }
         public void setDeliveryChecks(List<CausalVerdict> value) { deliveryChecks = value; }
@@ -749,13 +801,18 @@ public class ChapterAuditService {
      * （不放行未验证的稿），差别只在于调用方**不得把它记成质量债**。
      */
     public record FixVerification(List<ChapterIssueEntity> unfixed, boolean degraded, DeliveryReview deliveryReview,
-                                  boolean introducedFactConflict) {
+                                  boolean introducedFactConflict, List<ChapterIssueEntity> explanationIssues) {
         public FixVerification(List<ChapterIssueEntity> unfixed, boolean degraded) {
             this(unfixed, degraded, null);
         }
 
         public FixVerification(List<ChapterIssueEntity> unfixed, boolean degraded, DeliveryReview deliveryReview) {
             this(unfixed, degraded, deliveryReview, false);
+        }
+
+        public FixVerification(List<ChapterIssueEntity> unfixed, boolean degraded, DeliveryReview deliveryReview,
+                               boolean introducedFactConflict) {
+            this(unfixed, degraded, deliveryReview, introducedFactConflict, List.of());
         }
 
         static FixVerification verified(List<ChapterIssueEntity> unfixed) {
@@ -767,7 +824,8 @@ public class ChapterAuditService {
             new BeanOutputConverter<>(FixCheckOutput.class,
                     JsonMapper.builder().enable(JsonReadFeature.ALLOW_UNESCAPED_CONTROL_CHARS).build());
     private record LegacyFixOutput(List<FixCheckOutput.FixVerdict> verdicts, Boolean continuityChecked,
-                                   List<ChapterIssueEntity> introducedConflicts) { }
+                                   List<ChapterIssueEntity> introducedConflicts,
+                                   List<ChapterIssueEntity> explanationIssues) { }
     private static final String LEGACY_FIX_FORMAT = new BeanOutputConverter<>(LegacyFixOutput.class).getFormat();
 
     /**
@@ -871,12 +929,14 @@ public class ChapterAuditService {
             checkCancellation(request, writerContext);
             List<ChapterIssueEntity> unfixed = null;
             boolean introducedFactConflict = false;
+            List<ChapterIssueEntity> explanationIssues = List.of();
             try {
                 FixCheckOutput output = readStrictFixOutput(readStrictObject(raw), checks.size(), writerContext != null);
                 unfixed = resolveUnfixed(checks, output.getVerdicts(), revisedContent, globalNo);
                 if (writerContext != null) {
                     introducedFactConflict = addIntroducedConflicts(unfixed, output.getIntroducedConflicts(),
                             revisedContent, ledgerPrompt, writerContext, item, globalNo);
+                    explanationIssues = checkedExplanationIssues(output, revisedContent);
                 }
                 review = DeliveryReviewPolicy.consume(request, output.getDeliveryChecks());
                 diagnostic = reviewDiagnostic(review);
@@ -891,7 +951,7 @@ public class ChapterAuditService {
                 log.info("修订验证及交付核验完成，chapterNo: {}, 未修复: {}, delivery: {}",
                         globalNo, unfixed.size(), review.status());
                 // ISSUE 是有效内容结论，不是基础设施降级；旧 fixed 不为交付 PASS 提供授权。
-                return new FixVerification(unfixed, false, review, introducedFactConflict);
+                return new FixVerification(unfixed, false, review, introducedFactConflict, explanationIssues);
             }
             log.warn("交付复验第 {}/2 次未完成，chapterNo: {}，{}", attempt, globalNo, diagnostic);
         }
@@ -923,6 +983,13 @@ public class ChapterAuditService {
             }
             output.setContinuityChecked(true);
             output.setIntroducedConflicts(readIssues(root, "introducedConflicts"));
+            if (root.path("explanationIssues").isArray()) {
+                try {
+                    output.setExplanationIssues(readIssues(root, "explanationIssues"));
+                } catch (IllegalArgumentException | JsonProcessingException ignored) {
+                    // 编辑意见无效不影响交付或事实复核。
+                }
+            }
         }
         output.setDeliveryChecks(readDeliveryChecks(root));
         return output;
@@ -943,13 +1010,7 @@ public class ChapterAuditService {
                         .label("audit-verify-第" + globalNo + "章")
                         .scene(ModelScene.CHAPTER_AUDIT)
                         .build());
-                FixCheckOutput output = FIX_CONVERTER.convert(raw);
-                if (output == null || output.getVerdicts() == null) {
-                    output = JsonParseFallback.parse(raw, FIX_CONVERTER::convert);
-                    if (output != null) {
-                        log.info("修订验证经解析降级修复后成功，chapterNo: {}", globalNo);
-                    }
-                }
+                FixCheckOutput output = JsonParseFallback.parse(raw, FIX_CONVERTER::convert);
                 checkCancellation(null, writerContext);
                 if (output != null && output.getVerdicts() != null) {
                     List<ChapterIssueEntity> unfixed = resolveUnfixed(blocking, output.getVerdicts(), revisedContent, globalNo);
@@ -964,7 +1025,8 @@ public class ChapterAuditService {
                     }
                     log.info("修订验证完成，chapterNo: {}, 待验证 {} 条，未修复 {} 条",
                             globalNo, blocking.size(), unfixed.size());
-                    return new FixVerification(unfixed, false, null, introducedFactConflict);
+                    return new FixVerification(unfixed, false, null, introducedFactConflict,
+                            writerContext == null ? List.of() : checkedExplanationIssues(output, revisedContent));
                 }
                 log.warn("修订验证第 {}/2 次输出无法解析，chapterNo: {}", attempt, globalNo);
             } catch (Exception e) {
@@ -1078,7 +1140,7 @@ public class ChapterAuditService {
                                 + "若 plan-delivery 事件完全缺席，旧条目可不填正文引文；在 deliveryChecks 用 MISSING_DELIVERY 提供计划锚、全文核对理由和修复目标，不得捏造不存在的正文。")
                 .append(writerContext == null
                         ? "\n- 只验证列出的条目，不新增问题，不改变条目顺序。"
-                        : "\n- 列出条目逐项验证；额外只核对修订直接引入的连续性冲突，放在 introducedConflicts，不改原条目顺序。")
+                        : "\n- 列出条目逐项验证。修订直接引入的连续性冲突放在 introducedConflicts，不改原条目顺序。")
                 .append("\n\n【本章计划】")
                 .append("\n目标：").append(nullToBlank(item.getGoal()))
                 .append("\n关键事件：").append(joinList(item.getKeyEvents()))
@@ -1093,7 +1155,7 @@ public class ChapterAuditService {
             appendKnowledgeReview(sb, item);
             sb.append("\n【修订影响范围连续性核对】只核对修订涉及的时间、位置、物品身份与去向、承诺履行和保密状态，")
                     .append("能力的启动、停止及冷却条件，人物当时掌握的信息，")
-                    .append("以及这些改动前后的直接衔接，不做文风或全章重新评审。不以引文存在证明因果成立。")
+                    .append("以及这些改动前后的直接衔接。不以引文存在证明因果成立。")
                     .append("只有修订直接引入的明确矛盾才报告。evidence 引用修订稿连续原句，factEvidence 逐字引用已确认设定、")
                     .append("当前账本、修订稿另一处事实或修订前已成立且应保留的事实。冻结写作依据中的资料建议不可作为出处。")
                     .append("修订明确新引入的提前揭晓也放入 introducedConflicts，改用 planEvidence。")
@@ -1111,6 +1173,8 @@ public class ChapterAuditService {
                 sb.append("\n【修订前版本】\n").append(writerContext.original().content());
             }
             sb.append("\n输出 continuityChecked=true，并提供 introducedConflicts 数组；没有新增冲突显式输出[]，不能省略。");
+            sb.append("\n【修订稿意图复述 A5】只用当前修订稿核对这一项，")
+                    .append("结果单列 explanationIssues 数组。").append(EXPLANATION_REVIEW);
         }
         if (request != null) {
             sb.append(DeliveryReviewPolicy.prompt(request))

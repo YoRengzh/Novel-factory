@@ -13,6 +13,7 @@ import cn.novel.yonren.types.enums.ModelScene;
 import cn.novel.yonren.domain.novel.service.armory.memory.StyleStatService;
 import cn.novel.yonren.domain.novel.service.armory.quality.PatchIntegrityPolicy;
 import cn.novel.yonren.domain.novel.service.armory.plan.ScenePlanPolicy;
+import cn.novel.yonren.domain.novel.model.valobj.contract.ChapterContract;
 import cn.novel.yonren.domain.novel.service.armory.prompt.WritingContractPolicy;
 import cn.novel.yonren.domain.novel.service.armory.quality.ChapterLengthPolicy;
 import cn.novel.yonren.domain.novel.model.valobj.revise.RewriteContext;
@@ -254,7 +255,7 @@ public class ChapterReviseService {
                 + "不要从残稿反推历史；能力、物品、地点、承诺和保密状态必须与原始上下文一致。"
                 + "保留作者原有风格、视角和语气，事实修正优先，不把不成立的计划圆成新能力。"
                 + "\n" + WritingContractPolicy.renderEditorialScope()
-                + ScenePlanPolicy.render(item.getScenes())
+                + renderPlanWhenMissing(item, globalNo, writerContext.writerUserPrompt())
                 + "\n" + COMPLETION_RULE
                 + "\n待修问题：" + JSON.toJSONString(blockingIssues)
                 + (StringUtils.isBlank(previousRejectionReason) ? "" : "\n上一轮未采纳原因：" + previousRejectionReason)
@@ -477,9 +478,27 @@ public class ChapterReviseService {
     /**
      * 组装修订 prompt：两种形态只差**任务头**与**输出 schema**，中段的业务上下文完全共用
      * （章节计划、关键事件红线、账本、伏笔、待修问题、机械违规点），避免两处各写一份而漂移
-     *
-     * @param patchMode true = 定向补丁形态；false = 整章重写形态
      */
+    private String renderPlanWhenMissing(ChapterPlanItemEntity item, int globalNo, String writerPrompt) {
+        if (StringUtils.contains(writerPrompt, "\n第 " + globalNo + " 章计划：")) {
+            return "";
+        }
+        String scenes = ScenePlanPolicy.renderForWriting(item);
+        StringBuilder plan = new StringBuilder("\n\n【本章计划】")
+                .append("\n标题：").append(nullToBlank(item.getTitle()))
+                .append("\n目标：").append(nullToBlank(item.getGoal()));
+        if (scenes.isEmpty()) {
+            plan.append("\n关键事件：").append(joinList(item.getKeyEvents()));
+            scenes = ScenePlanPolicy.render(item.getScenes());
+        }
+        return plan.append("\n结尾悬念：").append(nullToBlank(item.getEndingHook()))
+                .append("\n章节类型：").append(item.getChapterType() == null ? "normal" : item.getChapterType().getCode())
+                .append(scenes)
+                .append(ChapterContract.renderKnowledgeProgress(item))
+                .append("\n").append(WritingContractPolicy.renderIntentGuidance())
+                .toString();
+    }
+
     private String buildPrompt(ChapterPlanItemEntity item,
                                String originalContent,
                                List<ChapterIssueEntity> blockingIssues,
@@ -491,7 +510,8 @@ public class ChapterReviseService {
                                boolean patchMode,
                                RewriteContext writerContext) {
         StringBuilder sb = new StringBuilder();
-        if (writerContext != null && StringUtils.isNotBlank(writerContext.writerUserPrompt())) {
+        boolean hasWriterContext = writerContext != null && StringUtils.isNotBlank(writerContext.writerUserPrompt());
+        if (hasWriterContext) {
             sb.append("【冻结的原始写作上下文】仅作为作者范围与事实基线；本轮交付以下方修订任务和完成状态规则为准。\n")
                     .append(writerContext.writerUserPrompt()).append("\n\n");
         }
@@ -513,13 +533,7 @@ public class ChapterReviseService {
             sb.append("\n【风格观测边界】风格统计仅供已定位修订处参考，不据此扩大修订范围；")
                     .append("未列为本轮 BLOCKING 的表达保持原样，不为了换词而补写环境、心理或比喻。");
         }
-        sb.append("\n\n【本章计划】")
-                .append("\n标题：").append(nullToBlank(item.getTitle()))
-                .append("\n目标：").append(nullToBlank(item.getGoal()))
-                .append("\n关键事件：").append(joinList(item.getKeyEvents()))
-                .append("\n结尾悬念：").append(nullToBlank(item.getEndingHook()))
-                .append("\n章节类型：").append(item.getChapterType() == null ? "normal" : item.getChapterType().getCode())
-                .append(ScenePlanPolicy.render(item.getScenes()));
+        sb.append(renderPlanWhenMissing(item, globalNo, hasWriterContext ? writerContext.writerUserPrompt() : null));
         // 守住真实场景完整性，但不把词面预检说成事实裁决，不能为计划伪造能力或历史。
         if (item.getKeyEvents() != null && !item.getKeyEvents().isEmpty()) {
             sb.append("\n\n【关键事件红线】可信事实成立的关键事件与场景结果必须保留：")

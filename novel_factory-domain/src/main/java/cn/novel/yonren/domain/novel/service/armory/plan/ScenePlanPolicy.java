@@ -11,6 +11,7 @@ import java.util.HashSet;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
+import java.util.Objects;
 import java.util.Set;
 
 /** 场景是 v2 唯一权威；本策略不把旧事件转换成场景，也不证明里程碑完成。 */
@@ -119,10 +120,26 @@ public final class ScenePlanPolicy {
 
     /** 完整渲染权威场景，保留 ID 和引用边界，不把入场事实或里程碑引用写成新结果。 */
     public static String render(List<ScenePlan> scenes) {
+        return render(scenes, false);
+    }
+
+    /** 写作优先使用 v2 场景；空场景和 legacy 由调用方回退到关键事件。 */
+    public static String renderForWriting(ChapterPlanItemEntity item) {
+        if (item == null || !Integer.valueOf(2).equals(item.getSchemaVersion()) || item.getScenes() == null
+                || item.getScenes().stream().noneMatch(Objects::nonNull)) {
+            return "";
+        }
+        return render(item.getScenes(), true);
+    }
+
+    private static String render(List<ScenePlan> scenes, boolean forWriting) {
         if (scenes == null || scenes.isEmpty()) {
             return "";
         }
         StringBuilder sb = new StringBuilder("\n\n【权威场景契约】场景最终结果以 outcome/function 为准。location/time 是连续性元数据，用于核对场景状态，不要求在首句或第一段显式写出。\n");
+        if (forWriting) {
+            sb.append("意图与因果理由用于选择人物反应；用实际过程体现结果。静场功能可决定节奏和余韵。\n");
+        }
         int index = 1;
         for (ScenePlan scene : scenes) {
             if (scene == null) {
@@ -133,9 +150,11 @@ public final class ScenePlanPolicy {
                     .append("\n人物：").append(scene.characters())
                     .append("\n意图(intention)：").append(text(scene.intention()))
                     .append("\n阻力(resistance)：").append(text(scene.resistance()))
-                    .append("\n最终结果(outcome)：").append(text(scene.outcome()))
-                    .append("\n场景功能(function)：").append(text(scene.function()))
-                    .append("\n地点(location)：").append(text(scene.location()))
+                    .append("\n最终结果(outcome)：").append(text(scene.outcome()));
+            if (!forWriting || StringUtils.isBlank(scene.outcome()) || quietFunction(scene.function())) {
+                sb.append("\n场景功能(function)：").append(text(scene.function()));
+            }
+            sb.append("\n地点(location)：").append(text(scene.location()))
                     .append("\n时间(time)：").append(text(scene.time()))
                     .append("\n入场前提引用(entryStates，待核验，不是本场新结果)：");
             if (scene.entryStates().isEmpty()) {
@@ -155,8 +174,11 @@ public final class ScenePlanPolicy {
                         .append(", status=").append(text(fact.status()))
                         .append(", evidence=").append(text(fact.evidence())).append("}");
             }
-            sb.append("\n里程碑引用(milestoneRefs，仅映射待推进目标，不代表已完成)：")
-                    .append(scene.milestoneRefs()).append("\n");
+            if (!forWriting) {
+                sb.append("\n里程碑引用(milestoneRefs，仅映射待推进目标，不代表已完成)：")
+                        .append(scene.milestoneRefs());
+            }
+            sb.append("\n");
             if (scene.causality() != null) {
                 sb.append("可选因果补充(causality；belief 是角色主观所信，可与事实不符；")
                         .append("knowledgeRefs 是人物事实 ID；requires 同样只引用人物事实 ID；")

@@ -259,6 +259,29 @@ class ChapterWorkerTest {
     }
 
     @Test
+    void buildChapterPrompt_prefersStructuredScenesOverDerivedEvents() {
+        var action = new cn.novel.yonren.domain.novel.model.valobj.plan.ScenePlan(
+                "scene-1", List.of("店员"), "悄悄退回钥匙", "有人盯着门", List.of(),
+                "他把钥匙放在台上", "回收策划标记", List.of("后续目标"), "后门", "");
+        var quiet = new cn.novel.yonren.domain.novel.model.valobj.plan.ScenePlan(
+                "scene-2", List.of("店员"), "等门铃安静", "", List.of(),
+                "", "余韵：回过神来", List.of(), "柜台", "");
+        var item = ChapterPlanItemEntity.builder().chapterNo(2).schemaVersion(2).title("闭店").goal("归还钥匙")
+                .scenes(List.of(action, quiet)).keyEvents(List.of("派生事件不重复给写手")).build();
+
+        String prompt = chapterWorker.buildChapterPrompt("设定", item, null, 2,
+                cn.novel.yonren.domain.novel.model.valobj.contract.ChapterContract.of(item, List.of()));
+
+        assertTrue(prompt.contains("悄悄退回钥匙"));
+        assertTrue(prompt.contains("他把钥匙放在台上"));
+        assertTrue(prompt.contains("余韵：回过神来"));
+        assertTrue(prompt.contains("【意图与读者信息】"));
+        assertFalse(prompt.contains("派生事件不重复给写手"));
+        assertFalse(prompt.contains("回收策划标记"));
+        assertFalse(prompt.contains("后续目标"));
+    }
+
+    @Test
     void buildChapterPrompt_doesNotTurnContinuityMetadataIntoMandatoryOpeningTime() {
         ChapterPlanItemEntity item = ChapterPlanItemEntity.builder()
                 .chapterNo(3).title("第三章").goal("赴约")
