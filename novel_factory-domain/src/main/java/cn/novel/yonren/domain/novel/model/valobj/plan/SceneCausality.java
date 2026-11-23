@@ -38,15 +38,27 @@ public record SceneCausality(List<ActorInput> actors, List<CausalStep> steps,
     @JsonInclude(JsonInclude.Include.NON_NULL)
     public record ActorInput(String character, String want, String pressure,
                              List<String> knowledgeRefs, List<String> resources, String belief,
-                             ProfileRef profileRef) {
+                             ProfileRef profileRef, String voiceAndTics, String tactic) {
         public ActorInput(String character, String want, String pressure,
                           List<String> knowledgeRefs, List<String> resources) {
-            this(character, want, pressure, knowledgeRefs, resources, null, null);
+            this(character, want, pressure, knowledgeRefs, resources, null, null, null, null);
         }
 
         public ActorInput(String character, String want, String pressure,
                           List<String> knowledgeRefs, List<String> resources, String belief) {
-            this(character, want, pressure, knowledgeRefs, resources, belief, null);
+            this(character, want, pressure, knowledgeRefs, resources, belief, null, null, null);
+        }
+
+        public ActorInput(String character, String want, String pressure,
+                          List<String> knowledgeRefs, List<String> resources, String belief,
+                          ProfileRef profileRef) {
+            this(character, want, pressure, knowledgeRefs, resources, belief, profileRef, null, null);
+        }
+
+        public ActorInput(String character, String want, String pressure,
+                          List<String> knowledgeRefs, List<String> resources, String belief,
+                          String voiceAndTics, String tactic) {
+            this(character, want, pressure, knowledgeRefs, resources, belief, null, voiceAndTics, tactic);
         }
 
         public ActorInput {

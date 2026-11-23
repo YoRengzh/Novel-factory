@@ -246,6 +246,12 @@ public final class WriterContextAssembler {
                                 String.join("；", subtextParts));
                     }
                 }
+                if (StringUtils.isNotBlank(actor.voiceAndTics())) {
+                    appendLine(text, name + "本场腔调或小动作（写作参考）", actor.voiceAndTics());
+                }
+                if (StringUtils.isNotBlank(actor.tactic())) {
+                    appendLine(text, name + "当场说话或应对方式（写作参考）", actor.tactic());
+                }
             }
         }
         if (causality.steps() != null) {

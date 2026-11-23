@@ -264,9 +264,11 @@ class WriterContextAssemblerTest {
     @Test
     void masksSupportingActorPressureAndBeliefWhenPovCharacterIsSet() {
         var povActor = new cn.novel.yonren.domain.novel.model.valobj.plan.SceneCausality.ActorInput(
-                "苏尘", "保住考核资格", "随时可能被贬", List.of(), List.of("短刀"), "管事暂未起疑");
+                "苏尘", "保住考核资格", "随时可能被贬", List.of(), List.of("短刀"), "管事暂未起疑",
+                null, "直接承认漏登账册，当面请管事给一次补登机会");
         var sideActor = new cn.novel.yonren.domain.novel.model.valobj.plan.SceneCausality.ActorInput(
-                "周贵", "摸清苏尘来历", "在药园资历浅怕担责", List.of(), List.of("值夜册子"), "草药来历可疑");
+                "周贵", "摸清苏尘来历", "在药园资历浅怕担责", List.of(), List.of("值夜册子"), "草药来历可疑",
+                "说话慢半拍爱敲案边，公事口吻藏私心", "假借核查药畦损耗顺路试探，绝不直说想压价");
         var causality = new cn.novel.yonren.domain.novel.model.valobj.plan.SceneCausality(
                 List.of(povActor, sideActor), List.of(), null, List.of(), List.of());
         var scene = new ScenePlan("s-1", List.of("苏尘", "周贵"), "交药盘问", "气氛僵硬",
@@ -282,6 +284,9 @@ class WriterContextAssemblerTest {
         assertFalse(text.contains("周贵此刻以为"));
         assertTrue(text.contains("周贵外在意图（借动作、眼神与话锋体现）：摸清苏尘来历"));
         assertTrue(text.contains("周贵戏底暗线（供拿捏潜台词、停顿与话中带刺；限知视角下通过外在言行演出来，不写成全知内心独白或静态简历）：压力：在药园资历浅怕担责；此刻以为：草药来历可疑"));
+        assertTrue(text.contains("周贵本场腔调或小动作（写作参考）：说话慢半拍爱敲案边，公事口吻藏私心"));
+        assertTrue(text.contains("周贵当场说话或应对方式（写作参考）：假借核查药畦损耗顺路试探，绝不直说想压价"));
+        assertTrue(text.contains("苏尘当场说话或应对方式（写作参考）：直接承认漏登账册，当面请管事给一次补登机会"));
         assertTrue(text.contains("周贵可用资源：值夜册子"));
     }
 }

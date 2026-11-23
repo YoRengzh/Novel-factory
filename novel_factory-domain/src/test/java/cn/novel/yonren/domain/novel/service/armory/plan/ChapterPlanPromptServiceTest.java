@@ -1132,5 +1132,10 @@ class ChapterPlanPromptServiceTest {
 
         String singlePrompt = service.buildPlanPrompt(ctx, 16, 16, blueprint, false, null, null);
         assertTrue(singlePrompt.contains("【逐章人物驱动推演】"));
+        for (String planPrompt : List.of(prompt, singlePrompt)) {
+            assertTrue(planPrompt.contains("voiceAndTics 与 tactic 均可省略"));
+            assertTrue(planPrompt.contains("坦白、认错、直接请求和迂回试探都可以"));
+            assertFalse(planPrompt.contains("绝不把真实目的直白当台词念出来"));
+        }
     }
 }

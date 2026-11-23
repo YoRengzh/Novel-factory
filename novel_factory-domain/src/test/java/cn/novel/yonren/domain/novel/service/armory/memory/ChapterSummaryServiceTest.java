@@ -251,6 +251,25 @@ class ChapterSummaryServiceTest {
     }
 
     @Test
+    void summarizeDoesNotStoreVoiceAsCharacterState() {
+        stubModel("""
+                {"summary":"周管事走进院里。","characterStates":[
+                  {"name":"周管事","status":"【腔调：说话尖刻伤人，开口先摇头】进院","evidence":"周管事走进院里"},
+                  {"name":"赵岩","status":"【腔调：惜字如金】","evidence":"赵岩没开口"}
+                ]}
+                """);
+        var summary = service.summarize(storyVO(), planItem(2), "周管事走进院里。赵岩没开口。", 2, null);
+        assertEquals(1, summary.getCharacterStates().size());
+        assertEquals("进院", summary.getCharacterStates().get(0).getStatus());
+        assertTrue(new ConsistencyIndexService().rebuild(List.of(summary), null).getInjuries().isEmpty());
+
+        ArgumentCaptor<LlmCall> captor = ArgumentCaptor.forClass(LlmCall.class);
+        verify(llmGateway).complete(any(), captor.capture());
+        assertTrue(captor.getValue().getUserPrompt().contains("推测性的心理或态度不写入 status"));
+        assertTrue(captor.getValue().getUserPrompt().contains("态度确有变化时可在 relationshipChange 记录"));
+    }
+
+    @Test
     void summarize_fabricatedEvidenceQuarantinesEntry() {
         // evidence 非当章正文子串（编造/漂移）：该条移出三账本，隔离至待人工确认
         String json = "{\"summary\":\"剧情。\","

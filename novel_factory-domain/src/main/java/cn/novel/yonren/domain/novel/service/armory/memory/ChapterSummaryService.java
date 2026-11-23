@@ -30,6 +30,7 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
 /**
@@ -59,6 +60,8 @@ public class ChapterSummaryService {
     private static final int SEED_EXCERPT_MAX_LENGTH = 80;
     /** 重述判定最短字数：双方至少达到该长度才参与包含判定，防短关键词误杀正常新伏笔 */
     private static final int RESTATED_MIN_CHARS = 8;
+    private static final Pattern CHARACTER_VOICE_PREFIX =
+            Pattern.compile("^[\\s\\p{Z}]*【腔调[：:][^】]*】[\\s\\p{Z}、，,；;]*");
     // 状态证据的字数上限与命中判定统一由 EvidenceMatch 提供（三处反编造门共用同一口径）
 
     private final LlmGateway llmGateway;
@@ -268,12 +271,14 @@ public class ChapterSummaryService {
                 .append("**严禁**记情绪、心理活动与环境氛围；必须逐字来自正文，严禁改写、拼接或概括；")
                 .append("\n2. characterStates：列出本章结束时状态发生变化（或首次登场）的每个角色及其当前状态")
                 .append("（伤势/修为/位置/情绪/持有物），主角配角都要记录，状态必须与正文一致；")
+                .append("status 只写引文能直接支持的当前状态。说话腔调、习惯与推测性的心理或态度不写入 status，也不从旧账本沿用；")
                 .append("若某角色位置/去留状态与下方当前账本记载相反（如账本记已离场、本章正文却仍在场，")
                 .append("或账本记在场、本章离场），status 必须标注轨迹\"第N章变化：旧状态 → 新状态\"，")
                 .append("且该反转必须已在本章正文中有过渡描写（归来/折返/离开）；无过渡描写时记入 continuityConflicts；")
                 .append("\n2.1 characterBeats：本章真正参与行动的关键配角观察（不含纯路人和无名群众），至多4条。")
                 .append("goal/decision/consequence/relationshipChange/nextIntent 均可空或省略；只填本章实际有支持的项，")
                 .append("没有目标、关系变化或后续意图就留空，不补满五项，不为人物凑个性/成长/代价。")
+                .append("态度确有变化时可在 relationshipChange 记录；只有间接线索时用 INTERPRETATION，写明谁可能如何看待谁，并附支持引文和上下文。")
                 .append("decision 可记录普通可观察动作，不要求正文包含姓名加心理谓词。characterEffects 才是权威状态增量，beat不是。")
                 .append("每个非空字段必须在 support 同名键各附自己的支持，禁止共用一条 evidence 默认证明五项；")
                 .append("support 是可选字段级对象，键仅 goal/decision/consequence/relationshipChange/nextIntent，值含 attribution、quote、context、effectRefs。")
@@ -814,6 +819,17 @@ public class ChapterSummaryService {
         for (ChapterSummaryEntity.StateEntry entry : entries) {
             if (entry == null) {
                 continue;
+            }
+            if (accountKind == ChapterSummaryEntity.AccountKind.CHARACTER && entry.getStatus() != null) {
+                // 旧提示曾要求在状态前缀拼接腔调。模型沿用该格式时，只去掉腔调并保留其余状态。
+                var voicePrefix = CHARACTER_VOICE_PREFIX.matcher(entry.getStatus());
+                if (voicePrefix.find()) {
+                    String status = entry.getStatus().substring(voicePrefix.end()).strip();
+                    if (status.isEmpty()) {
+                        continue;
+                    }
+                    entry.setStatus(status);
+                }
             }
             if (StringUtils.isBlank(entry.getEvidence())) {
                 missing++;

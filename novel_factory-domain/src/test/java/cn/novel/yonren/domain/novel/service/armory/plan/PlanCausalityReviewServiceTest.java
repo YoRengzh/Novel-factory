@@ -332,6 +332,38 @@ class PlanCausalityReviewServiceTest {
     }
 
     @Test
+    void writerHintsStayInThePlanButCannotSupportACausalityIssue() {
+        properties.getCausality().setPlanMode(Mode.ENFORCE);
+        String tactic = "借口自己没有钥匙";
+        String voice = "假装记不起钥匙，故意说得很慢";
+        String outcome = "周贵收起了真钥匙";
+        String intention = "周贵藏住钥匙";
+        var actor = new SceneCausality.ActorInput("周贵", null, null, null, null, null, voice, tactic);
+        var scene = new ScenePlan("s1", List.of("周贵"), intention, null, null, outcome,
+                "保住钥匙", null, null, null, new SceneCausality(List.of(actor), null, null, null));
+        var candidate = plan(scene);
+        String original = JSON.toJSONString(candidate);
+        when(gateway.complete(any(), any())).thenReturn(response(pass("s1", intention)));
+        assertTrue(service.check(config, candidate, null, List.of(), 2, 2, job, null).acceptable());
+
+        ArgumentCaptor<LlmCall> captor = ArgumentCaptor.forClass(LlmCall.class);
+        verify(gateway).complete(any(), captor.capture());
+        String prompt = captor.getValue().getUserPrompt();
+        assertFalse(prompt.contains(voice));
+        assertFalse(prompt.contains(tactic));
+        assertTrue(prompt.contains(outcome));
+        assertTrue(prompt.contains("\"verdict\":\"PASS\",\"planField\":\"scene.intention\""));
+        assertEquals(original, JSON.toJSONString(candidate));
+
+        for (var hint : Map.of("tactic", tactic, "voiceAndTics", voice).entrySet()) {
+            when(gateway.complete(any(), any())).thenReturn(response(planIssue("s1", "scene.outcome", outcome,
+                    "s1", "scene.causality.actors[0]." + hint.getKey(), hint.getValue(),
+                    "误把表演当作事实", "移除钥匙")));
+            blocked(service.check(config, candidate, null, List.of(), 2, 2, job, null), "CAUSALITY_PLAN_UNKNOWN");
+        }
+    }
+
+    @Test
     void quotesAndNewlinesAreMatchedAgainstOriginalFieldTextNotJsonEscapes() {
         properties.getCausality().setPlanMode(Mode.ENFORCE);
         String result = "读出\"城外\"档案\n并已完成远程定位";

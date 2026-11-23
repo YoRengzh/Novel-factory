@@ -20,6 +20,7 @@ import com.alibaba.fastjson2.JSON;
 import com.fasterxml.jackson.databind.DeserializationFeature;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import lombok.RequiredArgsConstructor;
 import org.apache.commons.lang3.StringUtils;
 import org.springframework.stereotype.Service;
@@ -35,7 +36,8 @@ public class PlanCausalityReviewService {
             .enable(DeserializationFeature.FAIL_ON_READING_DUP_TREE_KEY)
             .enable(DeserializationFeature.FAIL_ON_TRAILING_TOKENS);
     // v3 的无证 PASS 不能为新准入授权；只升级 review 指纹，不重写计划/历史 JSON 或正文 hash。
-    public static final String REVIEW_VERSION = "scene-evidence-v5-secrecy-policy";
+    public static final String REVIEW_VERSION = "scene-evidence-v6-writing-hints";
+    private static final List<String> WRITER_HINT_FIELDS = List.of("voiceAndTics", "tactic");
     private static final Set<String> NON_EVIDENCE_FIELDS = Set.of("id", "sceneId", "chapterNo",
             "manuscriptHash", "knowledgeRefs", "milestoneRefs", "factId", "effectId", "referenceId",
             "characterId", "belief", "believes", "profileRef", "characters", "character", "actor", "responder");
@@ -106,9 +108,11 @@ public class PlanCausalityReviewService {
         String legacyText = renderLegacyNotes(history, start);
         String baseline = factText + legacyText + "\n历史摘要：" + ChapterManuscript.digest(historyText)
                 + "\n当前阶段（规划上下文，不表示目标已完成）：" + stageText;
+        JsonNode candidateForReview;
         Map<String, List<EvidenceField>> scenes;
         try {
-            scenes = sceneEvidence(MAPPER.readTree(planText));
+            candidateForReview = withoutWriterHints(MAPPER.readTree(planText));
+            scenes = sceneEvidence(candidateForReview);
             if (scenes.isEmpty()) return unavailable(mode, "CAUSALITY_PLAN_INPUT");
         } catch (Exception invalid) {
             return unavailable(mode, "CAUSALITY_PLAN_INPUT");
@@ -139,6 +143,7 @@ public class PlanCausalityReviewService {
                 + "\n只有当结果所必需的前提缺乏已提交事实或合理的场景内行动支撑时才用UNKNOWN；"
                 + "不要仅因存在未核验引用就否定场景或增加证明配额。同场不同字段的内部矛盾仍可按现有规则判ISSUE。"
                 + "\nbelief/believes 与人物 BELIEF 记录不是世界事实，信念与真实情况不同本身不构成 ISSUE。"
+                + "角色的腔调与应对提示不参与核验；人物当场的借口只证明他这么说，不能证明其内容为真。"
                 + "知识回退、保密与既有承诺核验不得用BELIEF冒充确知、泄密事实或真实承诺；缺少已确认依据用UNKNOWN。"
                 + "\n保密策略来源：SECRECY_CONFLICT/SECRET_LEAK可核对同主体的DECISION/ESTABLISHED与INTENT/INTENDED；"
                 + "它们只证明人物已作出保密决定或打算，并不证明秘密为真、人物确知或对他人作出承诺，不得强制改成KNOWLEDGE。"
@@ -161,13 +166,17 @@ public class PlanCausalityReviewService {
                 + "PASS必须用planField/planEvidence定位本场行动过程或允许概述，不能只写无冲突。"
                 + "步骤的action/response/because或本场intention可以是过程证据；"
                 + "概述落在outcome/允许替代说明时必须evidenceRole=ALLOWED_SUMMARY并说明为何无需展开，不能用裸成功保证代替过程。"
-                + "\n每个sceneId恰好输出一条：{\"checks\":[{\"sceneId\":\"...\",\"verdict\":\"PASS|ISSUE|UNKNOWN\","
+                + "\n每个sceneId恰好输出一条，统一返回 {\"checks\":[判定条目]}。"
+                + "PASS用PROCESS时，planField直接引用intention或steps的过程字段，不能把过程填在basisPlanField里。"
+                + "PASS示例：{\"sceneId\":\"实际场景id\",\"verdict\":\"PASS\",\"planField\":\"scene.intention\","
+                + "\"planEvidence\":\"intention中的连续行动原文\",\"evidenceRole\":\"PROCESS\",\"reason\":\"通过理由\"}。"
+                + "\nISSUE示例：{\"sceneId\":\"实际场景id\",\"verdict\":\"ISSUE\","
                 + "\"planField\":\"scene.outcome\",\"planEvidence\":\"该字段的连续原文\","
                 + "\"evidenceRole\":\"PROCESS|ALLOWED_SUMMARY\",\"failureType\":\"具体冲突类型\",\"subject\":\"被核验主体原名\","
                 + "\"factId\":\"下方事实factId（历史依据时）\",\"sourceChapter\":章号,\"manuscriptHash\":\"事实hash\","
                 + "\"basisSceneId\":\"候选依据场id（计划依据时）\",\"basisPlanField\":\"scene.causality.steps[0].action\","
-                + "\"basisEvidence\":\"依据单字段的连续原文\",\"reason\":\"具体断裂环节或通过理由\","
-                + "\"repair\":\"ISSUE时的定向修正目标\"}]}。"
+                + "\"basisEvidence\":\"依据单字段的连续原文\",\"reason\":\"具体断裂环节\","
+                + "\"repair\":\"定向修正目标\"}。"
                 + "\nplanField必须明确绑定sceneId内的左场字段；字段路径必须从scene开始，数组带准确下标。"
                 + "ISSUE必须二选一绑定依据：历史factId/sourceChapter/manuscriptHash/连续原文同时匹配；"
                 + "或basisSceneId/basisPlanField绑定合法候选场/字段，左右各为单字段连续原文且不能相同。"
@@ -177,7 +186,7 @@ public class PlanCausalityReviewService {
                 + "知识/保密/承诺核验必须回填subject并绑定到该主体，不能把甲知道/答应误配到乙。"
                 + "\nISSUE的repair只写需要补齐或修正的实际缺口，不替作者设计人物突然醒悟、临时解锁或新对白。"
                 + "\n【已提交人物与阶段事实】\n" + baseline + "\n【可定位计划字段】\n" + JSON.toJSONString(scenes)
-                + "\n【候选计划】\n" + planText;
+                + "\n【候选计划】\n" + candidateForReview;
         if (record != null) {
             record.put(key + ":prompt", prompt);
             record.put(key + ":planHash", ChapterManuscript.digest(planText));
@@ -386,6 +395,20 @@ public class PlanCausalityReviewService {
     private static String basis(JsonNode check) {
         String value = text(check, "basisEvidence");
         return value.isBlank() ? text(check, "historyEvidence") : value;
+    }
+
+    /** 只清理送审的 JSON 副本。采纳后的计划与写手仍使用原始提示。 */
+    private static JsonNode withoutWriterHints(JsonNode plan) {
+        for (JsonNode chapter : plan.path("chapters")) {
+            for (JsonNode scene : chapter.path("scenes")) {
+                for (JsonNode actor : scene.path("causality").path("actors")) {
+                    if (actor instanceof ObjectNode actorObject) {
+                        actorObject.remove(WRITER_HINT_FIELDS);
+                    }
+                }
+            }
+        }
+        return plan;
     }
 
     private static Map<String, List<EvidenceField>> sceneEvidence(JsonNode plan) {
