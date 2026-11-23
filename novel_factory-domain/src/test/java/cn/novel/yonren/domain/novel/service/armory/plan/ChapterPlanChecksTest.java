@@ -453,6 +453,19 @@ class ChapterPlanChecksTest {
         assertTrue(issue.contains("与蓝图不符"), issue);
     }
 
+    /** 允许规划模型按章节行原样带出句首“第N章：”格式前缀，但不放行正文改写。 */
+    @Test
+    void validateMainLineAdvance_allowsLeadingChapterPrefixWithoutChangingContent() {
+        List<ChapterPlanItemEntity> chapters = List.of(
+                planWithAdvance(1, "档位1", "第1章：【学习】苏尘跌入后山洞府获得造化道瞳"),
+                planWithAdvance(2, "档位1", "【本金】苏尘救活西畦青纹藤换得养气丹"));
+        List<StageBlueprintEntity.MainLineBeat> planned = List.of(
+                planned(1, "【学习】苏尘跌入后山洞府获得造化道瞳"),
+                planned(2, "【本金】苏尘救活西畦青纹藤换得养气丹"));
+
+        assertNull(ChapterPlanChecks.validateMainLineAdvance(chapters, planned));
+    }
+
     /** 无蓝图（老数据/补采失败）→ 跳过，不得因缺字段而失败 */
     @Test
     void validateMainLineAdvance_skipsWithoutBlueprint() {

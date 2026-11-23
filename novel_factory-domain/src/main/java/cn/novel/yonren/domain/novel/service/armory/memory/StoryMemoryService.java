@@ -117,8 +117,17 @@ public class StoryMemoryService {
     private final ChapterMemoryService chapterMemoryService;
     private final StoryMemoryProperties properties;
 
-    /** 相关性唤醒命中条目：text 为注入原文（已过 minScore 门控与字符预算） */
-    public record RecallHit(String text, double score) {
+    /**
+     * 相关性唤醒命中条目：text 为注入原文（已过 minScore 门控与字符预算）。
+     *
+     * <p>source 记录这条记忆来自哪一类、哪一章（章节类才有），用于去重与归因：
+     * 同一个旧事件的多个切块不应各占一份预算，排查"为什么召回了这条"时也不必再解析正文前缀。
+     * 旧两参构造保留，source 为空表示来源未知。
+     */
+    public record RecallHit(String text, double score, String kind, Integer chapterNo) {
+        public RecallHit(String text, double score) {
+            this(text, score, null, null);
+        }
     }
 
     /** 待写入点：stableKey 生成稳定点 id，text 用于向量化，payload 携带展示元数据 */
@@ -782,6 +791,13 @@ public class StoryMemoryService {
         if (!enabled(module, storyDir) || StringUtils.isBlank(queryText)) {
             return RecallOutcome.of(List.of());
         }
+        // 只在明确指定类型时启用服务端过滤：候选池 topK 是全局的，若先取全局再按 kind 过滤，
+        // 无关类型可能占满名额，真正需要的那条排在第 K+1 位就永远进不来。
+        java.util.Collection<String> kindFilter = onlyKind == null ? null : List.of(onlyKind);
+        // 近章窗口排除只能在后过滤做（章节号比较不是等值匹配）：此时必须多取候选，
+        // 否则"最近几章摘要直给"会把名额占满，真正需要的旧事件同样进不来。
+        int searchLimit = minChapterNo == null ? properties.getTopK()
+                : Math.min(properties.getTopK() * 3, Math.max(properties.getTopK(), 30));
         int attempts = Math.max(1, properties.getRetrieveMaxAttempts());
         Exception last = null;
         for (int attempt = 1; attempt <= attempts; attempt++) {
@@ -790,14 +806,17 @@ public class StoryMemoryService {
                 String boundedQuery = StringUtils.abbreviate(queryText.trim(), MAX_QUERY_CHARS);
                 float[] queryVector = embeddingGateway.embed(module, List.of(boundedQuery)).get(0);
 
-                List<ScoredVectorPoint> storyHits = vectorStore.search(
-                        collectionOf(storyDir), queryVector, properties.getTopK());
+                List<ScoredVectorPoint> storyHits = kindFilter == null
+                        ? vectorStore.search(collectionOf(storyDir), queryVector, searchLimit)
+                        : vectorStore.search(collectionOf(storyDir), queryVector, searchLimit, "kind", kindFilter);
 
                 List<ScoredVectorPoint> worldHits = List.of();
                 if (isValidWorldId(worldId)) {
                     try {
-                        worldHits = vectorStore.search(
-                                worldCollectionOf(worldId), queryVector, properties.getTopK());
+                        worldHits = kindFilter == null
+                                ? vectorStore.search(worldCollectionOf(worldId), queryVector, searchLimit)
+                                : vectorStore.search(worldCollectionOf(worldId), queryVector, searchLimit,
+                                        "kind", kindFilter);
                     } catch (Exception e) {
                         log.warn("世界集合检索失败，已跳过：{}", e.getMessage());
                     }
@@ -821,6 +840,10 @@ public class StoryMemoryService {
 
                 List<RecallHit> result = new ArrayList<>();
                 Set<String> seenTexts = new HashSet<>();
+                // 同一章最多贡献两个切块：一章被切成多块时，高分块常是同一段剧情的不同片段，
+                // 全收会让一章占满唤醒预算，把真正需要跨章召回的另一条挤掉。
+                Map<Integer, Integer> chapterChunks = new HashMap<>();
+                int maxChunksPerChapter = 2;
                 int budget = 0;
                 int maxChars = properties.getMaxRecallChars();
                 // 单条上限 = 一个切块：正常记忆点本就 ≈MEM_CHUNK_CHARS 切块），
@@ -842,6 +865,10 @@ public class StoryMemoryService {
                             && isChapterNoAtLeast(payload, minChapterNo)) {
                         continue;
                     }
+                    Integer chapterNo = chapterNoOf(payload);
+                    if (chapterNo != null && chapterChunks.getOrDefault(chapterNo, 0) >= maxChunksPerChapter) {
+                        continue;
+                    }
                     // 单条封顶后再试入预算：因 perHitChars <= maxChars，最高分那条必然入选——
                     // 有命中时前缀不会为空 起首条不再"整条放行"，防长命中撑爆预算）
                     String admitted = text.length() > perHitChars ? truncateTo(text, perHitChars) : text;
@@ -851,8 +878,13 @@ public class StoryMemoryService {
                         // 命中已按分数降序，跳过只是让位给"更小但仍在门控内"的高分候选
                         continue;
                     }
+                    if (chapterNo != null) {
+                        // 未入选的命中不能占用同章名额。
+                        chapterChunks.merge(chapterNo, 1, Integer::sum);
+                    }
                     budget += admitted.length();
-                    result.add(new RecallHit(admitted, hit.getScore()));
+                    result.add(new RecallHit(admitted, hit.getScore(),
+                            payload.get("kind"), chapterNoOf(payload)));
                 }
                 if (result.isEmpty()) {
                     log.info("故事记忆检索无命中（topK={}, minScore={}）", properties.getTopK(), properties.getMinScore());
@@ -941,6 +973,30 @@ public class StoryMemoryService {
             if (item.getChapterType() != null) {
                 sb.append("；章节类型：").append(item.getChapterType().getDesc());
             }
+        }
+        return sb.toString();
+    }
+
+    /**
+     * DIRECT 当前仍是每章一次检索，因此这是"章级紧凑查询"，不是按场多次检索。
+     * 只描述当前人物、行动与待解决问题，不带风格和完整宏观背景；进入逐场执行后再按当前段查询。
+     */
+    public String buildSceneQuery(String theme, ChapterPlanItemEntity item, List<String> cast,
+                                  List<String> sceneTexts) {
+        StringBuilder sb = new StringBuilder();
+        if (cast != null && !cast.isEmpty()) {
+            sb.append("涉及人物：").append(String.join("、", cast));
+        }
+        if (sceneTexts != null && !sceneTexts.isEmpty()) {
+            if (sb.length() > 0) sb.append("；");
+            sb.append("当前场景：").append(String.join("；", sceneTexts));
+        }
+        if (item != null && StringUtils.isNotBlank(item.getGoal())) {
+            if (sb.length() > 0) sb.append("；");
+            sb.append("本章要完成：").append(item.getGoal());
+        }
+        if (StringUtils.isNotBlank(theme) && sb.length() > 0) {
+            sb.append("；题材：").append(theme);
         }
         return sb.toString();
     }
@@ -1148,14 +1204,20 @@ public class StoryMemoryService {
     }
 
     private boolean isChapterNoAtLeast(Map<String, String> payload, int minChapterNo) {
-        String raw = payload.get("chapterNo");
+        Integer chapterNo = chapterNoOf(payload);
+        return chapterNo != null && chapterNo >= minChapterNo;
+    }
+
+    /** payload 里的章号；非章节类或解析失败返回 null（不是"第 0 章"）。 */
+    private static Integer chapterNoOf(Map<String, String> payload) {
+        String raw = payload == null ? null : payload.get("chapterNo");
         if (raw == null) {
-            return false;
+            return null;
         }
         try {
-            return Integer.parseInt(raw) >= minChapterNo;
+            return Integer.parseInt(raw);
         } catch (NumberFormatException e) {
-            return false;
+            return null;
         }
     }
 

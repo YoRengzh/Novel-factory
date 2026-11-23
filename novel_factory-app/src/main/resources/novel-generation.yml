@@ -52,7 +52,7 @@ story:
         # 正文是核心交付物，输出预算需覆盖正文与可能的思考开销。
         # 完整计划和写作约束会扩大输入前缀，不能仅按最终正文字数估算预算。
         max-tokens: 100000
-        temperature: 0.5
+        temperature: 0.8 # 轻装写作模式搭配较高温度，释放情绪张力与自然口语
         enable-thinking: false
       chapter-rewrite:
         model: qwen3.8-max
@@ -71,7 +71,7 @@ story:
         enable-thinking: false
       paragraph-audit:
         model: deepseek-v4-flash
-        max-tokens: 4096
+        max-tokens: 16384
         temperature: 0.1
         enable-thinking: false
       revise:
@@ -116,6 +116,12 @@ story:
         max-tokens: 4096
         temperature: 0.1
         enable-thinking: false
+      chapter-rebase:  # 观察式 Rebase 候选：读真实人物状态提计划差异，不直接写正文。
+                       # 规划类任务，可与正文模型分族；默认 story.rebase.mode=OFF 时不调用。
+        model: kimi-k3
+        max-tokens: 24000
+        temperature: 1.0
+        enable-thinking: true
     # 全局兜底模型：所有场景共用这一个，主模型与场景配置都不可用时才启用。
     # 为什么只留一个：兜底的前提是"原路走不通"——额度耗尽/模型下线常按供应商计量，
     # 同供应商的另一个模型往往一起挂，所以兜底的价值全在换供应商。此前 17 个场景各配一条链，
@@ -156,6 +162,20 @@ story:
     # 体检分级达到该档即停止自动续批，交人工过问：WATCH / DEGRADED / CRITICAL
     stop-on-health-level: CRITICAL
 
+  # 正文材料组装方式（正文模型实际看到什么）：
+  #   LEGACY = 由 chapter-beats 场景的模型把完整背景压成分段任务摘要，写手只看压缩结果。
+  #   DIRECT（默认）= 代码确定性组装 + 轻装写手模式：场景原文照录、只给在场人物状态与同情绪语感切片。
+  writer-context-mode: DIRECT
+  # DIRECT 暂固定整章直通；分段预算预留，知识时序和场内工作态完成前不启用。
+  # 此路径是实验入口，不代表限知隔离已经实现；默认仍使用 LEGACY。
+  writer-context-section-chars: 0
+
+  # 观察式 Rebase：根据真实人物状态生成“候选计划 + 差异报告”，默认关闭。
+  # PROPOSE_ONLY 只落候选，正文仍按原计划执行；不会自动采纳或重排整本书。
+  rebase:
+    mode: OFF
+    max-proposals: 1
+
   # 场景因果与正文交付核验：两个阶段独立配置，不会互相开启。
   causality:
     # 计划前提核验：OFF 不调用；OBSERVE 只记录；ENFORCE 可驳回计划。
@@ -183,8 +203,9 @@ story:
     enabled: true
     enforce-minimum-chapter-length: true
 
+  # 段落审校只保存逐处删改建议，默认关闭以减少对正文风格的过度削平与额外 LLM 消耗
   paragraph-audit:
-    enabled: true
+    enabled: false
     max-patches: 3
 
   # 章节修订开关
@@ -193,13 +214,18 @@ story:
     max-attempts: 2
     patch-enabled: true
 
+  # 只删不扩·主编去解释刮油刀（在 DIRECT 初稿后剥除“不是A而是B”、事后复盘与静态简历）
+  prose-scalpel:
+    enabled: true
+    max-patches: 8
+
   # 候选选优（六期）：审校低置信通过（MINOR 残留/修订过才闭环）时，重写候选，
   # 机械排序 + 盲评二选一；挑战者复审不过自动回退原稿与原报告，严格模式另须同稿同计划交付 PASS。
   # UNKNOWN/未验证/计划待调整不发候选调用；已确认 ISSUE 仅在显式开启 DEBT 通道时允许救场。
   # 重写与评审分别走 scene-models.chapter-rewrite / chapter-judge 两族配置：
   # 当前 rewrite=qwen3.8-flash（与原稿同族，零消耗），judge=deepseek-v4-flash（异族中立评审两份 qwen 稿）
   candidate:
-    enabled: true           # 总开关（第二模型族 API 未配置时保持 false，避免每章空转失败）
+    enabled: false          # 总开关（第二模型族 API 未配置时保持 false，避免每章空转失败）
     max-candidates: 1
     trigger-on-minor-residue: false
     minor-residue-threshold: 6
@@ -226,6 +252,7 @@ story:
 
   plan:
     branches: 0
+    rolling-single-chapter: true
 
   # 动态参考资料选择器（skill 式按需注入）：索引交给 LLM 挑选，命中的资料全文注入
   prompt:

@@ -30,6 +30,9 @@ public class HardConstraintStrategy implements PromptRuleStrategy, CriticalPromp
 
     @Override
     public boolean supports(PromptScene scene, PromptContext ctx) {
+        if (PromptContext.isDirectWriter(scene, ctx)) {
+            return false;
+        }
         // 三类"要落笔"的场景：计划（把约束落成每章安排）、正文（逐条执行）、修订（不得改坏）
         return scene == PromptScene.CHAPTER_PLAN
                 || scene == PromptScene.CHAPTER_CONTENT

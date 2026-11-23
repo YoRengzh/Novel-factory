@@ -1,5 +1,8 @@
 package cn.novel.yonren.domain.novel.service.armory.worker;
 
+import cn.novel.yonren.domain.novel.service.armory.writer.ChapterWritingPlan;
+import cn.novel.yonren.domain.novel.service.armory.writer.ChapterWritingPlanService;
+import cn.novel.yonren.types.enums.PromptScene;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 
@@ -123,7 +126,7 @@ class ChapterWorkerTest {
     private ChapterCandidateService chapterCandidateService;
 
     @Mock
-    private cn.novel.yonren.domain.novel.service.armory.beats.ChapterBeatsService chapterBeatsService;
+    private ChapterWritingPlanService chapterWritingPlanService;
 
     @Mock
     private StoryMemoryService storyMemoryService;
@@ -196,6 +199,8 @@ class ChapterWorkerTest {
         when(chapterMemoryService.buildMemoryBlocks(anyList(), any(), anyList(), anyList(), any(), any(), anyList(), any())).thenReturn(List.of());
         when(chapterMemoryService.renderLedgerPrompt(anyList())).thenReturn("");
         when(chapterMemoryService.buildForeshadowContextList(anyList(), anyInt())).thenReturn(List.of());
+        when(chapterWritingPlanService.prepare(any(), any(), anyInt(), anyString(), anyList()))
+                .thenReturn(new ChapterWritingPlan(List.of(writingSection(1, "交付药签"))));
         when(styleStatService.empty()).thenReturn(StyleStatEntity.builder().build());
         when(styleStatService.renderWarning(any())).thenReturn("");
         when(llmInvokeService.invoke(any(), any(), any(), anyString(), anyMap())).thenReturn(RAW_CHAPTER);
@@ -216,191 +221,136 @@ class ChapterWorkerTest {
                 .thenReturn(new cn.novel.yonren.domain.novel.service.armory.candidate.CandidateSampleService.CandidateStats(0, 0));
     }
 
+    private static ChapterWritingPlan.Section writingSection(int number, String events) {
+        return new ChapterWritingPlan.Section("跟随沈砚", "他在药铺门口，手中没有药签。",
+                List.of(new ChapterWritingPlan.Scene(number, events)));
+    }
+
     @Test
-    void buildChapterPrompt_rendersFourLayersInOrder() {
-        // 拆分重构的保护测试：正文 prompt 必须按
-        // 事实层 → 任务层 → 约束层 → 表现层 的顺序渲染，且各层内容归属正确。
-        // 重构只改变组织方式，不得改变内容与顺序。
-        ChapterPlanItemEntity item = ChapterPlanItemEntity.builder()
-                .chapterNo(9)
-                .title("第九章")
-                .goal("保护软软时暴露一个只有许意见过的动作")
-                .characters(List.of("角色癸", "软软"))
-                .keyEvents(List.of("事件甲", "事件乙"))
-                .endingHook("怀疑增加但身份未确认")
+    void generateAllSeparatesPlanningContextFromWriterAndReferenceQuery() throws Exception {
+        var ctx = context(null);
+        ctx.setStoryContext("下卷隐藏答案红色石匣");
+        ctx.setPlanResidualViolations("相邻章将有人自认藏匣");
+        when(chapterMemoryService.buildSecrecyGuard(anyList(), any()))
+                .thenReturn(new ChapterMemoryService.SecrecyGuard(List.of("红色石匣"), "禁泄：红色石匣"));
+
+        chapterWorker.generateAll(command(), ctx);
+
+        var planning = org.mockito.ArgumentCaptor.forClass(String.class);
+        verify(chapterWritingPlanService).prepare(any(), any(), eq(1), planning.capture(), eq(List.of("红色石匣")));
+        assertTrue(planning.getValue().contains("下卷隐藏答案红色石匣"));
+        assertTrue(planning.getValue().contains("相邻章将有人自认藏匣"));
+
+        var writer = org.mockito.ArgumentCaptor.forClass(String.class);
+        var reference = org.mockito.ArgumentCaptor.forClass(cn.novel.yonren.domain.novel.model.valobj.prompt.PromptContext.class);
+        verify(llmInvokeService, org.mockito.Mockito.atLeastOnce())
+                .invoke(any(), eq(PromptScene.CHAPTER_CONTENT), reference.capture(), writer.capture(), anyMap());
+        for (String prompt : writer.getAllValues()) {
+            assertTrue(prompt.contains("交付药签"));
+            assertFalse(prompt.contains("红色石匣"));
+            assertFalse(prompt.contains("相邻章将有人自认藏匣"));
+        }
+        assertTrue(reference.getAllValues().stream().allMatch(r -> r.getChapterBrief().equals("交付药签")));
+    }
+
+    @Test
+    void legacyMemoryLedgerBlocksAreAppendedOnlyOnce() throws Exception {
+        when(chapterMemoryService.buildMemoryBlocks(anyList(), any(), any(), any(), any(), any(), anyList(), any()))
+                .thenReturn(List.of(
+                        new cn.novel.yonren.domain.novel.service.armory.prompt.PromptBudgetGuard.Block(
+                                "近章摘要", 3, true, "最近一次正文已经确认的事实"),
+                        new cn.novel.yonren.domain.novel.service.armory.prompt.PromptBudgetGuard.Block(
+                                ChapterMemoryService.LEDGER_BLOCK_LABEL, 4, true, "药签仍在柜中"),
+                        new cn.novel.yonren.domain.novel.service.armory.prompt.PromptBudgetGuard.Block(
+                                ChapterMemoryService.FORESHADOW_BLOCK_LABEL, 4, true, "旧约尚未兑现")));
+
+        chapterWorker.generateAll(command(), context(null));
+
+        var blocks = org.mockito.ArgumentCaptor.forClass(java.util.List.class);
+        verify(promptBudgetGuard, atLeastOnce()).assembleChapterPrefix(anyInt(), blocks.capture());
+        for (Object captured : blocks.getAllValues()) {
+            var supplied = (List<cn.novel.yonren.domain.novel.service.armory.prompt.PromptBudgetGuard.Block>) captured;
+            assertEquals(1, supplied.stream().filter(b -> ChapterMemoryService.LEDGER_BLOCK_LABEL.equals(b.label())).count());
+            assertEquals(1, supplied.stream().filter(b -> ChapterMemoryService.FORESHADOW_BLOCK_LABEL.equals(b.label())).count());
+            assertEquals(ChapterMemoryService.FORESHADOW_BLOCK_LABEL, supplied.get(supplied.size() - 1).label());
+        }
+    }
+
+    @Test
+    void directWriterContextSkipsMiddleModelAndKeepsSceneProse() throws Exception {
+        storyProperties.setWriterContextMode(StoryProperties.WriterContextMode.DIRECT);
+        var ctx = context(null);
+        ctx.setChapterPlanAggregate(ChapterPlanAggregate.builder().storyId("story-1")
+                .chapters(List.of(sceneItem(1))).build());
+
+        chapterWorker.generateAll(command(), ctx);
+
+        verify(chapterWritingPlanService, never()).prepare(any(), any(), anyInt(), anyString(), anyList());
+        var writer = org.mockito.ArgumentCaptor.forClass(String.class);
+        var reference = ArgumentCaptor.forClass(cn.novel.yonren.domain.novel.model.valobj.prompt.PromptContext.class);
+        verify(llmInvokeService, atLeastOnce())
+                .invoke(any(), eq(PromptScene.CHAPTER_CONTENT), reference.capture(), writer.capture(), anyMap());
+        assertTrue(writer.getAllValues().stream().anyMatch(p -> p.contains("沈砚要借钥匙")));
+        assertTrue(reference.getAllValues().stream().allMatch(p -> p.getChapterBrief().contains("沈砚要借钥匙")));
+    }
+
+    private static ChapterPlanItemEntity sceneItem(int no) {
+        return ChapterPlanItemEntity.builder()
+                .chapterNo(no)
+                .title("第" + no + "章")
+                .goal("本章目标")
+                .schemaVersion(2)
+                .characters(List.of("沈砚"))
+                .scenes(List.of(new cn.novel.yonren.domain.novel.model.valobj.plan.ScenePlan(
+                        "s-" + no, List.of("沈砚"), "沈砚要借钥匙", "管事说没带钥匙", List.of(),
+                        "管事拒绝", "推进", List.of(), "药铺", null)))
                 .build();
-
-        String prompt = chapterWorker.buildChapterPrompt(
-                "【全局设定】都市校园", item, "【记忆前缀】账本末态", 9,
-                cn.novel.yonren.domain.novel.model.valobj.contract.ChapterContract.of(item, null));
-
-        int facts = prompt.indexOf("【全局设定】都市校园");
-        int memory = prompt.indexOf("【记忆前缀】账本末态");
-        int contract = prompt.indexOf("第 9 章计划：");
-        int requirements = prompt.indexOf("\n要求：");
-        int continuity = prompt.indexOf("\n1. 严格围绕本章目标和关键事件");
-        int guidance = prompt.indexOf("\n4. 内容有效性");
-        int json = prompt.indexOf("请严格按照以下 JSON 格式输出");
-
-        assertTrue(facts >= 0, "事实层：全局设定在最前");
-        assertTrue(memory > facts, "记忆前缀紧随全局设定");
-        assertTrue(contract > memory, "任务层在事实层之后");
-        assertTrue(requirements > contract, "任务层含计划条目与「要求」总起");
-        assertTrue(continuity > requirements, "约束层（要求 1-3）紧随其后");
-        assertTrue(guidance > continuity, "表现层（要求 4 起）在约束层之后");
-        assertTrue(json > guidance, "输出格式在最后一层");
-        // 任务层必须完整渲染计划条目
-        assertTrue(prompt.contains("标题：第九章"));
-        assertTrue(prompt.contains("目标：保护软软时暴露一个只有许意见过的动作"));
-        assertTrue(prompt.contains("角色：角色癸、软软"));
-        assertTrue(prompt.contains("关键事件：事件甲、事件乙"));
-        assertTrue(prompt.contains("结尾落点：怀疑增加但身份未确认"));
-        assertTrue(prompt.contains("\"chapterNo\":9"));
     }
 
     @Test
-    void buildChapterPrompt_prefersStructuredScenesOverDerivedEvents() {
-        var action = new cn.novel.yonren.domain.novel.model.valobj.plan.ScenePlan(
-                "scene-1", List.of("店员"), "悄悄退回钥匙", "有人盯着门", List.of(),
-                "他把钥匙放在台上", "回收策划标记", List.of("后续目标"), "后门", "");
-        var quiet = new cn.novel.yonren.domain.novel.model.valobj.plan.ScenePlan(
-                "scene-2", List.of("店员"), "等门铃安静", "", List.of(),
-                "", "余韵：回过神来", List.of(), "柜台", "");
-        var item = ChapterPlanItemEntity.builder().chapterNo(2).schemaVersion(2).title("闭店").goal("归还钥匙")
-                .scenes(List.of(action, quiet)).keyEvents(List.of("派生事件不重复给写手")).build();
+    void writeDraftSendsEachSectionAloneAndContinuesFromActualProse() throws Exception {
+        var earlier = writingSection(1, "沈砚借钥匙，管事说没带。");
+        var later = writingSection(2, "沈砚发现红色石匣，第一次知道管事偷了账本。");
+        var story = StoryContextEntity.builder().theme("悬疑").outline("下一卷进盐仓").build();
+        when(chapterMemoryService.tailByParagraph(eq("管事朝门口喊了一声。"), anyInt()))
+                .thenReturn("管事朝门口喊了一声。");
+        when(llmInvokeService.invoke(any(), eq(PromptScene.CHAPTER_CONTENT), any(), anyString(), anyMap()))
+                .thenReturn("{\"title\":\"借钥匙\",\"content\":\"管事朝门口喊了一声。\"}",
+                            "{\"title\":\"找到匣子\",\"content\":\"沈砚拉开抽屉。\"}");
+        var prompts = new java.util.HashMap<String, String>();
 
-        String prompt = chapterWorker.buildChapterPrompt("设定", item, null, 2,
-                cn.novel.yonren.domain.novel.model.valobj.contract.ChapterContract.of(item, List.of()));
+        var draft = chapterWorker.writeDraft(command(), item(1), story, 1, 2,
+                new ChapterWritingPlan(List.of(earlier, later)), null, prompts, () -> {});
 
-        assertTrue(prompt.contains("悄悄退回钥匙"));
-        assertTrue(prompt.contains("他把钥匙放在台上"));
-        assertTrue(prompt.contains("余韵：回过神来"));
-        assertTrue(prompt.contains("【留白与克制】"));
-        assertFalse(prompt.contains("派生事件不重复给写手"));
-        assertFalse(prompt.contains("回收策划标记"));
-        assertFalse(prompt.contains("后续目标"));
+        var sent = org.mockito.ArgumentCaptor.forClass(String.class);
+        verify(llmInvokeService, org.mockito.Mockito.times(2))
+                .invoke(any(), eq(PromptScene.CHAPTER_CONTENT), any(), sent.capture(), anyMap());
+        assertFalse(sent.getAllValues().get(0).contains("红色石匣"));
+        assertFalse(sent.getAllValues().get(1).contains("下一卷进盐仓"));
+        assertTrue(sent.getAllValues().get(1).contains("管事朝门口喊了一声。"));
+        assertTrue(sent.getAllValues().get(1).contains("红色石匣"));
+        assertEquals("管事朝门口喊了一声。\n\n沈砚拉开抽屉。", draft.chapter().getContent());
+        assertEquals("借钥匙", draft.chapter().getTitle());
+        assertNull(draft.userPrompt());
     }
 
     @Test
-    void buildChapterPrompt_trimsOnlyAnExactRedundantEndingSuffixAndPreservesThePlan() {
-        String action = "孙执事叫她明日去矿洞外围搬新料";
-        String commentary = "她的追查终于踏上了新征程。";
-        var item = ChapterPlanItemEntity.builder().chapterNo(3).title("新差事").goal("接下新差事")
-                .endingHook(action + "，" + commentary).build();
-        var contract = cn.novel.yonren.domain.novel.model.valobj.contract.ChapterContract.of(item, List.of());
+    void writingPromptRetainsObjectFocusAndGenreLanguage() {
+        var section = writingSection(1, "取药");
+        String urban = chapterWorker.buildWritingPrompt(StoryContextEntity.builder()
+                .theme("都市重生").style("年代成长").build(), null, 2, section, null, null, false, true);
+        String fantasy = chapterWorker.buildWritingPrompt(StoryContextEntity.builder()
+                .theme("仙侠修真").style("热血").build(), null, 2, section, null, null, false, true);
 
-        String prompt = chapterWorker.buildChapterPrompt("设定", item, null, 3, contract, null, "", commentary);
-        assertTrue(prompt.contains("结尾落点：" + action + "。"));
-        assertFalse(prompt.contains(commentary));
-        assertEquals(action + "，" + commentary, item.getEndingHook());
-
-        for (String invalid : List.of(item.getEndingHook(), "追查终于踏上了新征程。", action, "不同于原文的解释")) {
-            String fallback = chapterWorker.buildChapterPrompt("设定", item, null, 3, contract, null, "", invalid);
-            assertTrue(fallback.contains(item.getEndingHook()));
-        }
-
-        String discovery = "她认出回执上的亲笔署名，第一次确认失踪的弟弟还活着。";
-        item.setEndingHook("驿卒把回执交给她。" + discovery);
-        var discoveryContract = cn.novel.yonren.domain.novel.model.valobj.contract.ChapterContract.of(item, List.of());
-        for (String invalid : List.of(discovery, "第一次确认失踪的弟弟还活着。")) {
-            String fallback = chapterWorker.buildChapterPrompt("设定", item, null, 3, discoveryContract, null, "", invalid);
-            assertTrue(fallback.contains(item.getEndingHook()));
-        }
-    }
-
-    @Test
-    void buildChapterPrompt_doesNotTurnContinuityMetadataIntoMandatoryOpeningTime() {
-        ChapterPlanItemEntity item = ChapterPlanItemEntity.builder()
-                .chapterNo(3).title("第三章").goal("赴约")
-                .characters(List.of("沈砚")).keyEvents(List.of("到后山门")).endingHook("见面").build();
-        var contract = cn.novel.yonren.domain.novel.model.valobj.contract.ChapterContract.of(item, null);
-
-        String prompt = chapterWorker.buildChapterPrompt("【全局设定】", item, null, 3, contract);
-
-        assertTrue(prompt.contains("允许仍在同一时间点、地点和场景，不必专门交代时间"));
-        assertTrue(prompt.contains("时间用于核对连续性，不是章首报时要求"));
-        assertTrue(prompt.contains("时间跳跃影响理解或具体时间承担赴约、倒计时等剧情作用时明确写出"));
-        assertTrue(prompt.contains("不要求复用其章首格式或物品描写方式"));
-        assertFalse(prompt.contains("本章第一段必须从上一章结束的时间点之后继续推进"));
-    }
-
-    @Test
-    void buildChapterPrompt_selectsObjectDetailsByObservationAndChange() {
-        ChapterPlanItemEntity item = ChapterPlanItemEntity.builder()
-                .chapterNo(2).title("第二章").goal("领取物资")
-                .characters(List.of("沈砚")).keyEvents(List.of("领取丹药")).endingHook("回屋").build();
-        var contract = cn.novel.yonren.domain.novel.model.valobj.contract.ChapterContract.of(item, null);
-
-        String prompt = chapterWorker.buildChapterPrompt("【全局设定】", item, null, 2, contract);
-
-        assertTrue(prompt.contains("物品出现不等于需要外观特写"));
-        assertTrue(prompt.contains("当前人物有理由注意"));
-        assertTrue(prompt.contains("已出现且没有变化的物品再次出现时直接称名"));
-        assertTrue(prompt.contains("状态、人物感受或意义变化才重新展开"));
-    }
-
-    @Test
-    void buildChapterPrompt_registerGuidanceIsGenreAware() {
-        ChapterPlanItemEntity item = ChapterPlanItemEntity.builder()
-                .chapterNo(1).title("开端").goal("目标")
-                .characters(List.of("林童")).keyEvents(List.of("事件")).endingHook("悬念").build();
-        var contract = cn.novel.yonren.domain.novel.model.valobj.contract.ChapterContract.of(item, null);
-
-        String urban = chapterWorker.buildChapterPrompt("都市重生", item, null, 1, contract,
-                StoryContextEntity.builder().theme("都市重生").style("年代成长").build());
         assertTrue(urban.contains("【语言与语域契约】"));
-        assertTrue(urban.contains("明确的认知超前、特殊训练或世界设定不能被年龄常识抹平"));
-        assertFalse(urban.contains("灵气、阵纹、符箓"), "非 fantasy 题材不得被仙侠词表污染");
-
-        String fantasy = chapterWorker.buildChapterPrompt("修仙世界", item, null, 1, contract,
-                StoryContextEntity.builder().theme("仙侠修真").style("热血").build());
-        assertTrue(fantasy.contains("灵气、阵纹、符箓"), "fantasy 题材仍应获得世界内词汇提示");
-        assertTrue(fantasy.contains("程序员术语不得充当客观世界名词"));
+        assertTrue(urban.contains("物品出现不等于需要外观特写"));
+        assertTrue(urban.contains("当前人物有理由注意"));
+        assertFalse(urban.contains("灵气、阵纹、符箓"));
+        assertTrue(fantasy.contains("灵气、阵纹、符箓"));
     }
 
     @Test
-    void buildChapterPrompt_blankMemoryPrefixSkipsOnlyFactsLayer() {
-        ChapterPlanItemEntity item = ChapterPlanItemEntity.builder()
-                .chapterNo(3).title("第三章").goal("目标")
-                .characters(List.of()).keyEvents(List.of()).endingHook("悬念").build();
-
-        String prompt = chapterWorker.buildChapterPrompt("【全局设定】", item, null, 3,
-                cn.novel.yonren.domain.novel.model.valobj.contract.ChapterContract.of(item, null));
-
-        assertTrue(prompt.startsWith("【全局设定】"), "无记忆前缀时全局设定仍排最前");
-        assertTrue(prompt.contains("\n\n请根据以下第 3 章计划"), "事实层与任务层的分隔保持不变");
-        assertTrue(prompt.contains("\"chapterNo\":3"));
-    }
-
-    @Test
-    void buildChapterPrompt_injectsKnowledgeBoundaryFromLedger() {
-        // 账本一直在记录"谁还不知道什么"（如"尚未确认无月的真实身份"），但此前从未进入正文 prompt，
-        // 模型只能靠猜，于是会把"怀疑"写成"确认"（实测候选评审就抓到过这种认知提前升级）
-        ChapterPlanItemEntity item = ChapterPlanItemEntity.builder()
-                .chapterNo(5).title("第五章").goal("目标")
-                .characters(List.of("角色壬")).keyEvents(List.of("事件甲")).endingHook("悬念")
-                .build();
-        List<ChapterSummaryEntity> summaries = List.of(
-                ChapterSummaryEntity.builder().chapterNo(4).title("第四章").summary("……")
-                        .characterStates(List.of(new ChapterSummaryEntity.StateEntry(
-                                "角色壬", "尚未确认无月的真实身份", "证据")))
-                        .build());
-
-        String prompt = chapterWorker.buildChapterPrompt("【全局设定】", item, null, 5,
-                cn.novel.yonren.domain.novel.model.valobj.contract.ChapterContract.of(item, summaries));
-
-        assertTrue(prompt.contains("【认知边界·不得越界】"), "认知边界块必须注入约束层");
-        assertTrue(prompt.contains("尚未确认无月的真实身份"), "边界内容来自账本");
-        assertTrue(prompt.contains("不得把\"怀疑\"写成\"确认\""), "必须点明越界的典型形态");
-
-        // 账本里没有认知类记录时，不得凭空生成该块
-        String bare = chapterWorker.buildChapterPrompt("【全局设定】", item, null, 5,
-                cn.novel.yonren.domain.novel.model.valobj.contract.ChapterContract.of(item, null));
-        assertTrue(!bare.contains("【认知边界·不得越界】"), "没有认知记录时不应出现该块");
-    }
-
-    @Test
-    void buildChapterPrompt_usesRelevantStructuredKnowledgeAndCurrentProgress() {
+    void planningContractUsesRelevantStructuredKnowledge() {
         String suspicion = "陈九看见了黑气，怀疑林长渊藏着东西。";
         String unrelated = "周管事得知粮价涨了。";
         var manuscript = new ChapterManuscript(1, "柴房", suspicion + unrelated);
@@ -418,12 +368,10 @@ class ChapterWorkerTest {
         CharacterStateProjector.bind(summary, manuscript, List.of());
         var item = ChapterPlanItemEntity.builder().chapterNo(2).title("矿柴").characters(List.of("陈九"))
                 .suspenseBeat("陈九仍只怀疑林长渊藏着东西，没有见到铁片。").build();
-        String prompt = chapterWorker.buildChapterPrompt("设定", item, null, 2,
-                chapterWorker.buildChapterContract(item, List.of(summary)));
+        String prompt = chapterWorker.buildChapterContract(item, List.of(summary)).knowledgeBoundary();
 
         assertTrue(prompt.contains("BELIEF/SUSPECTED"));
         assertTrue(prompt.contains("亲眼看见黑气"));
-        assertTrue(prompt.contains("【本章悬念进度】" + item.getSuspenseBeat()));
         assertTrue(prompt.contains("UNRESOLVED 1 项"));
         assertFalse(prompt.contains("陈九确认铁片的来历"));
         assertFalse(prompt.contains("铁片来自矿洞"));
@@ -585,6 +533,23 @@ class ChapterWorkerTest {
     }
 
     @Test
+    void continuationCountsOnlyTwoPrecedingFinalChaptersForParagraphEditing() throws Exception {
+        var ctx = context(null);
+        ctx.setChapterOffset(2);
+        ctx.setStoryDir(STORY_DIR);
+        ctx.getChapterPlanAggregate().setChapters(List.of(item(3), item(4)));
+        when(storyRepository.readChapter(STORY_DIR, 1)).thenReturn(
+                new cn.novel.yonren.domain.novel.model.entity.ChapterContentEntity(1, "甲", "两息过去。三息过去。又等了十来息。"));
+        when(storyRepository.readChapter(STORY_DIR, 2)).thenReturn(
+                new cn.novel.yonren.domain.novel.model.entity.ChapterContentEntity(2, "乙", "过了几息。"));
+
+        chapterWorker.generateAll(command(), ctx);
+
+        verify(paragraphDensityAuditService).suggest(any(), anyString(), eq(3), eq(4));
+        verify(paragraphDensityAuditService).suggest(any(), anyString(), eq(4), eq(1));
+    }
+
+    @Test
     void generateAll_jobNull_generatesAllChapters_noStatusPersistence() throws Exception {
         DefaultArmoryFactory.DynamicContext ctx = context(null);
 
@@ -703,12 +668,12 @@ class ChapterWorkerTest {
                 .build();
 
         // 段规划经规划执行器（与链式路径同一实现）：打桩并验证调用契约
-        when(planSegmentPlanner.planSegment(any(), any(), anyString(), eq(3), eq(4), any(), any(), any(), any(), any(), any()))
+        when(planSegmentPlanner.planSegment(any(), any(), anyString(), eq(3), eq(4), any(), any(), any(), any(), any(), any(), any()))
                 .thenReturn(new ChapterPlanSegmentPlanner.PlannedSegment("segment-2-raw", segment2Plan, null));
 
         chapterWorker.generateAll(command, ctx);
 
-        verify(planSegmentPlanner, times(1)).planSegment(any(), any(), anyString(), eq(3), eq(4), any(), any(), any(), any(), any(), any());
+        verify(planSegmentPlanner, times(1)).planSegment(any(), any(), anyString(), eq(3), eq(4), any(), any(), any(), any(), any(), any(), any());
 
         // 4 章全部生成（首段 2 章 + 惰性规划段 2 章），段计划已合并进整批计划
         assertEquals(4, ctx.getChapterContents().size());
@@ -1072,5 +1037,142 @@ class ChapterWorkerTest {
         assertEquals(1, captor.getValue().getChapterNo());
         assertEquals("他放下斧头，走出柴房。", captor.getValue().getContent());
         verify(llmInvokeService, org.mockito.Mockito.times(2)).invoke(any(), any(), any(), anyString(), anyMap());
+    }
+
+    @Test
+    void directWriterModeSendsSlimPromptAcceptsPlainTextAndRejectsBrokenJson() throws Exception {
+        storyProperties.setWriterContextMode(StoryProperties.WriterContextMode.DIRECT);
+        var ctx = context(null);
+        ctx.setChapterPlanAggregate(ChapterPlanAggregate.builder().storyId("story-1")
+                .chapters(List.of(sceneItem(1))).build());
+        when(llmInvokeService.invoke(any(), eq(PromptScene.CHAPTER_CONTENT), any(), anyString(), anyMap()))
+                .thenReturn("{\"chapterNo\":1,\"title\":\"残缺",
+                        "# 第1章 崖缝惊变\n\n他抓紧石缝，冷汗滑落。\n\n“是谁？”声音从身后传来。");
+
+        chapterWorker.generateAll(command(), ctx);
+
+        var promptCaptor = ArgumentCaptor.forClass(String.class);
+        var pcCaptor = ArgumentCaptor.forClass(cn.novel.yonren.domain.novel.model.valobj.prompt.PromptContext.class);
+        verify(llmInvokeService, org.mockito.Mockito.times(2))
+                .invoke(any(), eq(PromptScene.CHAPTER_CONTENT), pcCaptor.capture(), promptCaptor.capture(), anyMap());
+
+        assertTrue(pcCaptor.getAllValues().stream().allMatch(cn.novel.yonren.domain.novel.model.valobj.prompt.PromptContext::isDirectWriterMode));
+        String prompt = promptCaptor.getValue();
+        assertTrue(prompt.contains("直接输出纯文本"));
+        assertFalse(prompt.contains("严格按照以下 JSON 格式输出"));
+        assertFalse(prompt.contains("让读者自己理解它的意义"));
+
+        var savedCaptor = ArgumentCaptor.forClass(cn.novel.yonren.domain.novel.model.entity.ChapterContentEntity.class);
+        verify(storyRepository).commitChapter(any(), savedCaptor.capture(), any(ChapterCommitState.class));
+        assertEquals("崖缝惊变", savedCaptor.getValue().getTitle());
+        assertTrue(savedCaptor.getValue().getContent().startsWith("他抓紧石缝"));
+    }
+
+    @Test
+    void directWriterModeStillAcceptsValidJsonResponseAndNormalizesPlainText() throws Exception {
+        storyProperties.setWriterContextMode(StoryProperties.WriterContextMode.DIRECT);
+        var ctx = context(null);
+        ctx.setChapterPlanAggregate(ChapterPlanAggregate.builder().storyId("story-1")
+                .chapters(List.of(sceneItem(1))).build());
+        when(llmInvokeService.invoke(any(), eq(PromptScene.CHAPTER_CONTENT), any(), anyString(), anyMap()))
+                .thenReturn("{\"chapterNo\":1,\"title\":\"兼容标题\",\"content\":\"这是JSON正文。\"}");
+
+        chapterWorker.generateAll(command(), ctx);
+
+        var savedCaptor = ArgumentCaptor.forClass(cn.novel.yonren.domain.novel.model.entity.ChapterContentEntity.class);
+        verify(storyRepository).commitChapter(any(), savedCaptor.capture(), any(ChapterCommitState.class));
+        assertEquals("兼容标题", savedCaptor.getValue().getTitle());
+        assertEquals("这是JSON正文。", savedCaptor.getValue().getContent());
+
+        var parsed = ChapterWorker.readPlainTextChapterResponse("第一章 夜探\n\n风吹过药园。", sceneItem(1));
+        assertEquals("夜探", parsed.getTitle());
+        assertEquals("风吹过药园。", parsed.getContent());
+
+        var noTitle = ChapterWorker.readPlainTextChapterResponse("第一句就已经有句号，这是正文。\n\n第二段。", sceneItem(1));
+        assertEquals("第1章", noTitle.getTitle());
+        assertTrue(noTitle.getContent().startsWith("第一句就已经有句号"));
+
+        org.junit.jupiter.api.Assertions.assertNull(
+                ChapterWorker.readPlainTextChapterResponse("```json\n{\"chapterNo\":1,\"content\":\"残缺", sceneItem(1)));
+    }
+
+    @Test
+    void directWriterRoutesRegisterByGenreAndTransmigrationWithoutOvergeneralizing() {
+        var section = writingSection(1, "交锋");
+
+        String nativeFantasy = chapterWorker.buildWritingPrompt(StoryContextEntity.builder()
+                .theme("玄幻修真").style("传统升级爽文").worldSetting("各大修仙宗门林立").build(),
+                "中文", 1, section, null, null, false, true, true);
+        assertTrue(nativeFantasy.contains("古风/古代语境"));
+        assertTrue(nativeFantasy.contains("肥皂"));
+        assertTrue(nativeFantasy.contains("1500~2600 字"));
+
+        String transmigrationFantasy = chapterWorker.buildWritingPrompt(StoryContextEntity.builder()
+                .theme("玄幻修真").style("轻松").protagonist("现代程序员魂穿成外门杂役，觉醒签到系统").build(),
+                "中文", 1, section, null, null, false, true, true);
+        assertTrue(transmigrationFantasy.contains("古风穿越/系统语境"));
+        assertTrue(transmigrationFantasy.contains("穿越者内心吐槽或系统元素可自然保留"));
+        assertFalse(transmigrationFantasy.contains("避免“肥皂”"));
+
+        String modernUrban = chapterWorker.buildWritingPrompt(StoryContextEntity.builder()
+                .theme("都市职场").style("现实烟火气").build(),
+                "中文", 1, section, null, null, false, true, true);
+        assertTrue(modernUrban.contains("现代/对应时代语境"));
+        assertFalse(modernUrban.contains("古风/古代语境"));
+        assertFalse(modernUrban.contains("肥皂"));
+        assertTrue(modernUrban.contains("1500~2600 字"));
+
+        String sectioned = chapterWorker.buildWritingPrompt(StoryContextEntity.builder()
+                .theme("都市职场").build(),
+                "中文", 1, section, null, null, true, false, true);
+        assertFalse(sectioned.contains("1500~2600 字"), "分段非整章输出不应硬塞整章字数上限");
+        assertTrue(sectioned.contains("写到本段事件完成即收"));
+    }
+
+    @Test
+    void directWriterModeInvokesProseScalpelBeforeCommit() throws Exception {
+        storyProperties.setWriterContextMode(StoryProperties.WriterContextMode.DIRECT);
+        var scalpel = org.mockito.Mockito.mock(cn.novel.yonren.domain.novel.service.armory.revise.ProseScalpelService.class);
+        org.springframework.test.util.ReflectionTestUtils.setField(chapterWorker, "proseScalpelService", scalpel);
+        when(llmInvokeService.invoke(any(), eq(PromptScene.CHAPTER_CONTENT), any(), anyString(), anyMap()))
+                .thenReturn("初稿标题\n\n苏尘不是犹豫，而是小心探出头。");
+        when(scalpel.trim(any(), any(), eq("苏尘不是犹豫，而是小心探出头。"), eq(1)))
+                .thenReturn("苏尘小心探出头。");
+
+        var ctx = context(null);
+        ctx.setChapterPlanAggregate(ChapterPlanAggregate.builder().storyId("story-1")
+                .chapters(List.of(sceneItem(1))).build());
+        chapterWorker.generateAll(command(), ctx);
+
+        var savedCaptor = ArgumentCaptor.forClass(cn.novel.yonren.domain.novel.model.entity.ChapterContentEntity.class);
+        verify(storyRepository).commitChapter(any(), savedCaptor.capture(), any(ChapterCommitState.class));
+        assertEquals("苏尘小心探出头。", savedCaptor.getValue().getContent());
+    }
+
+    @Test
+    void resolveDirectPovCharacterFallsBackToOutlineWhenProtagonistOmitsName() {
+        var chapterItem = ChapterPlanItemEntity.builder().chapterNo(1)
+                .characters(List.of("周贵", "苏尘")).build();
+
+        var explicitProtagonist = StoryContextEntity.builder()
+                .perspective("第三人称限知视角")
+                .protagonist("身具下品杂灵根的杂役弟子")
+                .outline("周贵负责看守灵药园，主角苏尘在后山得到残瞳。")
+                .build();
+        assertEquals("苏尘", ChapterWorker.resolveDirectPovCharacter(explicitProtagonist, chapterItem));
+
+        var earliestInOutline = StoryContextEntity.builder()
+                .perspective("第三人称限知视角")
+                .protagonist("杂役弟子")
+                .outline("苏尘夜入后山采药，次日向周贵交差。")
+                .build();
+        assertEquals("苏尘", ChapterWorker.resolveDirectPovCharacter(earliestInOutline, chapterItem));
+
+        var omniscient = StoryContextEntity.builder()
+                .perspective("全知视角")
+                .protagonist("苏尘")
+                .outline("苏尘与周贵")
+                .build();
+        org.junit.jupiter.api.Assertions.assertNull(ChapterWorker.resolveDirectPovCharacter(omniscient, chapterItem));
     }
 }

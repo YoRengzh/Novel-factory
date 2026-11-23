@@ -83,6 +83,32 @@ class BuildChapterPlanPromptNodeTest {
         assertEquals(2, ctx.getPlannedChapterCount());
     }
 
+    @Test
+    void doApply_rollingSingleChapterExpandsSameStageBatchToPerChapterSegments() throws Exception {
+        var props = new cn.novel.yonren.domain.novel.config.StoryProperties();
+        props.getPlan().setRollingSingleChapter(true);
+        org.springframework.test.util.ReflectionTestUtils.setField(node, "storyProperties", props);
+        when(planPromptService.buildPlanPrompt(any(), anyInt(), anyInt(), any(), anyBoolean(), any(), any()))
+                .thenReturn("单章滚动prompt");
+
+        DefaultArmoryFactory.DynamicContext ctx = DefaultArmoryFactory.DynamicContext.builder()
+                .chapterOffset(0)
+                .stageBlueprints(new ArrayList<>(List.of(blueprint(1, 1, 10))))
+                .job(new GenerationJob("job-rolling"))
+                .build();
+
+        node.doApply(command(), ctx);
+
+        assertEquals(4, ctx.getPlanSegments().size());
+        assertEquals(1, ctx.getPlanSegments().get(0).startChapter());
+        assertEquals(1, ctx.getPlanSegments().get(0).endChapter());
+        assertEquals(4, ctx.getPlanSegments().get(3).startChapter());
+        assertEquals(4, ctx.getPlanSegments().get(3).endChapter());
+        assertEquals(1, ctx.getPlanSegmentPrompts().size(), "首轮只装配第1章prompt");
+        assertEquals(1, ctx.getPlannedSegmentEnd());
+        assertEquals(1, ctx.getPlannedChapterCount());
+    }
+
     private DefaultArmoryFactory.DynamicContext crossStageContext(GenerationJob job) {
         return DefaultArmoryFactory.DynamicContext.builder()
                 .chapterOffset(0)

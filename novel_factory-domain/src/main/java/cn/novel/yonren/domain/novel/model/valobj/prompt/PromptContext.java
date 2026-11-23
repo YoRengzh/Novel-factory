@@ -1,6 +1,7 @@
 package cn.novel.yonren.domain.novel.model.valobj.prompt;
 
 import cn.novel.yonren.types.enums.ChapterType;
+import cn.novel.yonren.types.enums.PromptScene;
 import lombok.Builder;
 import lombok.Data;
 
@@ -36,5 +37,13 @@ public class PromptContext {
      * 为空表示整份生成；非空时资料资格只保留与这些字段相关的条目。
      */
     private List<String> targetFields = List.of();
+
+    /** 轻装正文模式（DIRECT）：正文写手仅接收极简文风锚点与视角边界，跳过冗长规则手册与动态写作教材。 */
+    @Builder.Default
+    private boolean directWriterMode = false;
+
+    public static boolean isDirectWriter(PromptScene scene, PromptContext ctx) {
+        return scene == PromptScene.CHAPTER_CONTENT && ctx != null && ctx.isDirectWriterMode();
+    }
 
 }

@@ -1040,6 +1040,31 @@ class ChapterPlanPromptServiceTest {
         assertFalse(text.contains("本段必须补收"), "在养项不该再被催收：" + text);
     }
 
+    @Test
+    void optionalVerificationShapeBindsOriginalSubjectAndDoesNotTurnOrdinaryExampleIntoATask() throws Exception {
+        var context = DefaultArmoryFactory.DynamicContext.builder().storyContext("本书设定").build();
+        String prompt = service.buildPlanPrompt(context);
+        for (String required : List.of("核验必须绑定原主体、项目与标准", "查出对手的问题不能代替证明主角达标",
+                "没有授权就省略", "不能临时新增", "核验失败、待验或暂缓也可作为合法落点",
+                "非核验场景省略整个字段，不为填表新增任务")) {
+            assertTrue(prompt.contains(required), required);
+        }
+        int marker = prompt.indexOf("【VerificationObligation 元素形状】");
+        int next = prompt.indexOf("【FactReference 元素形状】");
+        int start = prompt.indexOf("\n{", marker);
+        var mapper = new ObjectMapper().enable(DeserializationFeature.FAIL_ON_TRAILING_TOKENS);
+        JsonNode shape = mapper.readTree(prompt.substring(start, next).trim());
+        assertEquals(mapper.readTree("""
+                {"verifier":"在场核验者","subject":"在场被验主体","item":"被验项目",
+                 "criterion":"原定判定标准","resultUse":"结果如何影响本场决定",
+                 "allowedAlternative":"仅填写已授权的替代和适用条件"}
+                """), shape);
+        String schemaPrefix = ChapterPlanPromptService.PLAN_SCHEMA_MARKER + ":";
+        JsonNode example = mapper.readTree(prompt.substring(prompt.indexOf(schemaPrefix) + schemaPrefix.length()).trim());
+        assertFalse(example.path("chapters").get(0).path("scenes").get(0).path("causality")
+                .has("verificationObligations"), "普通场景总体示例不强制核验");
+    }
+
     // ==================== 对白坍缩反馈块 ====================
 
     /**
@@ -1103,5 +1128,9 @@ class ChapterPlanPromptServiceTest {
         assertTrue(prompt.contains("\"scenes\":[{\"id\":\"ch-"), "输出示例必须含 scenes 字段：" + prompt);
         assertTrue(prompt.contains("scenes 是唯一生成源"), prompt);
         assertTrue(prompt.contains("禁止双份独立生成"), prompt);
+        assertFalse(prompt.contains("【逐章人物驱动推演】"));
+
+        String singlePrompt = service.buildPlanPrompt(ctx, 16, 16, blueprint, false, null, null);
+        assertTrue(singlePrompt.contains("【逐章人物驱动推演】"));
     }
 }

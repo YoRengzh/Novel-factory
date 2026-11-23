@@ -20,6 +20,7 @@ import cn.novel.yonren.domain.novel.model.valobj.work.ChapterManuscript;
 import cn.novel.yonren.domain.novel.service.armory.quality.DeliveryReviewPolicy;
 import cn.novel.yonren.domain.novel.service.armory.quality.QualityGate;
 import cn.novel.yonren.domain.novel.service.armory.quality.StyleViolationPolicy;
+import cn.novel.yonren.domain.novel.service.armory.quality.NarrativeStylePolicy;
 import cn.novel.yonren.types.enums.ModelScene;
 import cn.novel.yonren.types.enums.PromptScene;
 import cn.novel.yonren.types.utils.JsonRepair;
@@ -156,8 +157,7 @@ public class ChapterCandidateService {
             }
             // 机械排序：零违规者优先、有效字数次之；带违规的挑战者直接出局（原稿已过机械门禁 = 零违规）。
             // 字数下限在盲评前拦截严重缩水，避免不评长短的排序偏好损害成篇完整性。
-            ChapterContentEntity best = mechanicalBest(challengers,
-                    ChapterLengthPolicy.effectiveCharacterCount(chapterContent.getContent()));
+            ChapterContentEntity best = mechanicalBest(challengers, chapterContent.getContent());
             if (best == null) {
                 log.info("第 {} 章候选全部命中机械门禁（{} 稿），保留原稿", globalNo, challengers.size());
                 candidateSampleService.record(storyDir, globalNo, incumbentGate.grade().name(),
@@ -184,8 +184,8 @@ public class ChapterCandidateService {
             // 挑战者胜出：原地替换 + 质量门复审（挑战者尚未过审校，直接采纳等于旁路闸门）
             chapterContent.setTitle(best.getTitle());
             chapterContent.setContent(best.getContent());
-            var challengerContext = new cn.novel.yonren.domain.novel.model.valobj.revise.RewriteContext(
-                    userPrompt, null, ChapterManuscript.of(chapterContent));
+            var challengerContext = cn.novel.yonren.domain.novel.model.valobj.revise.RewriteContext.scoped(
+                    userPrompt, null, ChapterManuscript.of(chapterContent), null, false);
             GateResult challengerGate = qualityGate.auditAndReviseIfEnabled(
                     requestParameter, item, chapterContent, summaries, styleStat, globalNo, storyDir, challengerContext);
             if (!verifiedPass(challengerGate)) {
@@ -449,14 +449,16 @@ public class ChapterCandidateService {
      * 字数下限：挑战者有效字 < 原稿 × {@link #CHALLENGER_MIN_LENGTH_RATIO}
      * 或（原稿未达参考线时）< 原稿自身长度即出局，避免盲评采纳严重缩水的稿件。
      */
-    private ChapterContentEntity mechanicalBest(List<ChapterContentEntity> challengers, int incumbentChars) {
+    private ChapterContentEntity mechanicalBest(List<ChapterContentEntity> challengers, String incumbent) {
         // 下限以原稿为基准而非绝对 1500：原稿本就短时，拒绝更长的挑战者只会更糟——本闸防"缩水采纳"，
         // 不防"升级"；原稿自身的绝对不足由 QualityGate 密度信号回灌规划层治理。
+        int incumbentChars = ChapterLengthPolicy.effectiveCharacterCount(incumbent);
         int minChars = Math.max((int) (incumbentChars * CHALLENGER_MIN_LENGTH_RATIO),
                 Math.min(ChapterLengthPolicy.MINIMUM_EFFECTIVE_CHARACTERS, incumbentChars));
         return challengers.stream()
                 .filter(c -> StyleViolationPolicy.check(c.getContent()).isEmpty())
                 .filter(c -> ChapterLengthPolicy.effectiveCharacterCount(c.getContent()) >= minChars)
+                .filter(c -> NarrativeStylePolicy.regressionReason(incumbent, c.getContent()) == null)
                 .max(Comparator.comparingInt(c -> ChapterLengthPolicy.effectiveCharacterCount(c.getContent())))
                 .orElse(null);
     }

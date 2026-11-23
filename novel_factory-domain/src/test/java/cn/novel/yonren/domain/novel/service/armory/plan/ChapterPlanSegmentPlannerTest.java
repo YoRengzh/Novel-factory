@@ -222,7 +222,8 @@ class ChapterPlanSegmentPlannerTest {
         org.springframework.test.util.ReflectionTestUtils.setField(planner, "planCausalityReviewService", causalityReview);
         when(causalityReview.getMode()).thenReturn(
                 cn.novel.yonren.domain.novel.config.StoryProperties.CausalityProperties.Mode.ENFORCE);
-        when(causalityReview.check(any(), any(), any(), any(), eq(1), eq(3), any(), any(), any()))
+        when(causalityReview.check(any(), any(), any(), any(), eq(1), eq(3), any(), any(),
+                org.mockito.ArgumentMatchers.<java.nio.file.Path>any()))
                 .thenReturn(new cn.novel.yonren.domain.novel.model.valobj.plan.PlanValidationResult(
                         List.of("缺少必要前提"), List.of()));
 
@@ -231,6 +232,9 @@ class ChapterPlanSegmentPlannerTest {
                 1, 3, blueprintWithLadder(), null, usedPromptMap));
 
         assertTrue(failure.getInfo().contains("缺少必要前提"));
+        verify(llmInvokeService, times(2)).invoke(any(), any(), any(), anyString(), any());
+        verify(causalityReview, times(1)).check(any(), any(), any(), any(), eq(1), eq(3), any(), any(),
+                org.mockito.ArgumentMatchers.<java.nio.file.Path>any());
     }
 
     /**
@@ -399,6 +403,76 @@ class ChapterPlanSegmentPlannerTest {
                 1, 3, blueprintWithLadder(), null, usedPromptMap, null, null, job));
         // 取消后不再重试：总共只发生一次模型调用
         verify(llmInvokeService, times(1)).invoke(any(), any(), any(), anyString(), any());
+    }
+
+    @Test
+    void planModeOffDoesNotInvokeReviewAndPreservesExactRawPlan() {
+        org.springframework.test.util.ReflectionTestUtils.setField(planner, "planCausalityReviewService", causalityReview);
+        when(causalityReview.getMode()).thenReturn(
+                cn.novel.yonren.domain.novel.config.StoryProperties.CausalityProperties.Mode.OFF);
+        String raw = compliantPlan();
+        when(llmInvokeService.invoke(any(), any(), any(), anyString(), any())).thenReturn(raw);
+        var planned = planner.planSegment(new StoryVO(), PromptContext.builder().build(), "prompt",
+                1, 3, blueprintWithLadder(), null, usedPromptMap, List.of(), List.of(), null, java.nio.file.Path.of("D:/story"));
+        assertEquals(raw, planned.raw());
+        org.mockito.Mockito.verify(causalityReview, never()).check(any(), any(), any(), any(),
+                org.mockito.ArgumentMatchers.anyInt(), org.mockito.ArgumentMatchers.anyInt(), any(), any(),
+                org.mockito.ArgumentMatchers.<java.nio.file.Path>any());
+        verify(llmInvokeService, times(1)).invoke(any(), any(), any(), anyString(), any());
+    }
+
+    @Test
+    void observeUsesFirstSegmentHistoryAndPathButDoesNotAddWritingFeedbackOrReplan() {
+        org.springframework.test.util.ReflectionTestUtils.setField(planner, "planCausalityReviewService", causalityReview);
+        when(causalityReview.getMode()).thenReturn(
+                cn.novel.yonren.domain.novel.config.StoryProperties.CausalityProperties.Mode.OBSERVE);
+        List<cn.novel.yonren.domain.novel.model.entity.ChapterSummaryEntity> history = List.of(
+                cn.novel.yonren.domain.novel.model.entity.ChapterSummaryEntity.builder().chapterNo(70).summary("旧事实").build());
+        java.nio.file.Path storyDir = java.nio.file.Path.of("D:/resume-story");
+        GenerationJob job = new GenerationJob("observed-resume");
+        when(causalityReview.check(any(), any(), any(), org.mockito.ArgumentMatchers.same(history), eq(71), eq(73),
+                org.mockito.ArgumentMatchers.same(job), org.mockito.ArgumentMatchers.same(usedPromptMap),
+                org.mockito.ArgumentMatchers.same(storyDir))).thenReturn(
+                new cn.novel.yonren.domain.novel.model.valobj.plan.PlanValidationResult(List.of(), List.of("OBSERVE 缺少必要前提")));
+        when(llmInvokeService.invoke(any(), any(), any(), anyString(), any())).thenReturn(compliantPlan());
+        var planned = planner.planSegment(new StoryVO(), PromptContext.builder().build(), "prompt",
+                71, 73, null, null, usedPromptMap, history, List.of(), job, storyDir);
+        assertEquals(null, planned.residualGateIssues());
+        verify(causalityReview).check(any(), any(), any(), org.mockito.ArgumentMatchers.same(history), eq(71), eq(73),
+                org.mockito.ArgumentMatchers.same(job), org.mockito.ArgumentMatchers.same(usedPromptMap),
+                org.mockito.ArgumentMatchers.same(storyDir));
+        verify(llmInvokeService, times(1)).invoke(any(), any(), any(), anyString(), any());
+    }
+
+    @Test
+    void successfulPlanResponseCannotSwallowCancellationOrBudgetEvenWithReviewOff() {
+        for (boolean budget : List.of(false, true)) {
+            GenerationJob job = new GenerationJob("cancel-after-success-" + budget);
+            when(llmInvokeService.invoke(any(), any(), any(), anyString(), any())).thenAnswer(call -> {
+                if (budget) job.setBudgetExceeded(true); else job.requestCancel();
+                return compliantPlan();
+            });
+            assertThrows(AppException.class, () -> planner.planSegment(new StoryVO(), PromptContext.builder().build(), "prompt",
+                    1, 3, blueprintWithLadder(), null, usedPromptMap, null, null, job));
+        }
+        verify(llmInvokeService, times(2)).invoke(any(), any(), any(), anyString(), any());
+        org.mockito.Mockito.verifyNoInteractions(causalityReview);
+    }
+
+    @Test
+    void enforceUnknownFailsOnceWithoutUnboundedCausalityReplanning() {
+        org.springframework.test.util.ReflectionTestUtils.setField(planner, "planCausalityReviewService", causalityReview);
+        when(causalityReview.getMode()).thenReturn(
+                cn.novel.yonren.domain.novel.config.StoryProperties.CausalityProperties.Mode.ENFORCE);
+        when(causalityReview.check(any(), any(), any(), any(), eq(1), eq(3), any(), any(),
+                org.mockito.ArgumentMatchers.<java.nio.file.Path>any())).thenReturn(
+                new cn.novel.yonren.domain.novel.model.valobj.plan.PlanValidationResult(List.of("CAUSALITY_PLAN_UNKNOWN"), List.of()));
+        when(llmInvokeService.invoke(any(), any(), any(), anyString(), any())).thenReturn(compliantPlan());
+        assertThrows(AppException.class, () -> planner.planSegment(new StoryVO(), PromptContext.builder().build(), "prompt",
+                1, 3, blueprintWithLadder(), null, usedPromptMap));
+        verify(llmInvokeService, times(1)).invoke(any(), any(), any(), anyString(), any());
+        verify(causalityReview, times(1)).check(any(), any(), any(), any(), eq(1), eq(3), any(), any(),
+                org.mockito.ArgumentMatchers.<java.nio.file.Path>any());
     }
 
     /** 取消信号在首次调用前已置位：一次模型调用都不应发出 */

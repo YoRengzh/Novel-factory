@@ -393,8 +393,7 @@ public class BatchHealthService {
                 "超长 " + oversized + " / 有记录 " + recorded + " 章"));
         if (level != BatchHealthReport.Level.OK) {
             recommendations.add("篇幅注水：本批有 " + oversized + " 章超出参考上沿——先确认"
-                    + "story.paragraph-audit.enabled 是否开启（它是唯一能挤掉"
-                    + "「只重复已知状态 / 原地循环情绪」段落的组件），再确认规划层的【注水反馈】块已回灌；"
+                    + "story.paragraph-audit.enabled 是否开启，查看原稿与段落删改建议，再确认规划层的【注水反馈】块已回灌；"
                     + "不要在写手侧加压——拒收长章只会逼出另一种形态的注水。");
         }
     }

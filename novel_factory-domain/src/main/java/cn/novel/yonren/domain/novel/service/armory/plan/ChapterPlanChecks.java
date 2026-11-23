@@ -315,7 +315,7 @@ public final class ChapterPlanChecks {
             }
             if (want == null) {
                 issues.add("第 " + no + " 章蓝图未给出唯一的 mainLineAdvance 原文，不能核验细推进");
-            } else if (!got.equals(want)) {
+            } else if (!got.equals(want) && !stripLeadingChapterPrefix(got).equals(stripLeadingChapterPrefix(want))) {
                 issues.add("第 " + no + " 章的 mainLineAdvance 与蓝图不符：应为「" + brief(want)
                         + "」，实际「" + brief(got) + "」——必须逐字取自蓝图");
             }
@@ -373,6 +373,14 @@ public final class ChapterPlanChecks {
     /** 归一化：去空白与引号（与项目其它文本比对口径一致；实现复用仓库统一入口，勿另写正则） */
     private static String normalizeAdvance(String value) {
         return ForeshadowSpanPolicy.normalize(value);
+    }
+
+    /** 仅剥除句首“第N章：”格式前缀，避免规划模型按章节行照抄章号前缀触发整段重规划。 */
+    private static String stripLeadingChapterPrefix(String normalized) {
+        if (normalized == null) {
+            return "";
+        }
+        return normalized.replaceFirst("^第[0-9零〇一二三四五六七八九十百千两]+章[:：、.\\-—]*", "");
     }
 
     /** 违规信息里截断以便阅读 */

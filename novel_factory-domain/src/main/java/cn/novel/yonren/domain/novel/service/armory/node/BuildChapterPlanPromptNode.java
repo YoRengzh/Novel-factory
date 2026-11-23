@@ -38,6 +38,9 @@ public class BuildChapterPlanPromptNode extends AbstractArmorySupport {
     @Resource
     private cn.novel.yonren.domain.novel.service.armory.character.CharacterStageProfileService characterStageProfileService;
 
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private cn.novel.yonren.domain.novel.config.StoryProperties storyProperties;
+
     @Override
     public StrategyHandler<ArmoryCommandEntity, DefaultArmoryFactory.DynamicContext, StoryGenerateResultAggregate> get(ArmoryCommandEntity requestParameter, DefaultArmoryFactory.DynamicContext dynamicContext) {
         return callChapterPlanLlmNode;
@@ -50,6 +53,9 @@ public class BuildChapterPlanPromptNode extends AbstractArmorySupport {
         int batchStart = dynamicContext.getChapterOffset() + 1;
         int batchEnd = batchStart + requestParameter.getStoryContextEntity().getChapterCount() - 1;
         List<RollingOutlineService.StageSegment> segments = computeSegments(dynamicContext, batchStart, batchEnd);
+        if (isRollingSingleChapter() && batchEnd > batchStart) {
+            segments = expandToSingleChapterSegments(segments, batchStart, batchEnd, dynamicContext.getStageBlueprint());
+        }
         if (characterStageProfileService != null && !segments.isEmpty()) characterStageProfileService.ensure(
                 requestParameter, dynamicContext, segments.get(0).blueprint(), batchStart);
 
@@ -97,5 +103,26 @@ public class BuildChapterPlanPromptNode extends AbstractArmorySupport {
     List<RollingOutlineService.StageSegment> computeSegments(DefaultArmoryFactory.DynamicContext dynamicContext,
                                                              int batchStart, int batchEnd) {
         return rollingOutlineService.segmentBatch(dynamicContext.getStageBlueprints(), batchStart, batchEnd);
+    }
+
+    private boolean isRollingSingleChapter() {
+        return storyProperties != null && storyProperties.getPlan() != null
+                && storyProperties.getPlan().isRollingSingleChapter();
+    }
+
+    static List<RollingOutlineService.StageSegment> expandToSingleChapterSegments(
+            List<RollingOutlineService.StageSegment> segments, int batchStart, int batchEnd,
+            cn.novel.yonren.domain.novel.model.entity.StageBlueprintEntity fallbackBlueprint) {
+        List<RollingOutlineService.StageSegment> expanded = new ArrayList<>(batchEnd - batchStart + 1);
+        for (int chapterNo = batchStart; chapterNo <= batchEnd; chapterNo++) {
+            final int target = chapterNo;
+            var blueprint = segments == null ? fallbackBlueprint : segments.stream()
+                    .filter(s -> s != null && target >= s.startChapter() && target <= s.endChapter())
+                    .map(RollingOutlineService.StageSegment::blueprint)
+                    .findFirst()
+                    .orElse(fallbackBlueprint);
+            expanded.add(new RollingOutlineService.StageSegment(chapterNo, chapterNo, blueprint));
+        }
+        return expanded;
     }
 }

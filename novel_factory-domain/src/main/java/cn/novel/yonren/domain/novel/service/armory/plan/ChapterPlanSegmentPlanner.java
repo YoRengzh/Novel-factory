@@ -19,6 +19,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.lang3.StringUtils;
 import org.springframework.stereotype.Service;
 
+import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -121,6 +122,20 @@ public class ChapterPlanSegmentPlanner {
                                       List<ChapterSummaryEntity> summariesForPressure,
                                       List<ForeshadowSettlementEntity> settlementsForPressure,
                                       GenerationJob job) {
+        return planSegment(storyVO, ctx, prompt, startChapter, endChapter, blueprint, rosterNames,
+                usedPromptMap, summariesForPressure, settlementsForPressure, job, null);
+    }
+
+    /** 正式调用传入历史与故事目录，核验器据此读取与规划 prompt 同源的事实。旧重载不改默认行为。 */
+    public PlannedSegment planSegment(StoryVO storyVO, PromptContext ctx, String prompt,
+                                      int startChapter, int endChapter,
+                                      StageBlueprintEntity blueprint,
+                                      List<String> rosterNames,
+                                      Map<String, String> usedPromptMap,
+                                      List<ChapterSummaryEntity> summariesForPressure,
+                                      List<ForeshadowSettlementEntity> settlementsForPressure,
+                                      GenerationJob job, Path storyDir) {
+        throwIfCancelled(job, "段计划", 1, MAX_ATTEMPTS);
         int expected = endChapter - startChapter + 1;
         String label = "第" + startChapter + "-" + endChapter + "章段";
 
@@ -203,7 +218,7 @@ public class ChapterPlanSegmentPlanner {
                     mainLine == null ? 0 : mainLine.size(),
                     jumpRequired ? "；追进度跳接校验通过" : "");
             return withCausality(parsed, storyVO, blueprint, summariesForPressure,
-                    startChapter, endChapter, job, usedPromptMap);
+                    startChapter, endChapter, job, usedPromptMap, storyDir);
         }
         // 两类违规各自带**差异化修正指令** 教训：反馈不点名就等于让模型原样重生成一遍）
         StringBuilder feedback = new StringBuilder();
@@ -320,7 +335,7 @@ public class ChapterPlanSegmentPlanner {
             log.info("{}推进校验：重规划后通过", label);
         }
         return withCausality(retry, storyVO, blueprint, summariesForPressure,
-                startChapter, endChapter, job, usedPromptMap);
+                startChapter, endChapter, job, usedPromptMap, storyDir);
     }
 
     /**
@@ -334,16 +349,16 @@ public class ChapterPlanSegmentPlanner {
                                          StageBlueprintEntity blueprint,
                                          List<ChapterSummaryEntity> history,
                                          int start, int end, GenerationJob job,
-                                         Map<String, String> record) {
+                                         Map<String, String> record, Path storyDir) {
+        throwIfCancelled(job, "段计划完成", 1, MAX_ATTEMPTS);
         if (planCausalityReviewService == null
                 || planCausalityReviewService.getMode()
                     == cn.novel.yonren.domain.novel.config.StoryProperties.CausalityProperties.Mode.OFF) {
             return segment;
         }
         try {
-            var facts = CharacterFactReferences.from(history, start);
             var result = planCausalityReviewService.check(storyVO, segment.plan(), blueprint, history,
-                    start, end, job, record, facts);
+                    start, end, job, record, storyDir);
             if (!result.acceptable()) {
                 throw new cn.novel.yonren.types.exception.AppException(
                         cn.novel.yonren.types.enums.ResponseCode.UN_ERROR.getCode(),

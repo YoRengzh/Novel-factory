@@ -39,6 +39,27 @@ public class StoryProperties {
     // 场景因果核验：planMode 检查计划前提，auditMode 验收正文交付；各自默认 OFF
     private CausalityProperties causality = new CausalityProperties();
 
+    /**
+     * 正文材料组装方式：LEGACY 用 LLM 把完整背景压成分段任务摘要（旧行为，默认保持兼容）；
+     * DIRECT 由代码确定性组装——场景原文照录、只给本段在场人物状态，不经中间模型改写。
+     * 切换后可用同一批故事与模型做 A/B 对照，定位"信息断流"与"提示词拥挤"各占多少。
+     */
+    private WriterContextMode writerContextMode = WriterContextMode.LEGACY;
+
+    /**
+     * 预留分段预算；生产 DIRECT 当前固定整章一段，不以字数切段冒充知识隔离。
+     * 语义分段、视角权限和场内工作态完成后再启用。
+     */
+    private int writerContextSectionChars = 0;
+
+    public enum WriterContextMode { LEGACY, DIRECT }
+
+    // 观察式 Rebase：根据真实人物状态生成章节计划差异候选，默认关闭。
+    private RebaseProperties rebase = new RebaseProperties();
+
+    /** 只删不扩的去解释精修刀（后置刮油，默认 false 不改变既有单测行为） */
+    private ProseScalpelProperties proseScalpel = new ProseScalpelProperties();
+
     public StoryVO toStoryVO() {
         StoryVO storyVO = new StoryVO();
         storyVO.setDefaults(defaults);
@@ -150,6 +171,9 @@ public class StoryProperties {
     public static class PlanProperties {
         /** 批次计划分支推演版数：1=单稿（默认），2=稳健/进取两版自评风险后由 chapter-judge 评审择优 */
         private int branches = 1;
+
+        /** 逐章滚动规划：为 true 时每次只规划 1 章，写完拿到真实正文结尾与人物状态后再滚动规划下 1 章 */
+        private boolean rollingSingleChapter = false;
     }
 
     /**
@@ -215,6 +239,33 @@ public class StoryProperties {
          * 未验证不等于内容缺陷，不能当作已通过或用候选绕过；严格模式要求 story.audit.enabled=true。
          */
         private Mode auditMode = Mode.OFF;
+    }
+
+    /**
+     * 观察式 Rebase 配置。
+     *
+     * <p>默认关闭：不发起任何额外模型调用，不改变章节计划或正文。
+     * 开启后也只生成“候选计划 + 差异报告”落盘，正文仍走原计划；
+     * 是否采纳必须由显式操作决定，服务不会自行切换。
+     */
+    @Data
+    public static class RebaseProperties {
+        public enum Mode { OFF, PROPOSE_ONLY }
+
+        /** 总开关；OFF 时不产生候选、不调用模型 */
+        private Mode mode = Mode.OFF;
+
+        /** 候选数量上限；>1 时保留多份候选供人工比较，均不自动采纳 */
+        private int maxProposals = 1;
+    }
+
+    /** 只删不扩的去解释精修刀：仅刮除“不是A而是B”、事后复盘与静态介绍，绝不改写文风或扩写。 */
+    @Data
+    public static class ProseScalpelProperties {
+        /** 总开关；默认关闭以兼容旧单测，yml 中开启 */
+        private boolean enabled = false;
+        /** 单章最多套用的删减补丁数 */
+        private int maxPatches = 8;
     }
 
 }

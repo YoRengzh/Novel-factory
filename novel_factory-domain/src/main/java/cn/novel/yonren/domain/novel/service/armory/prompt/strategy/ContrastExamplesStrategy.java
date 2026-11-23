@@ -20,7 +20,7 @@ public class ContrastExamplesStrategy implements PromptRuleStrategy {
 
     @Override
     public boolean supports(PromptScene scene, PromptContext ctx) {
-        return scene == PromptScene.CHAPTER_CONTENT;
+        return scene == PromptScene.CHAPTER_CONTENT && !PromptContext.isDirectWriter(scene, ctx);
     }
 
     @Override

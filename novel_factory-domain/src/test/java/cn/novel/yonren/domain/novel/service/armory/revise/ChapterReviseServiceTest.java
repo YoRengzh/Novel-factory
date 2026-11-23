@@ -367,6 +367,7 @@ class ChapterReviseServiceTest {
         assertTrue(prompt.contains("【本轮文风问题定位】"));
         assertTrue(prompt.contains("喉结滚动×2、缓缓×3"));
         assertTrue(prompt.contains("只修改 issue 指向且核实成立的局部"));
+        assertTrue(prompt.contains("补丁可以只做删除"));
         assertFalse(prompt.contains("程序逐字扫描确认"));
         assertFalse(prompt.contains("删除或替换每一个命中词"));
     }
@@ -397,6 +398,23 @@ class ChapterReviseServiceTest {
 
     private static final String REWRITE_JSON =
             "{\"chapterNo\":1,\"title\":\"测试章\",\"content\":\"小陈拔剑，事件A发生，事件B也发生，结尾呼应钩子。\"}";
+
+    @Test
+    void styleOnlyPatchCannotIntroduceDenseTurnsButFactCorrectionsStillReachReview() {
+        String extra = "不是冷，是痛。不是催促，是告别。不是打量，是试探。";
+        when(llmGateway.complete(any(), any(LlmCall.class))).thenReturn(
+                "{\"patches\":[{\"anchor\":\"他坐下了。\",\"replacement\":\"" + extra + "\"}]}");
+        var issue = blockingIssue();
+        issue.setDimension("aesthetic");
+        var editorial = patchService().revise(storyVO(), planItem(), PATCH_ORIGINAL,
+                List.of(issue), null, null, emptyStyleStat(), 1, null);
+        assertFalse(editorial.decision().isAccepted());
+        assertTrue(editorial.decision().getReason().contains("否定转折"));
+        issue.setDimension("consistency");
+        var factual = patchService().revise(storyVO(), planItem(), PATCH_ORIGINAL,
+                List.of(issue), null, null, emptyStyleStat(), 1, null);
+        assertTrue(factual.decision().isAccepted());
+    }
 
     @Test
     void patch_acceptedWhenAnchorAppliesAndGatesPass() {

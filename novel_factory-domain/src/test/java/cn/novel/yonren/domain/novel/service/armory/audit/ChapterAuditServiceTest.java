@@ -787,6 +787,107 @@ class ChapterAuditServiceTest {
         capturedCalls(1);
     }
 
+    @ParameterizedTest
+    @ValueSource(strings = {"A", "B"})
+    void legacyAndDeliveryAuditShareActualSpeechAndOriginalVerificationReviewWithoutMoralRewrite(String variant) {
+        System.setProperty(AuditPromptVariant.SYSTEM_PROPERTY, variant);
+        try {
+            var item = deliveryPlan();
+            String off = service.buildPrompt(item, "他说出了暗号，后来却说自己守口如瓶。", null, null, null, 1, null);
+            String on = service.buildPrompt(item, DELIVERED, null, null, null, 1, null, deliveryRequest(item, DELIVERED));
+            for (String prompt : List.of(off, on)) {
+                for (String required : List.of("事后自述不能撤销已经发生的发言", "不能把失言当作从未说过",
+                        "有情节支撑的失言和明确改变策略可保留", "谎言或自欺", "说话者、接收者、被透露事项和先后关系",
+                        "不按通用道德把人物改成诚实、善良或永不失误", "查出对手的问题不能代替证明主角达标",
+                        "allowedAlternative 缺席不授权新增替代规则")) {
+                    assertTrue(prompt.contains(required), required);
+                }
+            }
+            assertFalse(off.contains("deliveryChecks"));
+            assertTrue(on.contains("deliveryChecks"));
+        } finally {
+            System.clearProperty(AuditPromptVariant.SYSTEM_PROPERTY);
+        }
+    }
+
+    @Test
+    void actualDisclosureVersusNarrativeDenialUsesPairedCurrentBodyQuotesNotInventedSpeech() {
+        String speech = "她对林岚说，暗号是青灯。";
+        String denial = "她直到离开也未向林岚说出暗号。";
+        String response = """
+                {"issues":[{"dimension":"continuity","severity":"BLOCKING",
+                 "evidence":"她直到离开也未向林岚说出暗号。","factEvidence":"她对林岚说，暗号是青灯。",
+                 "description":"把已经发生的透露抹回未透露","suggestion":"保留失言，纠正事后客观陈述"}]}
+                """;
+        when(llmGateway.complete(any(), any(LlmCall.class))).thenReturn(response, response.replace(speech, "她当场透露了密令。"));
+        var supported = service.audit(storyVO(), planItem(), speech + denial, null, null, null, 1);
+        var invented = service.audit(storyVO(), planItem(), speech + denial, null, null, null, 1);
+        assertEquals("BLOCKING", supported.getIssues().get(0).getSeverity());
+        assertEquals("MINOR", invented.getIssues().get(0).getSeverity());
+        assertTrue(invented.getIssues().get(0).getDescription().startsWith(ChapterIssueEntity.PENDING_FACT_PREFIX));
+    }
+
+    @Test
+    void supportedSlipChangedStrategyAndCharactersFalseSelfReportRemainAllowed() {
+        when(llmGateway.complete(any(), any(LlmCall.class))).thenReturn("{\"issues\":[]}");
+        for (String body : List.of("她一时口误说出暗号，立即改口，知道林岚已听见。",
+                "她决定不再隐瞒，把暗号告诉林岚。", "她已经告诉林岚暗号，却骗同伴说自己从未开口。")) {
+            assertTrue(service.audit(storyVO(), planItem(), body, null, null, null, 1).getIssues().isEmpty());
+        }
+        for (LlmCall call : capturedCalls(3)) {
+            assertTrue(call.getUserPrompt().contains("人物对自己的否认可以是谎言或自欺"));
+            assertTrue(call.getUserPrompt().contains("有情节支撑的失言和明确改变策略可保留"));
+        }
+    }
+
+    @Test
+    void revisionDisclosureReviewPreservesSlipAndRejectsNewObjectiveDenialAgainstOriginal() {
+        String original = "她对林岚说，暗号是青灯。";
+        String revised = "她对林岚说，暗号是青灯。她始终未向林岚说出暗号。";
+        when(llmGateway.complete(any(), any(LlmCall.class))).thenReturn("""
+                {"verdicts":[{"index":1,"fixed":true}],"continuityChecked":true,"introducedConflicts":[
+                 {"evidence":"她始终未向林岚说出暗号。","factEvidence":"她对林岚说，暗号是青灯。",
+                  "description":"新增客观叙述否认已透露的暗号"}]}
+                """);
+        var context = new RewriteContext(null, null, new ChapterManuscript(1, "标题", original));
+        var result = service.verifyFixes(storyVO(), planItem(), revised, List.of(blocking(null)), null, null, 1, context);
+        assertFalse(result.degraded());
+        assertTrue(result.introducedFactConflict());
+        assertEquals("BLOCKING", result.unfixed().get(0).getSeverity());
+        String prompt = capturedCalls(1).get(0).getUserPrompt();
+        assertTrue(prompt.contains("不能把失言当作从未说过"));
+        assertTrue(prompt.contains("有情节支撑的失言和明确改变策略可保留"));
+        assertTrue(prompt.contains("仅按此次待复核条目与修订影响范围核验"));
+    }
+
+    @Test
+    void auditConsumesVerificationTargetsAndPreservesTheirMissingDeliveryOutsideSevenDimensionDowngrade() {
+        var item = deliveryPlan();
+        item.setSchemaVersion(2);
+        var obligation = new cn.novel.yonren.domain.novel.model.valobj.plan.SceneCausality.VerificationObligation(
+                "执事", "林岚", "药材成色", "与样品同等成色", "决定通行资格", null);
+        item.setScenes(List.of(new ScenePlan("exam", List.of("执事", "林岚", "对手"), "验药", "成色待查", null,
+                "决定通行资格", "核验", null, null, null,
+                new cn.novel.yonren.domain.novel.model.valobj.plan.SceneCausality(null, null, null, null, List.of(obligation)))));
+        String body = "执事只验出对手掺假，让林岚继续等待。";
+        when(llmGateway.complete(any(), any(LlmCall.class))).thenReturn("""
+                {"issues":[],"deliveryChecks":[
+                 {"targetId":"scene:exam","sceneId":"exam","verdict":"PASS","planField":"outcome",
+                  "planEvidence":"决定通行资格","evidence":"让林岚继续等待","reason":"本场暂缓通行决定"},
+                 {"targetId":"scene:exam/verification:1","sceneId":"exam","verdict":"ISSUE",
+                  "planField":"causality.verificationObligations[0].criterion","planEvidence":"与样品同等成色",
+                  "reason":"核对全文，仅检查对手，未按标准检查林岚的药材成色","repair":"补原主体核验，不新增免验规则",
+                  "failureType":"MISSING_DELIVERY"}]}
+                """);
+        var result = auditDelivery(item, body, deliveryRequest(item, body));
+        assertTrue(result.getIssues().isEmpty());
+        assertEquals(DeliveryReview.Status.ISSUE, result.getDeliveryReview().status());
+        assertTrue(result.getDeliveryReview().blocksCommit());
+        assertEquals(2, result.getDeliveryReview().checks().size());
+        assertEquals(1, DeliveryReviewPolicy.blockingIssues(result.getDeliveryReview()).size());
+        assertTrue(capturedCalls(1).get(0).getUserPrompt().contains("scene:exam/verification:1"));
+    }
+
     private static final String DELIVERED_QUOTE = "执事接过药签，核对编号后收进匣子";
     private static final String DELIVERED = "他递出药签。" + DELIVERED_QUOTE + "。";
 

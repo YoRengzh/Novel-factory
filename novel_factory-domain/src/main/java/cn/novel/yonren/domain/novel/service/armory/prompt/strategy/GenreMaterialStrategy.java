@@ -39,6 +39,9 @@ public class GenreMaterialStrategy implements PromptRuleStrategy {
     public List<PromptRule> load(PromptScene scene, PromptContext ctx) {
         List<GenreType> genres = GenreType.matching(ctx.getTheme(), ctx.getStyle());
         GenreType primary = genres.isEmpty() ? GenreType.DEFAULT : genres.get(0);
+        if (PromptContext.isDirectWriter(scene, ctx)) {
+            return loadDirectStyleOnly(scene, ctx, genres, primary);
+        }
         List<PromptRule> rules = new ArrayList<>();
         PromptRule styleRule = loadStyle(scene, ctx, primary);
         if (styleRule != null) {
@@ -74,6 +77,22 @@ public class GenreMaterialStrategy implements PromptRuleStrategy {
             }
         }
         return rules;
+    }
+
+    /** 轻装正文模式按匹配题材顺次寻找纯正文语感切片（或显式语域卡），跳过题材风格论文与旧版对账范例。 */
+    private List<PromptRule> loadDirectStyleOnly(PromptScene scene, PromptContext ctx,
+                                                 List<GenreType> genres, GenreType primary) {
+        if (explicitRegister(ctx.getStyle()) == null) {
+            for (GenreType genre : genres) {
+                String anchor = fileLoader.load("styles/anchors/" + genre.getCode() + ".md");
+                if (anchor != null && !anchor.isBlank()) {
+                    return List.of(new PromptRule("style-anchor-" + genre.getCode(),
+                            anchor, PromptRule.InjectPosition.USER_TAIL));
+                }
+            }
+        }
+        PromptRule styleRule = loadStyle(scene, ctx, primary);
+        return styleRule == null ? List.of() : List.of(styleRule);
     }
 
     private PromptRule loadStyle(PromptScene scene, PromptContext ctx, GenreType primary) {

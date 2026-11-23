@@ -61,6 +61,13 @@ public class ChapterAuditService {
     /** 修订后计划事件完整性的复核维度；与旧 BLOCKING 分开，避免位置错配和误归因。 */
     public static final String PLAN_INTEGRITY_DIMENSION = "plan-integrity";
     private static final String EXPLANATION_CRITERION = "A5";
+    private static final String DISCLOSURE_REVIEW =
+            "\n【保密与实际发言核对】核对人物当场实际说出、写出或交给谁的内容，与事后‘我没有透露’‘始终守口如瓶’等自述分别记清。"
+                    + "事后自述不能撤销已经发生的发言，不能把失言当作从未说过；是否听清、误解或只获部分信息要依据正文，不自行保证无人知晓。"
+                    + "先区分口误/合法失言、明确改变策略、撒谎、自欺与客观叙述：有情节支撑的失言和明确改变策略可保留，"
+                    + "人物对自己的否认可以是谎言或自欺，不因它不真实就删掉人物声口；只有叙述把已透露内容无依据抹回未透露，才报事实/连续性矛盾。"
+                    + "报告须同时逐字引用实际发言与相冲突的事后客观陈述，明确说话者、接收者、被透露事项和先后关系；证据不足待核实。"
+                    + "不按通用道德把人物改成诚实、善良或永不失误，不为保密强制新增惩罚或反应。";
     private static final String EXPLANATION_REVIEW =
             "只报告替读者抢先说破策略、或事后翻译已能读懂的动作、对白和结尾。"
                     + "evidence 引用多余解释，contextEvidence 引用同一稿件中交付同一信息的另一处短句。"
@@ -438,6 +445,12 @@ public class ChapterAuditService {
                     cn.novel.yonren.domain.novel.service.armory.plan.ScenePlanPolicy.render(item.getScenes()));
         }
         appendKnowledgeReview(sb, item);
+        sb.append(DISCLOSURE_REVIEW);
+        if (deliveryRequest == null) {
+            sb.append(DeliveryReviewPolicy.verificationReviewInstructions())
+                    .append("\n旧协议仍只输出七维 issues；按原事实矛盾/关键事件缺失判据报告具体问题，")
+                    .append("不得为此凭空要求新核验清单或制造新评分维度。");
+        }
 
         if (StringUtils.isNotBlank(ledgerPrompt)) {
             sb.append("\n\n【当前账本】\n").append(ledgerPrompt);
@@ -751,6 +764,10 @@ public class ChapterAuditService {
                 .append("planEvidence 只用于这类问题，不作为已发生事实的 factEvidence。")
                 .append("也检查内心叙述的确定程度：‘特征相似，得再查’是推测；")
                 .append("只有相似特征却无保留地断言‘两件东西出自同一个人’，并把共同来源作为已知前提，是确认。")
+                .append("同章稍后才出现的证据也不能授权较早的定论。发现越界时指出哪一句提前、谁最早能从哪一场获知；")
+                .append("同时核对作者是否允许读者先知，读者知情不能算作人物知情。")
+                .append("限知视角若直接写到旁人的内心，逐字引用越界句并说明当前视角能看到的依据。")
+                .append("单纯的视角跳入按 MINOR 记录；影响揭晓程度时仍按本章揭晓上限核对。")
                 .append("推测、误信、谎言和计划允许且有新依据的确认不报；摘要、待核记录与未来计划不能当成获知依据。");
     }
 
@@ -1176,6 +1193,11 @@ public class ChapterAuditService {
             sb.append("\n输出 continuityChecked=true，并提供 introducedConflicts 数组；没有新增冲突显式输出[]，不能省略。");
             sb.append("\n【修订稿意图复述 A5】只用当前修订稿核对这一项，")
                     .append("结果单列 explanationIssues 数组。").append(EXPLANATION_REVIEW);
+        }
+        sb.append(DISCLOSURE_REVIEW);
+        if (request == null) {
+            sb.append(DeliveryReviewPolicy.verificationReviewInstructions())
+                    .append("\n仅按此次待复核条目与修订影响范围核验上述问题，不扩成全章新审。");
         }
         if (request != null) {
             sb.append(DeliveryReviewPolicy.prompt(request))

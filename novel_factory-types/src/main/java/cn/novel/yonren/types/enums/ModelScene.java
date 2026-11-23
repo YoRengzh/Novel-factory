@@ -54,6 +54,9 @@ public enum ModelScene {
     /** 动态资料选择器 */
     REFERENCE_SELECT("ref-select", "动态资料选择"),
 
+    /** 章节重基候选（观察式 Rebase：只产生差异候选，不直接改写正文任务） */
+    CHAPTER_REBASE("chapter-rebase", "章节重基候选"),
+
     QUALITY_REVIEW("quality-review", "全书质量评分");
 
     private final String configKey;

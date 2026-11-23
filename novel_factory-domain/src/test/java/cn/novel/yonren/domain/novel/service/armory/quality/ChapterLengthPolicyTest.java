@@ -49,6 +49,12 @@ class ChapterLengthPolicyTest {
     }
 
     @Test
+    void exceedsReference_directModeAllowsUpTo3800() {
+        assertFalse(ChapterLengthPolicy.exceedsReference("字".repeat(3800), true), "DIRECT 等于 3800 不算超标");
+        assertTrue(ChapterLengthPolicy.exceedsReference("字".repeat(3801), true), "DIRECT 超出 3800 算超标");
+    }
+
+    @Test
     void meetsMinimum_1499_fails() {
         assertFalse(ChapterLengthPolicy.meetsMinimum("正".repeat(1499)));
     }

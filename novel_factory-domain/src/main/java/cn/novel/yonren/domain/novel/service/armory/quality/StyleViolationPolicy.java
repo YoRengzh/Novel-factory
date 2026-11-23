@@ -78,7 +78,7 @@ public final class StyleViolationPolicy {
                     SEVERITY_MINOR,
                     "眼神套话命中 " + eyeTotal + " 次（眼睛没有“复杂”这种通用表情，读者无法成像）",
                     renderHits(eyeHits),
-                    "改写为视线的落点、停留时长与移动，或从被看者感受侧面写"));
+                    "核对这几处是否表达同一反应。可以省去已由上下文交代的那处。"));
         }
 
         // 3. 身体反应套话同一词条复读（程度问题，MINOR）
@@ -91,7 +91,7 @@ public final class StyleViolationPolicy {
                     SEVERITY_MINOR,
                     "身体反应套话复读（同一词条全章至多 1 次）",
                     renderHits(repeated),
-                    "替换为环境烘托、微表情、他人视角反应，或干脆让角色做出反常动作"));
+                    "同一反应已在前文交代时，可以省去重复处；保留会影响后续行动的信息。"));
         }
 
         // 4. 章末升华检测（程度问题，MINOR）
@@ -99,9 +99,9 @@ public final class StyleViolationPolicy {
         if (endingEvidence != null) {
             issues.add(buildIssue(
                     SEVERITY_MINOR,
-                    "章末升华（结尾停在感悟/总结而非画面或动作上，读者情绪被旁白总结闷死）",
+                    "章末升华候选，需核对结尾判断是否复述前文",
                     endingEvidence,
-                    "删掉最后一段的感悟总结，停在具体的画面或动作上；如需留白，用环境细节或角色微动作收尾；严禁“从此/这就是”等金句点题"));
+                    "只压缩重复点题的部分，保留人物刚获得的信息和由此产生的判断。"));
         }
 
         // 5. 章节编号元信息泄露检测（硬伤，BLOCKING——精确串、可定点清除，读者看到立刻出戏）

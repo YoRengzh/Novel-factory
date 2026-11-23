@@ -42,6 +42,8 @@ class AntiAiToneStrategyTest {
             String content = contentOf(scene);
             assertTrue(content.contains("前文已经让读者理解人物的用意"));
             assertTrue(content.contains("内心取舍和首次需要交代的规则可以直接写"));
+            assertTrue(content.contains("虚设的错误猜想") && content.contains("相邻几段都在用明喻"));
+            assertTrue(content.contains("影响行动的时长") && content.contains("清点物资"));
             assertFalse(content.contains("90%"));
             assertFalse(content.contains("单一语域"));
             assertFalse(content.contains("每千有效字"));
@@ -112,5 +114,21 @@ class AntiAiToneStrategyTest {
         assertEquals(null, loader.loadSections("rules/anti-ai-tone.md", "## 不存在的节"));
         assertEquals(null, loader.loadSections("rules/not-exist.md", "## 一、"));
         assertEquals(null, loader.loadSections("rules/anti-ai-tone.md"));
+    }
+
+    @Test
+    @DisplayName("DIRECT 轻装写作模式加载精简系统指令，不改变 LEGACY 与修订/审校")
+    void directWriterModeUsesSlimDirectSystemRuleForChapterContentOnly() {
+        PromptContext direct = PromptContext.builder().directWriterMode(true).build();
+        List<PromptRule> contentRules = strategy.load(PromptScene.CHAPTER_CONTENT, direct);
+        assertEquals(1, contentRules.size());
+        String content = contentRules.get(0).getContent();
+        assertTrue(content.contains("节奏有偏心与呼吸"));
+        assertTrue(content.contains("语言纯度"));
+        assertFalse(content.contains("古风/修真语境"), "全局资产不得把所有题材一刀切成古风禁令");
+        assertFalse(content.contains("清点物资时发现短缺"));
+
+        String revise = strategy.load(PromptScene.CHAPTER_REVISE, direct).get(0).getContent();
+        assertTrue(revise.contains("清点物资时发现短缺"), "修订场景仍沿用原行文指引");
     }
 }

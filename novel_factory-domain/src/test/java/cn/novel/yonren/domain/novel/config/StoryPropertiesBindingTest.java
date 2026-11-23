@@ -97,7 +97,7 @@ class StoryPropertiesBindingTest {
         // scene-models 应绑定成功
         Map<String, StoryVO.Module.ChatModel> sceneModels = module.getSceneModels();
         assertNotNull(sceneModels, "scene-models 不应为 null");
-        assertEquals(16, sceneModels.size());
+        assertEquals(17, sceneModels.size());
         assertFalse(sceneModels.containsKey("setting-draft"), "设定集应使用全局聊天模型");
 
         // 结构校验：每个场景模型名必须落在可调用模型集合内，提前拦截拼错调用名导致的运行期 404。
@@ -142,8 +142,8 @@ class StoryPropertiesBindingTest {
         StoryVO.Module.ChatModel beats = sceneModels.get("chapter-beats");
         assertEquals(16384L, beats.getMaxTokens().longValue(), "节拍上限需高于思考量，避免烧穿后降级");
 
-        // 抽查：正文温度 0.5（降温压套话随机变体）
-        assertEquals(0.5, sceneModels.get("chapter-content").getTemperature(), 0.001, "正文温度应为 0.5");
+        // 抽查：正文温度 0.8（轻装写作模式释放表达张力）
+        assertEquals(0.8, sceneModels.get("chapter-content").getTemperature(), 0.001, "正文温度应为 0.8");
 
         // 抽查：摘要温度 0.2（结构化记忆压缩）
         assertEquals(0.2, sceneModels.get("summary").getTemperature(), 0.001, "摘要温度应为 0.2");
@@ -173,5 +173,21 @@ class StoryPropertiesBindingTest {
                 "兜底模型名不应为空");
         // 兜底必须自带输出上限：异族模型的上限与主模型常不同，沿用会直接 400
         assertNotNull(fallback.getMaxTokens(), "兜底模型应显式配置 max-tokens");
+    }
+
+    @Test
+    void repositoryDefaultsUseDirectWriterAndDisableParagraphAudit() throws Exception {
+        YamlPropertySourceLoader loader = new YamlPropertySourceLoader();
+        List<PropertySource<?>> sources = loader.load("novel-gen",
+                new FileSystemResource("../novel_factory-app/src/main/resources/novel-generation.yml"));
+        Binder binder = new Binder(ConfigurationPropertySources.from(sources));
+        StoryProperties properties = binder.bind("story", StoryProperties.class)
+                .orElseThrow(() -> new AssertionError("story 配置绑定失败"));
+
+        assertEquals(StoryProperties.WriterContextMode.DIRECT, properties.getWriterContextMode());
+        assertFalse(properties.getParagraphAudit().isEnabled());
+        assertTrue(properties.getPlan().isRollingSingleChapter());
+        assertTrue(properties.getProseScalpel().isEnabled());
+        assertEquals(8, properties.getProseScalpel().getMaxPatches());
     }
 }

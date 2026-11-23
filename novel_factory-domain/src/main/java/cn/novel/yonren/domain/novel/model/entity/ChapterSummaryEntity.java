@@ -220,7 +220,7 @@ public class ChapterSummaryEntity {
         }
     }
 
-    /** 配角在本章的自主目标与选择，供后续章节恢复人物能动性。 */
+    /** 配角在本章的观察轨迹；不是人物权威状态增量，五个观察字段均可缺省。 */
     @Data
     @NoArgsConstructor
     @AllArgsConstructor
@@ -231,8 +231,50 @@ public class ChapterSummaryEntity {
         private String consequence;
         private String relationshipChange;
         private String nextIntent;
+        // 旧共享引文仅用于阅读旧观察，不能证明五个字段。
         private String evidence;
+        @com.fasterxml.jackson.annotation.JsonInclude(com.fasterxml.jackson.annotation.JsonInclude.Include.NON_NULL)
+        private Integer schemaVersion;
+        @com.fasterxml.jackson.annotation.JsonInclude(com.fasterxml.jackson.annotation.JsonInclude.Include.NON_NULL)
+        private java.util.Map<BeatField, BeatFieldSupport> support;
+        @com.fasterxml.jackson.annotation.JsonInclude(com.fasterxml.jackson.annotation.JsonInclude.Include.NON_NULL)
+        private java.util.Map<BeatField, PendingBeatField> pendingFields;
+        @com.fasterxml.jackson.annotation.JsonInclude(com.fasterxml.jackson.annotation.JsonInclude.Include.NON_NULL)
+        private Integer chapterNo;
+        @com.fasterxml.jackson.annotation.JsonInclude(com.fasterxml.jackson.annotation.JsonInclude.Include.NON_NULL)
+        private String manuscriptHash;
+
+        /** 旧七参签名与 support 缺省的 JSON/hash 形态保持不变。 */
+        public CharacterBeat(String name, String goal, String decision, String consequence,
+                             String relationshipChange, String nextIntent, String evidence) {
+            this.name = name;
+            this.goal = goal;
+            this.decision = decision;
+            this.consequence = consequence;
+            this.relationshipChange = relationshipChange;
+            this.nextIntent = nextIntent;
+            this.evidence = evidence;
+        }
     }
+
+    public enum BeatField { goal, decision, consequence, relationshipChange, nextIntent }
+    public enum BeatAttribution { OBSERVABLE, DIRECT_STATEMENT, INTERPRETATION, REPORTED, HYPOTHETICAL, AMBIGUOUS }
+
+    /** 原句/上下文均为连续正文；位置与 verification 只记录定位检查，不代表语义证明。 */
+    @com.fasterxml.jackson.annotation.JsonInclude(com.fasterxml.jackson.annotation.JsonInclude.Include.NON_NULL)
+    public record BeatFieldSupport(BeatAttribution attribution, String quote, String context,
+                                   List<BeatEffectRef> effectRefs, Integer quoteStart, Integer quoteEnd,
+                                   String verification) {
+        public BeatFieldSupport {
+            if (effectRefs != null) effectRefs = java.util.Collections.unmodifiableList(new java.util.ArrayList<>(effectRefs));
+        }
+        public BeatFieldSupport(BeatAttribution attribution, String quote, String context, List<BeatEffectRef> effectRefs) {
+            this(attribution, quote, context, effectRefs, null, null, null);
+        }
+    }
+
+    public record BeatEffectRef(String effectId, Integer chapterNo, String manuscriptHash) { }
+    public record PendingBeatField(String value, BeatFieldSupport support, String reason) { }
 
     /**
      * 伏笔种子条目：新埋伏笔 + 埋设处原文引用 + 主线重要度，供伏笔账回灌与动态权重打分

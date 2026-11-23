@@ -408,6 +408,34 @@ public class StoryRepository implements IStoryRepository {
      * ⚠️ 这里是**逐字段手写**的 YAML，不是对象序列化——**新增计划字段时必须同步加进来**，
      * 否则该字段在留档里静默消失，留档与实际计划将无法对照。
      */
+    /**
+     * 观察式重基候选：写 runDir/rebase/ 下独立文件，永不覆盖原计划、不参与正文生成。
+     * 唯一文件名保留多份候选与历史诊断，便于人工对照。
+     */
+    @Override
+    public Path writeRebaseRecord(Path storyDir, Path runDir, String chapterNo, String status, String content)
+            throws IOException {
+        if (storyDir == null || runDir == null || chapterNo == null || content == null) {
+            throw new IllegalArgumentException("重基候选缺少目录、章号或内容");
+        }
+        final Path[] saved = new Path[1];
+        withStoryLock(storyDir, () -> {
+            Path checkedRun = requireGenerationRun(storyDir, runDir);
+            Path directory = checkedRun.resolve("rebase");
+            if (Files.notExists(directory, LinkOption.NOFOLLOW_LINKS)) {
+                Files.createDirectory(directory);
+            }
+            assertCheckpointPath(directory, true, true);
+            String safeStatus = (status == null || status.isBlank() ? "UNKNOWN" : status)
+                    .replaceAll("[^A-Za-z_]", "");
+            Path file = directory.resolve(String.format("chapter-%s-%s-%s.json",
+                    chapterNo, safeStatus, UUID.randomUUID()));
+            writeStringAtomic(file, content);
+            saved[0] = file;
+        });
+        return saved[0];
+    }
+
     @Override
     public void writeChapterPlan(Path runDir, ChapterPlanAggregate chapterPlan) throws IOException {
         StringBuilder sb = new StringBuilder();
@@ -1041,6 +1069,16 @@ public class StoryRepository implements IStoryRepository {
             Files.createDirectories(memoryDir);
             // 观测文件走追加语义：单行 JSON，崩溃最多丢半行，无需原子替换
             Files.writeString(file, jsonlLine + System.lineSeparator(),
+                    StandardOpenOption.CREATE, StandardOpenOption.APPEND);
+        });
+    }
+
+    @Override
+    public void appendDraftReview(Path storyDir, String jsonlLine) throws IOException {
+        Path memoryDir = storyDir.resolve(StorageKeys.MEMORY_DIR);
+        withStoryLock(storyDir, () -> {
+            Files.createDirectories(memoryDir);
+            Files.writeString(memoryDir.resolve("draft-reviews.jsonl"), jsonlLine + System.lineSeparator(),
                     StandardOpenOption.CREATE, StandardOpenOption.APPEND);
         });
     }

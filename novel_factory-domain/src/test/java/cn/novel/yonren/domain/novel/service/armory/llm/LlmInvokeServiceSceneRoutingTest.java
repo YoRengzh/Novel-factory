@@ -115,4 +115,31 @@ class LlmInvokeServiceSceneRoutingTest {
         assertNull(captor.getValue().getScene(), "设定集应使用全局聊天模型");
         assertEquals("setting-draft", captor.getValue().getLabel(), "用量仍按设定集记录");
     }
+
+    @Test
+    void directWriterModeSkipsDynamicReferenceSelectionForChapterContent() {
+        PromptBuilder promptBuilder = mock(PromptBuilder.class);
+        LlmGateway gateway = mock(LlmGateway.class);
+        DynamicReferenceService references = mock(DynamicReferenceService.class);
+        when(promptBuilder.collectRules(any(), any())).thenReturn(List.of(
+                new cn.novel.yonren.domain.novel.model.valobj.prompt.PromptRule(
+                        "style-anchor-fantasy", "语感切片正文", PromptRulePosition.USER_TAIL)));
+        when(gateway.complete(any(), any())).thenReturn("第一章 标题\n\n正文。");
+
+        LlmInvokeService service = new LlmInvokeService(promptBuilder, gateway, references);
+        StoryVO storyVO = new StoryVO();
+        storyVO.setModule(new StoryVO.Module());
+
+        service.invoke(storyVO, PromptScene.CHAPTER_CONTENT,
+                PromptContext.builder().theme("玄幻").chapterNo(1).directWriterMode(true).build(),
+                "局面提示", null);
+
+        org.mockito.Mockito.verify(references, org.mockito.Mockito.never()).selectAsRules(any(), any(), any());
+        ArgumentCaptor<LlmCall> captor = ArgumentCaptor.forClass(LlmCall.class);
+        verify(gateway).complete(any(), captor.capture());
+        String sent = captor.getValue().getUserPrompt();
+        org.junit.jupiter.api.Assertions.assertTrue(sent.contains("语感与文风参考"));
+        org.junit.jupiter.api.Assertions.assertTrue(sent.contains("语感切片正文"));
+        org.junit.jupiter.api.Assertions.assertFalse(sent.contains("不新增剧情任务或数量配额"));
+    }
 }

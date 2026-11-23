@@ -1,6 +1,7 @@
 package cn.novel.yonren.domain.novel.service.armory.prompt.strategy;
 
 import cn.novel.yonren.domain.novel.service.armory.prompt.PromptRuleFileLoader;
+import cn.novel.yonren.domain.novel.model.valobj.prompt.PromptContext;
 import cn.novel.yonren.domain.novel.model.valobj.prompt.PromptRule;
 import cn.novel.yonren.types.enums.PromptScene;
 import org.junit.jupiter.api.Test;
@@ -77,6 +78,16 @@ class HardConstraintStrategyTest {
 
         assertEquals(1, rules.size());
         assertTrue(rules.get(0).getContent().contains("硬约束正文"));
+    }
+
+    @Test
+    void directWriterModeDisablesHardConstraintsForChapterContentOnly() {
+        HardConstraintStrategy strategy = strategyWithBothFiles();
+        PromptContext direct = PromptContext.builder().directWriterMode(true).build();
+
+        assertFalse(strategy.supports(PromptScene.CHAPTER_CONTENT, direct));
+        assertTrue(strategy.supports(PromptScene.CHAPTER_PLAN, direct));
+        assertTrue(strategy.supports(PromptScene.CHAPTER_REVISE, direct));
     }
 
     private static final String TARGETS_FILE_NAME = "plan-targets";

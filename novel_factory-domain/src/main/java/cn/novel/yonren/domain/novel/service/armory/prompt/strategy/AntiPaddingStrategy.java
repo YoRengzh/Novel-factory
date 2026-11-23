@@ -34,6 +34,9 @@ public class AntiPaddingStrategy implements PromptRuleStrategy, CriticalPromptRu
 
     @Override
     public boolean supports(PromptScene scene, PromptContext ctx) {
+        if (PromptContext.isDirectWriter(scene, ctx)) {
+            return false;
+        }
         return scene == PromptScene.CHAPTER_CONTENT
                 && (enabled("pacing-control") || enabled("quality-checklist"));
     }

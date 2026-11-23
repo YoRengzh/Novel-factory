@@ -29,7 +29,7 @@ public class HookTechniqueStrategy implements PromptRuleStrategy, CriticalPrompt
 
     @Override
     public boolean supports(PromptScene scene, PromptContext ctx) {
-        if (scene != PromptScene.CHAPTER_CONTENT) {
+        if (scene != PromptScene.CHAPTER_CONTENT || PromptContext.isDirectWriter(scene, ctx)) {
             return false;
         }
         return ctx != null && ctx.getChapterType() != null && ctx.getChapterType().isHookChapter();

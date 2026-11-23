@@ -4,6 +4,8 @@ import cn.novel.yonren.domain.novel.adapter.repository.IStoryRepository;
 import cn.novel.yonren.domain.novel.model.entity.ChapterContentEntity;
 import cn.novel.yonren.domain.novel.model.valobj.quality.DeliveryReview;
 import cn.novel.yonren.domain.novel.model.valobj.quality.GateResult;
+import cn.novel.yonren.domain.novel.model.valobj.work.ChapterManuscript;
+import cn.novel.yonren.domain.novel.service.armory.audit.ParagraphDensityAuditService.Suggestion;
 import com.alibaba.fastjson2.JSON;
 import jakarta.annotation.Resource;
 import lombok.extern.slf4j.Slf4j;
@@ -13,6 +15,7 @@ import java.nio.file.Path;
 import java.time.LocalDateTime;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 
 @Service
@@ -21,6 +24,34 @@ public class WriterSampleService {
 
     @Resource
     private IStoryRepository storyRepository;
+
+    public void recordDraft(Path storyDir, Path runDir, ChapterManuscript draft) {
+        recordDraftReview(storyDir, runDir, draft, "draft", draft);
+    }
+
+    public void recordSuggestions(Path storyDir, Path runDir, ChapterManuscript draft, List<Suggestion> suggestions) {
+        if (suggestions != null && !suggestions.isEmpty()) {
+            recordDraftReview(storyDir, runDir, draft, "suggestions", suggestions);
+        }
+    }
+
+    private void recordDraftReview(Path storyDir, Path runDir, ChapterManuscript draft, String type, Object data) {
+        if (storyDir == null) {
+            return;
+        }
+        try {
+            Map<String, Object> record = new LinkedHashMap<>();
+            record.put("ts", LocalDateTime.now().toString());
+            record.put("runId", runDir == null ? null : runDir.getFileName().toString());
+            record.put("chapterNo", draft.chapterNo());
+            record.put("manuscriptHash", draft.hash());
+            record.put("type", type);
+            record.put("data", data);
+            storyRepository.appendDraftReview(storyDir, JSON.toJSONString(record));
+        } catch (Exception e) {
+            log.warn("第 {} 章原稿或段落建议记录失败", draft.chapterNo(), e);
+        }
+    }
 
     public void record(Path storyDir, String storyId, int chapterNo,
                        String finalPrompt, String systemPrompt,

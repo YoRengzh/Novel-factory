@@ -5,6 +5,7 @@ import cn.novel.yonren.domain.novel.model.valobj.plan.SceneCausality.ActorInput;
 import cn.novel.yonren.domain.novel.model.valobj.plan.SceneCausality.CausalStep;
 import cn.novel.yonren.domain.novel.model.valobj.plan.SceneCausality.ProfileRef;
 import cn.novel.yonren.domain.novel.model.valobj.plan.SceneCausality.Terms;
+import cn.novel.yonren.domain.novel.model.valobj.plan.SceneCausality.VerificationObligation;
 import cn.novel.yonren.domain.novel.model.valobj.plan.ScenePlan;
 import org.apache.commons.lang3.StringUtils;
 
@@ -74,6 +75,21 @@ public final class SceneCausalityPolicy {
         }
 
         checkTerms(causality.terms(), characters, violations);
+        List<VerificationObligation> obligations = emptyIfNull(causality.verificationObligations());
+        for (int i = 0; i < obligations.size(); i++) {
+            VerificationObligation obligation = obligations.get(i);
+            String at = "causality.verificationObligations[" + i + "]";
+            if (obligation == null) {
+                violations.add(at + " 不能含空核验义务");
+                continue;
+            }
+            checkCharacter(obligation.verifier(), at + ".verifier", characters, violations);
+            checkCharacter(obligation.subject(), at + ".subject", characters, violations);
+            requireText(obligation.item(), at + ".item", "已声明核验的被验项目未明", violations);
+            requireText(obligation.criterion(), at + ".criterion", "已声明核验的判定标准未明", violations);
+            requireText(obligation.resultUse(), at + ".resultUse", "已声明核验的结果用途未明", violations);
+            // 不要求双方不同，不从自由文本证明语义核验成立；替代规则须在语义审查中核对授权。
+        }
         List<?> constraints = emptyIfNull(causality.constraints());
         for (int i = 0; i < constraints.size(); i++) {
             if (constraints.get(i) == null) {
@@ -140,7 +156,9 @@ public final class SceneCausalityPolicy {
         // 核验方式、截止时间和失败处置可不适用；不从自由文本推断或自动补全附加条款。
     }
 
-    private static boolean hasTerms(Terms terms) {
+    /** 全空条款不是交换；只要实际声明了任一条款，结构检查和交付投影都不可跳过。 */
+    public static boolean hasTerms(Terms terms) {
+        if (terms == null) return false;
         return StringUtils.isNotBlank(terms.offerer()) || StringUtils.isNotBlank(terms.receiver())
                 || StringUtils.isNotBlank(terms.consideration()) || StringUtils.isNotBlank(terms.payment())
                 || StringUtils.isNotBlank(terms.verificationBy()) || StringUtils.isNotBlank(terms.deadline())

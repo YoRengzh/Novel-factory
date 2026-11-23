@@ -206,6 +206,169 @@ class DeliveryReviewPolicyTest {
         assertFalse(DeliveryReviewPolicy.contract(item).diagnostics().isEmpty());
     }
 
+    @Test
+    void verificationAndMeaningfulTermsAreFixedTargetsWithoutStepsAndCannotBeSkipped() {
+        var item = verificationPlan(null, true);
+        var request = request(item, "执事验过林岚的药材，封好通行凭条。", true);
+        assertEquals(List.of("scene:exam", "scene:exam/terms", "scene:exam/verification:1"),
+                new ArrayList<>(request.contract().targets().keySet()));
+        assertEquals(List.of(), request.contract().diagnostics());
+        var fields = request.contract().targets().get("scene:exam/verification:1").fields();
+        assertEquals("执事", fields.get("causality.verificationObligations[0].verifier"));
+        assertEquals("林岚", fields.get("causality.verificationObligations[0].subject"));
+        assertEquals("药材成色", fields.get("causality.verificationObligations[0].item"));
+        assertEquals("与样品同等成色", fields.get("causality.verificationObligations[0].criterion"));
+        assertFalse(fields.containsKey("causality.verificationObligations[0].allowedAlternative"));
+        var scenePass = examScenePass(request);
+        var verificationPass = verificationCheck(request, CausalVerdict.Status.PASS, null);
+        assertTrue(DeliveryReviewPolicy.consume(request, List.of(scenePass, verificationPass)).unknown(), "不能漏验已声明条款");
+        var termsPass = check("scene:exam/terms", "exam", CausalVerdict.Status.PASS, request.manuscript().content(),
+                "causality.terms.consideration", "通行凭条", null);
+        assertTrue(DeliveryReviewPolicy.consume(request, List.of(scenePass, termsPass)).unknown(), "不能漏验被验项目");
+        assertTrue(DeliveryReviewPolicy.consume(request, List.of(scenePass, termsPass, verificationPass)).passed());
+        assertTrue(DeliveryReviewPolicy.consume(request, List.of(scenePass, termsPass, verificationPass, verificationPass)).unknown());
+        var identityOnly = check("scene:exam/verification:1", "exam", CausalVerdict.Status.PASS,
+                request.manuscript().content(), "causality.verificationObligations[0].subject", "林岚", null);
+        assertTrue(DeliveryReviewPolicy.consume(request, List.of(scenePass, termsPass, identityOnly)).unknown());
+        var crossTarget = check("scene:exam/verification:1", "exam", CausalVerdict.Status.PASS,
+                request.manuscript().content(), "causality.terms.consideration", "通行凭条", null);
+        assertTrue(DeliveryReviewPolicy.consume(request, List.of(scenePass, termsPass, crossTarget)).unknown());
+    }
+
+    @Test
+    void examiningOpponentCannotDischargeOriginalSubjectAndNewAlternativeRuleIsReportedAsIssue() {
+        var request = request(verificationPlan(null, false), "林岚指出对手的药材掺假。执事让对手退下，宣布林岚已合格。", true);
+        var failure = new CausalVerdict("exam", CausalVerdict.Status.ISSUE, "宣布林岚已合格", null,
+                "核对全文，仅验出对手掺假，未按与样品同等成色核验林岚的药材；计划没有免验授权",
+                "保留拆穿对手情节，补原主体林岚的药材核验，或保留待验结果；不得新增拆穿即可免验的规则",
+                CausalVerdict.FailureType.RESULT_WITHOUT_CAUSE, null, null, null, null,
+                "scene:exam/verification:1", "causality.verificationObligations[0].criterion", "与样品同等成色");
+        var result = DeliveryReviewPolicy.consume(request, List.of(examScenePass(request), failure));
+        assertEquals(DeliveryReview.Status.ISSUE, result.status());
+        assertTrue(result.blocksCommit());
+        assertTrue(DeliveryReviewPolicy.blockingIssues(result).get(0).getDescription().contains("verification:1"));
+        assertEquals(failure.planField(), result.checks().get(1).planField());
+        String prompt = DeliveryReviewPolicy.prompt(request);
+        for (String required : List.of("查出对手的问题不能代替证明主角达标", "保持原主体、项目和标准",
+                "allowedAlternative 缺席不授权新增替代规则", "授权含糊用 UNKNOWN", "全文核对结论")) {
+            assertTrue(prompt.contains(required), required);
+        }
+    }
+
+    @Test
+    void originalVerificationMayBeMissingEvenWhenADifferentExamOccurs() {
+        var request = request(verificationPlan(null, false), "执事只检查对手的药材后散场，林岚仍在门外等待。", true);
+        var missing = check("scene:exam/verification:1", "exam", CausalVerdict.Status.ISSUE, null,
+                "causality.verificationObligations[0].item", "药材成色", CausalVerdict.FailureType.MISSING_DELIVERY);
+        var report = DeliveryReviewPolicy.consume(request, List.of(examScenePass(request), missing));
+        assertEquals(DeliveryReview.Status.ISSUE, report.status());
+        assertNull(report.checks().get(1).evidence());
+        assertEquals("BLOCKING", DeliveryReviewPolicy.blockingIssues(report).get(0).getSeverity());
+    }
+
+    @Test
+    void authorizedAlternativePassesOnlyAgainstItsOwnPlanFieldAndVersion() {
+        String alternative = "作者已授权以林岚本人上次的验药记录代验，须执事确认记录完整且仍适用于同批药材";
+        var item = verificationPlan(alternative, false);
+        var request = request(item, "执事对照林岚上次的验药记录，确认记录完整且仍是同批药材，按旧约放行。", true);
+        var alternativePass = check("scene:exam/verification:1", "exam", CausalVerdict.Status.PASS,
+                request.manuscript().content(), "causality.verificationObligations[0].allowedAlternative", alternative, null);
+        var report = DeliveryReviewPolicy.consume(request, List.of(examScenePass(request), alternativePass));
+        assertTrue(report.passed());
+        assertTrue(DeliveryReviewPolicy.ensureBound(report, item, request.manuscript(), true).passed());
+        assertTrue(DeliveryReviewPolicy.ensureBound(report, verificationPlan(null, false), request.manuscript(), true).unknown());
+        assertTrue(DeliveryReviewPolicy.consume(request(verificationPlan(null, false), request.manuscript().content(), true),
+                List.of(examScenePass(request), alternativePass)).unknown(), "不能引用原计划没有的替代字段");
+        var oldSceneOnly = DeliveryReviewPolicy.consume(request(legacy("取得通行凭条"), request.manuscript().content(), true),
+                List.of(check("event:1", null, CausalVerdict.Status.PASS, request.manuscript().content(),
+                        "keyEvents[0]", "取得通行凭条", null)));
+        assertTrue(DeliveryReviewPolicy.ensureBound(oldSceneOnly, item, request.manuscript(), true).unknown());
+        assertTrue(DeliveryReviewPolicy.prompt(request).contains("已有明确授权且条件在正文成立时可按该替代判 PASS"));
+    }
+
+    @Test
+    void eachVerificationIdentityItemCriterionUseAndAlternativeChangeInvalidatesPriorReport() {
+        var item = verificationPlan(null, false);
+        var request = request(item, "执事验过林岚药材后签下通行凭条。", true);
+        var report = DeliveryReviewPolicy.consume(request, List.of(examScenePass(request),
+                verificationCheck(request, CausalVerdict.Status.PASS, null)));
+        assertTrue(report.passed());
+        var original = item.getScenes().get(0);
+        for (var changed : List.of(
+                new SceneCausality.VerificationObligation("对手", "林岚", "药材成色", "与样品同等成色", "按结果决定是否给通行凭条", null),
+                new SceneCausality.VerificationObligation("执事", "对手", "药材成色", "与样品同等成色", "按结果决定是否给通行凭条", null),
+                new SceneCausality.VerificationObligation("执事", "林岚", "药材重量", "与样品同等成色", "按结果决定是否给通行凭条", null),
+                new SceneCausality.VerificationObligation("执事", "林岚", "药材成色", "验出不是假药", "按结果决定是否给通行凭条", null),
+                new SceneCausality.VerificationObligation("执事", "林岚", "药材成色", "与样品同等成色", "只决定登记次序", null),
+                new SceneCausality.VerificationObligation("执事", "林岚", "药材成色", "与样品同等成色", "按结果决定是否给通行凭条", "作者新增合法替代"))) {
+            var newPlan = verificationPlan(null, false);
+            newPlan.setScenes(List.of(new ScenePlan(original.id(), original.characters(), original.intention(),
+                    original.resistance(), original.entryStates(), original.outcome(), original.function(), original.milestoneRefs(),
+                    original.location(), original.time(), new SceneCausality(null, null, null, null, List.of(changed)))));
+            assertNotEquals(request.contract().planHash(), DeliveryReviewPolicy.contract(newPlan).planHash());
+            assertTrue(DeliveryReviewPolicy.ensureBound(report, newPlan, request.manuscript(), true).unknown());
+        }
+    }
+
+    @Test
+    void allBlankTermsAndAbsentOrEmptyVerificationDoNotInventTargetsButInvalidObligationsCannotPass() {
+        var item = verificationPlan(null, false);
+        var scene = item.getScenes().get(0);
+        item.setScenes(List.of(new ScenePlan(scene.id(), scene.characters(), scene.intention(), scene.resistance(), null,
+                scene.outcome(), scene.function(), null, null, null,
+                new SceneCausality(null, null, new SceneCausality.Terms(null, " ", "", null, null, null, null), null, List.of()))));
+        assertEquals(List.of("scene:exam"), new ArrayList<>(DeliveryReviewPolicy.contract(item).targets().keySet()));
+        var incomplete = new SceneCausality.VerificationObligation("执事", "外人", "药材成色", null, "决定放行", null);
+        item.setScenes(List.of(new ScenePlan(scene.id(), scene.characters(), scene.intention(), scene.resistance(), null,
+                scene.outcome(), scene.function(), null, null, null,
+                new SceneCausality(null, null, null, null, java.util.Arrays.asList(null, incomplete)))));
+        var contract = DeliveryReviewPolicy.contract(item);
+        assertEquals(List.of("scene:exam", "scene:exam/verification:1", "scene:exam/verification:2"),
+                new ArrayList<>(contract.targets().keySet()));
+        assertTrue(contract.diagnostics().stream().anyMatch(value -> value.contains("verificationObligations[1].subject")));
+        assertTrue(contract.diagnostics().stream().anyMatch(value -> value.contains("verificationObligations[1].criterion")));
+        assertTrue(DeliveryReviewPolicy.consume(request(item, "正文", true), List.of()).unknown());
+    }
+
+    @Test
+    void legacyTextStillReceivesOriginalVerificationAndAlternativeBoundaryReview() {
+        var request = request(legacy("执事按与样品同等成色核验林岚药材，并按结果决定通行资格"), "对手被拆穿后林岚获准通行。", true);
+        String prompt = DeliveryReviewPolicy.prompt(request);
+        assertEquals(DeliveryReview.Scope.EVENTS, request.contract().scope());
+        assertEquals(1, request.contract().targets().size());
+        assertTrue(prompt.contains("即使旧计划只在 keyEvents、意图、结果或自由条款里写明核验"));
+        assertTrue(prompt.contains("不能由正文临时发明"));
+        var report = DeliveryReviewPolicy.consume(request, List.of(check("event:1", null, CausalVerdict.Status.ISSUE,
+                request.manuscript().content(), "keyEvents[0]", request.contract().targets().get("event:1").fields().get("keyEvents[0]"),
+                CausalVerdict.FailureType.RESULT_WITHOUT_CAUSE)));
+        assertTrue(report.blocksCommit());
+    }
+
+    private static ChapterPlanItemEntity verificationPlan(String alternative, boolean terms) {
+        var item = new ChapterPlanItemEntity();
+        item.setChapterNo(1);
+        item.setSchemaVersion(2);
+        var obligation = new SceneCausality.VerificationObligation("执事", "林岚", "药材成色", "与样品同等成色",
+                "按结果决定是否给通行凭条", alternative);
+        var exchange = terms ? new SceneCausality.Terms("执事", "林岚", "通行凭条", "无偿",
+                "执事核验林岚药材", "当场", "未通过则暂不发放") : null;
+        item.setScenes(List.of(new ScenePlan("exam", List.of("执事", "林岚", "对手"), "验药取得通行资格", "成色待查", null,
+                "按核验结果决定通行资格", "核验", null, null, null,
+                new SceneCausality(null, null, exchange, null, List.of(obligation)))));
+        return item;
+    }
+
+    private static CausalVerdict examScenePass(DeliveryReviewPolicy.Request request) {
+        return check("scene:exam", "exam", CausalVerdict.Status.PASS, request.manuscript().content(),
+                "outcome", "按核验结果决定通行资格", null);
+    }
+
+    private static CausalVerdict verificationCheck(DeliveryReviewPolicy.Request request, CausalVerdict.Status status,
+                                                 CausalVerdict.FailureType failureType) {
+        return check("scene:exam/verification:1", "exam", status, request.manuscript().content(),
+                "causality.verificationObligations[0].criterion", "与样品同等成色", failureType);
+    }
+
     private static ChapterPlanItemEntity legacy(String... events) {
         var item = new ChapterPlanItemEntity();
         item.setChapterNo(1);

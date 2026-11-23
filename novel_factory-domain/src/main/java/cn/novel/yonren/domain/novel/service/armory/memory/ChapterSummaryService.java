@@ -142,6 +142,8 @@ public class ChapterSummaryService {
                     // 走同一道 EvidenceMatch 校验，才能与模型输出的事实同等待遇
                     backfillNumericFacts(summary, content);
                     validateConsistencyEvidence(summary, content);
+                    CharacterBeatEvidencePolicy.sanitizeNewObservations(summary,
+                            new cn.novel.yonren.domain.novel.model.valobj.work.ChapterManuscript(globalNo, item.getTitle(), content));
                     log.info("章节摘要生成完成，chapterNo: {}, 一致性偏差 {} 条", globalNo,
                             summary.getContinuityConflicts() == null ? 0 : summary.getContinuityConflicts().size());
                     return summary;
@@ -269,10 +271,26 @@ public class ChapterSummaryService {
                 .append("若某角色位置/去留状态与下方当前账本记载相反（如账本记已离场、本章正文却仍在场，")
                 .append("或账本记在场、本章离场），status 必须标注轨迹\"第N章变化：旧状态 → 新状态\"，")
                 .append("且该反转必须已在本章正文中有过渡描写（归来/折返/离开）；无过渡描写时记入 continuityConflicts；")
-                .append("\n2.1 characterBeats：只记录本章真正参与行动的关键配角（不含纯路人和无名群众），每条必须说明")
-                .append("该配角独立于主角的个人目标、主动决定、决定后果、与主角关系变化和下一步意图；")
-                .append("配角不能只写‘帮助主角/提供信息’，若本章没有自主行为则不要编造；每章至多 4 条，")
-                .append("evidence 必须是支持该行为的正文连续原句（≤80 字）；")
+                .append("\n2.1 characterBeats：本章真正参与行动的关键配角观察（不含纯路人和无名群众），至多4条。")
+                .append("goal/decision/consequence/relationshipChange/nextIntent 均可空或省略；只填本章实际有支持的项，")
+                .append("没有目标、关系变化或后续意图就留空，不补满五项，不为人物凑个性/成长/代价。")
+                .append("decision 可记录普通可观察动作，不要求正文包含姓名加心理谓词。characterEffects 才是权威状态增量，beat不是。")
+                .append("每个非空字段必须在 support 同名键各附自己的支持，禁止共用一条 evidence 默认证明五项；")
+                .append("support 是可选字段级对象，键仅 goal/decision/consequence/relationshipChange/nextIntent，值含 attribution、quote、context、effectRefs。")
+                .append("attribution=OBSERVABLE（无损原文动作摘录）、DIRECT_STATEMENT（人物明确发言/意图内容，不证明发言为真或已经兑现）、")
+                .append("INTERPRETATION（基于上下文的可能解释）、REPORTED（转述）、HYPOTHETICAL（假设未发生）、AMBIGUOUS（归因不明）。")
+                .append("quote 是支持此字段的本章连续原句（≤400字，不改写/拼接）；context 可选连续上下文（≤1200字，包含quote），")
+                .append("INTERPRETATION 必须附context并写明确可能措辞，保持解释归属。引用不必单独带人物姓名，但上下文必须明确该动作/发言属于谁；")
+                .append("不能用另一人的动作或话语证明该人物选择。直接发言可合理概括目标/意图，不能因一句承诺声称任务已完成。")
+                .append("OBSERVABLE 字段值请无损摘录quote中动作，不从捏碎玉简推成给指定对象已送达，更不能把发送能力当收到消息；")
+                .append("consequence/relationshipChange 的OBSERVABLE只无损保留自己的完整quote（可去句末标点），不裁去可能、否定、条件或主体限定；")
+                .append("consequence 只有正文另有实际结果支持才写，其他解释可放INTERPRETATION并保留可能，不升级成世界事实。")
+                .append("effectRefs 可代替quote，只引用账本中已confirmed effectId并回抄chapterNo/manuscriptHash，每条格式")
+                .append("{effectId,chapterNo,manuscriptHash}；pending/其他版本引用不得使用，ref只支持原已确认内容，不凭动作推演额外结果。")
+                .append("无法提供字段支持就留空；缺支持候选将隔离待核。旧evidence可空，只是兼容观察摘录。")
+                .append("不输出schemaVersion/chapterNo/manuscriptHash/pendingFields/quoteStart/quoteEnd/verification，这些由程序绑定。")
+                .append("示例：{\"name\":\"苏青\",\"decision\":\"捏碎玉简\",\"consequence\":null,")
+                .append("\"support\":{\"decision\":{\"attribution\":\"OBSERVABLE\",\"quote\":\"苏青抬手捏碎玉简。\",\"context\":null,\"effectRefs\":null}}}；")
                 .append("\n2.2 characterEffects：可选的人物状态增量，主角配角均可，没有明确变化则[]；不为每人凑字段。")
                 .append("每条输出 character、kind、key、state、value、evidence、acquisition、referenceId。")
                 .append("kind=ALIAS/KNOWLEDGE/BELIEF/GOAL/DECISION/INTENT/ACTION/COMMITMENT，key 是独立事项的稳定描述；")

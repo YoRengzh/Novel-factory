@@ -26,6 +26,8 @@ public final class ChapterLengthPolicy {
      * 描写与对白被拉长"。两者要分别看，不能合成一个"长度是否合格"的布尔量。
      */
     public static final int MAXIMUM_REFERENCE_CHARACTERS = 2600;
+    /** 轻装正文（DIRECT）允许的整章参考上沿（与 2600~3800 写作提示对齐）。 */
+    public static final int DIRECT_MAXIMUM_REFERENCE_CHARACTERS = 3800;
 
     private ChapterLengthPolicy() { }
     public static int effectiveCharacterCount(String content) {
@@ -59,8 +61,16 @@ public final class ChapterLengthPolicy {
         }
         return effectiveCharacterCount(content) < COLLAPSE_FLOOR_CHARACTERS;
     }
+    public static int maxReference(boolean directMode) {
+        return directMode ? DIRECT_MAXIMUM_REFERENCE_CHARACTERS : MAXIMUM_REFERENCE_CHARACTERS;
+    }
+
     /** 是否超出参考上沿（注水信号）；空内容返回 false（无从判定，宁可漏报） */
     public static boolean exceedsReference(String content) {
-        return effectiveCharacterCount(content) > MAXIMUM_REFERENCE_CHARACTERS;
+        return exceedsReference(content, false);
+    }
+
+    public static boolean exceedsReference(String content, boolean directMode) {
+        return effectiveCharacterCount(content) > maxReference(directMode);
     }
 }

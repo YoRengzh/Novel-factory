@@ -79,16 +79,22 @@ public class LlmInvokeService {
                                   String labelOverride, Integer maxTokensOverride) {
         StoryVO.Module module = storyVO.getModule();
 
-        // 动态规则装配：确定性策略 + skill 式动态资料选择
+        // 动态规则装配：确定性策略 + skill 式动态资料选择（轻装正文模式跳过动态写作教材）
+        boolean directContent = PromptContext.isDirectWriter(scene, ctx);
         List<PromptRule> rules = new ArrayList<>(promptBuilder.collectRules(scene, ctx));
-        rules.addAll(withoutAlreadyInjected(rules, dynamicReferenceService.selectAsRules(module, scene, ctx)));
+        if (!directContent) {
+            rules.addAll(withoutAlreadyInjected(rules, dynamicReferenceService.selectAsRules(module, scene, ctx)));
+        }
 
         String systemText = joinPosition(rules, PromptRule.InjectPosition.SYSTEM);
         String userTail = joinPosition(rules, PromptRule.InjectPosition.USER_TAIL);
 
         String finalUserPrompt = userPrompt;
         if (!userTail.isBlank()) {
-            finalUserPrompt = userPrompt + "\n\n==== 交付与事实约束优先；技法、风格和参考资料按场景取用，不新增剧情任务或数量配额 ====\n" + userTail;
+            String banner = directContent
+                    ? "\n\n==== 以下为语感与文风参考，吸收节奏、情绪温度与人物口语，切勿照搬其中人名、设定与具体桥段 ====\n"
+                    : "\n\n==== 交付与事实约束优先；技法、风格和参考资料按场景取用，不新增剧情任务或数量配额 ====\n";
+            finalUserPrompt = userPrompt + banner + userTail;
         }
 
         String label = labelOverride != null ? labelOverride

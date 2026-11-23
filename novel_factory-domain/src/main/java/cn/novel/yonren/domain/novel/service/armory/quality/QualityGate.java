@@ -154,16 +154,21 @@ public class QualityGate {
         // 与下沿一样只告警不阻塞，信号回灌规划层（见 ChapterPlanPromptService 的注水反馈）。
         // 刻意**不豁免过渡章**：下沿豁免过渡章是因为它本就该短；写得比常规章还长的过渡章
         // 恰恰是最典型的注水形态。
-        if (chapterContent != null && ChapterLengthPolicy.exceedsReference(chapterContent.getContent())) {
+        boolean directMode = storyProperties != null
+                && storyProperties.getWriterContextMode() == StoryProperties.WriterContextMode.DIRECT;
+        if (chapterContent != null && ChapterLengthPolicy.exceedsReference(chapterContent.getContent(), directMode)) {
             log.warn("第 {} 章超出 {} 字参考上沿，实际有效字数 {}（不阻塞，注水信号将回灌规划层）", globalNo,
-                    ChapterLengthPolicy.MAXIMUM_REFERENCE_CHARACTERS,
+                    ChapterLengthPolicy.maxReference(directMode),
                     ChapterLengthPolicy.effectiveCharacterCount(chapterContent.getContent()));
         }
         // 机械文风门禁（零 LLM 调用）：万能副词密度/眼神套话/身体套话/章末升华已降为 MINOR
         //（只记录 + 回灌规划层，不触发修订），章节编号元信息泄露仍为 BLOCKING 进修订闭环。
         // 分层依据见 StyleViolationPolicy 类注释：程度类文风问题不以机械命中直接驱动整章修订。
-        List<ChapterIssueEntity> styleIssues = chapterContent == null ? List.of()
-                : StyleViolationPolicy.check(chapterContent.getContent());
+        String manuscript = chapterContent == null ? null : chapterContent.getContent();
+        var observations = NarrativeStylePolicy.inspect(manuscript);
+        int effectiveChars = ChapterLengthPolicy.effectiveCharacterCount(manuscript);
+        List<ChapterIssueEntity> styleIssues = new java.util.ArrayList<>(StyleViolationPolicy.check(manuscript));
+        styleIssues.addAll(observations.issues(effectiveChars));
         if (!styleIssues.isEmpty()) {
             log.warn("第 {} 章机械文风门禁命中 {} 条（BLOCKING {} / MINOR {}）：{}", globalNo,
                     styleIssues.size(), blockingOf(styleIssues).size(), nonBlockingOf(styleIssues).size(),
@@ -185,9 +190,9 @@ public class QualityGate {
         int dialogueCount = chapterContent == null ? 0 : ContentDensityPolicy.countDialogue(chapterContent.getContent());
         log.info("第 {} 章对白数量观测：{}（不作为数量准入或补稿要求）", globalNo, dialogueCount);
         if (chapterContent != null) {
-            log.info("第 {} 章叙述比喻标记观测：{} 次 / {} 有效字", globalNo,
-                    ContentDensityPolicy.countNarrativeSimileMarkers(chapterContent.getContent()),
-                    ChapterLengthPolicy.effectiveCharacterCount(chapterContent.getContent()));
+            log.info("第 {} 章叙述用语观测：否定转折 {}、明喻候选 {}、计时用息 {}、小结线索 {}，共 {} 有效字",
+                    globalNo, observations.negativeTurns().size(), observations.similes().size(),
+                    observations.breathTimings().size(), observations.summaryCues().size(), effectiveChars);
         }
         // 章节编号元信息泄露检测（机械预检）：正文中出现"第X章""本章/上一章"等作者层面元信息时给审校注入加审预警
         // 同时 StyleViolationPolicy.check 会将其标记为 BLOCKING issue 进入修订闭环，双重保险
@@ -329,8 +334,9 @@ public class QualityGate {
                 joinBlocks(joinBlocks(registerContract, timeAnchor), characterProfileHint(requestParameter)));
         String authorFacts = renderAuthorFacts(requestParameter == null ? null : requestParameter.getStoryContextEntity(), globalNo);
         String factSources = joinBlocks(authorFacts, timeAnchor);
-        // 修订输入保留禁泄清单与语域契约（防修订环节修好事实、却引入时代错位或人物失语）
-        String reviseForeshadowing = joinBlocks(joinBlocks(foreshadowing, secrecyGuard.promptBlock()), registerContract);
+        boolean scoped = writerContext != null && writerContext.scope() != RewriteContext.Scope.LEGACY;
+        String reviseForeshadowing = scoped ? registerContract
+                : joinBlocks(joinBlocks(foreshadowing, secrecyGuard.promptBlock()), registerContract);
 
         // 审校调用在 try 之外：解析/重试均失败时 AppException 直接终止本批
         List<ChapterIssueEntity> currentBlocking = new java.util.ArrayList<>(mechanicalBlocking);
@@ -378,7 +384,8 @@ public class QualityGate {
 
         log.warn("第 {} 章审校发现 BLOCKING 问题 {} 条，准备修订", globalNo, currentBlocking.size());
 
-        if (storyProperties.getRevise() == null || !storyProperties.getRevise().isEnabled()) {
+        if (storyProperties.getRevise() == null || !storyProperties.getRevise().isEnabled()
+                || scoped && writerContext.scope() == RewriteContext.Scope.SECTIONS) {
             log.info("第 {} 章修订未启用，保留原稿", globalNo);
             auditSampleService.record(storyDir, globalNo, item, chapterContent.getContent(),
                     currentBlocking, 0, ledgerPrompt, foreshadowing);
@@ -400,7 +407,7 @@ public class QualityGate {
                         requestParameter.getStoryVO(), item, chapterContent.getContent(),
                         currentBlocking, ledgerPrompt, reviseForeshadowing, styleStat, globalNo, previousRejectionReason)
                         : chapterReviseService.revise(requestParameter.getStoryVO(), item, chapterContent.getContent(),
-                        currentBlocking, ledgerPrompt, reviseForeshadowing, styleStat, globalNo,
+                            currentBlocking, scoped ? null : ledgerPrompt, reviseForeshadowing, styleStat, globalNo,
                         previousRejectionReason, writerContext);
                 if (writerContext != null) writerContext.checkCancellation();
             } catch (Exception e) {
@@ -451,6 +458,8 @@ public class QualityGate {
                 // 机械门禁重扫：修订稿带套话/引入泄底都不算闭环（字数不再进 BLOCKING，见首审处说明）
                 List<ChapterIssueEntity> rescan = new java.util.ArrayList<>(
                         StyleViolationPolicy.check(chapterContent.getContent()));
+                rescan.addAll(NarrativeStylePolicy.inspect(chapterContent.getContent()).issues(
+                        ChapterLengthPolicy.effectiveCharacterCount(chapterContent.getContent())));
                 if (!secrecyGuard.isEmpty()) {
                     rescan.addAll(SecrecyViolationPolicy.check(chapterContent.getContent(), secrecyGuard.keywords()));
                 }

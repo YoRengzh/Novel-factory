@@ -3,6 +3,9 @@ package cn.novel.yonren.domain.novel.service.armory.node;
 import cn.novel.yonren.domain.novel.model.aggregate.ChapterPlanAggregate;
 import cn.novel.yonren.domain.novel.model.entity.ArmoryCommandEntity;
 import cn.novel.yonren.domain.novel.model.entity.ChapterPlanItemEntity;
+import cn.novel.yonren.domain.novel.model.entity.ChapterSummaryEntity;
+import cn.novel.yonren.domain.novel.model.entity.ForeshadowSettlementEntity;
+import cn.novel.yonren.domain.novel.service.job.GenerationJob;
 import cn.novel.yonren.domain.novel.model.entity.StoryContextEntity;
 import cn.novel.yonren.domain.novel.model.valobj.StoryVO;
 import cn.novel.yonren.domain.novel.service.armory.factory.DefaultArmoryFactory;
@@ -17,6 +20,8 @@ import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.MockitoAnnotations;
 
+import java.nio.file.Path;
+import java.util.HashMap;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -209,6 +214,47 @@ class CallChapterPlanLlmNodeTest {
                 () -> node.invokePlanWithFallback(command(), dynamicContext, promptContext()));
 
         verify(llmInvokeService, times(2)).invoke(any(), any(), any(), anyString(), any());
+    }
+
+    @Test
+    void resumedFirstAndSegmentedPlansReceiveExactHistoryStoryDirAndJob() throws Exception {
+        ChapterPlanSegmentPlanner spyPlanner = org.mockito.Mockito.mock(ChapterPlanSegmentPlanner.class);
+        node = new CallChapterPlanLlmNode(spyPlanner);
+        org.springframework.test.util.ReflectionTestUtils.setField(node, "chapterMemoryService", chapterMemoryService);
+        List<ChapterSummaryEntity> history = List.of(ChapterSummaryEntity.builder().chapterNo(40)
+                .summary("已提交旧事件").build());
+        List<ForeshadowSettlementEntity> settlements = List.of();
+        dynamicContext.setChapterOffset(40);
+        dynamicContext.setChapterSummaries(history);
+        dynamicContext.setForeshadowSettlements(settlements);
+        dynamicContext.setStoryDir(Path.of("D:/synthetic-story"));
+        dynamicContext.setUsedPromptMap(new HashMap<>());
+        dynamicContext.setJob(new GenerationJob("resume-first-segment"));
+        ChapterPlanAggregate fixture = ChapterPlanAggregate.builder().chapters(List.of(
+                ChapterPlanItemEntity.builder().chapterNo(41).title("继续").build())).build();
+        org.mockito.Mockito.doReturn(new ChapterPlanSegmentPlanner.PlannedSegment("原始输出", fixture, null))
+                .when(spyPlanner).planSegment(any(), any(), anyString(), org.mockito.ArgumentMatchers.anyInt(),
+                        org.mockito.ArgumentMatchers.anyInt(), any(), any(), any(), any(), any(), any(),
+                        org.mockito.ArgumentMatchers.<Path>any());
+        node.invokePlanWithFallback(command(), dynamicContext, promptContext());
+        verify(spyPlanner).planSegment(any(), any(), org.mockito.ArgumentMatchers.eq("测试 prompt"),
+                org.mockito.ArgumentMatchers.eq(41), org.mockito.ArgumentMatchers.eq(41), any(), any(),
+                org.mockito.ArgumentMatchers.same(dynamicContext.getUsedPromptMap()), org.mockito.ArgumentMatchers.same(history),
+                org.mockito.ArgumentMatchers.same(settlements), org.mockito.ArgumentMatchers.same(dynamicContext.getJob()),
+                org.mockito.ArgumentMatchers.same(dynamicContext.getStoryDir()));
+
+        org.mockito.Mockito.clearInvocations(spyPlanner);
+        dynamicContext.setPlanSegments(List.of(new RollingOutlineService.StageSegment(41, 41, null),
+                new RollingOutlineService.StageSegment(42, 42, null)));
+        dynamicContext.setPlanSegmentPrompts(List.of("续写首段", "续写次段"));
+        node.invokePlanWithFallback(command(), dynamicContext, promptContext());
+        for (int i = 0; i < 2; i++) {
+            verify(spyPlanner).planSegment(any(), any(), org.mockito.ArgumentMatchers.eq(i == 0 ? "续写首段" : "续写次段"),
+                    org.mockito.ArgumentMatchers.eq(41 + i), org.mockito.ArgumentMatchers.eq(41 + i), any(), any(),
+                    org.mockito.ArgumentMatchers.same(dynamicContext.getUsedPromptMap()), org.mockito.ArgumentMatchers.same(history),
+                    org.mockito.ArgumentMatchers.same(settlements), org.mockito.ArgumentMatchers.same(dynamicContext.getJob()),
+                    org.mockito.ArgumentMatchers.same(dynamicContext.getStoryDir()));
+        }
     }
 
     private String planJson(int... chapterNos) {

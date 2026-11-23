@@ -16,6 +16,7 @@ import cn.novel.yonren.domain.novel.service.armory.plan.ScenePlanPolicy;
 import cn.novel.yonren.domain.novel.model.valobj.contract.ChapterContract;
 import cn.novel.yonren.domain.novel.service.armory.prompt.WritingContractPolicy;
 import cn.novel.yonren.domain.novel.service.armory.quality.ChapterLengthPolicy;
+import cn.novel.yonren.domain.novel.service.armory.quality.NarrativeStylePolicy;
 import cn.novel.yonren.domain.novel.model.valobj.revise.RewriteContext;
 import cn.novel.yonren.domain.novel.service.armory.llm.LlmLocalRejectionException;
 import cn.novel.yonren.types.utils.JsonParseFallback;
@@ -215,7 +216,7 @@ public class ChapterReviseService {
                 return new ReviseResult(buildRejected("修订稿无法解析或 content 为空"), null);
             }
 
-            String gateReason = runGates(originalContent, revised, item, styleStat, globalNo);
+            String gateReason = runGates(originalContent, revised, item, styleStat, globalNo, blockingIssues);
             if (gateReason != null) {
                 log.warn("章节修订未通过采纳闸门，chapterNo: {}，原因：{}", globalNo, gateReason);
                 return new ReviseResult(buildRejected(gateReason), null);
@@ -386,7 +387,7 @@ public class ChapterReviseService {
             return patchFailure("补丁未改变任何内容");
         }
 
-        String gateReason = runGates(originalContent, patchedEntity(outcome.content()), item, styleStat, globalNo);
+        String gateReason = runGates(originalContent, patchedEntity(outcome.content()), item, styleStat, globalNo, blockingIssues);
         if (gateReason != null) {
             return patchFailure("补丁未过采纳闸门：" + gateReason);
         }
@@ -553,6 +554,24 @@ public class ChapterReviseService {
         sb.append("\n\n【待修复的 BLOCKING 问题】\n");
         int idx = 1;
         for (ChapterIssueEntity issue : blockingIssues) {
+            if (writerContext != null && writerContext.scope() != RewriteContext.Scope.LEGACY
+                    && ("foreshadow".equalsIgnoreCase(issue.getDimension()) || StringUtils.isNotBlank(issue.getPlanEvidence()))) {
+                sb.append(idx++).append(". 核对下列正文是否让人物提前知道或确认了本段材料尚未给出证据的事。")
+                        .append("保留已有线索与人物当时可以作出的判断。\n");
+                String evidence = StringUtils.defaultString(issue.getEvidence());
+                if (StringUtils.isNotBlank(evidence) && originalContent.contains(evidence)) {
+                    sb.append("   原稿位置：").append(evidence).append("\n");
+                } else {
+                    // 机械禁泄证据为已在稿中出现的「词×次数」，只回送实际出现的位置。
+                    for (String hit : evidence.split("、")) {
+                        String term = hit.replaceFirst("×\\d+$", "");
+                        if (StringUtils.isNotBlank(term) && originalContent.contains(term)) {
+                            sb.append("   原稿位置：").append(term).append("\n");
+                        }
+                    }
+                }
+                continue;
+            }
             sb.append(idx++).append(". [").append(issue.getDimension()).append("] ")
                     .append(issue.getDescription())
                     .append("\n   evidence：").append(nullToBlank(issue.getEvidence()))
@@ -577,7 +596,9 @@ public class ChapterReviseService {
             for (String evidence : aestheticEvidence) {
                 sb.append("- ").append(evidence).append("\n");
             }
-            sb.append("只修改 issue 指向且核实成立的局部；未命中段落保持原样，不把 evidence 当作全章禁词表或追加润色任务。");
+            sb.append("只修改 issue 指向且核实成立的局部。先看原句中哪部分带来了新信息，保留它，省去重复解释。")
+                    .append("同一修辞换连接词或喻体，停顿换一个数目，仍要按原问题检查看读感是否改善。")
+                    .append("删去赘句即可读通时，补丁可以只做删除。作者有意的辨析、准确意象、时限与有后续作用的盘点须保留。");
         }
 
         sb.append("\n\n【原稿全文】\n").append(originalContent);
@@ -601,10 +622,18 @@ public class ChapterReviseService {
                             ChapterContentEntity revised,
                             ChapterPlanItemEntity item,
                             StyleStatEntity styleStat,
-                            int globalNo) {
+                            int globalNo,
+                            List<ChapterIssueEntity> blockingIssues) {
         // 1. 字数闸（硬）：修订稿腰斩 = 内容缺失，不是风格问题
         if (revised.getContent().length() < originalContent.length() * MIN_LENGTH_RATIO) {
             return "修订稿字数不足原稿 " + (int) (MIN_LENGTH_RATIO * 100) + "%";
+        }
+        String styleRegression = NarrativeStylePolicy.regressionReason(originalContent, revised.getContent());
+        if (styleRegression != null) {
+            if (blockingIssues.stream().allMatch(issue -> "aesthetic".equalsIgnoreCase(issue.getDimension()))) {
+                return styleRegression;
+            }
+            log.info("第 {} 章修订含剧情或事实问题，交由复审判断，文风观测：{}", globalNo, styleRegression);
         }
 
         // 2. 风格账：只告知、不拒绝——BLOCKING 修复优先于文风瑕疵

@@ -591,12 +591,78 @@ class StoryMemoryServiceTest { /*MARKER-CHECK-1*/
     }
 
     @Test
-    void retrieveDirections_filtersByVolumeKind() {
+    void oneChapterCannotMonopolizeRecallBudget() {
         when(vectorStore.search(anyString(), any(), anyInt())).thenReturn(List.of(
+                point(0.95, "chapter", 5, "第五章片段甲"),
+                point(0.94, "chapter", 5, "第五章片段乙"),
+                point(0.93, "chapter", 5, "第五章片段丙"),
+                point(0.70, "chapter", 2, "第二章旧事")));
+        properties.setTopK(10);
+        properties.setMinScore(0.35);
+        properties.setMaxRecallChars(5000);
+
+        var hits = service.retrieve(module(), storyDir(), "查询", null, null);
+
+        assertEquals(3, hits.size(), "同章最多两段，剩余名额让给跨章召回");
+        assertTrue(hits.stream().anyMatch(h -> h.text().equals("第二章旧事")));
+    }
+
+    @Test
+    void recallHitCarriesChapterSource() {
+        when(vectorStore.search(anyString(), any(), anyInt())).thenReturn(List.of(
+                point(0.9, "chapter", 7, "第七章旧事")));
+        properties.setMinScore(0.35);
+
+        var hits = service.retrieve(module(), storyDir(), "查询", null, null);
+
+        assertEquals("chapter", hits.get(0).kind());
+        assertEquals(7, hits.get(0).chapterNo());
+    }
+
+    private static ScoredVectorPoint point(double score, String kind, Integer chapterNo, String text) {
+        Map<String, String> payload = new HashMap<>();
+        payload.put("kind", kind);
+        payload.put("text", text);
+        if (chapterNo != null) {
+            payload.put("chapterNo", String.valueOf(chapterNo));
+        }
+        return ScoredVectorPoint.builder().score(score).payload(payload).build();
+    }
+
+    @Test
+    void sceneQueryOmitsGenreAndStyleButKeepsCastAndScene() {
+        var item = ChapterPlanItemEntity.builder().chapterNo(7).goal("拿到盐账副本")
+                .scenes(List.of(new cn.novel.yonren.domain.novel.model.valobj.plan.ScenePlan(
+                        "s-1", List.of("沈砚"), "向账房先生追问盐账", "对方推说不知", List.of(),
+                        "被赶出来", "推进", List.of(), "账房", null)))
+                .build();
+
+        String query = service.buildSceneQuery("悬疑", item, List.of("沈砚", "账房先生"),
+                List.of("向账房先生追问盐账；阻碍：对方推说不知"));
+
+        assertTrue(query.contains("沈砚"));
+        assertTrue(query.contains("向账房先生追问盐账"));
+        assertTrue(query.contains("拿到盐账副本"));
+        assertFalse(query.contains("风格"), "场景级查询不把风格算进语义相似度");
+    }
+
+    @Test
+    void nearWindowExclusionWidensCandidatePool() {
+        when(vectorStore.search(anyString(), any(), anyInt())).thenReturn(List.of());
+        properties.setTopK(5);
+
+        service.retrieve(module(), storyDir(), "查询", 10, null);
+
+        // 近章窗口只能后过滤，若仍按 topK=5 取候选，最近几章会占满名额
+        verify(vectorStore).search(anyString(), any(), org.mockito.ArgumentMatchers.intThat(limit -> limit > 5));
+    }
+
+    @Test
+    void retrieveDirections_filtersByVolumeKind() {
+        // 类型过滤必须在检索前生效：候选池是全局 topK，先取全局再过滤会让无关类型占满名额
+        when(vectorStore.search(anyString(), any(), anyInt(), eq("kind"), anyList())).thenReturn(List.of(
                 ScoredVectorPoint.builder().score(0.9)
-                        .payload(Map.of("kind", "volume", "text", "第一卷方向")).build(),
-                ScoredVectorPoint.builder().score(0.8)
-                        .payload(Map.of("kind", "chapter", "text", "章节记忆")).build()));
+                        .payload(Map.of("kind", "volume", "text", "第一卷方向")).build()));
         properties.setTopK(6);
         properties.setMinScore(0.35);
         properties.setMaxRecallChars(1000);
@@ -604,9 +670,10 @@ class StoryMemoryServiceTest { /*MARKER-CHECK-1*/
         List<StoryMemoryService.RecallHit> hits = service.retrieveDirections(
                 module(), storyDir(), "当前弧意图", null);
 
-        // 只召回 kind=VOLUME，chapter 类被过滤
         assertEquals(1, hits.size());
         assertEquals("第一卷方向", hits.get(0).text());
+        verify(vectorStore).search(anyString(), any(), anyInt(), eq("kind"), eq(List.of("volume")));
+        verify(vectorStore, never()).search(anyString(), any(), anyInt());
     }
 
     @Test

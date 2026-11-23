@@ -24,15 +24,19 @@ public final class CharacterDepthFeedbackProjector {
         if (profiles == null || profiles.profiles().isEmpty()) return binding.review(CharacterDepthReview.Status.NOT_EVALUATED, List.of());
         List<CharacterDepthReview.Finding> findings = new ArrayList<>();
         for (var beat : summary.getCharacterBeats() == null ? List.<ChapterSummaryEntity.CharacterBeat>of() : summary.getCharacterBeats()) {
+            if (beat == null) continue;
             var profile = profiles.profiles().stream().filter(card -> Objects.equals(card.displayName(), beat.getName())).findFirst().orElse(null);
-            String evidence = beat.getEvidence();
-            if (profile == null || evidence == null || evidence.isBlank() || evidence.length() > 400 || !manuscript.content().contains(evidence)) continue;
-            String observation = "目标：" + Objects.toString(beat.getGoal(), "未记录") + "；选择：" + Objects.toString(beat.getDecision(), "未记录")
-                    + "；后果：" + Objects.toString(beat.getConsequence(), "未记录");
-            if (observation.length() > 800) continue;
-            findings.add(new CharacterDepthReview.Finding(List.of(profile.characterId()), List.of(), "CHAPTER", "choice-consequence",
-                    evidence, List.of(new CharacterDepthReview.SourceRef(manuscript.chapterNo(), manuscript.hash(), evidence)), observation,
-                    "后续参考已发生选择及卡片设计，核对改变决定的依据；不为人物成长或代价制造事件。"));
+            if (profile == null) continue;
+            for (var observation : CharacterBeatEvidencePolicy.observations(summary, beat, manuscript, history)) {
+                var sources = CharacterBeatEvidencePolicy.sourceRefs(summary, observation, history);
+                if (sources.isEmpty()) continue;
+                String text = observationText(observation);
+                var finding = new CharacterDepthReview.Finding(List.of(profile.characterId()), List.of(), "CHAPTER",
+                        "beat-field-v1:" + observation.field(), sources.get(0).evidence(), sources, text,
+                        "仅参考本字段的观察来源；解释、发言与尝试不等于获知、送达或履行，不为成长和代价制造事件。");
+                if (CharacterDepthReview.validFinding(finding)) findings.add(finding);
+                if (findings.size() == CharacterDepthReview.MAX_FINDINGS) break;
+            }
             if (findings.size() == CharacterDepthReview.MAX_FINDINGS) break;
         }
         return binding.review(findings.isEmpty() ? CharacterDepthReview.Status.NOT_EVALUATED : CharacterDepthReview.Status.OBSERVED, findings);
@@ -52,8 +56,11 @@ public final class CharacterDepthFeedbackProjector {
                     || review.findings() == null) continue;
             for (var finding : review.findings()) {
                 if (!CharacterDepthReview.validFinding(finding) || finding.sourceRefs().stream().anyMatch(source ->
-                        !Objects.equals(source.chapterNo(), summary.getChapterNo())
-                                || !Objects.equals(source.manuscriptHash(), summary.getManuscriptHash()))) continue;
+                        history.stream().noneMatch(item -> Objects.equals(source.chapterNo(), item.getChapterNo())
+                                && Objects.equals(source.manuscriptHash(), item.getManuscriptHash())))) continue;
+                // 旧版整条共享quote点评不能当作逐字段复核；新版按同一policy回读且对照原字段与refs。
+                if ("choice-consequence".equals(finding.dimension())) continue;
+                if (finding.dimension().startsWith("beat-field-v1:") && !matchesField(story, summary, finding, history)) continue;
                 String line = "\n第" + summary.getChapterNo() + "章人物选择观察：" + finding.observation();
                 if (header.length() + text.length() + line.length() > limit) continue;
                 text.append(line);
@@ -61,5 +68,26 @@ public final class CharacterDepthFeedbackProjector {
             if (!text.isEmpty()) break;
         }
         return text.isEmpty() ? "" : header + text;
+    }
+
+    private static String observationText(CharacterBeatEvidencePolicy.FieldObservation observation) {
+        return CharacterBeatEvidencePolicy.fieldLabel(observation.field()) + "[" + observation.label() + "]：" + observation.value();
+    }
+
+    private static boolean matchesField(StoryContextEntity story, ChapterSummaryEntity summary,
+                                         CharacterDepthReview.Finding finding, List<ChapterSummaryEntity> history) {
+        if (summary.getCharacterBeats() == null) return false;
+        for (var beat : summary.getCharacterBeats()) {
+            if (beat == null) continue;
+            var profile = story.getCharacterDecisionProfiles().profiles().stream()
+                    .filter(card -> Objects.equals(card.displayName(), beat.getName())).findFirst().orElse(null);
+            if (profile == null || !finding.characterIds().equals(List.of(profile.characterId()))) continue;
+            for (var observation : CharacterBeatEvidencePolicy.observations(summary, beat, history)) {
+                if (observation.support() != null && finding.dimension().equals("beat-field-v1:" + observation.field())
+                        && finding.observation().equals(observationText(observation))
+                        && finding.sourceRefs().equals(CharacterBeatEvidencePolicy.sourceRefs(summary, observation, history))) return true;
+            }
+        }
+        return false;
     }
 }

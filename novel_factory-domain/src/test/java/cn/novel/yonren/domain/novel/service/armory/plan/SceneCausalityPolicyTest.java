@@ -8,6 +8,7 @@ import cn.novel.yonren.domain.novel.model.valobj.plan.SceneCausality.CausalStep;
 import cn.novel.yonren.domain.novel.model.valobj.plan.SceneCausality.Choice;
 import cn.novel.yonren.domain.novel.model.valobj.plan.SceneCausality.ProfileRef;
 import cn.novel.yonren.domain.novel.model.valobj.plan.SceneCausality.Terms;
+import cn.novel.yonren.domain.novel.model.valobj.plan.SceneCausality.VerificationObligation;
 import cn.novel.yonren.domain.novel.model.valobj.plan.ScenePlan;
 import cn.novel.yonren.domain.novel.model.valobj.work.ChapterManuscript;
 import com.alibaba.fastjson2.JSON;
@@ -41,12 +42,13 @@ class SceneCausalityPolicyTest {
         SceneCausality explicitNull = new SceneCausality(List.of(new ActorInput("江燃", "整理旧信", null,
                 List.of("character-fact-id-1"), null, "以为信未读", null)),
                 List.of(new CausalStep("江燃", "将信归档", null, null, "留待明日核对",
-                        List.of("character-fact-id-1"), null)), null, null);
+                        List.of("character-fact-id-1"), null)), null, null, null);
         ObjectMapper mapper = new ObjectMapper();
         String nullJson = LEGACY_JACKSON_JSON.replace("\"belief\":\"以为信未读\"}",
                         "\"belief\":\"以为信未读\",\"profileRef\":null}")
                 .replace("\"requires\":[\"character-fact-id-1\"]}",
                         "\"requires\":[\"character-fact-id-1\"],\"choice\":null}");
+        nullJson = nullJson.substring(0, nullJson.length() - 1) + ",\"verificationObligations\":null}";
         for (SceneCausality causality : List.of(legacy, explicitNull,
                 mapper.readValue(LEGACY_JACKSON_JSON, SceneCausality.class),
                 JSON.parseObject(LEGACY_FASTJSON_JSON, SceneCausality.class),
@@ -54,6 +56,7 @@ class SceneCausalityPolicyTest {
             assertEquals(legacy, causality);
             assertNull(causality.actors().get(0).profileRef());
             assertNull(causality.steps().get(0).choice());
+            assertNull(causality.verificationObligations());
             String jackson = mapper.writeValueAsString(causality);
             String fastjson = JSON.toJSONString(causality);
             assertEquals(LEGACY_JACKSON_JSON, jackson);
@@ -373,6 +376,77 @@ class SceneCausalityPolicyTest {
         assertThrows(UnsupportedOperationException.class, () -> causality.actors().clear());
         assertThrows(UnsupportedOperationException.class, () -> causality.steps().clear());
         assertThrows(UnsupportedOperationException.class, () -> causality.constraints().clear());
+    }
+
+    @Test
+    void verificationJsonSchemaGoldenPreservesBindingsAndOmitsUnauthorizedAlternative() throws Exception {
+        String jacksonGolden = "{\"verificationObligations\":[{\"verifier\":\"林青\",\"subject\":\"江燃\","
+                + "\"item\":\"辨字能力\",\"criterion\":\"独立读出署名\",\"resultUse\":\"决定是否接手核对\"}]}";
+        String fastjsonGolden = "{\"verificationObligations\":[{\"criterion\":\"独立读出署名\",\"item\":\"辨字能力\","
+                + "\"resultUse\":\"决定是否接手核对\",\"subject\":\"江燃\",\"verifier\":\"林青\"}]}";
+        var expected = new SceneCausality(null, null, null, null, List.of(
+                new VerificationObligation("林青", "江燃", "辨字能力", "独立读出署名", "决定是否接手核对", null)));
+        var mapper = new ObjectMapper();
+        for (var causality : List.of(expected, mapper.readValue(jacksonGolden, SceneCausality.class),
+                JSON.parseObject(fastjsonGolden, SceneCausality.class))) {
+            assertEquals(expected, causality);
+            assertEquals(jacksonGolden, mapper.writeValueAsString(causality));
+            assertEquals(fastjsonGolden, JSON.toJSONString(causality));
+            assertEquals("f8982d877502b89b5d97704b3aaf61cc6c96c51a8194b880c6c67113d5c20f8a",
+                    ChapterManuscript.digest(mapper.writeValueAsString(causality)));
+            assertEquals("71593b59a4e31638cf0ee16be2d80486926545fbaff4585545e2e3d07ea2155c",
+                    ChapterManuscript.digest(JSON.toJSONString(causality)));
+            assertNull(causality.verificationObligations().get(0).allowedAlternative());
+        }
+    }
+
+    @Test
+    void declaredVerificationRequiresBoundParticipantsItemCriterionAndResultUseWithoutInventingAlternatives() {
+        var incomplete = new VerificationObligation("外人", " ", null, " ", null, "临时免试");
+        var causality = new SceneCausality(null, null, null, null, Arrays.asList(null, incomplete));
+        var violations = SceneCausalityPolicy.violations(scene(causality, List.of("江燃", "林青")));
+        assertEquals(6, violations.size());
+        assertIssue(violations, "causality.verificationObligations[0]", "空");
+        for (String field : List.of("verifier", "subject", "item", "criterion", "resultUse")) {
+            assertTrue(violations.stream().anyMatch(value -> value.startsWith("causality.verificationObligations[1]." + field)),
+                    violations.toString());
+        }
+        assertSame(incomplete, causality.verificationObligations().get(1));
+        assertNull(incomplete.item());
+        var plan = ChapterPlanItemEntity.builder().schemaVersion(2)
+                .scenes(List.of(scene(causality, List.of("江燃", "林青")))).build();
+        assertTrue(ScenePlanPolicy.violations(plan).stream()
+                .anyMatch(value -> value.startsWith("scenes[0].causality.verificationObligations[1].criterion")));
+    }
+
+    @Test
+    void verificationWithoutExchangeOrStepsCanBeSelfCheckOrExplicitlyAuthorizedAlternative() throws Exception {
+        for (var obligation : List.of(
+                new VerificationObligation("江燃", "江燃", "旧信页数", "与目录一致", "缺页则暂不归档", null),
+                new VerificationObligation("林青", "江燃", "辨字能力", "独立读出署名", "按结果决定能否接手核对",
+                        "作者明确允许以本人昨日已验过的签名记录代验，记录完整且核验者确认同一人时适用"))) {
+            var causality = new SceneCausality(null, null, null, null, List.of(obligation));
+            assertEquals(List.of(), SceneCausalityPolicy.violations(scene(causality, List.of("江燃", "林青"))));
+            var mapper = new ObjectMapper();
+            assertEquals(causality, mapper.readValue(mapper.writeValueAsString(causality), SceneCausality.class));
+            assertEquals(causality, JSON.parseObject(JSON.toJSONString(causality), SceneCausality.class));
+            assertNull(causality.terms());
+            assertNull(causality.steps());
+            assertEquals(obligation.allowedAlternative(), causality.verificationObligations().get(0).allowedAlternative());
+        }
+        var empty = new SceneCausality(null, null, null, null, List.of());
+        assertEquals(List.of(), SceneCausalityPolicy.violations(quiet(empty)));
+    }
+
+    @Test
+    void verificationSnapshotKeepsNullPositionsWithoutMutatingCallerList() {
+        var obligation = new VerificationObligation("江燃", "江燃", "旧信页数", "与目录一致", "决定归档", null);
+        List<VerificationObligation> values = new ArrayList<>(Arrays.asList(obligation, null));
+        var causality = new SceneCausality(null, null, null, null, values);
+        values.clear();
+        assertEquals(Arrays.asList(obligation, null), causality.verificationObligations());
+        assertThrows(UnsupportedOperationException.class, () -> causality.verificationObligations().clear());
+        assertIssue(SceneCausalityPolicy.violations(quiet(causality)), "causality.verificationObligations[1]", "空");
     }
 
     private static void assertIssue(List<String> violations, String path, String detail) {

@@ -8,6 +8,7 @@ import cn.novel.yonren.domain.novel.model.valobj.plan.CausalVerdict;
 import cn.novel.yonren.domain.novel.model.valobj.plan.SceneCausality;
 import cn.novel.yonren.domain.novel.model.valobj.plan.ScenePlan;
 import cn.novel.yonren.domain.novel.model.valobj.quality.DeliveryReview;
+import cn.novel.yonren.domain.novel.service.armory.plan.SceneCausalityPolicy;
 import cn.novel.yonren.domain.novel.model.valobj.work.ChapterManuscript;
 import com.alibaba.fastjson2.JSON;
 import org.apache.commons.lang3.StringUtils;
@@ -105,8 +106,12 @@ public final class DeliveryReviewPolicy {
             diagnostics.add("DELIVERY_PLAN_INVALID: " + id + " 未声明 outcome/function");
         }
         addTarget(targets, diagnostics, new Target(id, sceneId, fields));
-        if (scene.causality() == null || scene.causality().steps() == null) return;
-        List<SceneCausality.CausalStep> steps = scene.causality().steps();
+        if (scene.causality() == null) return;
+        for (String violation : SceneCausalityPolicy.violations(scene)) {
+            diagnostics.add("DELIVERY_PLAN_INVALID: " + id + " " + violation);
+        }
+        List<SceneCausality.CausalStep> steps = scene.causality().steps() == null
+                ? List.of() : scene.causality().steps();
         for (int i = 0; i < steps.size(); i++) {
             SceneCausality.CausalStep step = steps.get(i);
             if (step == null || StringUtils.isBlank(step.action())) {
@@ -121,6 +126,36 @@ public final class DeliveryReviewPolicy {
             put(stepFields, prefix + "response", step.response());
             put(stepFields, prefix + "because", step.because());
             addTarget(targets, diagnostics, new Target(id + "/step:" + (i + 1), sceneId, stepFields));
+        }
+        var terms = scene.causality().terms();
+        if (SceneCausalityPolicy.hasTerms(terms)) {
+            Map<String, String> termsFields = new LinkedHashMap<>();
+            String prefix = "causality.terms.";
+            put(termsFields, prefix + "offerer", terms.offerer());
+            put(termsFields, prefix + "receiver", terms.receiver());
+            put(termsFields, prefix + "consideration", terms.consideration());
+            put(termsFields, prefix + "payment", terms.payment());
+            put(termsFields, prefix + "verificationBy", terms.verificationBy());
+            put(termsFields, prefix + "deadline", terms.deadline());
+            put(termsFields, prefix + "onFailure", terms.onFailure());
+            addTarget(targets, diagnostics, new Target(id + "/terms", sceneId, termsFields));
+        }
+        var obligations = scene.causality().verificationObligations();
+        if (obligations == null) return;
+        for (int i = 0; i < obligations.size(); i++) {
+            var obligation = obligations.get(i);
+            Map<String, String> verificationFields = new LinkedHashMap<>();
+            if (obligation != null) {
+                String prefix = "causality.verificationObligations[" + i + "].";
+                put(verificationFields, prefix + "verifier", obligation.verifier());
+                put(verificationFields, prefix + "subject", obligation.subject());
+                put(verificationFields, prefix + "item", obligation.item());
+                put(verificationFields, prefix + "criterion", obligation.criterion());
+                put(verificationFields, prefix + "resultUse", obligation.resultUse());
+                put(verificationFields, prefix + "allowedAlternative", obligation.allowedAlternative());
+            }
+            // 即使义务结构无效也保留原下标 target；异常计划不能靠省略坏条目宣称全覆盖。
+            addTarget(targets, diagnostics, new Target(id + "/verification:" + (i + 1), sceneId, verificationFields));
         }
     }
 
@@ -138,7 +173,9 @@ public final class DeliveryReviewPolicy {
         StringBuilder sb = new StringBuilder("\n\n【计划交付逐项验收】这是一份固定清单，不是文风评分。")
                 .append("每个 targetId 恰好返回一条 deliveryChecks；不能因机械词面命中、issues=[] 或 fixed=true 省略核验。")
                 .append("\n核验范围：").append(request.contract().scope())
-                .append("。场景级对象核对最终 outcome/function；step 对象核对已声明的决定性行动及必要回应、依据。")
+                .append("。场景级对象核对最终 outcome/function；step 对象核对已声明的决定性行动及必要回应、依据；")
+                .append("terms 对象核对双方提供与回报及实际适用的核验、期限和失败约定；verification 对象核对绑定的核验义务。")
+                .append(verificationReviewInstructions())
                 .append("\n意图不等于成功，阻力不等于必须克服；预期失败、静场、等待、心理、讲述与余韵都可交付。")
                 .append("不新增对白、冲突、代价、转折、字数或动作展示配额，不要求逐句照抄计划。")
                 .append("\nPASS：正文已有可理解的必要过程与结果，或计划明确允许结果级概述且已给出具体落点。")
@@ -149,7 +186,9 @@ public final class DeliveryReviewPolicy {
                 .append("\nUNKNOWN：计划含糊、证据不足、无法判断。不能将拿不准改成 PASS 或程度性 MINOR。")
                 .append("\n每条填写 targetId、sceneId（旧事件为 null）、verdict、planField、planEvidence、evidence、reason、")
                 .append("repair、failureType；planField 只选该对象下的一个交付字段：场景选 outcome/function，")
-                .append("步骤选 action/response/because，旧事件选 keyEvents[i]；planEvidence 是该字段的连续原文。")
+                .append("步骤选 action/response/because，terms 选 consideration/payment/verificationBy/deadline/onFailure，")
+                .append("verification 选 item/criterion/resultUse/allowedAlternative，旧事件选 keyEvents[i]；")
+                .append("嵌套字段须填固定清单中的完整路径；不能只引人物身份。planEvidence 是该字段的连续原文。")
                 .append("PASS 的 evidence 必须摘自当前正文，reason 说明这些文字如何支撑必要过程/允许概述的落点。")
                 .append("ISSUE 必须有具体缺口和定向 repair，不另编剧情；非 ISSUE 的 failureType 必须为 null。")
                 .append("引文存在本身不证明因果成立，不能拿名词/结果短语的重合代替语义判断。")
@@ -160,6 +199,21 @@ public final class DeliveryReviewPolicy {
             sb.append("计划结构异常，不能宣称通过：").append(String.join("；", request.contract().diagnostics()));
         }
         return sb.toString();
+    }
+
+    /** 新旧计划均适用的语义口径；只有实际核验义务才审，不按词面制造新任务。 */
+    public static String verificationReviewInstructions() {
+        return "\n【核验主体与条款交付】即使旧计划只在 keyEvents、意图、结果或自由条款里写明核验，也须识别其实际义务。"
+                + "明确谁核验谁的什么项目、按什么标准、结果用于哪个决定，逐项保持原主体、项目和标准。"
+                + "查出对手的问题不能代替证明主角达标；对手心虚、认输、退让、签字认可、围观喝彩或被验者自述都不是自动完成证明。"
+                + "正文只验了对手而原义务是验主角，仍是原核验 MISSING_DELIVERY；若已宣布据此过关/交付结果却缺原定核验，"
+                + "用 RESULT_WITHOUT_CAUSE 定位宣布句，并在 reason 指明被偷换的主体、项目或标准。"
+                + "只允许计划/作者/既定规则明确授权的替代及其条件；allowedAlternative 缺席不授权新增替代规则，"
+                + "‘拆穿考官即可免试’不能由正文临时发明，授权含糊用 UNKNOWN。"
+                + "已有明确授权且条件在正文成立时可按该替代判 PASS，不强求再做被合法替代的原流程。"
+                + "核验失败、暂缓、待验也可兑现计划的失败/未决落点，不把失败强改成功；必要过程可以简短讲述，不要求演示配额。"
+                + "交换保持 offerer/receiver 的提供物与回报方向；无偿不补代价，期限未到或失败条件未触发时不提前要求支付/惩罚，"
+                + "但约定不能被正文无授权改写。检查有意义 terms，即使本场没有 steps；全空 terms 不制造交易任务。";
     }
 
     public static DeliveryReview consume(Request request, List<CausalVerdict> checks) {
@@ -210,10 +264,7 @@ public final class DeliveryReviewPolicy {
         }
         if (check.verdict() == CausalVerdict.Status.UNKNOWN) return null;
         String field = target.fields().get(check.planField());
-        boolean obligationField = check.planField() != null && (check.planField().startsWith("keyEvents[")
-                || check.planField().equals("outcome") || check.planField().equals("function")
-                || check.planField().endsWith(".action") || check.planField().endsWith(".response")
-                || check.planField().endsWith(".because"));
+        boolean obligationField = isObligationField(check.planField());
         // 计划证据必须锚定该对象的交付义务，人物名或“有此意图”不是完成证明。
         if (!obligationField || field == null || StringUtils.isBlank(check.planEvidence())
                 || !field.contains(check.planEvidence())
@@ -237,6 +288,19 @@ public final class DeliveryReviewPolicy {
             }
         }
         return null;
+    }
+
+    private static boolean isObligationField(String field) {
+        if (field == null) return false;
+        if (field.startsWith("keyEvents[") || field.equals("outcome") || field.equals("function")) return true;
+        if (field.startsWith("causality.steps[")) {
+            return List.of(".action", ".response", ".because").stream().anyMatch(field::endsWith);
+        }
+        if (field.startsWith("causality.verificationObligations[")) {
+            return List.of(".item", ".criterion", ".resultUse", ".allowedAlternative").stream().anyMatch(field::endsWith);
+        }
+        return List.of("consideration", "payment", "verificationBy", "deadline", "onFailure").stream()
+                .anyMatch(name -> field.equals("causality.terms." + name));
     }
 
     private static CausalVerdict boundCheck(CausalVerdict check, ChapterManuscript manuscript) {

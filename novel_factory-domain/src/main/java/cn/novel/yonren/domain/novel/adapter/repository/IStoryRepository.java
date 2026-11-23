@@ -97,6 +97,15 @@ public interface IStoryRepository {
     void writeChapterPlan(Path runDir, ChapterPlanAggregate chapterPlan) throws Exception;
 
     /**
+     * 写观察式重基候选到 runDir/rebase/ 独立文件：不覆盖原计划、不参与正文生成。
+     * 每次调用生成唯一文件，便于保留多份候选与历史诊断。
+     *
+     * @return 实际写入路径
+     */
+    Path writeRebaseRecord(Path storyDir, Path runDir, String chapterNo, String status, String content)
+            throws Exception;
+
+    /**
      * 写每章正文到 chapters/chapter-XXXX.txt
      */
     void writeChapters(Path storyDir, List<ChapterContentEntity> chapterContents) throws Exception;
@@ -312,6 +321,9 @@ public interface IStoryRepository {
      * storyDir 为 resolveStoryDirectory 校验后的路径对象
      */
     void appendWriterSample(Path storyDir, String jsonlLine) throws Exception;
+
+    /** 原稿和段落建议留作对照，独立于已采用正文及训练样本。 */
+    void appendDraftReview(Path storyDir, String jsonlLine) throws Exception;
 
     /**
      * 追加一行全书质量评分到 memory/quality-trend.jsonl（观测文件，追加语义）。

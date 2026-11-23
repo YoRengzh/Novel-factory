@@ -100,7 +100,8 @@ public class CallChapterPlanLlmNode extends AbstractArmorySupport {
             ChapterPlanSegmentPlanner.PlannedSegment planned = planner.planSegment(
                     requestParameter.getStoryVO(), ctx, dynamicContext.getPrompt(),
                     batchStart, batchEnd, dynamicContext.getStageBlueprint(), rosterNames,
-                    dynamicContext.getUsedPromptMap(), null, null, job);
+                    dynamicContext.getUsedPromptMap(), dynamicContext.getChapterSummaries(),
+                    dynamicContext.getForeshadowSettlements(), job, dynamicContext.getStoryDir());
             dynamicContext.setRawResult(planned.raw());
             dynamicContext.setChapterPlanAggregate(planned.plan());
             return planned.plan();
@@ -114,7 +115,8 @@ public class CallChapterPlanLlmNode extends AbstractArmorySupport {
             ChapterPlanSegmentPlanner.PlannedSegment parsed = planner.planSegment(
                     requestParameter.getStoryVO(), ctx, prompts.get(i),
                     segment.startChapter(), segment.endChapter(), segment.blueprint(), rosterNames,
-                    dynamicContext.getUsedPromptMap(), null, null, job);
+                    dynamicContext.getUsedPromptMap(), dynamicContext.getChapterSummaries(),
+                    dynamicContext.getForeshadowSettlements(), job, dynamicContext.getStoryDir());
             mergedChapters.addAll(parsed.plan().getChapters());
             rawSegments.add(parsed.raw());
         }

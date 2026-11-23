@@ -792,13 +792,10 @@ public class ChapterMemoryService {
             if (summary.getCharacterBeats() == null) continue;
             for (ChapterSummaryEntity.CharacterBeat beat : summary.getCharacterBeats()) {
                 if (beat == null || StringUtils.isBlank(beat.getName())) continue;
+                String fields = CharacterBeatEvidencePolicy.renderFields(summary, beat, summaries);
+                if (fields.isEmpty()) continue;
                 StringBuilder line = new StringBuilder("- 第").append(summary.getChapterNo()).append("章 ")
-                        .append(beat.getName());
-                if (StringUtils.isNotBlank(beat.getGoal())) line.append("｜目标：").append(beat.getGoal());
-                if (StringUtils.isNotBlank(beat.getDecision())) line.append("｜决定：").append(beat.getDecision());
-                if (StringUtils.isNotBlank(beat.getConsequence())) line.append("｜后果：").append(beat.getConsequence());
-                if (StringUtils.isNotBlank(beat.getRelationshipChange())) line.append("｜关系变化：").append(beat.getRelationshipChange());
-                if (StringUtils.isNotBlank(beat.getNextIntent())) line.append("｜后续意图：").append(beat.getNextIntent());
+                        .append(beat.getName()).append(fields);
                 lines.add(line.toString());
             }
         }

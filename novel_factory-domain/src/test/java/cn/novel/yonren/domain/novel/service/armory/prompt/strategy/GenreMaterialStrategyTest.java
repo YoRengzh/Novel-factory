@@ -265,6 +265,66 @@ class GenreMaterialStrategyTest {
         assertTrue(strategy.supports(PromptScene.CHAPTER_PLAN, ctx("悬疑")));
     }
 
+    @Test
+    void directWriterModeLoadsOnlyPureProseAnchorAndSkipsStylePapersAndOldExemplars() {
+        var registered = new GenreMaterialStrategy(new PromptRuleFileLoader(), new ReferenceUsagePolicy());
+        var context = PromptContext.builder()
+                .theme("玄幻修真")
+                .style("传统升级爽文")
+                .chapterBrief("领例钱并起冲突")
+                .directWriterMode(true)
+                .build();
+
+        List<PromptRule> rules = registered.load(PromptScene.CHAPTER_CONTENT, context);
+
+        assertEquals(List.of("style-anchor-fantasy"), names(rules));
+        assertTrue(rules.get(0).getContent().contains("斗之力"));
+        assertFalse(rules.get(0).getContent().contains("【思维链拆解】"));
+    }
+
+    @Test
+    void directWriterModeRespectsExplicitRegisterAndStillSkipsGenrePapersAndExemplars() {
+        var registered = new GenreMaterialStrategy(new PromptRuleFileLoader(), new ReferenceUsagePolicy());
+        var context = PromptContext.builder()
+                .theme("玄幻")
+                .style("冷峻白描古风")
+                .chapterBrief("排队领例钱")
+                .directWriterMode(true)
+                .build();
+
+        List<PromptRule> rules = registered.load(PromptScene.CHAPTER_CONTENT, context);
+
+        assertEquals(List.of("style-register-crisp-classical"), names(rules));
+    }
+
+    @Test
+    void directWriterModeLoadsRealAuthorFantasyAnchorsAndSupportsMultiGenreFallback() {
+        var registered = new GenreMaterialStrategy(new PromptRuleFileLoader(), new ReferenceUsagePolicy());
+
+        List<PromptRule> fantasyRules = registered.load(PromptScene.CHAPTER_CONTENT,
+                PromptContext.builder().theme("玄幻修真").style("传统升级爽文").directWriterMode(true).build());
+        assertEquals(List.of("style-anchor-fantasy"), names(fantasyRules));
+        String fantasyAnchor = fantasyRules.get(0).getContent();
+        assertTrue(fantasyAnchor.contains("斗之力，三段"));
+        assertTrue(fantasyAnchor.contains("恭喜主人，结成元婴"));
+        assertTrue(fantasyAnchor.contains("叶凡"));
+        assertFalse(fantasyAnchor.contains("第一件事不是嚎叫狂喜"), "必须移除AI自编切片");
+
+        List<PromptRule> gamingRules = registered.load(PromptScene.CHAPTER_CONTENT,
+                PromptContext.builder().theme("电子竞技").style("热血").directWriterMode(true).build());
+        assertEquals(List.of("style-anchor-gaming"), names(gamingRules));
+        assertTrue(gamingRules.get(0).getContent().contains("伏龙翔天"));
+
+        List<PromptRule> compositeRules = registered.load(PromptScene.CHAPTER_CONTENT,
+                PromptContext.builder().theme("都市网游").style("轻松").directWriterMode(true).build());
+        assertEquals(List.of("style-anchor-gaming"), names(compositeRules), "复合题材应回落命中带锚点的子题材");
+
+        List<PromptRule> urbanRules = registered.load(PromptScene.CHAPTER_CONTENT,
+                PromptContext.builder().theme("都市职场").style("现实").directWriterMode(true).build());
+        assertTrue(urbanRules.stream().noneMatch(r -> r.getName().contains("style-anchor-fantasy")
+                || r.getName().contains("style-anchor-gaming")), "纯现代职场题材不得串入玄幻或电竞切片");
+    }
+
     private void stubFantasy() {
         when(fileLoader.load("styles/fantasy.md")).thenReturn("风格内容");
         when(fileLoader.load("references/genres/fantasy/style-references.md")).thenReturn("题材风格");

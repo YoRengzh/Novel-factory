@@ -69,6 +69,25 @@ class ParagraphDensityAuditServiceTest {
     }
 
     @Test
+    void rejectsPatchThatAddsRepeatedContrast() {
+        enable();
+        stub("{\"patches\":[{\"anchor\":\"他感到很愤怒。他真的很愤怒。\","
+                + "\"replacement\":\"不是哭，是笑。不是冷，是怕。不是催促，是告别。\"}]}");
+        assertNull(service.auditAndRewrite(module(), item(), CONTENT, 1));
+    }
+
+    @Test
+    void previousChaptersMakeScatteredBreathTimingsVisibleToTheEditor() {
+        enable();
+        stub("{\"patches\":[]}");
+        service.auditAndRewrite(module(), item(), CONTENT + "两息过去。又过三息。水面像镜子，缆绳像墨线，桨柄像秤杆。", 3, 4);
+        ArgumentCaptor<LlmCall> captor = ArgumentCaptor.forClass(LlmCall.class);
+        verify(llmGateway).complete(any(), captor.capture());
+        assertTrue(captor.getValue().getUserPrompt().contains("近两章叙述用“息”计时 4 次，本稿 2 次"));
+        assertTrue(captor.getValue().getUserPrompt().contains("逐项核对原物、位置与状态"));
+    }
+
+    @Test
     void validPatch_isAppliedLocally() {
         enable();
         stub("{\"patches\":[{\"anchor\":\"他感到很愤怒。他真的很愤怒。\","
@@ -131,6 +150,8 @@ class ParagraphDensityAuditServiceTest {
         assertTrue(prompt.contains("重复且没有当前阅读功能"), "只处理重复且损失功能的段落");
         assertTrue(prompt.contains("心理、讲述、等待、环境、余韵和后果消化都可以独立承担阅读功能"));
         assertTrue(prompt.contains("不能仅因不改变外部状态而删除"));
+        assertTrue(prompt.contains("实际盘点得出的新信息"));
+        assertTrue(prompt.contains("只删一句时，引用该句") && prompt.contains("改整段时，引用完整原段"));
         assertTrue(prompt.contains("不要改变剧情走向") && prompt.contains("不要新增情节"),
                 "改写必须限定在挤水，不得改剧情");
         assertTrue(prompt.contains("anchor 必须逐字来自正文"), "必须强调锚点逐字性");

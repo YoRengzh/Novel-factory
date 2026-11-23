@@ -383,6 +383,44 @@ class ScenePlanPolicyTest {
         }
     }
 
+    @Test
+    void verificationProjectsBoundSubjectItemCriterionResultAndOnlyAuthorizedAlternative() throws Exception {
+        for (String alternative : Arrays.<String>asList(null, "作者授权以本人既有验字记录代验，仅记录完整且身份一致时可用")) {
+            var obligation = new SceneCausality.VerificationObligation("林青", "江燃", "辨字能力", "独立读出署名",
+                    "决定是否接手核对，未通过则待验", alternative);
+            var causality = new SceneCausality(null, null, null, null, List.of(obligation));
+            var scene = new ScenePlan("reading", List.of("江燃", "林青"), "核验辨字能力", "署名模糊", null,
+                    "按核验结论决定是否接手", "核验", null, null, null, causality);
+            var plan = v2(List.of(scene));
+            String before = JSON.toJSONString(plan);
+            String writing = ScenePlanPolicy.renderForWriting(plan);
+            for (String required : List.of("本场核验：林青核验江燃的辨字能力", "判定标准：独立读出署名",
+                    "结果用于：决定是否接手核对，未通过则待验")) {
+                assertTrue(writing.contains(required), writing);
+            }
+            if (alternative == null) {
+                assertTrue(writing.contains("未授权替代，不得换被验主体、项目或标准"), writing);
+                assertFalse(writing.contains("已授权替代及条件"), writing);
+            } else {
+                assertTrue(writing.contains("已授权替代及条件：" + alternative), writing);
+            }
+            String review = ScenePlanPolicy.render(plan.getScenes());
+            assertTrue(review.contains(JSON.toJSONString(causality)));
+            assertTrue(review.contains("缺省不得新增替代规则"));
+            assertEquals(before, JSON.toJSONString(plan), "投影不改权威计划或其hash输入");
+            ScenePlanPolicy.normalize(plan);
+            assertSame(obligation, plan.getScenes().get(0).causality().verificationObligations().get(0));
+            assertEquals(List.of(), ScenePlanPolicy.violations(plan));
+            assertEquals(List.of(), plan.getDialogueScenes());
+            var mapper = new ObjectMapper();
+            assertEquals(plan, mapper.readValue(mapper.writeValueAsString(plan), ChapterPlanItemEntity.class));
+            assertEquals(plan, JSON.parseObject(JSON.toJSONString(plan), ChapterPlanItemEntity.class));
+        }
+        String quiet = ScenePlanPolicy.renderForWriting(v2(List.of(scene("quiet", "看雨", null, null, "静场"))));
+        assertFalse(quiet.contains("本场核验"));
+        assertFalse(quiet.contains("替代边界"));
+    }
+
     private static String renderReferences(FactReference fact) {
         ScenePlan scene = new ScenePlan("s1", List.of("江燃"), "整理旧信", null,
                 List.of(fact), null, "静场", null, null, null,

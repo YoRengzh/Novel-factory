@@ -8,11 +8,15 @@ import cn.novel.yonren.domain.novel.model.valobj.character.CharacterEffect.Kind;
 import cn.novel.yonren.domain.novel.model.valobj.character.CharacterEffect.State;
 import cn.novel.yonren.domain.novel.model.valobj.work.ChapterManuscript;
 import com.alibaba.fastjson2.JSON;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.util.*;
 
 /** 从已提交摘要按章序重建人物状态，不维护第二份权威人物库。 */
 public final class CharacterStateProjector {
+    private static final Logger log = LoggerFactory.getLogger(CharacterStateProjector.class);
+
     private CharacterStateProjector() {}
 
     public record Snapshot(Map<String, CharacterEffect> facts, Map<String, String> aliases,
@@ -347,6 +351,116 @@ public final class CharacterStateProjector {
         return "- " + fact.factId() + "｜" + fact.character() + "｜" + fact.kind() + '/' + fact.state() + "｜"
                 + fact.key() + "：" + fact.value() + "（第" + fact.chapterNo() + "章，证据：" + fact.evidence() + "）\n"
                 + (blank(fact.acquisition()) ? "" : "  获知/形成方式：" + fact.acquisition() + '\n');
+    }
+
+    /**
+     * 正文投影：只写人物此刻知道什么、相信什么、打算做什么，不带 factId、哈希、章节号与审计诊断。
+     *
+     * <p>与 {@link #render} 的分工：那个是审校/校验投影（要能溯源到证据），这个是写手投影
+     * （要能直接变成人物行动依据）。两者共用确认状态；正文按完整自然语言条目选入预算，
+     * 普通候选可以省略，场景显式依赖不允许静默省略。
+     * 章节号故意不出现：正文禁止作者层面元信息，写手看到"第12章"容易顺手写进叙述。
+     */
+    public static String renderForWriter(List<ChapterSummaryEntity> summaries, Integer beforeChapter,
+                                         Collection<String> cast, int maxChars) {
+        return renderForWriter(summaries, beforeChapter, cast, maxChars, Map.of());
+    }
+
+    /** 场景显式依赖先校验归属、来源和状态，再优先供给；软预算不得静默丢掉硬依赖。 */
+    public static String renderForWriter(List<ChapterSummaryEntity> summaries, Integer beforeChapter,
+                                         Collection<String> cast, int maxChars,
+                                         Map<String, List<String>> requiredReferences) {
+        return renderForWriter(summaries, beforeChapter, cast, maxChars, requiredReferences, true);
+    }
+
+    /** 宽容模式写手投影：忽略规划层误填的物品名或未确认依赖并记日志，避免中断续写作业。 */
+    public static String renderForWriterTolerant(List<ChapterSummaryEntity> summaries, Integer beforeChapter,
+                                                 Collection<String> cast, int maxChars,
+                                                 Map<String, List<String>> requiredReferences) {
+        return renderForWriter(summaries, beforeChapter, cast, maxChars, requiredReferences, false);
+    }
+
+    private static String renderForWriter(List<ChapterSummaryEntity> summaries, Integer beforeChapter,
+                                          Collection<String> cast, int maxChars,
+                                          Map<String, List<String>> requiredReferences, boolean strict) {
+        Projection projection = projection(summaries, beforeChapter, cast, Integer.MAX_VALUE, 0);
+        Set<String> required = new LinkedHashSet<>();
+        if (requiredReferences != null) {
+            requiredReferences.forEach((character, ids) -> {
+                if (ids == null) {
+                    return;
+                }
+                for (String id : ids) {
+                    CharacterEffect fact = projection.confirmedFacts().get(id);
+                    if (fact == null || !projection.snapshot().identity(character).equals(fact.characterId())
+                            || fact.state() == State.FORGOTTEN || fact.state() == State.WITHDRAWN) {
+                        if (strict) {
+                            throw new IllegalArgumentException("场景人物事实依赖未确认、已失效或归属不符：" + character + " / " + id);
+                        }
+                        log.warn("跳过未确认、已失效或归属不符的场景人物事实依赖：{} / {}", character, id);
+                        continue;
+                    }
+                    required.add(id);
+                }
+            });
+        }
+        Set<String> ordered = new LinkedHashSet<>(required);
+        ordered.addAll(projection.selectedFactIds());
+        String header = "【人物当前状态·只写他确实知道的】缺省是未知，不等于不知道；怀疑不等于确认；"
+                + "答应过不等于已经做到。\n";
+        StringBuilder text = new StringBuilder();
+        int admitted = 0;
+        for (String id : ordered) {
+            if (!required.contains(id) && admitted >= DEFAULT_MAX_FACTS) continue;
+            String line = writerLine(projection.confirmedFacts().get(id));
+            if (line.isEmpty()) continue;
+            if (maxChars > 0 && header.length() + text.length() + line.length() > maxChars) {
+                if (required.contains(id)) {
+                    if (strict) {
+                        throw new IllegalArgumentException("正文人物状态预算无法容纳场景必要依赖：" + id);
+                    }
+                    log.warn("正文人物状态预算已满，跳过场景人物事实依赖：{}", id);
+                }
+                continue;
+            }
+            text.append(line);
+            admitted++;
+        }
+        return text.length() == 0 ? "" : header + text;
+    }
+
+    /** 单条状态的自然语言行；无写作价值的状态（如别名）返回空串。 */
+    private static String writerLine(CharacterEffect fact) {
+        if (fact == null || blank(fact.character()) || blank(fact.value()) || fact.kind() == Kind.ALIAS) {
+            return "";
+        }
+        String label = switch (fact.kind()) {
+            case KNOWLEDGE -> fact.state() == State.FORGOTTEN ? "已经忘记" : "知道";
+            case BELIEF -> switch (fact.state()) {
+                case SUSPECTED -> "怀疑";
+                case WITHDRAWN -> "不再相信";
+                default -> "相信";
+            };
+            case GOAL -> fact.state() == State.COMPLETED ? "已经实现的目标"
+                    : fact.state() == State.FAILED ? "未能实现的目标"
+                    : fact.state() == State.WITHDRAWN ? "已经放弃的目标" : "目标";
+            case DECISION -> fact.state() == State.WITHDRAWN ? "撤回的决定" : "已经决定";
+            case INTENT -> fact.state() == State.WITHDRAWN ? "不再打算" : "打算";
+            case ACTION -> switch (fact.state()) {
+                case COMPLETED -> "已经完成";
+                case FAILED -> "没能完成";
+                default -> "正在尝试";
+            };
+            case COMMITMENT -> switch (fact.state()) {
+                case ACCEPTED -> "答应过";
+                case COMPLETED -> "已经履行";
+                case FAILED -> "未能履行";
+                case WITHDRAWN -> "撤回了承诺";
+                default -> "被要求";
+            };
+            case ALIAS -> "";
+        };
+        return "- " + fact.character().strip() + "｜" + label + "：" + fact.value().strip() + "\n";
     }
 
     /** 只读派生轨迹，不落盘、不构成第二份人物权威账本；events 仅为实际完整渲染的事件。 */

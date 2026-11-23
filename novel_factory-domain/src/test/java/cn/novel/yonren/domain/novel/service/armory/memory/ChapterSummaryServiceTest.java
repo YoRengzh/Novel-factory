@@ -38,6 +38,50 @@ class ChapterSummaryServiceTest {
     }
 
     @Test
+    void summarizeNewBeatsDoNotRequireFiveFieldsAndIsolateUnsupportedConsequence() {
+        stubModel("""
+                {"summary":"苏青捏碎玉简。","characterBeats":[
+                  {"name":"苏青","decision":"捏碎玉简","consequence":"赵衡已收到消息",
+                   "support":{"decision":{"attribution":"OBSERVABLE","quote":"苏青捏碎玉简。"}}}
+                ]}
+                """);
+        var summary = service.summarize(storyVO(), planItem(1), "苏青捏碎玉简。", 1, null);
+        var beat = summary.getCharacterBeats().get(0);
+        assertEquals(1, beat.getSchemaVersion());
+        assertEquals("捏碎玉简", beat.getDecision());
+        assertNull(beat.getGoal());
+        assertNull(beat.getConsequence());
+        assertNull(beat.getRelationshipChange());
+        assertNull(beat.getNextIntent());
+        assertEquals("赵衡已收到消息", beat.getPendingFields().get(ChapterSummaryEntity.BeatField.consequence).value());
+        verify(llmGateway, times(1)).complete(any(), any(LlmCall.class));
+    }
+
+    @Test
+    void summarizeMarksNewLegacyShapedBeatPendingAndPromptExplainsOptionalSupport() {
+        stubModel("""
+                {"summary":"苏青捏碎玉简。","characterBeats":[
+                  {"name":"苏青","decision":"捏碎玉简","evidence":"苏青捏碎玉简。"}
+                ]}
+                """);
+        var summary = service.summarize(storyVO(), planItem(1), "苏青捏碎玉简。", 1, null);
+        var beat = summary.getCharacterBeats().get(0);
+        assertEquals(1, beat.getSchemaVersion());
+        assertNull(beat.getDecision());
+        assertNotNull(beat.getPendingFields());
+        ArgumentCaptor<LlmCall> captor = ArgumentCaptor.forClass(LlmCall.class);
+        verify(llmGateway).complete(any(), captor.capture());
+        String prompt = captor.getValue().getUserPrompt();
+        assertTrue(prompt.contains("均可空或省略"));
+        assertTrue(prompt.contains("不补满五项"));
+        assertTrue(prompt.contains("DIRECT_STATEMENT"));
+        assertTrue(prompt.contains("INTERPRETATION"));
+        assertTrue(prompt.contains("effectId,chapterNo,manuscriptHash"));
+        assertTrue(prompt.contains("捏碎玉简"));
+        assertTrue(prompt.contains("不要求正文包含姓名加心理谓词"));
+    }
+
+    @Test
     void summarize_parsesStructuredOutputAndBackfills() {
         String json = "{\"summary\":\"小陈被废去丹田后，古物吞噬灵气为他重塑经脉。\","
                 + "\"characterStates\":[{\"name\":\"小陈\",\"status\":\"炼气一层，藏身石缝\",\"evidence\":\"正文\"},"

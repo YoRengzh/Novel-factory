@@ -22,6 +22,7 @@ public class AntiAiToneStrategy implements PromptRuleStrategy, CriticalPromptRul
 
     private static final String FILE = "rules/anti-ai-tone.md";
     private static final String WRITER_FILE = "rules/writer-prose-guide.md";
+    private static final String DIRECT_WRITER_FILE = "rules/direct-writer-system.md";
 
     /** 结构 AI 味小节（计划场景唯一需要的一节） */
     private static final String STRUCTURE_SECTION = "## 一、";
@@ -43,7 +44,8 @@ public class AntiAiToneStrategy implements PromptRuleStrategy, CriticalPromptRul
             return List.of();
         }
         String content = switch (scene) {
-            case CHAPTER_CONTENT, CHAPTER_REVISE -> fileLoader.load(WRITER_FILE);
+            case CHAPTER_CONTENT -> loadWriterGuide(ctx);
+            case CHAPTER_REVISE -> fileLoader.load(WRITER_FILE);
             case CHAPTER_AUDIT -> fileLoader.load(FILE);
             case CHAPTER_PLAN -> fileLoader.loadSections(FILE, STRUCTURE_SECTION);
             default -> null;
@@ -55,5 +57,15 @@ public class AntiAiToneStrategy implements PromptRuleStrategy, CriticalPromptRul
             content += "\n" + PLAN_SCOPE_NOTE;
         }
         return List.of(new PromptRule("anti-ai-tone", content, PromptRule.InjectPosition.SYSTEM));
+    }
+
+    private String loadWriterGuide(PromptContext ctx) {
+        if (ctx != null && ctx.isDirectWriterMode()) {
+            String direct = fileLoader.load(DIRECT_WRITER_FILE);
+            if (direct != null && !direct.isBlank()) {
+                return direct;
+            }
+        }
+        return fileLoader.load(WRITER_FILE);
     }
 }

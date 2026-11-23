@@ -46,6 +46,41 @@ class CharacterStateProjectorTest {
     }
 
     @Test
+    void writerBudgetSkipsLongCandidatesBeforeApplyingCountLimit() {
+        var effects = new ArrayList<CharacterEffect>();
+        var content = new StringBuilder();
+        for (int i = 0; i < 13; i++) {
+            String value = "冗长旧信息" + i + "。".repeat(300);
+            String evidence = "苏青知道" + value + "。";
+            content.append(evidence);
+            effects.add(fact("苏青", Kind.KNOWLEDGE, "旧信息" + i, State.ESTABLISHED, value, evidence, null));
+        }
+        String commitment = "苏青答应今晚返回。";
+        content.append(commitment);
+        effects.add(fact("苏青", Kind.COMMITMENT, "返回", State.ACCEPTED, "今晚返回", commitment, null));
+        var source = summary(1, content.toString(), effects, List.of());
+
+        String writing = CharacterStateProjector.renderForWriter(List.of(source), 2, List.of("苏青"), 180);
+
+        assertTrue(writing.contains("答应过：今晚返回"));
+        assertFalse(writing.contains("character-fact-"));
+    }
+
+    @Test
+    void writerRequiredReferenceMustBelongToActorAndFitBudget() {
+        String evidence = "林远知道水样已污染。";
+        var source = summary(1, evidence, List.of(fact("林远", Kind.KNOWLEDGE, "水样", State.ESTABLISHED,
+                "水样已污染", evidence, null)), List.of());
+        String id = source.getCharacterEffects().get(0).factId();
+        assertThrows(IllegalArgumentException.class, () -> CharacterStateProjector.renderForWriter(
+                List.of(source), 2, List.of("苏青", "林远"), 200, java.util.Map.of("苏青", List.of(id))));
+        assertThrows(IllegalArgumentException.class, () -> CharacterStateProjector.renderForWriter(
+                List.of(source), 2, List.of("林远"), 1, java.util.Map.of("林远", List.of(id))));
+        assertTrue(CharacterStateProjector.renderForWriter(List.of(source), 2, List.of("林远"), 200,
+                java.util.Map.of("林远", List.of(id))).contains("知道：水样已污染"));
+    }
+
+    @Test
     void independentKnowledgePersistsBeyondThreeChaptersAndFutureIsExcluded() {
         String hiding = "苏青看见林远把终端放进地砖暗格。";
         var first = summary(1, hiding, List.of(fact("苏青", Kind.KNOWLEDGE, "终端藏处", State.ESTABLISHED,

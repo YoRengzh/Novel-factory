@@ -15,12 +15,20 @@ import java.util.List;
  */
 @JsonInclude(JsonInclude.Include.NON_NULL)
 public record SceneCausality(List<ActorInput> actors, List<CausalStep> steps,
-                             Terms terms, List<FactReference> constraints) {
+                             Terms terms, List<FactReference> constraints,
+                             List<VerificationObligation> verificationObligations) {
+
+    /** 兼容旧计划和调用方；普通场景不自动添加核验义务。 */
+    public SceneCausality(List<ActorInput> actors, List<CausalStep> steps,
+                          Terms terms, List<FactReference> constraints) {
+        this(actors, steps, terms, constraints, null);
+    }
 
     public SceneCausality {
         actors = optionalList(actors);
         steps = optionalList(steps);
         constraints = optionalList(constraints);
+        verificationObligations = optionalList(verificationObligations);
     }
 
     /**
@@ -82,6 +90,17 @@ public record SceneCausality(List<ActorInput> actors, List<CausalStep> steps,
     @JsonInclude(JsonInclude.Include.NON_NULL)
     public record Terms(String offerer, String receiver, String consideration, String payment,
                         String verificationBy, String deadline, String onFailure) {
+    }
+
+    /**
+     * 仅在本场确有核验任务时声明。verifier 核验 subject 的 item，按 criterion 判定，
+     * resultUse 说明结果如何影响本场决定；失败、未完成也可作为计划的合法结果。
+     * allowedAlternative 只记录作者/既定规则明确授权的替代及条件，null 不授予任何替代权。
+     * 此项不是历史事实引用，也不要求交易；允许自验，不要求每场增加核验。
+     */
+    @JsonInclude(JsonInclude.Include.NON_NULL)
+    public record VerificationObligation(String verifier, String subject, String item, String criterion,
+                                         String resultUse, String allowedAlternative) {
     }
 
     private static <T> List<T> optionalList(List<T> values) {

@@ -18,7 +18,6 @@ public final class ContentDensityPolicy {
      */
     private static final Pattern DIALOGUE_PATTERN = Pattern.compile(
             "[\"\u201C][^\"\u201D]*[\"\u201D]|\u300C[^\u300D]*\u300D|\u300E[^\u300F]*\u300F");
-    private static final Pattern SIMILE_MARKER_PATTERN = Pattern.compile("得像|像被人|似的");
 
     /**
      * 统计正文中的有效对话句数。
@@ -41,9 +40,7 @@ public final class ContentDensityPolicy {
 
     /** 统计引号外可疑比喻标记的词面次数，仅供日志观测。 */
     static long countNarrativeSimileMarkers(String content) {
-        if (content == null || content.isBlank()) return 0;
-        String narration = DIALOGUE_PATTERN.matcher(content).replaceAll(" ");
-        return SIMILE_MARKER_PATTERN.matcher(narration).results().count();
+        return NarrativeStylePolicy.inspect(content).similes().size();
     }
 
     /** 兼容历史调用，只报告词面计数，不生成补量要求或质量结论。 */

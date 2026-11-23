@@ -21,11 +21,13 @@ import cn.novel.yonren.domain.novel.service.armory.quality.ForeshadowSpanPolicy;
 import cn.novel.yonren.domain.novel.service.armory.quality.PlaceTrajectoryPolicy;
 import cn.novel.yonren.domain.novel.service.armory.quality.UsedPatternPolicy;
 import cn.novel.yonren.domain.novel.service.armory.quality.RelationTrajectoryPolicy;
+import cn.novel.yonren.domain.novel.config.StoryProperties;
 import cn.novel.yonren.types.enums.ChapterType;
 import cn.novel.yonren.types.enums.GenreType;
 import jakarta.annotation.Resource;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.lang3.StringUtils;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
 import java.util.ArrayList;
@@ -61,6 +63,9 @@ public class ChapterPlanPromptService {
     /** 输入段总量守门（故事设定 + 记忆前缀）：固定要求与 schema 段不参与裁剪 */
     @Resource
     private PromptBudgetGuard promptBudgetGuard;
+
+    @Autowired(required = false)
+    private StoryProperties storyProperties;
 
     /** 规划 prompt 尾部章节 schema 指令块的起始标记：分支推演须自此处剥离，避免与"只输出方向"指令打架 */
     public static final String PLAN_SCHEMA_MARKER = "请严格按照以下 JSON 格式输出";
@@ -174,6 +179,16 @@ public class ChapterPlanPromptService {
                     .append(" 章（共 ").append(endNo - startNo + 1)
                     .append(" 章），严禁超出此范围；且必须输出 ").append(endNo - startNo + 1)
                     .append(" 章一个不少，未排满即输出不完整，宁可把'收束章'提前也要把批次排满。");
+            if (endNo == startNo) {
+                sb.append("\n【逐章人物驱动推演】紧接上一章实际正文结尾与刚暴露的人物隐患或矛盾，先推演在场各方当下的私心、说话脾气与信息盲区，")
+                        .append("让立场的真实摩擦碰撞出本章局面；各场景的 intention/resistance/outcome 只写可拍成画面的具体行动与客观结果，")
+                        .append("避免写“消化奇遇、确立方向”这类抽象总结语。")
+                        .append("严禁连续多章死守同一地点重复同类小动作（如连章反复验废药），严禁把冲突写成背诵宗门条文与审批流程；每章须推进实质性局面变化（换场、矛盾升级、利益真交割或新危机爆发），不要把一场能演完的冲突硬拆成多章挤牙膏。")
+                        .append("时间间隔、人物往返路程与“昨夜/今日”称呼必须与上一章末尾严格自洽；")
+                        .append("物品名称使用自然称呼，不要把品相或状态描述拼成生造专有名词（如“尚可青芝”）；")
+                        .append("knowledgeRefs 与 requires 只能填上方【可引用的正式事实】中的 character-fact- 编号，严禁填入物品名或人名；")
+                        .append("场景动作与人物转述必须写清具体人名，避免“让他去看”这类模糊代词导致正文错配主语。");
+            }
         }
         sb.append("\n2. chapterNo 从 ").append(startNo).append(" 开始连续递增")
                 .append("\n3. 每章输出 schemaVersion=2 的 scenes 场景计划，并保留章级 goal 与 endingHook；")
@@ -267,7 +282,7 @@ public class ChapterPlanPromptService {
                     settlementListedIntents(dynamicContext.getForeshadowSettlements(), startNo));
         }
         // 密度反馈：前文有"料少字少"的章节时，责令本段计划提高事件密度（治本的反注水）
-        appendDensityFeedback(sb, dynamicContext.getChapterSummaries());
+        appendDensityFeedback(sb, dynamicContext.getChapterSummaries(), isDirectWriterMode());
         // 对白坍缩反馈：前文有"篇幅够、事件也在，但角色不开腔"的章节时，责令本段把冲突写进台词
         appendDialogueCollapseFeedback(sb, dynamicContext.getChapterSummaries());
         // 伏笔长度反馈：伏笔"埋了就收"是长篇读起来浅的直接原因；
@@ -328,7 +343,7 @@ public class ChapterPlanPromptService {
                 .append("多方冲突的出场顺序、信息差与时间差按情境决定，不强制非对称。")
                 .append("先由人物已知信息、目标、当前压力与可用资源决定行动，再形成场景结果；既成事实与能力限制高于预想情节。")
                 .append("可选 causality 提供 actors（character/want/pressure/knowledgeRefs/resources/belief）、")
-                .append("steps（actor/action/responder/response/because/requires）、terms 与 constraints。")
+                .append("steps（actor/action/responder/response/because/requires）、terms、constraints 与 verificationObligations。")
                 .append("knowledgeRefs 仅引用上方人物 factId，belief 可以错误而不改变世界事实；")
                 .append("constraints 用真实 FactReference 描述物品/世界能力前提。")
                 .append("entryStates 与 constraints 的**每个元素都必须是 FactReference 对象**，")
@@ -340,12 +355,21 @@ public class ChapterPlanPromptService {
                 .append("无必要因果说明时可省略，不填配额。")
                 .append("交易才用 terms：offerer/receiver/consideration/payment，以及实际相关的 verificationBy/deadline/onFailure；")
                 .append("无偿可明确写无偿，不擅自补出承诺。")
+                .append("本场确有核验任务时才声明 verificationObligations，每项明确 verifier（核验者）、subject（被验主体）、")
+                .append("item（被验项目）、criterion（判定标准）、resultUse（结果如何影响决定）；核验者和被验主体须在场，可自验。")
+                .append("核验必须绑定原主体、项目与标准，查出对手的问题不能代替证明主角达标；")
+                .append("对手心虚、退让、认可、围观喝彩或人物自述均不能自动兑现核验。")
+                .append("allowedAlternative 选填，只复制作者指令或既定规则明确授权的替代和适用条件；")
+                .append("没有授权就省略，不能临时新增‘验倒对手即可过关’等替代规则。")
+                .append("核验失败、待验或暂缓也可作为合法落点，resultUse 不保证成功；非核验场景省略整个字段，不为填表新增任务。")
                 .append("计划不能把不可读改成数据不完整来授予读取能力；能力转变必须先有合理操作与结果，尚未发生的改变不入历史状态。")
                 .append("outcome 写本场实际交付的选择、后果、感受或有依据的新认识，不写“意味着什么”“相当于迈出第一步”等作者评语；")
                 .append("伏笔映射和策划理由统一放到 function/milestoneRefs，不要混进 outcome。")
                 .append("若同一人物已经确认某条线索，只有本场增加证据、改变风险或影响其他人物时，才把后续核对当成新的场景结果。")
                 .append("独处、犹疑、等待、静场可成立，不要求每场转折或付出代价。")
                 .append("同一线索在目标、场景结果、章末和 suspenseBeat 中的知情程度须一致；阶段要到达的结论可留到后章。")
+                .append("有知情变化时，写明谁在本场通过什么第一次获知，读者此时能看到哪条证据。")
+                .append("本章中途揭晓的答案只放到揭晓场的 outcome，较早场景只记录可观察线索和当时能作出的判断。")
                 .append("筹划只表达人物的主观判断和待验证前提，不在事前保证对手反应或风险已消失；")
                 .append("重复确认条款只有新增信息或关系作用时保留，资源、期限和责任交代清楚后不再重复结算。")
                 .append("任务失败与后续成果之间须有可理解的补救或转变，不跳过寻找材料未果却直接完成救药这类必要接续。")
@@ -359,6 +383,12 @@ public class ChapterPlanPromptService {
                 .append("**时间是情节的背景，不是每章的任务**——一个下午能写完的章，就让它停在那天；")
                 .append("不要为了“推进时间”而插入过夜/赶路/季节更替等无信息过渡。")
                 .append("唯一的硬约束：不得与已确立的时间线矛盾（例如主角已上高中，就不能写“小学三年级”）。");
+        // 可选核验形状单列；不把总体普通场景示例改成每场必须核验的模板。
+        sb.append("\n\n【VerificationObligation 元素形状】仅在确有核验任务时放入 causality.verificationObligations 数组；")
+                .append("以下为字段占位说明，不是替代规则的授权。allowedAlternative 没有明确授权时省略。")
+                .append("\n{\"verifier\":\"在场核验者\",\"subject\":\"在场被验主体\",\"item\":\"被验项目\",")
+                .append("\"criterion\":\"原定判定标准\",\"resultUse\":\"结果如何影响本场决定\",")
+                .append("\"allowedAlternative\":\"仅填写已授权的替代和适用条件\"}");
         // 字段形状单列，不向总体示例填入虚构历史。
         sb.append("\n\n【FactReference 元素形状】仅展示六字段形状，占位文字不是事实，不能作为引用；")
                 .append("chapterNo 实际应复制来源中的整数章号，其余字段照抄来源值。")
@@ -412,7 +442,16 @@ public class ChapterPlanPromptService {
         return rule.toString();
     }
 
+    private boolean isDirectWriterMode() {
+        return storyProperties != null
+                && storyProperties.getWriterContextMode() == StoryProperties.WriterContextMode.DIRECT;
+    }
+
     static void appendDensityFeedback(StringBuilder sb, List<ChapterSummaryEntity> summaries) {
+        appendDensityFeedback(sb, summaries, false);
+    }
+
+    static void appendDensityFeedback(StringBuilder sb, List<ChapterSummaryEntity> summaries, boolean directMode) {
         if (summaries == null || summaries.isEmpty()) {
             return;
         }
@@ -432,9 +471,10 @@ public class ChapterPlanPromptService {
         }
 
         // 对称的另一侧：篇幅超标。判定用参考上沿，且**不豁免过渡章**（理由见方法注释）
+        int maxRef = ChapterLengthPolicy.maxReference(directMode);
         List<String> bloated = recent.stream()
                 .filter(s -> s != null && s.getValidChars() != null
-                        && s.getValidChars() > ChapterLengthPolicy.MAXIMUM_REFERENCE_CHARACTERS)
+                        && s.getValidChars() > maxRef)
                 .map(s -> "第" + s.getChapterNo() + "章（" + s.getValidChars() + " 有效字"
                         + (s.getChapterType() == null ? "" : " / " + s.getChapterType())
                         + "，仅 " + (s.getKeyEventCount() == null ? "?" : s.getKeyEventCount()) + " 个关键事件）")

@@ -179,13 +179,27 @@ public final class ScenePlanPolicy {
             }
         }
         var terms = causality.terms();
-        if (terms != null && StringUtils.isNotBlank(terms.consideration())) {
+        if (SceneCausalityPolicy.hasTerms(terms)) {
             appendWritingLine(sb, StringUtils.trimToEmpty(terms.offerer()) + "向"
                     + StringUtils.trimToEmpty(terms.receiver()) + "提供", terms.consideration());
             appendWritingLine(sb, "回报", terms.payment());
             appendWritingLine(sb, "验收方式", terms.verificationBy());
             appendWritingLine(sb, "期限", terms.deadline());
             appendWritingLine(sb, "未达约定时", terms.onFailure());
+        }
+        if (causality.verificationObligations() != null) {
+            for (var obligation : causality.verificationObligations()) {
+                if (obligation == null) continue;
+                sb.append("\n- 本场核验：").append(text(obligation.verifier())).append("核验")
+                        .append(text(obligation.subject())).append("的").append(text(obligation.item()));
+                appendWritingLine(sb, "判定标准", obligation.criterion());
+                appendWritingLine(sb, "结果用于", obligation.resultUse());
+                if (StringUtils.isNotBlank(obligation.allowedAlternative())) {
+                    appendWritingLine(sb, "已授权替代及条件", obligation.allowedAlternative());
+                } else {
+                    sb.append("\n- 替代边界：未授权替代，不得换被验主体、项目或标准来宣称已完成。");
+                }
+            }
         }
     }
 
@@ -263,6 +277,8 @@ public final class ScenePlanPolicy {
                         .append("不等于人物已知或正文事实，不得放入 knowledgeRefs/requires；")
                         .append("choice 仅为选择语境，已选行动见 action、理由见 because；")
                         .append("冲突、放弃项、代价与关系影响均按实际适用，不要求补齐；")
+                        .append("verificationObligations 按 verifier/subject/item/criterion/resultUse 绑定核验任务，")
+                        .append("allowedAlternative 仅为已授权替代，缺省不得新增替代规则；核验结果不等于自动成功；")
                         .append("constraints 是待核验约束引用，非本场新结果)：\n")
                         .append(JSON.toJSONString(scene.causality())).append("\n");
                 List<FactReference> constraints = scene.causality().constraints();
