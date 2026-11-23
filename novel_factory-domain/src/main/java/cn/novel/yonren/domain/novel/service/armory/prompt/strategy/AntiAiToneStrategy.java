@@ -3,6 +3,7 @@ package cn.novel.yonren.domain.novel.service.armory.prompt.strategy;
 import cn.novel.yonren.domain.novel.service.armory.PromptRuleStrategy;
 import cn.novel.yonren.domain.novel.service.armory.prompt.CriticalPromptRule;
 import cn.novel.yonren.domain.novel.service.armory.prompt.PromptRuleFileLoader;
+import cn.novel.yonren.domain.novel.service.armory.prompt.WritingContractPolicy;
 import cn.novel.yonren.domain.novel.model.valobj.prompt.PromptContext;
 import cn.novel.yonren.domain.novel.model.valobj.prompt.PromptRule;
 import cn.novel.yonren.types.enums.PromptScene;
@@ -63,7 +64,7 @@ public class AntiAiToneStrategy implements PromptRuleStrategy, CriticalPromptRul
         if (ctx != null && ctx.isDirectWriterMode()) {
             String direct = fileLoader.load(DIRECT_WRITER_FILE);
             if (direct != null && !direct.isBlank()) {
-                return direct;
+                return direct.replace("{{perspectiveRule}}", WritingContractPolicy.PERSPECTIVE_RULE);
             }
         }
         return fileLoader.load(WRITER_FILE);

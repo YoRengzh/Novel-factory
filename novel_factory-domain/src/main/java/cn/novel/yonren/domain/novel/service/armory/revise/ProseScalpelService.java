@@ -3,8 +3,11 @@ package cn.novel.yonren.domain.novel.service.armory.revise;
 import cn.novel.yonren.domain.novel.adapter.llm.LlmGateway;
 import cn.novel.yonren.domain.novel.config.StoryProperties;
 import cn.novel.yonren.domain.novel.model.entity.ChapterPlanItemEntity;
+import cn.novel.yonren.domain.novel.model.entity.StoryContextEntity;
 import cn.novel.yonren.domain.novel.model.valobj.LlmCall;
 import cn.novel.yonren.domain.novel.model.valobj.StoryVO;
+import cn.novel.yonren.domain.novel.service.armory.authoring.StoryAuthoringService;
+import cn.novel.yonren.domain.novel.service.armory.prompt.WritingContractPolicy;
 import cn.novel.yonren.domain.novel.service.armory.quality.ChapterLengthPolicy;
 import cn.novel.yonren.domain.novel.service.armory.quality.PatchIntegrityPolicy;
 import cn.novel.yonren.types.enums.ModelScene;
@@ -42,6 +45,11 @@ public class ProseScalpelService {
     private final StoryProperties storyProperties;
 
     public String trim(StoryVO.Module module, ChapterPlanItemEntity item, String content, int chapterNo) {
+        return trim(module, item, content, chapterNo, null);
+    }
+
+    public String trim(StoryVO.Module module, ChapterPlanItemEntity item, String content, int chapterNo,
+                       StoryContextEntity story) {
         var props = storyProperties == null ? null : storyProperties.getProseScalpel();
         if (props == null || !props.isEnabled() || StringUtils.isBlank(content)) {
             return null;
@@ -52,7 +60,7 @@ public class ProseScalpelService {
                     .scene(ModelScene.PARAGRAPH_AUDIT)
                     .temperature(SCALPEL_TEMPERATURE)
                     .label("prose-scalpel-第" + chapterNo + "章")
-                    .userPrompt(buildPrompt(content, maxPatches))
+                    .userPrompt(buildPrompt(content, maxPatches, story, chapterNo))
                     .build());
             PatchEnvelope envelope = JsonParseFallback.parse(raw, this::readEnvelope);
             if (envelope == null || envelope.getPatches() == null || envelope.getPatches().isEmpty()) {
@@ -103,17 +111,19 @@ public class ProseScalpelService {
     /** 锁 2：优先批量套用并过完整性校验；若整体校验不通过或锚点重叠，则逐条安全试套，只跳过越界补丁。 */
     private String applySafely(String content, List<ChapterReviseService.Patch> validPatches,
                                List<String> anchors, int chapterNo) {
-        ChapterReviseService.PatchOutcome batch = ChapterReviseService.applyPatches(content, validPatches);
-        if (batch.applied() && PatchIntegrityPolicy.check(content, batch.content(), null, anchors, 0, 0).acceptable()) {
+        ChapterReviseService.PatchOutcome batch = ChapterReviseService.applyPatchesKeepingParagraphs(content, validPatches);
+        if (batch.applied()
+                && PatchIntegrityPolicy.check(content, batch.content(), null, anchors, 0, 0).acceptable()) {
             return batch.content();
         }
         String current = content;
         int applied = 0;
         for (ChapterReviseService.Patch patch : validPatches) {
-            if (StringUtils.countMatches(current, patch.getAnchor()) != 1) {
+            ChapterReviseService.PatchOutcome single = ChapterReviseService.applyPatchesKeepingParagraphs(current, List.of(patch));
+            if (!single.applied()) {
                 continue;
             }
-            String candidate = StringUtils.replaceOnce(current, patch.getAnchor(), patch.getReplacement());
+            String candidate = single.content();
             PatchIntegrityPolicy.Verdict verdict = PatchIntegrityPolicy.check(current, candidate, null, anchors, 0, 0);
             if (!verdict.acceptable()) {
                 log.info("第 {} 章跳过破坏实体/数字锚点的单条刮油补丁：{}", chapterNo, verdict.reason());
@@ -151,27 +161,30 @@ public class ProseScalpelService {
         return true;
     }
 
-    static String buildPrompt(String content, int maxPatches) {
+    private static String buildPrompt(String content, int maxPatches, StoryContextEntity story, int chapterNo) {
         return """
                 你是资深网文主编，只做一件事：在不改变剧情、不改动任何引号内人物对白、不新增任何词句的前提下，用定向删除/缩句刮掉正文里残余的“AI解释腔”。
+                %s%s
 
                 只处理以下五类问题（最多给出 %d 条补丁）：
                 1. 引号外的“不是A，而是B / 并非A，而是B / 不再是A，而是B”：删去虚设的否定前半句，直接保留或改写成干净的 B（replacement 长度必须严格短于或等于 anchor）。
                 2. 动作或对白已经演明白后画蛇添足的动机复盘、心理账本、自我复盘与预告清单（如“免了小过，后面一定有别的事等着”“把能看到的东西在心里过了一遍”）、围观心思点破或战略演讲句：整句直接删除（replacement 设为空串 ""），或只留极短过渡词。
                 3. 人物（尤其是配角）刚露面时的年龄、修为、资历、性格等静态档案介绍，打断节奏的突兀背景百科科普句，以及与推动剧情无关的物件/场景图鉴式冗余细描：删除静态说明，保留现场动作与对白。
-                4. 限知视角下越界切入配角内心做履历感叹、心理翻译或替配角神态/语气贴标签的解说句（如“他干了十几年……没见过”“语气已经不是质问了，更像在掂量”“不像是自己划的，的确是……”）：删除多余的内心解说与定性结论，只保留主角亲眼可见的动作、停顿、神态与对白。
+                4. 限知视角下，删除越界解读配角内心或给神态贴标签的冗余说明，按当前视角保留可感知的动作、停顿、神态与对白。保留作者已经授权的切换场景及其中有用的信息。
                 5. 中文叙述中偶发混入的孤立英文虚词或连词（如 somehow、until、actually）：直接删除或替换为更短的中文词。
 
                 铁律：
                 - 绝对不要扩写，绝对不要重写正常叙事段落，不要润色已经生动的动作、感官与对白。
                 - 保留所有出场人名、关键数字、物件位置与因果事件，只删多余“解说词”。
                 - anchor 必须逐字复制原稿中唯一出现的连续原文（含标点），replacement 只能是更短文本或空字符串 ""。
+                - 删除整句时必须连同其句末标点一起删除，并保证删除后相邻句子仍以完整标点收尾，不得留下以逗号、顿号收尾或缺句号的残句。
                 - 没有明显问题时输出 {"patches":[]}。
 
                 只输出 JSON：{"patches":[{"anchor":"原稿逐字唯一片段","replacement":"删减后文本或空串"}]}
 
                 【待精修正文】
-                """.formatted(maxPatches) + content;
+                """.formatted(WritingContractPolicy.renderPerspective(story == null ? null : story.getPerspective()),
+                        StoryAuthoringService.renderGuidance(story, chapterNo, chapterNo), maxPatches) + content;
     }
 
     private PatchEnvelope readEnvelope(String raw) {

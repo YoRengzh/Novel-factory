@@ -156,7 +156,7 @@ public final class WriterContextAssembler {
         // 禁泄是每一段都必须遵守的边界，不因第一段已经知道而省略。
         appendBlock(text, context.secrecyGuidance());
         if (includeEnding) {
-            appendLine(text, "本章结尾落在", item.getEndingHook());
+            appendLine(text, "本章结尾备选落点（仅交付作者视角允许呈现的部分）", item.getEndingHook());
         }
         return text.toString();
     }
@@ -325,7 +325,7 @@ public final class WriterContextAssembler {
             text.append("- ").append(index++).append("、").append(event.trim()).append('\n');
         }
         appendBlock(text, context.secrecyGuidance());
-        appendLine(text, "本章结尾落在", item.getEndingHook());
+        appendLine(text, "本章结尾备选落点（仅交付作者视角允许呈现的部分）", item.getEndingHook());
         if (StringUtils.isNotBlank(context.previousChapterTail())) {
             text.append("【上一章实际结尾·只用于承接，不要复述】\n")
                     .append(context.previousChapterTail().strip()).append('\n');

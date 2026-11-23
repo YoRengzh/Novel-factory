@@ -6,6 +6,13 @@ import cn.novel.yonren.types.enums.GenreType;
 /** 正文、审校与修订共用的作者契约，不由辅助环节追加创作任务。 */
 public final class WritingContractPolicy {
 
+    public static final String PERSPECTIVE_RULE = "按作者指定的叙述视角写作与编辑。"
+            + "只有作者明确允许视角轮换，或在本场明确指定另一位视角人物，才可在独立场景切换。"
+            + "固定第一人称或单一限知视角沿用当前视角人物；另起一段、章末落点和配角动作都不能单独授权切换。"
+            + "切换获准时清楚标明新视角，区分读者已知与各人物所知。"
+            + "其他人物私下获得的线索，若本场没有安排当前视角人物获知，只写他当下能感知的动静，"
+            + "也不要临时安排回头或偷听，让他提前获知。";
+
     private WritingContractPolicy() { }
 
     public static String renderRegister(StoryContextEntity context) {
@@ -33,6 +40,12 @@ public final class WritingContractPolicy {
                 + "判断依据是具体内容是否重复、矛盾或妨碍本场阅读功能，不是表达形式本身。"
                 + "确认取决于角色已有信息和现场证据，不规定观察次数；结尾可未决、闭合或留有余韵。"
                 + "若计划与可信事实不能同时满足，指出冲突及依据，不编造能力、材料或已发生事件来强行完成计划。";
+    }
+
+    public static String renderPerspective(String perspective) {
+        StringBuilder rule = new StringBuilder(PERSPECTIVE_RULE);
+        append(rule, "作者指定的叙述视角", perspective);
+        return rule.toString();
     }
 
     /** 场景规划交给写手后，按读者已经知道的信息选择交代方式。 */

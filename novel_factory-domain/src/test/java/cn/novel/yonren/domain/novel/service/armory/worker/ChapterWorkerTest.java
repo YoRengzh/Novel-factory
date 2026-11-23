@@ -59,6 +59,7 @@ import org.mockito.MockitoAnnotations;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.HashMap;
+import java.util.ArrayList;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -1106,6 +1107,15 @@ class ChapterWorkerTest {
         assertTrue(nativeFantasy.contains("古风/古代语境"));
         assertTrue(nativeFantasy.contains("肥皂"));
         assertTrue(nativeFantasy.contains("1500~2600 字"));
+        assertTrue(nativeFantasy.contains("以具体结果、未决变化或余韵收尾"));
+        assertTrue(nativeFantasy.contains("只有作者明确允许视角轮换"));
+        assertFalse(nativeFantasy.contains("像退潮一样"));
+
+        String fixedPerspective = chapterWorker.buildWritingPrompt(StoryContextEntity.builder()
+                .perspective("第一人称，只写我亲历的事").build(),
+                "中文", 3, section, null, null, false, true, true);
+        assertTrue(fixedPerspective.contains("作者指定的叙述视角：第一人称，只写我亲历的事"));
+        assertTrue(fixedPerspective.contains("章末落点和配角动作都不能单独授权切换"));
 
         String transmigrationFantasy = chapterWorker.buildWritingPrompt(StoryContextEntity.builder()
                 .theme("玄幻修真").style("轻松").protagonist("现代程序员魂穿成外门杂役，觉醒签到系统").build(),
@@ -1136,7 +1146,7 @@ class ChapterWorkerTest {
         org.springframework.test.util.ReflectionTestUtils.setField(chapterWorker, "proseScalpelService", scalpel);
         when(llmInvokeService.invoke(any(), eq(PromptScene.CHAPTER_CONTENT), any(), anyString(), anyMap()))
                 .thenReturn("初稿标题\n\n苏尘不是犹豫，而是小心探出头。");
-        when(scalpel.trim(any(), any(), eq("苏尘不是犹豫，而是小心探出头。"), eq(1)))
+        when(scalpel.trim(any(), any(), eq("苏尘不是犹豫，而是小心探出头。"), eq(1), any(StoryContextEntity.class)))
                 .thenReturn("苏尘小心探出头。");
 
         var ctx = context(null);
@@ -1147,6 +1157,32 @@ class ChapterWorkerTest {
         var savedCaptor = ArgumentCaptor.forClass(cn.novel.yonren.domain.novel.model.entity.ChapterContentEntity.class);
         verify(storyRepository).commitChapter(any(), savedCaptor.capture(), any(ChapterCommitState.class));
         assertEquals("苏尘小心探出头。", savedCaptor.getValue().getContent());
+    }
+
+    @Test
+    void directContinuationReceivesRecentNarrationAndSynopsis() throws Exception {
+        storyProperties.setWriterContextMode(StoryProperties.WriterContextMode.DIRECT);
+        var ctx = context(null);
+        ctx.setChapterOffset(2);
+        ctx.setStoryDir(STORY_DIR);
+        ctx.setChapterPlanAggregate(ChapterPlanAggregate.builder().storyId("story-1")
+                .chapters(List.of(sceneItem(3))).build());
+        ctx.setChapterSummaries(new ArrayList<>(List.of(ChapterSummaryEntity.builder().chapterNo(2)
+                .summary("周管事已拒绝复验。药童丢还草茎，警告苏尘不得声张。").build())));
+        when(storyRepository.readChapter(STORY_DIR, 1)).thenReturn(new ChapterContentEntity(1, "前章", "灵气像退潮一样散去。"));
+        when(storyRepository.readChapter(STORY_DIR, 2)).thenReturn(new ChapterContentEntity(2, "上章",
+                "草茎被丢还。“窗外像下雪一样。”"));
+        when(llmInvokeService.invoke(any(), eq(PromptScene.CHAPTER_CONTENT), any(), anyString(), anyMap()))
+                .thenReturn("正文标题\n\n苏尘将草茎放在桌上。");
+
+        chapterWorker.generateAll(command(), ctx);
+
+        var prompt = ArgumentCaptor.forClass(String.class);
+        verify(llmInvokeService).invoke(any(), eq(PromptScene.CHAPTER_CONTENT), any(), prompt.capture(), anyMap());
+        assertTrue(prompt.getValue().contains("【近章前情】"));
+        assertTrue(prompt.getValue().contains("周管事已拒绝复验"));
+        assertTrue(prompt.getValue().contains("像退潮一样"));
+        assertFalse(prompt.getValue().contains("像下雪一样"));
     }
 
     @Test

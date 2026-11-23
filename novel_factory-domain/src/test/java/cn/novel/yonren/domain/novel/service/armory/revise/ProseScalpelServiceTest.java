@@ -171,4 +171,52 @@ class ProseScalpelServiceTest {
         assertTrue(trimmed.contains("1280"), "破坏数字锚点的坏补丁应被单独跳过");
         assertFalse(trimmed.contains("平日最爱在管事面前刷脸踩人"), "同批安全去简历补丁应正常保留生效");
     }
+
+    @Test
+    void skipsPatchThatLeavesDanglingCommaWhileKeepingCleanPatch() {
+        LlmGateway gateway = mock(LlmGateway.class);
+        String original = longManuscript();
+        when(gateway.complete(any(), any())).thenReturn("""
+                {
+                  "patches": [
+                    {
+                      "anchor": "血丝混着冷露渗进石缝。",
+                      "replacement": ""
+                    },
+                    {
+                      "anchor": "刘全比苏尘早入药园一年，平日最爱在管事面前刷脸踩人。",
+                      "replacement": ""
+                    }
+                  ]
+                }
+                """);
+
+        ProseScalpelService service = new ProseScalpelService(gateway, enabledProps(8));
+        String trimmed = service.trim(new StoryVO.Module(), item(), original, 1);
+
+        assertNotNull(trimmed);
+        assertTrue(trimmed.contains("血丝混着冷露渗进石缝。"), "会留下逗号残段的补丁必须被跳过");
+        assertFalse(trimmed.contains("平日最爱在管事面前刷脸踩人"), "正常整句删除补丁应保留生效");
+    }
+
+    @Test
+    void repairedParagraphCannotOffsetNewDamageElsewhereInBatch() {
+        LlmGateway gateway = mock(LlmGateway.class);
+        when(gateway.complete(any(), any())).thenReturn("""
+                {"patches":[
+                  {"anchor":"夜雾里看不太清他的表情，","replacement":"夜雾里看不太清他的表情。"},
+                  {"anchor":"走进院子。","replacement":""},
+                  {"anchor":"他望着灯火，","replacement":"他望着灯火。"},
+                  {"anchor":"转身回屋。","replacement":""}
+                ]}
+                """);
+        String original = "夜雾里看不太清他的表情，\n\n他拿起油灯，走进院子。\n\n他望着灯火，转身回屋。\n\n"
+                + longManuscript();
+        String edited = new ProseScalpelService(gateway, enabledProps(8))
+                .trim(new StoryVO.Module(), item(), original, 2);
+        assertNotNull(edited);
+        assertTrue(edited.contains("夜雾里看不太清他的表情。"));
+        assertTrue(edited.contains("他拿起油灯，走进院子。"));
+        assertTrue(edited.contains("他望着灯火。\n\n"));
+    }
 }

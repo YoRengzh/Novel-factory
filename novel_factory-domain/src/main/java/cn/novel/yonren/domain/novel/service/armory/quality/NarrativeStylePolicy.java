@@ -6,6 +6,7 @@ import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Deque;
 import java.util.HashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.regex.Matcher;
@@ -27,6 +28,7 @@ public final class NarrativeStylePolicy {
     private static final Pattern CLAUSE = Pattern.compile("[^，,；;：:]+");
     private static final Pattern SENTENCE = Pattern.compile("[^。！？!?；;\r\n]+[。！？!?；;]?");
     private static final int SIMILE_WINDOW_CHARS = 160;
+    private static final Pattern SHORT_SIMILE = Pattern.compile("像[\\p{IsHan}]{2,8}?(?:一样|一般|似的)");
     private static final Pattern BREATH_TIME = Pattern.compile(
             "(?<!奄奄)(?<![一二两三四五六七八九十百千万零〇\\d])"
                     + "(?:[一二两三四五六七八九十百千万零〇\\d]+(?:来|余|多|几)?|半|几|数)息"
@@ -37,6 +39,25 @@ public final class NarrativeStylePolicy {
                     + "|[两二三四五几][样件条](?:东西|线索|证物)[，,]一[根条]线");
 
     private NarrativeStylePolicy() { }
+
+    /** 少量近期叙述原句里的表达，只用于提醒写手。对白和有意呼应不受限制。 */
+    public static String recentExpressionWarning(String latest, String older) {
+        var matches = new LinkedHashSet<String>();
+        List<Span> recent = new ArrayList<>(narrationSpans(latest));
+        recent.addAll(narrationSpans(older));
+        for (Span span : recent) {
+            Matcher matcher = SHORT_SIMILE.matcher(span.text());
+            while (matcher.find()) matches.add(matcher.group());
+        }
+        for (Span span : recent) {
+            for (String phrase : FatiguePatternCatalog.get().bodyCliches()) {
+                if (span.text().contains(phrase)) matches.add(phrase);
+            }
+        }
+        List<String> phrases = matches.stream().limit(4).toList();
+        return phrases.isEmpty() ? "" : "【近期写法参考】前两章叙述用过“"
+                + String.join("”“", phrases) + "”。同类情境可换落笔处，保留有意呼应、伏笔和人物口头禅。";
+    }
 
     public record Observations(List<String> negativeTurns, List<String> similes,
                                List<String> breathTimings, List<String> summaryCues, List<String> closestSimiles) {

@@ -76,4 +76,44 @@ class WriterContextSupportTest {
         assertFalse(memories.contains("第2章救活青纹藤"));
         assertTrue(memories.contains("第1章药匣底部残阵线"));
     }
+
+    @Test
+    void recentSynopsis_keepsLastThreeEarlierChaptersWithinBudgetAndReturnsEmptyWhenBlank() {
+        assertEquals("", WriterContextSupport.recentSynopsis(List.of(), 2));
+        assertEquals("", WriterContextSupport.recentSynopsis(null, 3));
+
+        var summaries = List.of(
+                cn.novel.yonren.domain.novel.model.entity.ChapterSummaryEntity.builder().chapterNo(1).summary("第1章要点。").build(),
+                cn.novel.yonren.domain.novel.model.entity.ChapterSummaryEntity.builder().chapterNo(2).summary("第2章要点。").build(),
+                cn.novel.yonren.domain.novel.model.entity.ChapterSummaryEntity.builder().chapterNo(3).summary("第3章要点。").build(),
+                cn.novel.yonren.domain.novel.model.entity.ChapterSummaryEntity.builder().chapterNo(4).summary("第4章要点。").build(),
+                cn.novel.yonren.domain.novel.model.entity.ChapterSummaryEntity.builder().chapterNo(5).summary("第5章要点。").build()
+        );
+        assertEquals("", WriterContextSupport.recentSynopsis(summaries, 1), "首章无前情应返回空串");
+
+        String ch5 = WriterContextSupport.recentSynopsis(summaries, 5);
+        assertTrue(ch5.contains("【近章前情"));
+        assertFalse(ch5.contains("第1章要点"), "只取 currentChapterNo 之前最近 3 章");
+        assertTrue(ch5.contains("- 第2章：第2章要点。"));
+        assertTrue(ch5.contains("- 第3章：第3章要点。"));
+        assertTrue(ch5.contains("- 第4章：第4章要点。"));
+        assertFalse(ch5.contains("第5章要点"), "不应包含当前章及之后章节");
+
+        String longUnit = "周管事当众驳回苏尘的复验请求。".repeat(20);
+        var longSummaries = List.of(
+                cn.novel.yonren.domain.novel.model.entity.ChapterSummaryEntity.builder().chapterNo(1).summary("极旧：" + longUnit).build(),
+                cn.novel.yonren.domain.novel.model.entity.ChapterSummaryEntity.builder().chapterNo(2).summary("次新：" + longUnit).build(),
+                cn.novel.yonren.domain.novel.model.entity.ChapterSummaryEntity.builder().chapterNo(3).summary("最新：" + longUnit).build()
+        );
+        String capped = WriterContextSupport.recentSynopsis(longSummaries, 4);
+        assertTrue(capped.length() <= 700, "近章前情总长度必须控制在 700 字以内，实际=" + capped.length());
+        assertTrue(capped.contains("最新："), "超限时应保留最新章节前情");
+        var longEnding = cn.novel.yonren.domain.novel.model.entity.ChapterSummaryEntity.builder()
+                .chapterNo(2).summary("苏尘从后山坠入石室。" + longUnit
+                        + "药童把灰叶凝露草丢还给苏尘。药童警告他不得声张私入后山之事。").build();
+        String synopsis = WriterContextSupport.recentSynopsis(List.of(longEnding), 3);
+        assertTrue(synopsis.contains("从后山坠入石室"));
+        assertTrue(synopsis.contains("把灰叶凝露草丢还给苏尘"));
+        assertTrue(synopsis.contains("警告他不得声张"));
+    }
 }

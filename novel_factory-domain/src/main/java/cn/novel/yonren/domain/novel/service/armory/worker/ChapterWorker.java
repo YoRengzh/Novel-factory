@@ -276,8 +276,10 @@ public class ChapterWorker {
         GenerationJob job = dynamicContext.getJob();
         // 文风指纹库：续写时预载历史指纹（首发为空表），全票通过章节逐章追加
         List<String> styleFingerprints = preloadStyleFingerprints(dynamicContext, storyDir);
-        int olderBreathTimings = priorBreathTimings(storyDir, offset - 1);
-        int lastBreathTimings = priorBreathTimings(storyDir, offset);
+        String olderProse = priorProse(storyDir, offset - 1);
+        String lastProse = priorProse(storyDir, offset);
+        int olderBreathTimings = NarrativeStylePolicy.inspect(olderProse).breathTimings().size();
+        int lastBreathTimings = NarrativeStylePolicy.inspect(lastProse).breathTimings().size();
         // 惰性分段规划：分段蓝图与边界由规划节点计算，生成推进到未规划段时才用最新记忆规划该段
         List<RollingOutlineService.StageSegment> segments = dynamicContext.getPlanSegments();
         int batchEnd = offset + (storyContext.getChapterCount() == null ? 0 : storyContext.getChapterCount());
@@ -351,6 +353,12 @@ public class ChapterWorker {
             int recentBreathTimings = olderBreathTimings + lastBreathTimings;
             String proseStyleWarning = recentBreathTimings >= 4 ? "近两章已有 " + recentBreathTimings
                     + " 处用呼吸次数交代时长。普通停顿可直接接下一件事，涉及具体时限时保留计时。" : null;
+            if (storyProperties.getWriterContextMode() == StoryProperties.WriterContextMode.DIRECT) {
+                String expressionWarning = NarrativeStylePolicy.recentExpressionWarning(lastProse, olderProse);
+                if (!expressionWarning.isEmpty()) {
+                    proseStyleWarning = proseStyleWarning == null ? expressionWarning : proseStyleWarning + "\n" + expressionWarning;
+                }
+            }
             var secrecyGuard = chapterMemoryService.buildSecrecyGuard(summaries, item);
             // 观察式重基：默认 OFF；开启时只落候选与差异，返回值不参与本方法后续任何分支。
             if (chapterRebaseRunner != null && chapterRebaseRunner.enabled()) {
@@ -445,7 +453,7 @@ public class ChapterWorker {
             ChapterContentEntity chapterContent = draft.chapter();
             if (storyProperties.getWriterContextMode() == StoryProperties.WriterContextMode.DIRECT
                     && proseScalpelService != null && chapterContent != null) {
-                String trimmed = proseScalpelService.trim(module, item, chapterContent.getContent(), globalNo);
+                String trimmed = proseScalpelService.trim(module, item, chapterContent.getContent(), globalNo, storyContext);
                 if (StringUtils.isNotBlank(trimmed)) {
                     chapterContent.setContent(trimmed);
                 }
@@ -488,7 +496,9 @@ public class ChapterWorker {
             // 只有交付策略已允许的稿件才进入树尾待写集合。
             chapterContents.add(chapterContent);
             olderBreathTimings = lastBreathTimings;
-            lastBreathTimings = NarrativeStylePolicy.inspect(chapterContent.getContent()).breathTimings().size();
+            olderProse = lastProse;
+            lastProse = chapterContent.getContent();
+            lastBreathTimings = NarrativeStylePolicy.inspect(lastProse).breathTimings().size();
             // 写手样本（训练数据水龙头）：完整最终 prompt 取自 usedPromptMap 的 chapter-N:user/system
             // （LlmInvokeService 已存含规则尾注的版本），正文取过完审校/修订/盲评的最终采纳稿；
             // OBSERVE 的 ISSUE/UNKNOWN 独立留交付诊断，不得冒充合格范文。
@@ -811,14 +821,14 @@ public class ChapterWorker {
         }
     }
 
-    private int priorBreathTimings(Path storyDir, int chapterNo) {
-        if (storyDir == null || chapterNo < 1) return 0;
+    private String priorProse(Path storyDir, int chapterNo) {
+        if (storyDir == null || chapterNo < 1) return null;
         try {
             ChapterContentEntity chapter = storyRepository.readChapter(storyDir, chapterNo);
-            return chapter == null ? 0 : NarrativeStylePolicy.inspect(chapter.getContent()).breathTimings().size();
+            return chapter == null ? null : chapter.getContent();
         } catch (Exception e) {
-            log.warn("第 {} 章正文无法回读，跳过该章计时统计", chapterNo, e);
-            return 0;
+            log.warn("第 {} 章正文无法回读，跳过该章近期写法统计", chapterNo, e);
+            return null;
         }
     }
 
@@ -1391,6 +1401,15 @@ public class ChapterWorker {
             }
             String directTail = StringUtils.isBlank(previousTail)
                     ? "" : chapterMemoryService.tailByParagraph(previousTail, 800);
+            String directContinuity = java.util.stream.Stream.of(
+                            cn.novel.yonren.domain.novel.service.armory.writer.WriterContextSupport.castStates(
+                                    chapterMemoryService, summaries, item),
+                            cn.novel.yonren.domain.novel.service.armory.writer.WriterContextSupport.relevantContinuity(
+                                    chapterMemoryService, summaries, item),
+                            cn.novel.yonren.domain.novel.service.armory.writer.WriterContextSupport.recentSynopsis(
+                                    summaries, globalNo))
+                    .filter(StringUtils::isNotBlank)
+                    .collect(java.util.stream.Collectors.joining("\n"));
             var directContext = new cn.novel.yonren.domain.novel.service.armory.writer.WriterChapterContext(
                     verifiedReferences,
                     characterGuidance,
@@ -1399,10 +1418,7 @@ public class ChapterWorker {
                                     .renderFeedback(story, summaries)),
                     cn.novel.yonren.domain.novel.service.armory.writer.WriterContextSupport.edgeState(
                             chapterMemoryService, summaries),
-                    cn.novel.yonren.domain.novel.service.armory.writer.WriterContextSupport.castStates(
-                            chapterMemoryService, summaries, item)
-                            + cn.novel.yonren.domain.novel.service.armory.writer.WriterContextSupport.relevantContinuity(
-                            chapterMemoryService, summaries, item),
+                    directContinuity,
                     secrecyGuard == null ? "" : secrecyGuard.promptBlock(),
                     StoryAuthoringService.renderGuidance(story, globalNo, globalNo),
                     cn.novel.yonren.domain.novel.service.armory.writer.WriterContextSupport.memories(recallHits, globalNo),
@@ -1587,21 +1603,23 @@ public class ChapterWorker {
             sb.append("\n\n【本章已写原文结尾，紧接往下写】\n").append(tail);
         }
         sb.append("\n\n【写作提示】")
-                .append("\n1. 严格保持与上一章/前文结尾的人、物、伤势、位置、修为和信息边界连续；视角人物只知道自己亲历、所见、所闻或当下合理推测的事。")
+                .append("\n1. 保持上一章结尾的人、物、伤势、位置、修为和信息边界连续。")
+                .append(WritingContractPolicy.renderPerspective(story.getPerspective()))
                 .append("\n2. 放开写情绪张力和现场感官，重要冲突与爽点写透，日常过渡利落推进；动作或对白已经演出的意图、胜负和情绪直接推进下一拍，不要在动作后补写旁白复盘、战略演讲或心理账本总结，人物出场用言行带出脾气，不插播静态简历或世界百科。")
-                .append("\n3. 对话写出各自脾气、身份与私心，冲突与对手戏放开写出试探、嘲讽、压迫感与反唇相讥，不要连续蹦出两三个字的冰冷电报式短句；非关键道具与场景一笔带过，只给推动剧情的细节特写；用贴合处境的具体反应替代“指节发白”“瞳孔骤缩”等套话；直接写“是什么”，避免在叙述中反复使用“不是A，而是B / 并非A，而是B / 不再是A，而是B”句式；正文纯文本，不用星号、井号等 Markdown 标记。")
+                .append("\n3. 对话写出各自脾气、身份与私心。场景和道具细节按当前冲突取舍。规划给出的腔调只用来帮助把握角色，说话方式随对象和处境变动。用台词和具体反应推进，避免无意复用同一个手势、语气和比喻。正文纯文本，不用星号、井号等 Markdown 标记。")
                 .append("\n4. ");
-        if (StringUtils.isNotBlank(story.getPerspective())) {
-            sb.append("叙述视角：").append(story.getPerspective().strip()).append("。");
-        }
         sb.append(renderDirectRegisterNote(story, genre));
         if (!sectioned) {
-            sb.append("整章篇幅自然落在 1500~2600 字为佳（写透核心冲突即自然收笔，略超亦可，严禁为凑字数插入无关跑腿、重复验物或对非关键道具逐项描写外观）。");
+            sb.append("整章篇幅自然落在 1500~2600 字为佳，写透核心冲突即自然收笔，略超亦可。过场保留必要的因果、信息来源与状态变化。根据本章需要，以具体结果、未决变化或余韵收尾。");
         } else if (!last) {
             sb.append("写到本段事件完成即收，无需章末总结或下场预告。");
         }
         if (StringUtils.isNotBlank(styleWarning)) {
             sb.append("\n").append(styleWarning.strip());
+        }
+        if (last) {
+            sb.append("\n【章末视角】遇到与作者视角冲突的章末安排，写到当前视角人物最后能亲历的一刻即停。")
+                    .append("离场后的私下发现留待后续揭示。无需切换镜头或替当前人物安排获知过程来交付这一部分。");
         }
         sb.append("\n\n直接输出纯文本，第一行写章节标题（纯标题文字，不要加“第X章”或标点装饰），空一行后直接写正文。不要输出 JSON、代码块或任何解释说明。");
         return sb.toString();

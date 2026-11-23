@@ -18,6 +18,8 @@ public final class PatchIntegrityPolicy {
 
     /** 数字串（连续 ASCII 数字）；中文数字日期不在此列——宁可漏报，也不引入模糊判据 */
     private static final Pattern NUMBER_RUN = Pattern.compile("\\d{" + MIN_NUMBER_ANCHOR_LENGTH + ",}");
+    /** 完整段落收尾符号集合：缺句末标点或以逗号/顿号收尾时视为残段。 */
+    private static final String SENTENCE_CLOSERS = "。.!！？?…”\"’'」』）)】—～~：:；;";
 
     private PatchIntegrityPolicy() {
     }
@@ -142,6 +144,21 @@ public final class PatchIntegrityPolicy {
             }
         }
         return new ArrayList<>(anchors);
+    }
+
+    /** 用于一组相互关联的补丁。跨段编辑只能保留原有的残段，不能拿一段修复抵消另一段损坏。 */
+    public static boolean introducesDanglingParagraph(String original, String patched) {
+        if (!original.contains("\n") && !patched.contains("\n")) {
+            return dangling(patched.strip()) && !dangling(original.strip());
+        }
+        List<String> existing = new ArrayList<>(original.lines().map(String::strip)
+                .filter(PatchIntegrityPolicy::dangling).toList());
+        return patched.lines().map(String::strip).filter(PatchIntegrityPolicy::dangling)
+                .anyMatch(line -> !existing.remove(line));
+    }
+
+    private static boolean dangling(String line) {
+        return !line.isEmpty() && SENTENCE_CLOSERS.indexOf(line.charAt(line.length() - 1)) < 0;
     }
 
     /** 与两条补丁路径的既有口径一致：去全部空白后比对 */

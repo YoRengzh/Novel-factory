@@ -378,7 +378,7 @@ public class ChapterReviseService {
             patch.setReplacement(entry.path("replacement").textValue());
             patches.add(patch);
         }
-        PatchOutcome outcome = applyPatches(originalContent, patches);
+        PatchOutcome outcome = applyPatchesKeepingParagraphs(originalContent, patches);
         if (!outcome.applied()) {
             return new PatchAttempt(outcome, null);
         }
@@ -386,7 +386,6 @@ public class ChapterReviseService {
             // 套用成功但等于空操作。若放过，就会把"什么也没修"当成"修完了"，还白烧一次复审
             return patchFailure("补丁未改变任何内容");
         }
-
         String gateReason = runGates(originalContent, patchedEntity(outcome.content()), item, styleStat, globalNo, blockingIssues);
         if (gateReason != null) {
             return patchFailure("补丁未过采纳闸门：" + gateReason);
@@ -401,8 +400,15 @@ public class ChapterReviseService {
     private record PatchAttempt(PatchOutcome outcome, String rewriteReason) { }
 
     public static PatchOutcome applyPatches(String original, List<Patch> patches) {
-        List<int[]> spans = new ArrayList<>(patches.size());
-        List<String> replacements = new ArrayList<>(patches.size());
+        return applyPatches(original, patches, false);
+    }
+
+    static PatchOutcome applyPatchesKeepingParagraphs(String original, List<Patch> patches) {
+        return applyPatches(original, patches, true);
+    }
+
+    private static PatchOutcome applyPatches(String original, List<Patch> patches, boolean protectParagraphs) {
+        List<LocatedPatch> spans = new ArrayList<>(patches.size());
         for (Patch patch : patches) {
             String anchor = patch == null ? null : patch.getAnchor();
             if (StringUtils.isBlank(anchor)) {
@@ -415,30 +421,65 @@ public class ChapterReviseService {
             if (original.indexOf(anchor, start + 1) >= 0) {
                 return new PatchOutcome(null, "锚点在原稿中出现多次，无法确定该改哪一处");
             }
-            spans.add(new int[]{start, start + anchor.length()});
-            replacements.add(patch.getReplacement() == null ? "" : patch.getReplacement());
+            spans.add(new LocatedPatch(start, start + anchor.length(), StringUtils.defaultString(patch.getReplacement())));
         }
 
-        // 按出现位置升序套用；锚点唯一故起点不会相同，只需防重叠
-        List<Integer> order = new ArrayList<>(spans.size());
-        for (int i = 0; i < spans.size(); i++) {
-            order.add(i);
-        }
-        order.sort(Comparator.comparingInt(i -> spans.get(i)[0]));
-
-        StringBuilder sb = new StringBuilder();
-        int cursor = 0;
-        for (int idx : order) {
-            int[] span = spans.get(idx);
-            if (span[0] < cursor) {
+        spans.sort(Comparator.comparingInt(LocatedPatch::start));
+        int previousEnd = 0;
+        for (LocatedPatch span : spans) {
+            if (span.start() < previousEnd) {
                 return new PatchOutcome(null, "补丁锚点互相重叠，无法安全套用");
             }
-            sb.append(original, cursor, span[0]).append(replacements.get(idx));
-            cursor = span[1];
+            previousEnd = span.end();
         }
-        sb.append(original.substring(cursor));
-        return new PatchOutcome(sb.toString(), null);
+        if (!protectParagraphs) {
+            return new PatchOutcome(renderPatches(original, 0, original.length(), spans), null);
+        }
+        StringBuilder result = new StringBuilder();
+        int cursor = 0;
+        boolean skipped = false;
+        for (int first = 0; first < spans.size();) {
+            LocatedPatch initial = spans.get(first);
+            int start = original.lastIndexOf('\n', initial.start() - 1) + 1;
+            int end = paragraphEnd(original, initial.end());
+            int next = first + 1;
+            while (next < spans.size() && spans.get(next).start() <= end) {
+                end = paragraphEnd(original, spans.get(next++).end());
+            }
+            String before = original.substring(start, end);
+            String after = renderPatches(original, start, end, spans.subList(first, next));
+            result.append(original, cursor, start);
+            if (PatchIntegrityPolicy.introducesDanglingParagraph(before, after)) {
+                result.append(before);
+                skipped = true;
+            } else {
+                result.append(after);
+            }
+            cursor = end;
+            first = next;
+        }
+        String patched = result.append(original, cursor, original.length()).toString();
+        return skipped && original.equals(patched)
+                ? new PatchOutcome(null, "补丁删句后留下残段")
+                : new PatchOutcome(patched, null);
     }
+
+    private static int paragraphEnd(String original, int from) {
+        int newline = original.indexOf('\n', from);
+        return newline < 0 ? original.length() : newline;
+    }
+
+    private static String renderPatches(String original, int start, int end, List<LocatedPatch> spans) {
+        StringBuilder text = new StringBuilder();
+        int cursor = start;
+        for (LocatedPatch span : spans) {
+            text.append(original, cursor, span.start()).append(span.replacement());
+            cursor = span.end();
+        }
+        return text.append(original, cursor, end).toString();
+    }
+
+    private record LocatedPatch(int start, int end, String replacement) { }
 
     /** 补丁路径的返回体：**标题留空**表示"标题未变"，由 QualityGate 保留原标题（补丁不该动标题） */
     private static ChapterContentEntity patchedEntity(String content) {

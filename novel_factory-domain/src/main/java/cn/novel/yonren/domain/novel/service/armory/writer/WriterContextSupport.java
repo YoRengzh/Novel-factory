@@ -1,10 +1,13 @@
 package cn.novel.yonren.domain.novel.service.armory.writer;
 
 import cn.novel.yonren.domain.novel.model.entity.ChapterPlanItemEntity;
+import cn.novel.yonren.domain.novel.model.entity.ChapterSummaryEntity;
 import cn.novel.yonren.domain.novel.service.armory.memory.ChapterMemoryService;
 import cn.novel.yonren.domain.novel.service.armory.memory.StoryMemoryService;
 import org.apache.commons.lang3.StringUtils;
 
+import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Objects;
@@ -15,6 +18,11 @@ public final class WriterContextSupport {
 
     private static final int INITIAL_SETTING_CLIP_CHARS = 260;
     private static final int DIRECT_MEMORY_RECALL_CHARS = 1000;
+    private static final int DIRECT_RECENT_SYNOPSIS_CHARS = 700;
+    private static final int DIRECT_RECENT_SYNOPSIS_ITEM_CHARS = 220;
+    private static final int DIRECT_RECENT_SYNOPSIS_CHAPTERS = 3;
+    private static final String RECENT_SYNOPSIS_HEADER =
+            "【近章前情】续接已发生的交涉与结果。摘要供写手衔接，各人物只能使用自己已获知的信息。";
 
     private WriterContextSupport() {
     }
@@ -74,6 +82,55 @@ public final class WriterContextSupport {
         if (states.isEmpty()) return "";
         return "【本章开场前的在场人物状态】场内发生的新变化以实际正文为准，不把这份开场状态反复写回。\n"
                 + String.join("\n", states);
+    }
+
+    /** 供给 DIRECT 写手的近几章事件摘要，避免跨章忘记已发生过的对话、判定与交涉。 */
+    public static String recentSynopsis(List<ChapterSummaryEntity> summaries, int currentChapterNo) {
+        if (summaries == null || summaries.isEmpty() || currentChapterNo <= 1) {
+            return "";
+        }
+        List<ChapterSummaryEntity> recent = summaries.stream()
+                .filter(s -> s != null && s.getChapterNo() != null
+                        && s.getChapterNo() < currentChapterNo && StringUtils.isNotBlank(s.getSummary()))
+                .sorted(Comparator.comparingInt(ChapterSummaryEntity::getChapterNo))
+                .toList();
+        if (recent.isEmpty()) {
+            return "";
+        }
+        int start = Math.max(0, recent.size() - DIRECT_RECENT_SYNOPSIS_CHAPTERS);
+        List<String> lines = new ArrayList<>();
+        for (int i = start; i < recent.size(); i++) {
+            ChapterSummaryEntity item = recent.get(i);
+            String clipped = clipSynopsis(item.getSummary());
+            lines.add("- 第" + item.getChapterNo() + "章：" + clipped);
+        }
+        while (lines.size() > 1 && formattedSynopsisLength(lines) > DIRECT_RECENT_SYNOPSIS_CHARS) {
+            lines.remove(0);
+        }
+        return RECENT_SYNOPSIS_HEADER + "\n" + String.join("\n", lines);
+    }
+
+    private static int formattedSynopsisLength(List<String> lines) {
+        int linesLength = lines.stream().mapToInt(String::length).sum() + Math.max(0, lines.size() - 1);
+        return RECENT_SYNOPSIS_HEADER.length() + 1 + linesLength;
+    }
+
+    private static String clipSynopsis(String raw) {
+        String text = raw.strip();
+        if (text.length() <= DIRECT_RECENT_SYNOPSIS_ITEM_CHARS) {
+            return text;
+        }
+        // 多数摘要按事件顺序写，末尾优先保留交割、尚未处理的事与离场状态。
+        String opening = clipAtBoundary(text, DIRECT_RECENT_SYNOPSIS_ITEM_CHARS / 3);
+        int tailBudget = DIRECT_RECENT_SYNOPSIS_ITEM_CHARS - opening.length() - 3;
+        String tail = text.substring(text.length() - tailBudget);
+        for (int i = 0; i < tail.length() / 2; i++) {
+            if ("。！？；\n".indexOf(tail.charAt(i)) >= 0) {
+                tail = tail.substring(i + 1).stripLeading();
+                break;
+            }
+        }
+        return opening + " … " + tail;
     }
 
     /** 首章没有历史状态，需要最小世界与人物设定；续写不重复整份大纲。 */

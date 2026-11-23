@@ -82,4 +82,26 @@ class PatchIntegrityPolicyTest {
         assertTrue(PatchIntegrityPolicy.check(original, patched, List.of(), anchors, 5, 3)
                 .reason().isEmpty(), "通过时不应给出拒绝理由");
     }
+
+    @Test
+    @DisplayName("残段锁：删句后留下逗号收尾或缺句末标点时拦截，整句删除或冒号引对白放行")
+    void introducesDanglingParagraph_detectsBrokenSplitAndAllowsWholeSentenceOrDialogueIntro() {
+        assertFalse(PatchIntegrityPolicy.introducesDanglingParagraph("She stopped!", "She stopped."));
+        assertTrue(PatchIntegrityPolicy.introducesDanglingParagraph("She stopped.", "She stopped,"));
+        assertTrue(PatchIntegrityPolicy.introducesDanglingParagraph(
+                "他看不太清表情，但声音发尖。\n\n下一段。",
+                "他看不太清表情，\n\n下一段。"), "删后留逗号收尾必须判定为引入残段");
+
+        assertTrue(PatchIntegrityPolicy.introducesDanglingParagraph(
+                "他点头算作应下。\n\n下一段。",
+                "他点头算作应下\n\n下一段。"), "删掉句末句号必须判定为引入残段");
+
+        assertFalse(PatchIntegrityPolicy.introducesDanglingParagraph(
+                "第一句。第二句。\n\n下一段。",
+                "第一句。\n\n下一段。"), "连同句末标点一起删整句应放行");
+
+        assertFalse(PatchIntegrityPolicy.introducesDanglingParagraph(
+                "周管事放下茶碗，冷笑了一声。\n\n“滚回去干活。”",
+                "周管事放下茶碗：\n\n“滚回去干活。”"), "以冒号收尾并转下一段对白不算残段");
+    }
 }
