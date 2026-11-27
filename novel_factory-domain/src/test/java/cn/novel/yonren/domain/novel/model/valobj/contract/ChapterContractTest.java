@@ -54,24 +54,19 @@ class ChapterContractTest {
     }
 
     @Test
-    void modeDecide_prefersFreeOnlyWhenContractCompleteAndBeatsUsable() {
+    void modeDecide_prefersFreeOnlyWhenContractComplete() {
         ChapterContract complete = contract("目标", List.of("事件甲"), "悬念");
-        assertEquals(GenerationMode.FREE, GenerationMode.decide(complete, true));
-        // 契约完整但节拍不可用 → 用兜底骨架
-        assertEquals(GenerationMode.SCAFFOLDED, GenerationMode.decide(complete, false));
-        // 契约不完整 → 强约束恢复（节拍是否可用都不影响这个判定）
+        assertEquals(GenerationMode.FREE, GenerationMode.decide(complete));
+        // 契约不完整 → 强约束恢复
         assertEquals(GenerationMode.RECOVERY,
-                GenerationMode.decide(contract("目标", List.of("事件甲"), null), true));
-        assertEquals(GenerationMode.RECOVERY, GenerationMode.decide(null, true));
+                GenerationMode.decide(contract("目标", List.of("事件甲"), null)));
+        assertEquals(GenerationMode.RECOVERY, GenerationMode.decide(null));
     }
 
     @Test
     void modeFlags() {
-        assertFalse(GenerationMode.FREE.enforcesBeats(), "FREE 下节拍只是建议顺序");
-        assertTrue(GenerationMode.SCAFFOLDED.enforcesBeats());
-        assertTrue(GenerationMode.RECOVERY.enforcesBeats());
         assertTrue(GenerationMode.RECOVERY.forbidsOutOfPlanElements());
-        assertFalse(GenerationMode.SCAFFOLDED.forbidsOutOfPlanElements());
+        assertFalse(GenerationMode.FREE.forbidsOutOfPlanElements());
     }
 
     @Test

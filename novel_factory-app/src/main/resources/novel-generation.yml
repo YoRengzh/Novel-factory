@@ -66,7 +66,7 @@ story:
         enable-thinking: false
       audit:
         model: qwen3.7-plus
-        max-tokens: 16384
+        max-tokens: 33768
         temperature: 0.1
         enable-thinking: false
       paragraph-audit:
@@ -81,7 +81,7 @@ story:
         enable-thinking: false
       summary:
         model: deepseek-v4-flash
-        max-tokens: 16384
+        max-tokens: 33768
         temperature: 0.2
         enable-thinking: false
       ledger-adjudicate:
@@ -251,7 +251,7 @@ story:
     rubric-version: v1
 
   plan:
-    branches: 0
+    branches: 2
     rolling-single-chapter: true
 
   # 动态参考资料选择器（skill 式按需注入）：索引交给 LLM 挑选，命中的资料全文注入

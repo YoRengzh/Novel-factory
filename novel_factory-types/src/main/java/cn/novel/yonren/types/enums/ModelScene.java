@@ -12,8 +12,8 @@ public enum ModelScene {
     /** 章节计划（写大纲） */
     CHAPTER_PLAN("chapter-plan", "章节计划"),
 
-    /** 章节场景节拍（每章正文前把计划拆成 3-5 拍；每章一次的高频小输出任务，独立场景以便与批次计划分开配模型） */
-    CHAPTER_BEATS("chapter-beats", "章节节拍"),
+    /** 章节写作计划（每章正文前把计划拆成分段写作任务；每章一次的高频小输出任务，独立场景以便与批次计划分开配模型） */
+    CHAPTER_BEATS("chapter-beats", "章节写作计划"),
 
     /** 正文（逐章生成） */
     CHAPTER_CONTENT("chapter-content", "章节正文"),

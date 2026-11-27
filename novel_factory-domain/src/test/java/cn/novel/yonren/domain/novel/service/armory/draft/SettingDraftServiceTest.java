@@ -109,6 +109,18 @@ class SettingDraftServiceTest {
     // ==================== 单字段重生成：机械锁定 ====================
 
     @Test
+    void worldSettingPromptUsesAbilityBoundariesForFullAndFieldRegeneration() {
+        stubLlm(FULL_DRAFT);
+        settingDraftService.draft(STORY_VO, request(null, null));
+        settingDraftService.draft(STORY_VO, request(List.of("worldSetting"), Map.of("worldSetting", "旧世界观")));
+
+        for (String prompt : capturedPrompt(2)) {
+            assertTrue(prompt.contains("涉及能力时，说明其适用条件、能做到什么和做不到什么"));
+            assertFalse(prompt.contains("限制与代价"));
+        }
+    }
+
+    @Test
     void draft_targetsOutline_keepsLockedFieldsFromPrevious_evenIfModelRewritesThem() {
         stubLlm(FULL_DRAFT);
         Map<String, String> previous = Map.of(

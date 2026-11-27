@@ -135,9 +135,6 @@ public class ReferenceUsagePolicy {
         if (ruleName == null) {
             return false;
         }
-        if ("genre-exemplar-fallback".equals(ruleName)) {
-            return scene == PromptScene.CHAPTER_CONTENT && allowsDocument("exemplar-dialogue", scene, ctx);
-        }
         for (String prefix : List.of("genre-exemplar-", "genre-style-", "genre-arc-", "style-")) {
             if (!ruleName.startsWith(prefix)) {
                 continue;

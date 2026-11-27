@@ -14,13 +14,13 @@ import java.util.Map;
 /**
  * 角色名字列表的容错反序列化器。
  *
- * 为什么需要：`ChapterBeatsEntity.Beat.characters` 声明为 {@code List<String>}，
+ * 为什么需要：原节拍结构（已下线）的 {@code characters} 字段声明为 {@code List<String>}，
  * 但模型经常输出对象数组，把"角色名:角色身份"塞进去：
  *
  * "characters": [ {"主角甲":"婴儿"}, {"角色甲":"父亲"}, {"角色乙":"母亲"} ]
  *
  * 期望 {@code ["主角甲","角色甲","角色乙"]}，实际收到对象 ⇒ Jackson 反序列化抛异常
- * ⇒ {@code BeanOutputConverter.convert} 失败 ⇒ 整章节拍丢失、降级为无节拍直写（SCAFFOLDED）。
+ * ⇒ {@code BeanOutputConverter.convert} 失败 ⇒ 整章节拍丢失。
  * 容错解析避免合法角色名因对象包装而丢失。
  *
  * 容错策略（只取能确定的部分，绝不猜）：

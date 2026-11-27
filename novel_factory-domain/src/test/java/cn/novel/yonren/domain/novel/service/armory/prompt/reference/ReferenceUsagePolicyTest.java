@@ -35,8 +35,12 @@ class ReferenceUsagePolicyTest {
         assertTrue(policy.allowsDocument("exemplar-breakthrough", PromptScene.CHAPTER_CONTENT, breakthrough));
         assertFalse(policy.allowsDocument("exemplar-breakthrough", PromptScene.CHAPTER_CONTENT,
                 PromptContext.builder().theme("玄幻修仙").build()), "未知章节任务不得强行注入专用范例");
-        assertTrue(policy.allowsDocument("exemplar-dialogue", PromptScene.CHAPTER_CONTENT, extraction),
-                "非突破专用范例不受此限制");
+        PromptContext battle = PromptContext.builder().theme("玄幻修仙")
+                .chapterBrief("沈砚在湿木擂台上与剑客交手。").build();
+        assertTrue(policy.allowsDocument("exemplar-battle", PromptScene.CHAPTER_CONTENT, battle),
+                "战斗范例仅在战斗章可用");
+        assertFalse(policy.allowsDocument("exemplar-battle", PromptScene.CHAPTER_CONTENT, extraction),
+                "非战斗章不得注入战斗范例");
         PromptContext deferred = PromptContext.builder().theme("玄幻修仙")
                 .chapterBrief("本章暂不破境，先整理药园账目。").build();
         assertFalse(policy.allowsDocument("exemplar-breakthrough", PromptScene.CHAPTER_CONTENT, deferred),
@@ -84,11 +88,6 @@ class ReferenceUsagePolicyTest {
 
     @Test
     void mixedDocumentIsNotWholeSafeButItsPrincipleSectionRemainsEligible() {
-        assertFalse(policy.allowsDocument("character-building", PromptScene.SETTING_DRAFT, fantasy));
-        assertTrue(policy.allowsSection("character-building", "人物深度塑造技巧", PromptScene.SETTING_DRAFT, fantasy));
-        assertFalse(policy.allowsSection("character-building", "人物档案模板 › 基本信息",
-                PromptScene.SETTING_DRAFT, fantasy));
-        assertFalse(policy.allowsSection("character-building", "全文", PromptScene.SETTING_DRAFT, fantasy));
         assertFalse(policy.allowsDocument("outline-template", PromptScene.SETTING_DRAFT, fantasy));
         assertTrue(policy.allowsSection("outline-template", "第一步：先判断作品长度级别",
                 PromptScene.SETTING_DRAFT, fantasy));
@@ -101,8 +100,10 @@ class ReferenceUsagePolicyTest {
     void proseExamplesStayInExpressionScenesAndGenrePrinciplesRemainAvailable() {
         PromptContext breakthrough = PromptContext.builder().theme("玄幻修仙")
                 .chapterBrief("主角尝试破境冲关。").build();
-        for (String id : List.of("exemplar-battle", "exemplar-breakthrough", "exemplar-dialogue")) {
-            PromptContext expressionContext = "exemplar-breakthrough".equals(id) ? breakthrough : fantasy;
+        PromptContext battle = PromptContext.builder().theme("玄幻修仙")
+                .chapterBrief("双方在擂台上交手，斗法三回合。").build();
+        for (String id : List.of("exemplar-battle", "exemplar-breakthrough")) {
+            PromptContext expressionContext = "exemplar-breakthrough".equals(id) ? breakthrough : battle;
             assertFalse(policy.allowsDocument(id, PromptScene.SETTING_DRAFT, expressionContext));
             assertFalse(policy.allowsDocument(id, PromptScene.CHAPTER_PLAN, expressionContext));
             assertTrue(policy.allowsDocument(id, PromptScene.CHAPTER_CONTENT, expressionContext));
@@ -130,7 +131,7 @@ class ReferenceUsagePolicyTest {
         var scene = PromptScene.CHAPTER_CONTENT;
         var chapter = PromptContext.builder().theme("悬疑").chapterBrief("两人澄清误会，本章暂不表白。").build();
         var policyBlocks = new ReferenceAtomBuilder().build(id, "情感场面范例", "technique", markdown, new ReferenceChunker());
-        assertEquals(List.of("导言", "范例二：误会揭穿（虐点三段式：铺垫→引爆→宣泄）"), policyBlocks.stream()
+        assertEquals(List.of("导言", "范例一：误会揭穿（虐点三段式：铺垫→引爆→宣泄）"), policyBlocks.stream()
                 .map(ReferenceAtom::headingPath).filter(title -> policy.allowsSection(id, title, scene, chapter)).toList());
         assertFalse(policy.allowsSection(id, "全文", scene, chapter));
         assertFalse(policy.allowsSection(id, "导言", scene, fantasy));
@@ -145,7 +146,7 @@ class ReferenceUsagePolicyTest {
         assertTrue(policy.allowsRule("genre-exemplar-romance", PromptScene.CHAPTER_CONTENT, current));
         var deferred = PromptContext.builder().theme("悬疑").chapterBrief("两人下章再核对口供。").build();
         assertFalse(policy.allowsRule("genre-exemplar-suspense", PromptScene.CHAPTER_CONTENT, deferred));
-        var mixed = PromptContext.builder().theme("言情").chapterBrief("他暂不表白，她却先向他表白。").build();
+        var mixed = PromptContext.builder().theme("言情").chapterBrief("两人终于冰释前嫌。").build();
         assertTrue(policy.canSelectDocument("exemplar-emotion", PromptScene.CHAPTER_CONTENT, mixed));
     }
 
@@ -187,7 +188,6 @@ class ReferenceUsagePolicyTest {
         var tone = PromptContext.builder().theme("玄幻").targetFields(List.of("tone")).build();
         assertFalse(policy.allowsDocument("worldbuilding", PromptScene.SETTING_DRAFT, tone));
         assertFalse(policy.allowsDocument("villain-design", PromptScene.SETTING_DRAFT, tone));
-        assertFalse(policy.allowsSection("character-building", "人物深度塑造技巧", PromptScene.SETTING_DRAFT, tone));
         assertTrue(policy.allowsFixed("styles/fantasy.md", PromptScene.SETTING_DRAFT, tone));
         var world = PromptContext.builder().theme("玄幻").targetFields(List.of("worldSetting")).build();
         assertTrue(policy.allowsDocument("worldbuilding", PromptScene.SETTING_DRAFT, world));
@@ -217,7 +217,7 @@ class ReferenceUsagePolicyTest {
                 files.add(name.substring(0, name.length() - 3));
             }
         }
-        assertEquals(58, files.size());
+        assertEquals(46, files.size());
         assertEquals(files, docs.keySet());
         for (String group : List.of("documents", "fixed")) {
             JSONObject entries = root.getJSONObject(group);

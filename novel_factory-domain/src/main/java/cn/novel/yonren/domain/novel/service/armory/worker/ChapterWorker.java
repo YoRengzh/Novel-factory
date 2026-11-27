@@ -440,7 +440,7 @@ public class ChapterWorker {
                     planningContext, secrecyGuard, summaries, storyContext, verifiedReferences,
                     recallHits, prevTail);
             boolean sectioned = writingPlan.sections().size() > 1;
-            GenerationMode mode = GenerationMode.decide(contract, false);
+            GenerationMode mode = GenerationMode.decide(contract);
             // 观测字段以 DIRECT 实际材料为准：不能只因 APPLY 生成了人物卡就声称正文已注入。
             if (storyProperties.getWriterContextMode() == StoryProperties.WriterContextMode.DIRECT) {
                 visibleCharacterFields = writingPlan.sections().stream()

@@ -261,12 +261,12 @@ public class BatchHealthService {
         BatchHealthReport.Level level = lowerIsBetter(share, FALLBACK_MODE_OK, FALLBACK_MODE_DEGRADED);
         metrics.add(new BatchHealthReport.Metric("fallbackModeShare", "兜底模式占比",
                 share * 100, "%",
-                "≤" + pct(FALLBACK_MODE_OK) + "（SCAFFOLDED+RECOVERY 占比；截至 2026-09-22 无历史基线，观察项）",
+                "≤" + pct(FALLBACK_MODE_OK) + "（非 FREE 占比；历史章节含已下线的 SCAFFOLDED，截至 2026-09-22 无历史基线，观察项）",
                 BatchHealthReport.Direction.LOWER_IS_BETTER, level,
                 "兜底 " + fallback + " / 有模式记录 " + recorded + " 章"));
         if (fallback > 0) {
-            recommendations.add("兜底模式被触发：" + fallback + " 章走了 SCAFFOLDED/RECOVERY——"
-                    + "检查这些章的计划是否缺 endingHook（契约不完整）或节拍生成有没有连续失败");
+            recommendations.add("兜底模式被触发：" + fallback + " 章走了非 FREE 路径——"
+                    + "检查这些章的计划是否缺 endingHook（契约不完整）");
         }
     }
 

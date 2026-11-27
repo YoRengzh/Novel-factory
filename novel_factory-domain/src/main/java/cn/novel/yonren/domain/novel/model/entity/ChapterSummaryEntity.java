@@ -114,10 +114,10 @@ public class ChapterSummaryEntity {
     private String abilityDisplayForm;
 
     /**
-     * 本章的**生成模式**（FREE / SCAFFOLDED / RECOVERY）。
+     * 本章的**生成模式**（FREE / RECOVERY；历史章节还可能有已下线的 SCAFFOLDED）。
      *
      * 落进摘要而非只写日志，是为了让体检能统计模式分布——尤其
-     * **SCAFFOLDED / RECOVERY 占比**（= 兜底路径被吃掉的频率）。
+     * **非 FREE 占比**（= 兜底路径被吃掉的频率）。
      * 落盘还有个必要原因：{@code StoryJobService} 的健康判停是**读盘重算**的，
      * 只放内存的话那条路看不到。
      */

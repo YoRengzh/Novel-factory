@@ -34,64 +34,6 @@
         "METHOD"
       ]
     },
-    "chapter-template": {
-      "group": "structure",
-      "scenes": [
-        "CHAPTER_PLAN",
-        "CHAPTER_CONTENT"
-      ],
-      "purposes": [
-        "ASSET_MAINTENANCE"
-      ],
-      "types": [
-        "MODEL_SCHEMA"
-      ],
-      "_why": "完整交付格式不得覆盖运行时 schema。"
-    },
-    "character-building": {
-      "group": "genre",
-      "scenes": [
-        "SETTING_DRAFT",
-        "CHAPTER_PLAN",
-        "STAGE_BLUEPRINT",
-        "VOLUME_BLUEPRINT",
-        "CHAPTER_CONTENT",
-        "CHAPTER_REVISE",
-        "CHAPTER_AUDIT"
-      ],
-      "purposes": [
-        "SETTING_DESIGN",
-        "STORY_PLANNING",
-        "PROSE_EXPRESSION",
-        "QUALITY_REVIEW"
-      ],
-      "types": [
-        "PRINCIPLE",
-        "METHOD"
-      ],
-      "sections": [
-        {
-          "headingContains": [
-            "人物档案模板"
-          ],
-          "scenes": [
-            "CHAPTER_PLAN",
-            "STAGE_BLUEPRINT",
-            "VOLUME_BLUEPRINT"
-          ],
-          "purposes": [
-            "STORY_PLANNING"
-          ],
-          "types": [
-            "TEMPLATE"
-          ]
-        }
-      ],
-      "targetFields": [
-        "protagonist",
-        "outline"
-      ]
-    },
     "character-template": {
       "group": "genre",
       "scenes": [
@@ -109,26 +51,6 @@
         "protagonist"
       ]
     },
-    "consistency": {
-      "group": "technique",
-      "scenes": [
-        "CHAPTER_PLAN",
-        "STAGE_BLUEPRINT",
-        "VOLUME_BLUEPRINT",
-        "CHAPTER_CONTENT",
-        "CHAPTER_REVISE",
-        "CHAPTER_AUDIT"
-      ],
-      "purposes": [
-        "STORY_PLANNING",
-        "PROSE_EXPRESSION",
-        "QUALITY_REVIEW"
-      ],
-      "types": [
-        "PRINCIPLE",
-        "METHOD"
-      ]
-    },
     "content-expansion": {
       "group": "technique",
       "scenes": [
@@ -144,23 +66,9 @@
         "METHOD"
       ]
     },
-    "corpus-distillation": {
-      "group": "technique",
-      "scenes": [
-        "CHAPTER_CONTENT"
-      ],
-      "purposes": [
-        "ASSET_MAINTENANCE"
-      ],
-      "types": [
-        "OPERATIONS"
-      ],
-      "_why": "资料生产流程不是写作任务指令。"
-    },
     "cross-chapter-tables": {
       "group": "technique",
       "scenes": [
-        "CHAPTER_PLAN",
         "CHAPTER_CONTENT",
         "CHAPTER_REVISE",
         "CHAPTER_AUDIT"
@@ -172,25 +80,6 @@
       ],
       "types": [
         "METHOD"
-      ],
-      "sections": [
-        {
-          "headingContains": [
-            "一、道具链表",
-            "二、时间锚表",
-            "三、术语一致性表",
-            "四、关键数字表"
-          ],
-          "scenes": [
-            "CHAPTER_PLAN"
-          ],
-          "purposes": [
-            "STORY_PLANNING"
-          ],
-          "types": [
-            "TEMPLATE"
-          ]
-        }
       ]
     },
     "de-ai-principles": {
@@ -291,6 +180,11 @@
       ],
       "types": [
         "EXEMPLAR"
+      ],
+      "chapterKeywords": [
+        "战斗", "交战", "交手", "厮杀", "恶战", "激战", "决战", "对决",
+        "搏斗", "搏杀", "围攻", "突围", "伏击", "追杀", "截杀", "过招",
+        "斗法", "迎敌", "应战", "阵前"
       ]
     },
     "exemplar-breakthrough": {
@@ -336,21 +230,6 @@
         "巩固修为"
       ]
     },
-    "exemplar-dialogue": {
-      "group": "technique",
-      "scenes": [
-        "CHAPTER_CONTENT",
-        "CHAPTER_REVISE",
-        "CHAPTER_AUDIT"
-      ],
-      "purposes": [
-        "PROSE_EXPRESSION",
-        "QUALITY_REVIEW"
-      ],
-      "types": [
-        "EXEMPLAR"
-      ]
-    },
     "exemplar-emotion": {
       "group": "technique",
       "scenes": [
@@ -366,10 +245,7 @@
         "EXEMPLAR"
       ],
       "chapterKeywordsByHeading": {
-        "范例一：雨夜告白（克制型·双向奔赴）": [
-          "告白", "表白", "互诉心意", "表明心意", "坦白心意", "回应心意", "互表心迹", "戳破窗户纸"
-        ],
-        "范例二：误会揭穿（虐点三段式：铺垫→引爆→宣泄）": [
+        "范例一：误会揭穿（虐点三段式：铺垫→引爆→宣泄）": [
           "解开误会", "误会解开", "澄清误会", "解除误会", "误会揭穿", "化解误会", "解开心结", "冰释前嫌", "感情和解", "修复感情", "破镜重圆"
         ]
       }
@@ -377,9 +253,6 @@
     "foreshadowing": {
       "group": "technique",
       "scenes": [
-        "CHAPTER_PLAN",
-        "STAGE_BLUEPRINT",
-        "VOLUME_BLUEPRINT",
         "CHAPTER_CONTENT",
         "CHAPTER_REVISE",
         "CHAPTER_AUDIT"
@@ -473,25 +346,6 @@
         "chapterGoal"
       ]
     },
-    "multi-thread": {
-      "group": "structure",
-      "scenes": [
-        "CHAPTER_PLAN",
-        "STAGE_BLUEPRINT",
-        "VOLUME_BLUEPRINT",
-        "CHAPTER_CONTENT",
-        "CHAPTER_REVISE",
-        "CHAPTER_AUDIT"
-      ],
-      "purposes": [
-        "STORY_PLANNING",
-        "PROSE_EXPRESSION",
-        "QUALITY_REVIEW"
-      ],
-      "types": [
-        "METHOD"
-      ]
-    },
     "opening-design": {
       "group": "structure",
       "scenes": [
@@ -512,10 +366,7 @@
     "opening-hooks-goldfinger": {
       "group": "structure",
       "scenes": [
-        "CHAPTER_PLAN",
-        "CHAPTER_CONTENT",
-        "CHAPTER_REVISE",
-        "CHAPTER_AUDIT"
+        "CHAPTER_PLAN"
       ],
       "purposes": [
         "STORY_PLANNING",
@@ -723,20 +574,6 @@
         "TEMPLATE"
       ]
     },
-    "plot-structure-save-the-cat": {
-      "group": "structure",
-      "scenes": [
-        "CHAPTER_PLAN",
-        "STAGE_BLUEPRINT",
-        "VOLUME_BLUEPRINT"
-      ],
-      "purposes": [
-        "STORY_PLANNING"
-      ],
-      "types": [
-        "TEMPLATE"
-      ]
-    },
     "plot-structure-seven-point": {
       "group": "structure",
       "scenes": [
@@ -780,34 +617,6 @@
       ]
     },
     "plot-structure-three-act": {
-      "group": "structure",
-      "scenes": [
-        "CHAPTER_PLAN",
-        "STAGE_BLUEPRINT",
-        "VOLUME_BLUEPRINT"
-      ],
-      "purposes": [
-        "STORY_PLANNING"
-      ],
-      "types": [
-        "TEMPLATE"
-      ]
-    },
-    "plot-structure-thriller": {
-      "group": "structure",
-      "scenes": [
-        "CHAPTER_PLAN",
-        "STAGE_BLUEPRINT",
-        "VOLUME_BLUEPRINT"
-      ],
-      "purposes": [
-        "STORY_PLANNING"
-      ],
-      "types": [
-        "TEMPLATE"
-      ]
-    },
-    "plot-structure-twist": {
       "group": "structure",
       "scenes": [
         "CHAPTER_PLAN",
@@ -884,76 +693,6 @@
         "METHOD"
       ]
     },
-    "seed-architecture": {
-      "group": "genre",
-      "scenes": [
-        "SETTING_DRAFT",
-        "CHAPTER_PLAN",
-        "STAGE_BLUEPRINT",
-        "VOLUME_BLUEPRINT"
-      ],
-      "purposes": [
-        "SETTING_DESIGN",
-        "STORY_PLANNING"
-      ],
-      "types": [
-        "PRINCIPLE",
-        "METHOD"
-      ],
-      "sections": [
-        {
-          "headingContains": [
-            "衍生子设定结构 schema"
-          ],
-          "scenes": [
-            "CHAPTER_PLAN",
-            "STAGE_BLUEPRINT",
-            "VOLUME_BLUEPRINT"
-          ],
-          "purposes": [
-            "STORY_PLANNING"
-          ],
-          "types": [
-            "MODEL_SCHEMA"
-          ]
-        },
-        {
-          "headingContains": [
-            "专有名词检索标签规范"
-          ],
-          "scenes": [
-            "CHAPTER_PLAN"
-          ],
-          "purposes": [
-            "ASSET_MAINTENANCE"
-          ],
-          "types": [
-            "OPERATIONS"
-          ]
-        },
-        {
-          "headingContains": [
-            "黄金示例"
-          ],
-          "scenes": [
-            "CHAPTER_PLAN",
-            "STAGE_BLUEPRINT",
-            "VOLUME_BLUEPRINT"
-          ],
-          "purposes": [
-            "STORY_PLANNING"
-          ],
-          "types": [
-            "TEMPLATE"
-          ]
-        }
-      ],
-      "targetFields": [
-        "worldSetting",
-        "protagonist",
-        "outline"
-      ]
-    },
     "seed-atoms-fantasy": {
       "group": "genre",
       "scenes": [
@@ -1003,58 +742,6 @@
         "outline"
       ]
     },
-    "style-distillation": {
-      "group": "technique",
-      "scenes": [
-        "CHAPTER_CONTENT"
-      ],
-      "purposes": [
-        "ASSET_MAINTENANCE"
-      ],
-      "types": [
-        "OPERATIONS"
-      ]
-    },
-    "subject-and-ops": {
-      "group": "genre",
-      "scenes": [
-        "SETTING_DRAFT",
-        "CHAPTER_PLAN",
-        "STAGE_BLUEPRINT",
-        "VOLUME_BLUEPRINT"
-      ],
-      "purposes": [
-        "SETTING_DESIGN",
-        "STORY_PLANNING"
-      ],
-      "types": [
-        "METHOD"
-      ],
-      "sections": [
-        {
-          "headingContains": [
-            "数据指标与诊断",
-            "连载更新节拍"
-          ],
-          "scenes": [
-            "CHAPTER_PLAN"
-          ],
-          "purposes": [
-            "ASSET_MAINTENANCE"
-          ],
-          "types": [
-            "OPERATIONS"
-          ]
-        }
-      ],
-      "targetFields": [
-        "novelTitle",
-        "targetAudience",
-        "outline",
-        "chapterGoal",
-        "totalChapters"
-      ]
-    },
     "transitions": {
       "group": "structure",
       "scenes": [
@@ -1076,10 +763,7 @@
       "group": "genre",
       "scenes": [
         "SETTING_DRAFT",
-        "CHAPTER_PLAN",
-        "CHAPTER_CONTENT",
-        "CHAPTER_REVISE",
-        "CHAPTER_AUDIT"
+        "CHAPTER_PLAN"
       ],
       "purposes": [
         "SETTING_DESIGN",
@@ -1170,60 +854,6 @@
   },
   "fixed": {
     "styles/default.md": {
-      "group": "style",
-      "scenes": [
-        "SETTING_DRAFT",
-        "CHAPTER_PLAN",
-        "STAGE_BLUEPRINT",
-        "VOLUME_BLUEPRINT",
-        "CHAPTER_CONTENT",
-        "CHAPTER_REVISE",
-        "CHAPTER_AUDIT"
-      ],
-      "purposes": [
-        "STYLE_GUIDANCE"
-      ],
-      "types": [
-        "STYLE",
-        "PRINCIPLE"
-      ],
-      "targetFields": [
-        "style",
-        "tone",
-        "perspective",
-        "targetAudience",
-        "outline",
-        "chapterGoal"
-      ]
-    },
-    "styles/register-crisp-classical.md": {
-      "group": "style",
-      "scenes": [
-        "SETTING_DRAFT",
-        "CHAPTER_PLAN",
-        "STAGE_BLUEPRINT",
-        "VOLUME_BLUEPRINT",
-        "CHAPTER_CONTENT",
-        "CHAPTER_REVISE",
-        "CHAPTER_AUDIT"
-      ],
-      "purposes": [
-        "STYLE_GUIDANCE"
-      ],
-      "types": [
-        "STYLE",
-        "PRINCIPLE"
-      ],
-      "targetFields": [
-        "style",
-        "tone",
-        "perspective",
-        "targetAudience",
-        "outline",
-        "chapterGoal"
-      ]
-    },
-    "styles/register-traditional-wuxia.md": {
       "group": "style",
       "scenes": [
         "SETTING_DRAFT",
@@ -1405,13 +1035,13 @@
         "ability"
       ],
       "chapterKeywordsByHeading": {
-        "范例一：能力展示走半步（旁观者只到\"多看一眼\"）": [
-          "初次使用异能", "首次使用异能", "初次显露异能", "能力初显", "能力展示", "显露异能",
-          "异能暴露", "异能被撞见", "目击异能", "掩饰异能", "隐藏异能", "试用异能"
+        "范例一：能力展示走半步（旁观者只到“多看一眼”）": [
+          "初次使用异能", "首次使用异能", "初次显露异能", "能力初显", "低调使用异能", "日常使用异能",
+          "显露异能", "异能暴露", "异能被撞见", "目击异能", "掩饰异能", "隐藏异能", "试用异能"
         ],
-        "范例二：越级挑战要有依据（信息差+地利，写解法不写招式）": [
-          "越级挑战", "以弱胜强", "越级对敌", "遭异能者追杀", "躲避追击", "摆脱追杀",
-          "摆脱追兵", "利用地形脱身", "借地形周旋", "借异能脱身", "利用能力脱身"
+        "范例二：弱势脱身要有依据（信息差+地利，写解法不写招式）": [
+          "遭异能者追杀", "躲避强敌追击", "摆脱追杀", "摆脱追兵", "利用地形脱身",
+          "借地形周旋", "借异能脱身", "利用能力脱身", "以弱脱身", "甩开追击者"
         ]
       }
     },
@@ -1482,11 +1112,11 @@
       "chapterKeywordsByHeading": {
         "范例一：囤货写过程感（清单夹冲突，不刷屏）": [
           "囤货", "囤粮", "囤积物资", "储备物资", "采购物资", "抢购物资",
-          "搬运物资", "清点储备", "筹备口粮", "储备饮用水", "寻找备用水源"
+          "搬运物资", "清点储备", "盘点物资", "筹备口粮", "储备饮用水", "采购口粮"
         ],
         "范例二：收人的决定写代价（人性账，不写圣母也不写黑深残）": [
-          "收留幸存者", "接纳幸存者", "收容幸存者", "接收幸存者", "接纳新人", "决定是否收留",
-          "要求收留", "请求收留", "请求入队", "收留难民", "新人入队", "决定是否接纳"
+          "收留幸存者", "接纳幸存者", "收容幸存者", "决定是否收留", "决定是否接纳", "请求收留",
+          "请求入队", "收留难民", "新人入队", "审核入营", "避难所收人", "接纳新人"
         ]
       }
     },
@@ -1554,15 +1184,33 @@
       "genres": [
         "fantasy"
       ],
-      "chapterKeywords": [
-        "领例钱",
-        "领取例钱",
-        "领月例",
-        "领取宗门份例",
-        "检查灵石成色",
-        "更换巡山灯材料",
-        "资源兑换"
-      ]
+      "chapterKeywordsByHeading": {
+        "范例一：领例钱的队伍（利益链与让步依据）": [
+          "领例钱",
+          "领取例钱",
+          "领月例",
+          "领取宗门份例",
+          "宗门资源分配",
+          "检查灵石",
+          "核验灵石成色",
+          "克扣份例",
+          "执事刁难",
+          "申领宗门物资",
+          "兑换修炼资源"
+        ],
+        "范例二：坊市鉴宝与议价（信息差与现结博弈）": [
+          "坊市交易",
+          "以物易物",
+          "鉴宝议价",
+          "采购灵材",
+          "拍卖竞价",
+          "商铺讨价还价",
+          "出售妖兽材料",
+          "辨别灵药真伪",
+          "黑市交易",
+          "估价法器"
+        ]
+      }
     },
     "references/genres/infinite-flow/style-references.md": {
       "group": "genre",
@@ -1629,14 +1277,14 @@
         "infinite-flow"
       ],
       "chapterKeywordsByHeading": {
-        "范例一：明规则的精确措辞与第一次失误（教学关付学费）": [
+        "范例一：明规则的精确措辞与初探失误（规则试错代价）": [
           "触犯规则", "违反规则", "误触规则", "触发惩罚", "规则惩罚", "验证规则",
           "试探规则", "规则试错", "副本试错", "试探禁忌", "触犯禁忌"
         ],
         "范例二：矛盾规则的推理现场（证据摆在明处）": [
-          "规则矛盾", "矛盾规则", "规则冲突", "冲突的规则", "规则互相矛盾", "规则自相矛盾",
-          "规则相互矛盾", "规则彼此矛盾", "辨别规则真伪", "真假规则", "核对规则来源", "比对规则",
-          "对照两份规则"
+          "规则矛盾", "矛盾规则", "规则冲突", "规则互相矛盾", "规则自相矛盾",
+          "辨别规则真伪", "真假规则", "伪造规则", "核对规则来源", "比对规则",
+          "对照两份规则", "识别假规则"
         ]
       }
     },
@@ -1706,15 +1354,12 @@
       ],
       "chapterKeywordsByHeading": {
         "范例一：甜点场景（心动用细节，不写爱字）": [
-          "心动", "动心", "萌生好感", "暗生情愫", "好感升温", "暧昧升温",
-          "感情升温", "情感升温", "关系升温", "关系靠近", "拉近关系", "互生好感",
-          "试探心意", "暧昧试探", "主动示好", "主动邀约", "第一次约会", "发出约会邀请", "相约吃饭",
-          "送夜宵", "留下夜宵", "给对方留饭"
+          "暗生情愫", "互生好感", "暧昧升温", "试探心意", "暧昧试探", "主动示好",
+          "主动邀约", "发出约会邀请", "第一次约会", "相约吃饭", "默默照顾", "贴心照料"
         ],
         "范例二：甜虐拉扯（先给糖再收紧）": [
           "甜虐拉扯", "感情拉扯", "先甜后虐", "隐瞒身份", "隐瞒身世", "揭穿身份",
-          "身份曝光", "身份暴露", "身份揭穿", "身份被揭穿", "谎言被拆穿", "戳穿谎言", "拆穿谎言",
-          "揭穿谎言", "信任受挫", "信任受损", "信任动摇", "信任危机", "质问他的身份", "质问她的身份"
+          "身份暴露", "身份被揭穿", "拆穿谎言", "谎言被拆穿", "信任动摇", "信任危机", "当面质问"
         ]
       }
     },
@@ -1784,14 +1429,14 @@
       ],
       "chapterKeywordsByHeading": {
         "范例一：技术攻关写失败与消耗（不写灵光一闪）": [
-          "技术攻关", "实验失败", "实验受挫", "排查实验异常", "排查故障", "排查异常数据",
-          "复核实验数据", "重做实验", "验证实验假设", "调整实验参数", "试验失败", "样机调试"
+          "技术攻关", "实验失败", "实验受挫", "试验失败", "排查实验异常", "排查实验故障",
+          "排查异常数据", "复核实验数据", "重做实验", "验证实验假设", "调整实验参数", "样机调试"
         ],
         "范例二：商业化谈判写结构（股权、控制权、陷阱）": [
           "融资谈判", "投资谈判", "商业化谈判", "股权谈判", "谈判融资条款", "投资条款",
           "融资条款", "技术授权谈判", "董事会否决权", "谈判控制权", "争夺公司控制权"
         ],
-        "远处的回答": ["星际通信", "深空通信", "延迟通信", "等待地球回信", "接收延迟信号", "等待深空回信", "光速延迟"]
+        "远处的回答": ["星际通信", "星际通讯", "深空通信", "延迟通信", "通信延迟", "光速延迟", "地火通信", "等待地球回信", "接收延迟信号", "等待深空回信"]
       }
     },
     "references/genres/suspense/style-references.md": {
@@ -1860,16 +1505,16 @@
       ],
       "chapterKeywordsByHeading": {
         "范例一：日常违和感（线索自然埋设）": [
-          "发现疑点", "发现异常痕迹", "发现可疑痕迹", "现场勘查", "勘查现场", "回访现场",
-          "重返现场", "回访死者家", "走访死者家属", "走访邻居", "走访证人", "走访目击者",
-          "入户走访", "核实线索", "核查线索", "查证线索", "埋设线索", "埋下线索", "日常违和感"
+          "勘查现场", "现场勘查", "回访现场", "重返现场", "回访死者家",
+          "走访死者家属", "走访邻居", "走访证人", "走访目击者", "入户走访",
+          "排查生活痕迹", "发现异常痕迹", "发现可疑痕迹", "核对证人说辞"
         ],
         "范例二：审讯对峙（信息控制）": [
-          "审讯", "讯问", "问讯嫌疑人", "询问嫌疑人", "传唤嫌疑人", "核对口供",
-          "核实口供", "口供矛盾", "供词矛盾", "证词矛盾", "核对证言", "核实证词",
+          "审讯嫌疑人", "讯问嫌疑人", "问讯嫌疑人", "传唤嫌疑人", "核对口供",
+          "核实口供", "供词矛盾", "证词矛盾", "核对证言", "核实证词",
           "质疑不在场证明", "核实不在场证明", "出示监控", "出示物证", "当面对质", "追问行踪"
         ],
-        "传闻从哪一家开始": ["追查传闻", "核实传言", "追溯传闻", "追问怪谈来源", "查访怪谈", "查证目击传闻"]
+        "传闻从哪一家开始": ["追查传闻", "核实传言", "追溯传闻", "追问怪谈来源", "查访怪谈", "查证目击传闻", "走访传言源头", "核对怪谈说法", "辟谣传闻"]
       }
     },
     "references/genres/urban/style-references.md": {
@@ -1938,16 +1583,1028 @@
       ],
       "chapterKeywordsByHeading": {
         "范例一：认知落差的克制展示（半步就走，旁人只起疑不点破）": [
-          "确认重生", "发现自己重生", "发现自己回到过去", "刚刚重生", "重生之初", "确认回到哪一年",
-          "确认自己回到了哪年", "核对前世记忆", "验证前世记忆", "掩饰重生", "隐瞒重生"
+          "确认重生", "发现自己重生", "确认回到哪一年", "核对前世记忆", "验证前世记忆",
+          "掩饰重生", "隐瞒重生", "显露异常见识", "超出年龄的判断", "长辈起疑",
+          "追问消息来源", "打岔掩饰"
         ],
         "范例二：先知信息差的变现（账目感与代价）": [
-          "利用前世记忆", "凭前世记忆", "凭借前世记忆", "抢占商机", "预判商机", "预知商机",
-          "先知变现", "信息差变现", "利用信息差赚钱", "利用信息差获利", "提前布局生意"
+          "利用前世记忆", "抢占商机", "预判商机", "先知变现", "信息差变现",
+          "提前布局生意", "盘下铺面", "核对启动资金", "筹措本钱", "调研地段商机"
         ],
         "范例三：年代对白与家人互动（温情不煽情，反对有理由）": [
-          "商量开店", "商量借钱", "家人凑钱", "全家凑钱", "家庭开支", "家庭预算",
-          "商量家用", "商量生计", "商量租铺", "向家里借钱", "动用家里积蓄", "家庭账本"
+          "商量借钱", "家人凑钱", "全家凑钱", "核对家庭开支", "商量家用",
+          "商量生计", "买断工龄", "合买车辆", "动用家里积蓄", "家庭账本", "家人反对创业"
+        ]
+      }
+    },
+    "references/genres/wuxia/style-references.md": {
+      "group": "genre",
+      "scenes": [
+        "SETTING_DRAFT",
+        "CHAPTER_PLAN",
+        "STAGE_BLUEPRINT",
+        "VOLUME_BLUEPRINT",
+        "CHAPTER_CONTENT",
+        "CHAPTER_REVISE",
+        "CHAPTER_AUDIT"
+      ],
+      "purposes": [
+        "STYLE_GUIDANCE"
+      ],
+      "types": [
+        "STYLE",
+        "PRINCIPLE"
+      ],
+      "genres": [
+        "wuxia"
+      ],
+      "targetFields": [
+        "style",
+        "tone",
+        "perspective",
+        "targetAudience",
+        "outline",
+        "chapterGoal"
+      ]
+    },
+    "references/genres/wuxia/arc-templates.md": {
+      "group": "genre",
+      "scenes": [
+        "CHAPTER_PLAN",
+        "STAGE_BLUEPRINT",
+        "VOLUME_BLUEPRINT"
+      ],
+      "purposes": [
+        "STORY_PLANNING"
+      ],
+      "types": [
+        "TEMPLATE"
+      ],
+      "genres": [
+        "wuxia"
+      ]
+    },
+    "references/genres/wuxia/exemplars.md": {
+      "group": "genre",
+      "scenes": [
+        "CHAPTER_CONTENT",
+        "CHAPTER_REVISE",
+        "CHAPTER_AUDIT"
+      ],
+      "purposes": [
+        "PROSE_EXPRESSION",
+        "QUALITY_REVIEW"
+      ],
+      "types": [
+        "EXEMPLAR"
+      ],
+      "genres": [
+        "wuxia"
+      ],
+      "chapterKeywordsByHeading": {
+        "范例一：一趟镖的规矩（先递话，再动手）": [
+          "走镖遇劫",
+          "押镖遭截",
+          "劫道截镖",
+          "半路截道",
+          "绿林剪径",
+          "江湖递话",
+          "报字号谈判",
+          "盘道试探",
+          "护送商队遇袭",
+          "拦路劫货"
+        ],
+        "范例二：师门问罪（人情与门规冲突）": [
+          "师门问罪",
+          "触犯门规",
+          "违背门规",
+          "戒律堂受审",
+          "长老问罪",
+          "处置违规弟子",
+          "处置弟子",
+          "私授武功",
+          "逐出山门",
+          "罚入思过崖",
+          "堂议定罪"
+        ]
+      }
+    },
+    "references/genres/magic/style-references.md": {
+      "group": "genre",
+      "scenes": [
+        "SETTING_DRAFT",
+        "CHAPTER_PLAN",
+        "STAGE_BLUEPRINT",
+        "VOLUME_BLUEPRINT",
+        "CHAPTER_CONTENT",
+        "CHAPTER_REVISE",
+        "CHAPTER_AUDIT"
+      ],
+      "purposes": [
+        "STYLE_GUIDANCE"
+      ],
+      "types": [
+        "STYLE",
+        "PRINCIPLE"
+      ],
+      "genres": [
+        "magic"
+      ],
+      "targetFields": [
+        "style",
+        "tone",
+        "perspective",
+        "targetAudience",
+        "outline",
+        "chapterGoal"
+      ]
+    },
+    "references/genres/magic/arc-templates.md": {
+      "group": "genre",
+      "scenes": [
+        "CHAPTER_PLAN",
+        "STAGE_BLUEPRINT",
+        "VOLUME_BLUEPRINT"
+      ],
+      "purposes": [
+        "STORY_PLANNING"
+      ],
+      "types": [
+        "TEMPLATE"
+      ],
+      "genres": [
+        "magic"
+      ]
+    },
+    "references/genres/magic/exemplars.md": {
+      "group": "genre",
+      "scenes": [
+        "CHAPTER_CONTENT",
+        "CHAPTER_REVISE",
+        "CHAPTER_AUDIT"
+      ],
+      "purposes": [
+        "PROSE_EXPRESSION",
+        "QUALITY_REVIEW"
+      ],
+      "types": [
+        "EXEMPLAR"
+      ],
+      "genres": [
+        "magic"
+      ],
+      "chapterKeywordsByHeading": {
+        "范例一：一次照明术的代价（规则先于效果）": [
+          "施法消耗",
+          "法术代价",
+          "魔力透支",
+          "维持法术",
+          "持续施法",
+          "施法受限",
+          "法术边界",
+          "施法反噬",
+          "测算施法时间",
+          "控制魔力消耗"
+        ],
+        "范例二：公会任务的分成（规则写进谈判）": [
+          "商议委托条款",
+          "谈判任务报酬",
+          "冒险者公会签约",
+          "划分任务责任",
+          "谈妥委托分成",
+          "协商任务抽成",
+          "签订冒险契约",
+          "核对悬赏条件",
+          "接取高危委托"
+        ]
+      }
+    },
+    "references/genres/history/style-references.md": {
+      "group": "genre",
+      "scenes": [
+        "SETTING_DRAFT",
+        "CHAPTER_PLAN",
+        "STAGE_BLUEPRINT",
+        "VOLUME_BLUEPRINT",
+        "CHAPTER_CONTENT",
+        "CHAPTER_REVISE",
+        "CHAPTER_AUDIT"
+      ],
+      "purposes": [
+        "STYLE_GUIDANCE"
+      ],
+      "types": [
+        "STYLE",
+        "PRINCIPLE"
+      ],
+      "genres": [
+        "history"
+      ],
+      "targetFields": [
+        "style",
+        "tone",
+        "perspective",
+        "targetAudience",
+        "outline",
+        "chapterGoal"
+      ]
+    },
+    "references/genres/history/arc-templates.md": {
+      "group": "genre",
+      "scenes": [
+        "CHAPTER_PLAN",
+        "STAGE_BLUEPRINT",
+        "VOLUME_BLUEPRINT"
+      ],
+      "purposes": [
+        "STORY_PLANNING"
+      ],
+      "types": [
+        "TEMPLATE"
+      ],
+      "genres": [
+        "history"
+      ]
+    },
+    "references/genres/history/exemplars.md": {
+      "group": "genre",
+      "scenes": [
+        "CHAPTER_CONTENT",
+        "CHAPTER_REVISE",
+        "CHAPTER_AUDIT"
+      ],
+      "purposes": [
+        "PROSE_EXPRESSION",
+        "QUALITY_REVIEW"
+      ],
+      "types": [
+        "EXEMPLAR"
+      ],
+      "genres": [
+        "history"
+      ],
+      "chapterKeywordsByHeading": {
+        "范例一：廷议争的是粮道（程序先于口才）": [
+          "廷议",
+          "朝议",
+          "朝堂争论",
+          "御前奏对",
+          "上疏建言",
+          "合议政令",
+          "商议粮道",
+          "筹措军粮",
+          "廷推议事",
+          "殿前议政",
+          "弹劾争辩"
+        ],
+        "范例二：旧案里的一张签收单（证据要能过堂）": [
+          "复查旧案",
+          "翻查卷宗",
+          "核对账册",
+          "查验底簿",
+          "追查旧案",
+          "核查回执",
+          "调查贪墨",
+          "查证旧档",
+          "平反旧案",
+          "取证过堂"
+        ],
+        "范例三：内宅对账与查月例（名分与账册博弈）": [
+          "内宅查账",
+          "核对月例",
+          "掌管中馈",
+          "查验管事账本",
+          "清点府库账目",
+          "虚报开支",
+          "克扣月银",
+          "内宅整顿规矩",
+          "盘查对牌"
+        ]
+      }
+    },
+    "references/genres/war/style-references.md": {
+      "group": "genre",
+      "scenes": [
+        "SETTING_DRAFT",
+        "CHAPTER_PLAN",
+        "STAGE_BLUEPRINT",
+        "VOLUME_BLUEPRINT",
+        "CHAPTER_CONTENT",
+        "CHAPTER_REVISE",
+        "CHAPTER_AUDIT"
+      ],
+      "purposes": [
+        "STYLE_GUIDANCE"
+      ],
+      "types": [
+        "STYLE",
+        "PRINCIPLE"
+      ],
+      "genres": [
+        "war"
+      ],
+      "targetFields": [
+        "style",
+        "tone",
+        "perspective",
+        "targetAudience",
+        "outline",
+        "chapterGoal"
+      ]
+    },
+    "references/genres/war/arc-templates.md": {
+      "group": "genre",
+      "scenes": [
+        "CHAPTER_PLAN",
+        "STAGE_BLUEPRINT",
+        "VOLUME_BLUEPRINT"
+      ],
+      "purposes": [
+        "STORY_PLANNING"
+      ],
+      "types": [
+        "TEMPLATE"
+      ],
+      "genres": [
+        "war"
+      ]
+    },
+    "references/genres/war/exemplars.md": {
+      "group": "genre",
+      "scenes": [
+        "CHAPTER_CONTENT",
+        "CHAPTER_REVISE",
+        "CHAPTER_AUDIT"
+      ],
+      "purposes": [
+        "PROSE_EXPRESSION",
+        "QUALITY_REVIEW"
+      ],
+      "types": [
+        "EXEMPLAR"
+      ],
+      "genres": [
+        "war"
+      ],
+      "chapterKeywordsByHeading": {
+        "范例一：夺桥之前（先算条件，再写决心）": [
+          "战前部署",
+          "阵前部署",
+          "制定突袭方案",
+          "夜袭部署",
+          "布置火力掩护",
+          "夺取要隘",
+          "抢占桥头",
+          "攻坚部署",
+          "下达作战命令",
+          "分配突击任务"
+        ],
+        "范例二：军议上的两套账（方案都可核算）": [
+          "召开军议",
+          "帐中议事",
+          "商议战守",
+          "争论追击还是固守",
+          "核算军粮",
+          "评估粮道",
+          "研判敌情",
+          "主将裁决",
+          "作战会议",
+          "讨论撤退方案"
+        ]
+      }
+    },
+    "references/genres/sports/style-references.md": {
+      "group": "genre",
+      "scenes": [
+        "SETTING_DRAFT",
+        "CHAPTER_PLAN",
+        "STAGE_BLUEPRINT",
+        "VOLUME_BLUEPRINT",
+        "CHAPTER_CONTENT",
+        "CHAPTER_REVISE",
+        "CHAPTER_AUDIT"
+      ],
+      "purposes": [
+        "STYLE_GUIDANCE"
+      ],
+      "types": [
+        "STYLE",
+        "PRINCIPLE"
+      ],
+      "genres": [
+        "sports"
+      ],
+      "targetFields": [
+        "style",
+        "tone",
+        "perspective",
+        "targetAudience",
+        "outline",
+        "chapterGoal"
+      ]
+    },
+    "references/genres/sports/arc-templates.md": {
+      "group": "genre",
+      "scenes": [
+        "CHAPTER_PLAN",
+        "STAGE_BLUEPRINT",
+        "VOLUME_BLUEPRINT"
+      ],
+      "purposes": [
+        "STORY_PLANNING"
+      ],
+      "types": [
+        "TEMPLATE"
+      ],
+      "genres": [
+        "sports"
+      ]
+    },
+    "references/genres/sports/exemplars.md": {
+      "group": "genre",
+      "scenes": [
+        "CHAPTER_CONTENT",
+        "CHAPTER_REVISE",
+        "CHAPTER_AUDIT"
+      ],
+      "purposes": [
+        "PROSE_EXPRESSION",
+        "QUALITY_REVIEW"
+      ],
+      "types": [
+        "EXEMPLAR"
+      ],
+      "genres": [
+        "sports"
+      ],
+      "chapterKeywordsByHeading": {
+        "范例一：加练到吐（改动作，不是拼命）": [
+          "纠正动作",
+          "改技术动作",
+          "拆解动作",
+          "加练改动作",
+          "助跑节奏",
+          "动作定型",
+          "针对性加练",
+          "反复纠错",
+          "训练瓶颈",
+          "起跳踩板"
+        ],
+        "范例二：赛前战术会（把对手拆开看）": [
+          "赛前战术会",
+          "召开战术会",
+          "研究对手录像",
+          "分析对手打法",
+          "制定防守策略",
+          "赛前部署",
+          "商讨首发阵容",
+          "赛前备战会",
+          "拆解对手",
+          "敲定战术"
+        ]
+      }
+    },
+    "references/genres/farm-food/style-references.md": {
+      "group": "genre",
+      "scenes": [
+        "SETTING_DRAFT",
+        "CHAPTER_PLAN",
+        "STAGE_BLUEPRINT",
+        "VOLUME_BLUEPRINT",
+        "CHAPTER_CONTENT",
+        "CHAPTER_REVISE",
+        "CHAPTER_AUDIT"
+      ],
+      "purposes": [
+        "STYLE_GUIDANCE"
+      ],
+      "types": [
+        "STYLE",
+        "PRINCIPLE"
+      ],
+      "genres": [
+        "farm-food"
+      ],
+      "targetFields": [
+        "style",
+        "tone",
+        "perspective",
+        "targetAudience",
+        "outline",
+        "chapterGoal"
+      ]
+    },
+    "references/genres/farm-food/arc-templates.md": {
+      "group": "genre",
+      "scenes": [
+        "CHAPTER_PLAN",
+        "STAGE_BLUEPRINT",
+        "VOLUME_BLUEPRINT"
+      ],
+      "purposes": [
+        "STORY_PLANNING"
+      ],
+      "types": [
+        "TEMPLATE"
+      ],
+      "genres": [
+        "farm-food"
+      ]
+    },
+    "references/genres/farm-food/exemplars.md": {
+      "group": "genre",
+      "scenes": [
+        "CHAPTER_CONTENT",
+        "CHAPTER_REVISE",
+        "CHAPTER_AUDIT"
+      ],
+      "purposes": [
+        "PROSE_EXPRESSION",
+        "QUALITY_REVIEW"
+      ],
+      "types": [
+        "EXEMPLAR"
+      ],
+      "genres": [
+        "farm-food"
+      ],
+      "chapterKeywordsByHeading": {
+        "范例一：抢在雨前（农时与人手）": [
+          "抢农时",
+          "雨前抢栽",
+          "雨前抢收",
+          "找人换工",
+          "商量换工",
+          "借牛耕地",
+          "赶种秧苗",
+          "雇短工抢收",
+          "田间抢种",
+          "劳力紧缺"
+        ],
+        "范例二：一桌席面（工序先于夸赞）": [
+          "承办喜宴",
+          "操办席面",
+          "掌勺宴席",
+          "排菜工序",
+          "后厨出岔子",
+          "宴席帮厨",
+          "控火失误",
+          "出菜补救",
+          "大席掌勺",
+          "赶制宴席"
+        ]
+      }
+    },
+    "references/genres/school/style-references.md": {
+      "group": "genre",
+      "scenes": [
+        "SETTING_DRAFT",
+        "CHAPTER_PLAN",
+        "STAGE_BLUEPRINT",
+        "VOLUME_BLUEPRINT",
+        "CHAPTER_CONTENT",
+        "CHAPTER_REVISE",
+        "CHAPTER_AUDIT"
+      ],
+      "purposes": [
+        "STYLE_GUIDANCE"
+      ],
+      "types": [
+        "STYLE",
+        "PRINCIPLE"
+      ],
+      "genres": [
+        "school"
+      ],
+      "targetFields": [
+        "style",
+        "tone",
+        "perspective",
+        "targetAudience",
+        "outline",
+        "chapterGoal"
+      ]
+    },
+    "references/genres/school/arc-templates.md": {
+      "group": "genre",
+      "scenes": [
+        "CHAPTER_PLAN",
+        "STAGE_BLUEPRINT",
+        "VOLUME_BLUEPRINT"
+      ],
+      "purposes": [
+        "STORY_PLANNING"
+      ],
+      "types": [
+        "TEMPLATE"
+      ],
+      "genres": [
+        "school"
+      ]
+    },
+    "references/genres/school/exemplars.md": {
+      "group": "genre",
+      "scenes": [
+        "CHAPTER_CONTENT",
+        "CHAPTER_REVISE",
+        "CHAPTER_AUDIT"
+      ],
+      "purposes": [
+        "PROSE_EXPRESSION",
+        "QUALITY_REVIEW"
+      ],
+      "types": [
+        "EXEMPLAR"
+      ],
+      "genres": [
+        "school"
+      ],
+      "chapterKeywordsByHeading": {
+        "范例一：排名出来之后（评价与选择）": [
+          "月考放榜",
+          "公布月考排名",
+          "成绩下滑",
+          "排名大幅下滑",
+          "班主任约谈",
+          "分析试卷失分",
+          "限时刷卷",
+          "查看成绩榜单",
+          "分班排名",
+          "停掉周末补习"
+        ],
+        "范例二：晚自习的纸条（试探与克制）": [
+          "晚自习传纸条",
+          "偷偷传纸条",
+          "课堂传纸条",
+          "约去图书馆",
+          "暗中试探心意",
+          "回避同学视线",
+          "递纸条邀约",
+          "隐蔽传递消息",
+          "青春期试探"
+        ]
+      }
+    },
+    "references/genres/performing-arts/style-references.md": {
+      "group": "genre",
+      "scenes": [
+        "SETTING_DRAFT",
+        "CHAPTER_PLAN",
+        "STAGE_BLUEPRINT",
+        "VOLUME_BLUEPRINT",
+        "CHAPTER_CONTENT",
+        "CHAPTER_REVISE",
+        "CHAPTER_AUDIT"
+      ],
+      "purposes": [
+        "STYLE_GUIDANCE"
+      ],
+      "types": [
+        "STYLE",
+        "PRINCIPLE"
+      ],
+      "genres": [
+        "performing-arts"
+      ],
+      "targetFields": [
+        "style",
+        "tone",
+        "perspective",
+        "targetAudience",
+        "outline",
+        "chapterGoal"
+      ]
+    },
+    "references/genres/performing-arts/arc-templates.md": {
+      "group": "genre",
+      "scenes": [
+        "CHAPTER_PLAN",
+        "STAGE_BLUEPRINT",
+        "VOLUME_BLUEPRINT"
+      ],
+      "purposes": [
+        "STORY_PLANNING"
+      ],
+      "types": [
+        "TEMPLATE"
+      ],
+      "genres": [
+        "performing-arts"
+      ]
+    },
+    "references/genres/performing-arts/exemplars.md": {
+      "group": "genre",
+      "scenes": [
+        "CHAPTER_CONTENT",
+        "CHAPTER_REVISE",
+        "CHAPTER_AUDIT"
+      ],
+      "purposes": [
+        "PROSE_EXPRESSION",
+        "QUALITY_REVIEW"
+      ],
+      "types": [
+        "EXEMPLAR"
+      ],
+      "genres": [
+        "performing-arts"
+      ],
+      "chapterKeywordsByHeading": {
+        "范例一：试镜间（准备与临场）": [
+          "参加试镜",
+          "试镜配角",
+          "复试试镜",
+          "导演喊停重演",
+          "临场调整演法",
+          "试戏搭戏",
+          "现场试戏",
+          "争取进组名额",
+          "试镜间考核"
+        ],
+        "范例二：直播事故（舆论与应对）": [
+          "直播事故",
+          "直播翻车",
+          "弹幕追问旧闻",
+          "直播间控场",
+          "突发舆情公关",
+          "公关发声明",
+          "紧急切话题",
+          "直播节奏失控",
+          "回应黑料质疑",
+          "团队应急公关"
+        ]
+      }
+    },
+    "references/genres/workplace/style-references.md": {
+      "group": "genre",
+      "scenes": [
+        "SETTING_DRAFT",
+        "CHAPTER_PLAN",
+        "STAGE_BLUEPRINT",
+        "VOLUME_BLUEPRINT",
+        "CHAPTER_CONTENT",
+        "CHAPTER_REVISE",
+        "CHAPTER_AUDIT"
+      ],
+      "purposes": [
+        "STYLE_GUIDANCE"
+      ],
+      "types": [
+        "STYLE",
+        "PRINCIPLE"
+      ],
+      "genres": [
+        "workplace"
+      ],
+      "targetFields": [
+        "style",
+        "tone",
+        "perspective",
+        "targetAudience",
+        "outline",
+        "chapterGoal"
+      ]
+    },
+    "references/genres/workplace/arc-templates.md": {
+      "group": "genre",
+      "scenes": [
+        "CHAPTER_PLAN",
+        "STAGE_BLUEPRINT",
+        "VOLUME_BLUEPRINT"
+      ],
+      "purposes": [
+        "STORY_PLANNING"
+      ],
+      "types": [
+        "TEMPLATE"
+      ],
+      "genres": [
+        "workplace"
+      ]
+    },
+    "references/genres/workplace/exemplars.md": {
+      "group": "genre",
+      "scenes": [
+        "CHAPTER_CONTENT",
+        "CHAPTER_REVISE",
+        "CHAPTER_AUDIT"
+      ],
+      "purposes": [
+        "PROSE_EXPRESSION",
+        "QUALITY_REVIEW"
+      ],
+      "types": [
+        "EXEMPLAR"
+      ],
+      "genres": [
+        "workplace"
+      ],
+      "chapterKeywordsByHeading": {
+        "范例一：周会上的三分钟（结论先行）": [
+          "周会汇报",
+          "汇报项目延期",
+          "项目延期",
+          "申请加人",
+          "砍掉次要模块",
+          "压缩测试排期",
+          "向上汇报风险",
+          "汇报进度受阻",
+          "例会追问进度",
+          "同步延期方案"
+        ],
+        "范例二：出事之后（留痕与自保）": [
+          "线上故障复盘",
+          "故障追责",
+          "追责会议",
+          "查验审批记录",
+          "核对变更单",
+          "紧急变更审批",
+          "留痕自保",
+          "澄清责任归属",
+          "甩锅推责",
+          "排查事故责任"
+        ]
+      }
+    },
+    "references/genres/adventure/style-references.md": {
+      "group": "genre",
+      "scenes": [
+        "SETTING_DRAFT",
+        "CHAPTER_PLAN",
+        "STAGE_BLUEPRINT",
+        "VOLUME_BLUEPRINT",
+        "CHAPTER_CONTENT",
+        "CHAPTER_REVISE",
+        "CHAPTER_AUDIT"
+      ],
+      "purposes": [
+        "STYLE_GUIDANCE"
+      ],
+      "types": [
+        "STYLE",
+        "PRINCIPLE"
+      ],
+      "genres": [
+        "adventure"
+      ],
+      "targetFields": [
+        "style",
+        "tone",
+        "perspective",
+        "targetAudience",
+        "outline",
+        "chapterGoal"
+      ]
+    },
+    "references/genres/adventure/arc-templates.md": {
+      "group": "genre",
+      "scenes": [
+        "CHAPTER_PLAN",
+        "STAGE_BLUEPRINT",
+        "VOLUME_BLUEPRINT"
+      ],
+      "purposes": [
+        "STORY_PLANNING"
+      ],
+      "types": [
+        "TEMPLATE"
+      ],
+      "genres": [
+        "adventure"
+      ]
+    },
+    "references/genres/adventure/exemplars.md": {
+      "group": "genre",
+      "scenes": [
+        "CHAPTER_CONTENT",
+        "CHAPTER_REVISE",
+        "CHAPTER_AUDIT"
+      ],
+      "purposes": [
+        "PROSE_EXPRESSION",
+        "QUALITY_REVIEW"
+      ],
+      "types": [
+        "EXEMPLAR"
+      ],
+      "genres": [
+        "adventure"
+      ],
+      "chapterKeywordsByHeading": {
+        "范例一：出发前的路线会（风险与退路）": [
+          "商定路线",
+          "争论路线",
+          "规划行程",
+          "制定撤退线",
+          "进山前会议",
+          "核算补给天数",
+          "向导反对",
+          "评估天气窗口",
+          "确定行进方案",
+          "路线分歧"
+        ],
+        "范例二：暴雨之后（岔路与判断）": [
+          "辨认方向",
+          "寻找路标",
+          "路标被毁",
+          "岔口抉择",
+          "勘查痕迹",
+          "雨后探路",
+          "判断路径",
+          "迷失方向",
+          "留下退路记号",
+          "野外寻路"
+        ]
+      }
+    },
+    "references/genres/gaming/style-references.md": {
+      "group": "genre",
+      "scenes": [
+        "SETTING_DRAFT",
+        "CHAPTER_PLAN",
+        "STAGE_BLUEPRINT",
+        "VOLUME_BLUEPRINT",
+        "CHAPTER_CONTENT",
+        "CHAPTER_REVISE",
+        "CHAPTER_AUDIT"
+      ],
+      "purposes": [
+        "STYLE_GUIDANCE"
+      ],
+      "types": [
+        "STYLE",
+        "PRINCIPLE"
+      ],
+      "genres": [
+        "gaming"
+      ],
+      "targetFields": [
+        "style",
+        "tone",
+        "perspective",
+        "targetAudience",
+        "outline",
+        "chapterGoal"
+      ]
+    },
+    "references/genres/gaming/arc-templates.md": {
+      "group": "genre",
+      "scenes": [
+        "CHAPTER_PLAN",
+        "STAGE_BLUEPRINT",
+        "VOLUME_BLUEPRINT"
+      ],
+      "purposes": [
+        "STORY_PLANNING"
+      ],
+      "types": [
+        "TEMPLATE"
+      ],
+      "genres": [
+        "gaming"
+      ]
+    },
+    "references/genres/gaming/exemplars.md": {
+      "group": "genre",
+      "scenes": [
+        "CHAPTER_CONTENT",
+        "CHAPTER_REVISE",
+        "CHAPTER_AUDIT"
+      ],
+      "purposes": [
+        "PROSE_EXPRESSION",
+        "QUALITY_REVIEW"
+      ],
+      "types": [
+        "EXEMPLAR"
+      ],
+      "genres": [
+        "gaming"
+      ],
+      "chapterKeywordsByHeading": {
+        "范例一：复盘室里的追责（把失误说清）": [
+          "赛后复盘",
+          "训练赛复盘",
+          "复盘录像",
+          "回看录像",
+          "追究失误",
+          "复盘团战",
+          "队内复盘",
+          "分析失误",
+          "复盘室",
+          "总结失误"
+        ],
+        "范例二：决胜局的禁选（取舍与预案）": [
+          "禁选阶段",
+          "英雄禁选",
+          "BP博弈",
+          "BP阶段",
+          "决胜局BP",
+          "放版本英雄",
+          "抢版本英雄",
+          "针对选人",
+          "ban选",
+          "阵容博弈"
         ]
       }
     }

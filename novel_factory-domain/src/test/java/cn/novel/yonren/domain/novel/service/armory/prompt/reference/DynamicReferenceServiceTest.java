@@ -80,11 +80,11 @@ class DynamicReferenceServiceTest {
         var blockRetriever = mock(ReferenceBlockRetriever.class);
         service = new DynamicReferenceService(referenceIndexLoader, selector, retriever, fileLoader,
                 properties, llmRuntimeConfig, null, policy, blockRetriever);
-        var document = entry("character-building");
-        var eligible = new ReferenceAtom(document.getFileName(), "eligible", "人物塑造", "人物深度塑造技巧",
-                0, "角色需要独立动机", "hash", null, List.of(), true);
-        var ineligible = new ReferenceAtom(document.getFileName(), "ineligible", "人物塑造", "人物档案模板",
-                1, "人物档案模板", "hash", null, List.of(), true);
+        var document = entry("outline-template");
+        var eligible = new ReferenceAtom(document.getFileName(), "eligible", "大纲规划模板", "第一步：先判断作品长度级别",
+                0, "先判断作品长度级别", "hash", null, List.of(), true);
+        var ineligible = new ReferenceAtom(document.getFileName(), "ineligible", "大纲规划模板", "大纲的分层与字段口径",
+                1, "大纲的分层与字段口径", "hash", null, List.of(), true);
         var snapshot = new ReferenceBlockSnapshot(null, List.of(eligible, ineligible),
                 Map.of("eligible", eligible, "ineligible", ineligible), "corpus", "signature");
         var prepared = mock(ReferenceBlockRetriever.Prepared.class);
@@ -97,8 +97,8 @@ class DynamicReferenceServiceTest {
                 eq(Set.of("eligible")), eq(12), eq(0.0)))
                 .thenReturn(new ReferenceBlockRetriever.Retrieval(snapshot, List.of()));
 
-        assertFalse(policy.allowsDocument(document.getFileName(), PromptScene.CHAPTER_CONTENT, context));
-        service.selectAsRules(module, PromptScene.CHAPTER_CONTENT, context);
+        assertFalse(policy.allowsDocument(document.getFileName(), PromptScene.CHAPTER_PLAN, context));
+        service.selectAsRules(module, PromptScene.CHAPTER_PLAN, context);
 
         verify(blockRetriever).retrieve(eq(prepared), anyString(), eq(Set.of(document.getFileName())),
                 eq(Set.of("eligible")), eq(12), eq(0.0));
@@ -120,8 +120,8 @@ class DynamicReferenceServiceTest {
 
         assertEquals(1, rules.size());
         String content = rules.get(0).getContent();
-        assertTrue(content.contains("## 范例二：误会揭穿"));
-        assertFalse(content.contains("## 范例一：雨夜告白"));
+        assertTrue(content.contains("## 范例一：误会揭穿"));
+        assertFalse(content.contains("雨夜告白"));
         assertTrue(content.length() <= 260);
     }
 
@@ -155,7 +155,7 @@ class DynamicReferenceServiceTest {
     @Test
     void unregisteredOrIneligibleSourcesNeverReachTheSelector() {
         when(referenceIndexLoader.getIndex()).thenReturn(List.of(
-                entry("worldbuilding"), entry("unregistered-new-doc"), entry("exemplar-dialogue")));
+                entry("worldbuilding"), entry("unregistered-new-doc"), entry("exemplar-battle")));
         when(selector.select(any(), any(), any(), anyList())).thenReturn(List.of());
 
         service.selectAsRules(null, PromptScene.SETTING_DRAFT,

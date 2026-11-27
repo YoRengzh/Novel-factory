@@ -40,29 +40,29 @@ class ReferenceIndexLoaderTest {
                 .map(ReferenceIndexEntry::getFileName)
                 .collect(Collectors.toList());
         // references 根下的写作资料入索引；ainovel-cli/Go 工程设计文档不属于 Java 运行时资料
-        // 54 → 58：吸纳 chinese-webnovel-skills 四份合卷（人味节奏/情绪台词/开篇金手指/语域纪律）
-        assertEquals(58, fileNames.size());
+        // 58 → 50 → 47 → 46：删旧世代资料、归档运营资料、删空转骨架与节拍层
+        assertEquals(46, fileNames.size());
         assertTrue(fileNames.containsAll(List.of(
-                "chapter-guide", "chapter-template", "character-building",
-                "character-template", "consistency", "content-expansion", "dialogue-writing",
+                "chapter-guide",
+                "character-template", "content-expansion", "dialogue-writing",
                 "differentiation", "longform-planning", "outline-template", "quality-checklist",
                 "action-scenes", "emotion-curve", "foreshadowing", "genre-flow-tactics",
-                "multi-thread", "opening-design",
-                "pacing-control", "restrained-emotion", "scene-writing", "subject-and-ops",
+                "opening-design",
+                "pacing-control", "restrained-emotion", "scene-writing",
                 "transitions", "trope-usage",
-                "transmigration-transition", "de-ai-principles", "corpus-distillation",
-                "style-distillation", "cross-chapter-tables",
+                "transmigration-transition", "de-ai-principles",
+                "cross-chapter-tables",
                 "villain-design", "worldbuilding",
-                "seed-architecture", "seed-atoms-fantasy", "seed-atoms-romance",
-                "exemplar-battle", "exemplar-dialogue", "exemplar-breakthrough", "exemplar-emotion",
+                "seed-atoms-fantasy", "seed-atoms-romance",
+                "exemplar-battle", "exemplar-breakthrough", "exemplar-emotion",
                 "human-texture-rhythm", "emotion-display-dialogue", "opening-hooks-goldfinger",
                 "register-discipline",
                 "plot-structure-three-act", "plot-structure-heros-journey", "plot-structure-mystery",
-                "plot-structure-romance", "plot-structure-thriller", "plot-structure-twist",
+                "plot-structure-romance",
                 "plot-structure-multiline", "plot-structure-short", "plot-structure-five-act",
                 "plot-structure-kishotenketsu", "plot-structure-circular", "plot-structure-network",
                 "plot-structure-fragmented", "plot-structure-frame", "plot-structure-seven-point",
-                "plot-structure-save-the-cat", "plot-structure-story-circle")));
+                "plot-structure-story-circle")));
         assertTrue(fileNames.stream().noneMatch(n -> n.startsWith("design-")));
     }
 
@@ -83,15 +83,6 @@ class ReferenceIndexLoaderTest {
         assertEquals("references/dialogue-writing.md", entry.getRelativePath());
         assertNotNull(entry.getTitle());
         assertTrue(entry.getDigest().contains("对话"));
-    }
-
-    @Test
-    void index_templateFileNowHasDigest() {
-        // 修正：纯模板文件此前没有首段简介，选择器只能看到标题——// 而 chapter-template 的标题甚至是占位符「第[X]章：[章节标题]」。现已补齐
-        ReferenceIndexEntry entry = byName("chapter-template");
-        assertNotNull(entry);
-        assertEquals("章节正文与备注模板", entry.getTitle());
-        assertNotNull(entry.getDigest());
     }
 
     @Test

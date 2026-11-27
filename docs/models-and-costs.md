@@ -27,7 +27,7 @@
 |---|---|---|---|---|
 | `stage-blueprint` 阶段蓝图 | DeepSeek-V4-Pro | 16384 | 0.7 | 关 |
 | `chapter-plan` 章节计划 | **qwen3.8-max** | 32768 | **1.0** | 开 |
-| `chapter-beats` 章节节拍 | deepseek-v4.1-flash | 2048 | 0.3 | 关 |
+| `chapter-beats` 章节写作计划 | deepseek-v4.1-flash | 2048 | 0.3 | 关 |
 | `chapter-content` 章节正文 | glm-5.2 | 16384 | 0.5 | 关 |
 | `chapter-rewrite` 候选重写 | qwen3.8-max | 16384 | 0.7 | 关 |
 | `chapter-judge` 候选评审 | deepseek-v4.1-flash | 1024 | 0.2 | 关 |
@@ -84,7 +84,7 @@ model-fallbacks:
 **实测每章 8–25 万 token**（视质量档位）。这是"全链路"的定价——一章正文不止一次调用：
 
 ```
-章节计划 → 节拍 → 正文生成（含重试）→ 段落密度审校 → 审校 → 修订 → 复审 → 候选重写/评审（低置信时）
+章节计划 → 写作计划 → 正文生成（含重试）→ 段落密度审校 → 审校 → 修订 → 复审 → 候选重写/评审（低置信时）
 ```
 
 预算敏感时，**先调低候选触发**（`candidate.trigger-on-*`），它是最贵且最可省的一环；其次是段落密度审校。

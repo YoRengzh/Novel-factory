@@ -7,7 +7,7 @@ import java.util.Set;
 /**
  * 参考资料分组：按「这份资料服务哪类场景」归类，用于在交给选择器之前裁剪索引。
  *
- * 为什么需要裁剪：58 份资料平铺时，ref-select 的 prompt 里是一张 58 行的大表，
+ * 为什么需要裁剪：50 份资料平铺时，ref-select 的 prompt 里是一张 50 行的大表，
  * 模型要在长表里挑 3 份，选准率随条目数下降。按场景先筛到 10-20 行，选择范围更聚焦。
  *
  * 为什么不做目录重组：文件名已是对外标识（选择结果、缓存键、测试断言都依赖它），
@@ -70,22 +70,21 @@ public final class ReferenceGroup {
 
     /** 结构类：情节骨架、大纲与章节模板、开篇与节奏 */
     private static final Set<String> STRUCTURE_FILES = Set.of(
-            "outline-template", "chapter-template", "chapter-guide",
+            "outline-template", "chapter-guide",
             "opening-design", "pacing-control", "longform-planning",
             "plot-structure-circular", "plot-structure-five-act", "plot-structure-fragmented",
             "plot-structure-frame", "plot-structure-heros-journey", "plot-structure-kishotenketsu",
             "plot-structure-multiline", "plot-structure-mystery", "plot-structure-network",
-            "plot-structure-romance", "plot-structure-save-the-cat", "plot-structure-seven-point",
+            "plot-structure-romance", "plot-structure-seven-point",
             "plot-structure-short", "plot-structure-story-circle", "plot-structure-three-act",
-            "plot-structure-thriller", "plot-structure-twist",
-            "multi-thread", "transitions", "emotion-curve", "hook-library"
+            "transitions", "emotion-curve"
     );
 
     /** 题材/设定类：世界观、人物档案、反派、题材打法、种子原子 */
     private static final Set<String> GENRE_FILES = Set.of(
-            "worldbuilding", "character-building", "character-template", "villain-design",
-            "genre-flow-tactics", "differentiation", "trope-usage", "subject-and-ops",
-            "seed-architecture", "seed-atoms-fantasy", "seed-atoms-romance",
+            "worldbuilding", "character-template", "villain-design",
+            "genre-flow-tactics", "differentiation", "trope-usage",
+            "seed-atoms-fantasy", "seed-atoms-romance",
             "transmigration-transition", "opening-hooks-goldfinger"
     );
 }

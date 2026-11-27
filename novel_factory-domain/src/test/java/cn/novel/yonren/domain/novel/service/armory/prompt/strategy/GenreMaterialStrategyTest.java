@@ -48,6 +48,19 @@ class GenreMaterialStrategyTest {
     }
 
     @Test
+    void wuxiaPackLoadsPlannedMaterialsAndChapterExemplar() {
+        GenreMaterialStrategy registered = new GenreMaterialStrategy(
+                new PromptRuleFileLoader(), new ReferenceUsagePolicy());
+
+        List<String> plan = names(registered.load(PromptScene.CHAPTER_PLAN, ctx("武侠")));
+        assertEquals(List.of("style-wuxia", "genre-style-wuxia", "genre-arc-wuxia"), plan);
+
+        List<String> content = names(registered.load(PromptScene.CHAPTER_CONTENT,
+                PromptContext.builder().theme("武侠").chapterBrief("长老要按门规处置弟子").build()));
+        assertTrue(content.contains("genre-exemplar-wuxia"), content.toString());
+    }
+
+    @Test
     void fantasyContentSceneSkipsArcTemplates() {
         stubFantasy();
 
@@ -172,27 +185,28 @@ class GenreMaterialStrategyTest {
 
     @ParameterizedTest
     @CsvSource({
-            "CHAPTER_CONTENT, 武侠, 传统武侠, register-traditional-wuxia, 文体语域：传统古典评书风",
-            "CHAPTER_REVISE, 玄幻, 语域：冷峻白描古风，叙事克制, register-crisp-classical, 文体语域：冷峻白描古风",
-            "CHAPTER_PLAN, 武侠, 本书采用传统武侠风格, register-traditional-wuxia, 文体语域：传统古典评书风"
+            "CHAPTER_CONTENT, 武侠, 传统武侠, wuxia",
+            "CHAPTER_REVISE, 玄幻, 语域：冷峻白描古风，叙事克制, fantasy",
+            "CHAPTER_PLAN, 武侠, 本书采用传统武侠风格, wuxia",
+            "CHAPTER_AUDIT, 玄幻, 冷峻白描古风, fantasy",
+            "SETTING_DRAFT, 武侠, 古典评书风, wuxia"
     })
-    void explicitRegisterReplacesGenreStyleInTheAssembledPrompt(PromptScene scene, String theme, String style,
-                                                              String card, String cardTitle) {
+    void authorStyleDescriptionsUseGenreStyleInTheAssembledPrompt(PromptScene scene, String theme, String style,
+                                                                 String genre) {
         var registered = new GenreMaterialStrategy(new PromptRuleFileLoader(), new ReferenceUsagePolicy());
         var builder = new PromptBuilder(List.of(registered));
         var context = PromptContext.builder().theme(theme).style(style).build();
         String prompt = builder.buildUserTail(scene, context);
 
-        assertTrue(prompt.contains("【style-" + card + "】"));
-        assertTrue(prompt.contains(cardTitle));
-        assertFalse(prompt.contains("【style-wuxia】"));
-        assertFalse(prompt.contains("【style-fantasy】"));
-        assertFalse(prompt.contains("【style-default】"));
+        assertTrue(prompt.contains("【style-" + genre + "】"));
+        assertFalse(prompt.contains("【style-register-"));
+        assertEquals(style, context.getStyle());
     }
 
     @ParameterizedTest
-    @CsvSource(value = {"武侠江湖|", "传统武侠|避免传统武侠", "武侠|传统武侠，冷峻白描古风"}, delimiter = '|')
-    void genreAloneOrUnclearStyleDoesNotSelectARegister(String theme, String style) {
+    @CsvSource(value = {"武侠江湖|", "传统武侠|避免传统武侠", "武侠|传统武侠，冷峻白描古风",
+            "武侠|传统武侠", "武侠|传统古典评书风"}, delimiter = '|')
+    void authorStyleTextDoesNotOverrideGenreStyle(String theme, String style) {
         when(fileLoader.load("styles/wuxia.md")).thenReturn("作者保存的武侠题材卡");
         var context = PromptContext.builder().theme(theme).style(style).build();
         List<PromptRule> rules = strategy.load(PromptScene.CHAPTER_CONTENT, context);
@@ -202,12 +216,12 @@ class GenreMaterialStrategyTest {
     }
 
     @Test
-    void explicitRegisterKeepsMatchingGenreExemplar() {
+    void authorStyleKeepsMatchingGenreExemplar() {
         var registered = new GenreMaterialStrategy(new PromptRuleFileLoader(), new ReferenceUsagePolicy());
         var context = PromptContext.builder().theme("玄幻").style("冷峻白描古风").chapterBrief("排队领例钱").build();
         List<PromptRule> rules = registered.load(PromptScene.CHAPTER_CONTENT, context);
 
-        assertEquals(List.of("style-register-crisp-classical", "genre-style-fantasy", "genre-exemplar-fantasy"),
+        assertEquals(List.of("style-fantasy", "genre-style-fantasy", "genre-exemplar-fantasy"),
                 names(rules));
     }
 
@@ -266,8 +280,9 @@ class GenreMaterialStrategyTest {
     }
 
     @Test
-    void directWriterModeLoadsOnlyPureProseAnchorAndSkipsStylePapersAndOldExemplars() {
-        var registered = new GenreMaterialStrategy(new PromptRuleFileLoader(), new ReferenceUsagePolicy());
+    void directWriterModeLoadsOnlyProseAnchorAndSkipsGenrePapersAndExemplars() {
+        stubFantasy();
+        when(fileLoader.load("styles/anchors/fantasy.md")).thenReturn("玄幻语感切片");
         var context = PromptContext.builder()
                 .theme("玄幻修真")
                 .style("传统升级爽文")
@@ -275,51 +290,73 @@ class GenreMaterialStrategyTest {
                 .directWriterMode(true)
                 .build();
 
-        List<PromptRule> rules = registered.load(PromptScene.CHAPTER_CONTENT, context);
+        List<PromptRule> rules = strategy.load(PromptScene.CHAPTER_CONTENT, context);
 
         assertEquals(List.of("style-anchor-fantasy"), names(rules));
-        assertTrue(rules.get(0).getContent().contains("斗之力"));
-        assertFalse(rules.get(0).getContent().contains("【思维链拆解】"));
+        assertEquals("玄幻语感切片", rules.get(0).getContent());
     }
 
-    @Test
-    void directWriterModeRespectsExplicitRegisterAndStillSkipsGenrePapersAndExemplars() {
-        var registered = new GenreMaterialStrategy(new PromptRuleFileLoader(), new ReferenceUsagePolicy());
+    @ParameterizedTest
+    @CsvSource({
+            "玄幻, 冷峻白描古风, fantasy",
+            "玄幻, 语域：冷峻白描古风，叙事克制, fantasy",
+            "武侠, 传统武侠, wuxia",
+            "武侠, 本书采用传统武侠风格, wuxia"
+    })
+    void directWriterModeUsesGenreAnchorRegardlessOfAuthorStyle(String theme, String style, String genre) {
+        when(fileLoader.load("styles/anchors/" + genre + ".md")).thenReturn("题材语感切片");
         var context = PromptContext.builder()
-                .theme("玄幻")
-                .style("冷峻白描古风")
+                .theme(theme)
+                .style(style)
                 .chapterBrief("排队领例钱")
                 .directWriterMode(true)
                 .build();
 
-        List<PromptRule> rules = registered.load(PromptScene.CHAPTER_CONTENT, context);
+        List<PromptRule> rules = strategy.load(PromptScene.CHAPTER_CONTENT, context);
 
-        assertEquals(List.of("style-register-crisp-classical"), names(rules));
+        assertEquals(List.of("style-anchor-" + genre), names(rules));
+        assertEquals("题材语感切片", rules.get(0).getContent());
+    }
+
+    @ParameterizedTest
+    @CsvSource({
+            "玄幻, 冷峻白描古风, fantasy, 风格内容",
+            "武侠, 传统武侠, wuxia, 默认风格内容",
+            "信件体小品, 冷峻白描古风, default, 默认风格内容"
+    })
+    void directWriterModeWithoutAnchorUsesGenreOrDefaultStyleOnly(String theme, String style,
+                                                                  String genre, String expectedContent) {
+        stubFantasy();
+        when(fileLoader.load("styles/default.md")).thenReturn("默认风格内容");
+        var context = PromptContext.builder().theme(theme).style(style)
+                .chapterBrief("排队领例钱").directWriterMode(true).build();
+
+        List<PromptRule> rules = strategy.load(PromptScene.CHAPTER_CONTENT, context);
+
+        assertEquals(List.of("style-" + genre), names(rules));
+        assertEquals(expectedContent, rules.get(0).getContent());
     }
 
     @Test
-    void directWriterModeLoadsRealAuthorFantasyAnchorsAndSupportsMultiGenreFallback() {
-        var registered = new GenreMaterialStrategy(new PromptRuleFileLoader(), new ReferenceUsagePolicy());
+    void directWriterModeSupportsMultiGenreAnchorFallback() {
+        when(fileLoader.load("styles/anchors/fantasy.md")).thenReturn("玄幻语感切片");
+        when(fileLoader.load("styles/anchors/gaming.md")).thenReturn("电竞语感切片");
 
-        List<PromptRule> fantasyRules = registered.load(PromptScene.CHAPTER_CONTENT,
+        List<PromptRule> fantasyRules = strategy.load(PromptScene.CHAPTER_CONTENT,
                 PromptContext.builder().theme("玄幻修真").style("传统升级爽文").directWriterMode(true).build());
         assertEquals(List.of("style-anchor-fantasy"), names(fantasyRules));
-        String fantasyAnchor = fantasyRules.get(0).getContent();
-        assertTrue(fantasyAnchor.contains("斗之力，三段"));
-        assertTrue(fantasyAnchor.contains("恭喜主人，结成元婴"));
-        assertTrue(fantasyAnchor.contains("叶凡"));
-        assertFalse(fantasyAnchor.contains("第一件事不是嚎叫狂喜"), "必须移除AI自编切片");
+        assertEquals("玄幻语感切片", fantasyRules.get(0).getContent());
 
-        List<PromptRule> gamingRules = registered.load(PromptScene.CHAPTER_CONTENT,
+        List<PromptRule> gamingRules = strategy.load(PromptScene.CHAPTER_CONTENT,
                 PromptContext.builder().theme("电子竞技").style("热血").directWriterMode(true).build());
         assertEquals(List.of("style-anchor-gaming"), names(gamingRules));
-        assertTrue(gamingRules.get(0).getContent().contains("伏龙翔天"));
+        assertEquals("电竞语感切片", gamingRules.get(0).getContent());
 
-        List<PromptRule> compositeRules = registered.load(PromptScene.CHAPTER_CONTENT,
+        List<PromptRule> compositeRules = strategy.load(PromptScene.CHAPTER_CONTENT,
                 PromptContext.builder().theme("都市网游").style("轻松").directWriterMode(true).build());
         assertEquals(List.of("style-anchor-gaming"), names(compositeRules), "复合题材应回落命中带锚点的子题材");
 
-        List<PromptRule> urbanRules = registered.load(PromptScene.CHAPTER_CONTENT,
+        List<PromptRule> urbanRules = strategy.load(PromptScene.CHAPTER_CONTENT,
                 PromptContext.builder().theme("都市职场").style("现实").directWriterMode(true).build());
         assertTrue(urbanRules.stream().noneMatch(r -> r.getName().contains("style-anchor-fantasy")
                 || r.getName().contains("style-anchor-gaming")), "纯现代职场题材不得串入玄幻或电竞切片");
@@ -329,7 +366,8 @@ class GenreMaterialStrategyTest {
         when(fileLoader.load("styles/fantasy.md")).thenReturn("风格内容");
         when(fileLoader.load("references/genres/fantasy/style-references.md")).thenReturn("题材风格");
         when(fileLoader.load("references/genres/fantasy/arc-templates.md")).thenReturn("弧线模板");
-        when(fileLoader.load("references/genres/fantasy/exemplars.md")).thenReturn("正文范例");
+        when(fileLoader.load("references/genres/fantasy/exemplars.md"))
+                .thenReturn("# 玄幻/修仙 正文范例\n\n## 范例一：领例钱的队伍（利益链与让步依据）\n\n正文范例");
     }
 
     private PromptContext ctx(String theme) {

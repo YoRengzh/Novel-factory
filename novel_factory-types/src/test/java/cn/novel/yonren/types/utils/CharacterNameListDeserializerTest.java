@@ -10,15 +10,15 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
- * 节拍 characters 容错反序列化测试。
- * 复现第 1–10 章批次第 4 章：模型输出对象数组导致 BeanOutputConverter 解析失败、整章降级 SCAFFOLDED。
+ * 角色名字列表容错反序列化测试。
+ * 复现历史节拍（已下线）中模型输出对象数组导致 BeanOutputConverter 解析失败的场景。
  *
- * 随反序列化器迁入 types 后，不再依赖 domain 的 ChapterBeatsEntity——* 这里用本地 fixture 复刻同款注解挂载（{@code List<String> characters} +
+ * 这里用本地 fixture 复刻同款注解挂载（{@code List<String> characters} +
  * {@code @JsonDeserialize(using = CharacterNameListDeserializer.class)}），反序列化行为等价。
  */
 class CharacterNameListDeserializerTest {
 
-    /** 与 ChapterBeatsEntity.Beat 同款挂载形态的最小载体 */
+    /** 与原节拍 Beat 同款挂载形态的最小载体 */
     static class Beat {
         public String location;
         @com.fasterxml.jackson.databind.annotation.JsonDeserialize(using = CharacterNameListDeserializer.class)

@@ -169,7 +169,7 @@ DEGRADED 进度对齐        7段（目标 ≤1 段） ｜ 第 65 章按大纲�
 |---|---|---|
 | 阶段蓝图 `stage-blueprint` | DeepSeek-V4-Pro | 0.7 |
 | 章节计划 `chapter-plan` | qwen3.8-max | 1.0 |
-| 章节节拍 `chapter-beats` | deepseek-v4.1-flash | 0.3 |
+| 章节写作计划 `chapter-beats` | deepseek-v4.1-flash | 0.3 |
 | 章节正文 `chapter-content` | glm-5.2 | 0.5 |
 | 章节审校 `audit` | qwen3.7-plus | 0.1 |
 | 段落密度审校 `paragraph-audit` | deepseek-v4-flash | 0.1 |

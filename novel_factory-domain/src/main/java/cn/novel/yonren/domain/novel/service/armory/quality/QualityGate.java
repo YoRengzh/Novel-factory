@@ -639,7 +639,7 @@ public class QualityGate {
      * 此时"主流"尚未形成，报漂移只会误伤。
      *
  *  规范由「」改为“”后的口径调整：prompt 层（hard-constraints.md /
-     * plan-targets.md / ChapterBeatsService / ChapterWorker）已统一要求双引号，但历史章节
+     * plan-targets.md / ChapterWorker）已统一要求双引号，但历史章节
      * 全是「」。纯历史统计会把主流永远钉在旧写法上，导致**遵守新规的每一章都被判"漂移"**——
      * 那等于用质检去对抗规则本身。故此处直接返回 {@code true}（主流=双引号）：
      * 新规下仍在写「」的章才是漂移，与 prompt 方向一致。历史统计逻辑保留为

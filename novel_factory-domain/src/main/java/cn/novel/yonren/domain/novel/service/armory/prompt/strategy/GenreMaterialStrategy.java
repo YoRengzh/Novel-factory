@@ -12,9 +12,8 @@ import org.springframework.stereotype.Component;
 
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Locale;
 
-/** 文风优先采用作者明确指定的语域；题材资料按主类及本章任务装配。 */
+/** 题材文风与参考资料按主类及本章任务装配。 */
 @Component
 @RequiredArgsConstructor
 public class GenreMaterialStrategy implements PromptRuleStrategy {
@@ -79,16 +78,14 @@ public class GenreMaterialStrategy implements PromptRuleStrategy {
         return rules;
     }
 
-    /** 轻装正文模式按匹配题材顺次寻找纯正文语感切片（或显式语域卡），跳过题材风格论文与旧版对账范例。 */
+    /** 轻装正文模式按匹配题材顺次寻找纯正文语感切片，跳过题材风格论文与旧版对账范例。 */
     private List<PromptRule> loadDirectStyleOnly(PromptScene scene, PromptContext ctx,
                                                  List<GenreType> genres, GenreType primary) {
-        if (explicitRegister(ctx.getStyle()) == null) {
-            for (GenreType genre : genres) {
-                String anchor = fileLoader.load("styles/anchors/" + genre.getCode() + ".md");
-                if (anchor != null && !anchor.isBlank()) {
-                    return List.of(new PromptRule("style-anchor-" + genre.getCode(),
-                            anchor, PromptRule.InjectPosition.USER_TAIL));
-                }
+        for (GenreType genre : genres) {
+            String anchor = fileLoader.load("styles/anchors/" + genre.getCode() + ".md");
+            if (anchor != null && !anchor.isBlank()) {
+                return List.of(new PromptRule("style-anchor-" + genre.getCode(),
+                        anchor, PromptRule.InjectPosition.USER_TAIL));
             }
         }
         PromptRule styleRule = loadStyle(scene, ctx, primary);
@@ -96,17 +93,6 @@ public class GenreMaterialStrategy implements PromptRuleStrategy {
     }
 
     private PromptRule loadStyle(PromptScene scene, PromptContext ctx, GenreType primary) {
-        String register = explicitRegister(ctx.getStyle());
-        if (register != null) {
-            String path = "styles/" + register + ".md";
-            if (usagePolicy.allowsFixed(path, scene, ctx)) {
-                String content = fileLoader.load(path);
-                if (content != null && !content.isBlank()) {
-                    return new PromptRule("style-" + register, content, PromptRule.InjectPosition.USER_TAIL);
-                }
-            }
-        }
-
         String ruleName = "style-" + primary.getCode();
         if (!usagePolicy.allowsRule(ruleName, scene, ctx)) {
             return null;
@@ -117,31 +103,6 @@ public class GenreMaterialStrategy implements PromptRuleStrategy {
         }
         return content == null || content.isBlank()
                 ? null : new PromptRule(ruleName, content, PromptRule.InjectPosition.USER_TAIL);
-    }
-
-    /** 风格是自由文本，只用明确写出的名称选卡。提及题材、否定某种写法或并列两张卡时沿用原路径。 */
-    private static String explicitRegister(String style) {
-        if (style == null) {
-            return null;
-        }
-        String selected = null;
-        for (String clause : style.split("[,，、;；。\\r\\n]+")) {
-            String name = clause.strip().toLowerCase(Locale.ROOT)
-                    .replaceFirst("^(?:(?:文风|语域)\\s*[:：]|(?:本书)?(?:采用|使用))\\s*", "");
-            String register = switch (name) {
-                case "冷峻白描古风", "register-crisp-classical" -> "register-crisp-classical";
-                case "传统武侠", "传统武侠风", "传统武侠风格", "传统古典评书风", "古典评书风",
-                        "register-traditional-wuxia" -> "register-traditional-wuxia";
-                default -> null;
-            };
-            if (register != null) {
-                if (selected != null && !selected.equals(register)) {
-                    return null;
-                }
-                selected = register;
-            }
-        }
-        return selected;
     }
 
     /** 保留已选中的正文小节，有标签的长范例与无标签的短篇使用同一路径。 */
